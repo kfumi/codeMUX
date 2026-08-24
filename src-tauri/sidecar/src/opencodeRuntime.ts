@@ -96,7 +96,6 @@ export class OpenCodeRuntime {
   private permissionClosing = false;
   private permissionConfig: SidecarPermissionConfig | undefined;
   private planMode: AgentPlanMode = 'off';
-  private appliedAutoApprove: boolean | undefined;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -352,11 +351,7 @@ export class OpenCodeRuntime {
     return this.enqueueLifecycle(() => this.interruptInternal());
   }
 
-  /**
-   * Stores CodeMUX compatibility settings; OpenCode server remains authoritative for native permission decisions.
-   * The auto-approve shield toggle is the exception: it is applied by rewriting
-   * the server permission config (ask → allow) through `PATCH /config`.
-   */
+  /** Stores CodeMUX compatibility settings for per-request permission handling. */
   updatePermissions(input: OpenCodePermissionUpdate): void {
     if (input.permissionConfig !== undefined) {
       this.permissionConfig = input.permissionConfig;
@@ -364,37 +359,6 @@ export class OpenCodeRuntime {
     if (input.planMode !== undefined) {
       this.planMode = input.planMode;
     }
-    this.syncAutoApproveState();
-  }
-
-  /** Pushes the desired auto-approve state to the server when it changed. */
-  private syncAutoApproveState(): void {
-    const desired = isOpenCodeAutoApproveEnabled(this.permissionConfig);
-    if (desired === this.appliedAutoApprove) return;
-    const client = this.client;
-    if (!client?.setAutoApprovePermissions) {
-      // Client not ready yet (pre-start update); retry after start().
-      this.appliedAutoApprove = undefined;
-      return;
-    }
-    if (!desired && this.appliedAutoApprove !== true) {
-      // Default-off configs never need an explicit disable push — patching
-      // would clobber permission rules that came from opencode.json.
-      this.appliedAutoApprove = desired;
-      return;
-    }
-    this.appliedAutoApprove = desired;
-    void client.setAutoApprovePermissions({ enable: desired })
-      .then(() => {
-        writeLog('[opencode-task]', `auto-approve permissions ${desired ? 'enabled' : 'disabled'} sessionId=${this.config.sessionId}`);
-      })
-      .catch((error: unknown) => {
-        // Allow a later toggle to retry after a transient failure.
-        if (this.appliedAutoApprove === desired) {
-          this.appliedAutoApprove = undefined;
-        }
-        writeLog('[opencode-task]', `auto-approve update FAILED sessionId=${this.config.sessionId} error=${errorMessage(error)}`);
-      });
   }
 
   respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {
@@ -565,8 +529,6 @@ export class OpenCodeRuntime {
       this.agentSessionId = session.id;
       this.state = 'started';
       await this.subscribeToEvents();
-      // A permission config may have arrived before the client was ready.
-      this.syncAutoApproveState();
       return this.mapping();
     } catch (error) {
       const requestedSessionId = this.config.agentSessionId;
@@ -986,6 +948,12 @@ export class OpenCodeRuntime {
       },
     });
     if (!registration.accepted) {
+      return;
+    }
+    if (isOpenCodeAutoApproveEnabled(this.permissionConfig)) {
+      void this.permissions.respond(requestId, this.config.sessionId, 'once').catch((error: unknown) => {
+        writeLog('[opencode-task]', `auto-approve permission FAILED requestId=${requestId} error=${errorMessage(error)}`);
+      });
       return;
     }
     this.emitEvent({

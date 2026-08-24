@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren, type ReactNode } from 'react';
-import { ChevronDownIcon, CompassIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
+import { ChevronDownIcon, WrenchIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -102,7 +102,7 @@ function ToolGroupTrigger({
       )}
       {...props}
     >
-      <CompassIcon
+      <WrenchIcon
         aria-hidden
         data-slot="tool-group-trigger-icon"
         className={cn(
@@ -193,8 +193,6 @@ type ToolGroupProps = {
   endIndex: number;
   toolNames?: string[];
   active?: boolean;
-  liveContent?: ReactNode;
-  hideReasoningContent?: boolean;
 };
 
 type ToolGroupComponent = FC<PropsWithChildren<ToolGroupProps>> & {
@@ -209,18 +207,15 @@ const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
   endIndex,
   toolNames,
   active = false,
-  liveContent,
-  hideReasoningContent = false,
 }) => {
   const toolCount = endIndex - startIndex + 1;
-  const hasLiveContent = liveContent != null;
-  const [open, setOpen] = useState(hasLiveContent);
+  const [open, setOpen] = useState(active);
 
   useEffect(() => {
-    if (hasLiveContent) {
+    if (active) {
       setOpen(true);
     }
-  }, [hasLiveContent]);
+  }, [active]);
 
   return (
     <ToolGroupRoot
@@ -230,12 +225,7 @@ const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
       data-active={active ? 'true' : 'false'}
     >
       <ToolGroupTrigger count={toolCount} toolNames={toolNames} active={active} />
-      <ToolGroupContent>
-        {hideReasoningContent ? (
-          <div className={'**:data-[slot="reasoning-root"]:hidden'}>{children}</div>
-        ) : children}
-        {liveContent}
-      </ToolGroupContent>
+      <ToolGroupContent>{children}</ToolGroupContent>
     </ToolGroupRoot>
   );
 };
@@ -249,7 +239,7 @@ ToolGroup.Content = ToolGroupContent;
 function ToolGroupTriggerLabel({ summary }: { summary?: string }) {
   return (
     <span className="inline-flex items-baseline">
-      <span>探索</span>
+      <span>已执行</span>
       {summary ? (
         <>
           <span
@@ -286,7 +276,7 @@ export function buildToolGroupSummary(toolNames?: string[], count = toolNames?.l
 
 export function buildToolGroupLabel(toolNames?: string[], count = toolNames?.length ?? 0): string {
   const summary = buildToolGroupSummary(toolNames, count);
-  return summary ? `探索·${summary}` : '探索';
+  return summary ? `已执行·${summary}` : '已执行';
 }
 
 export { ToolGroup, ToolGroupRoot, ToolGroupTrigger, ToolGroupContent, toolGroupVariants };

@@ -6,7 +6,7 @@ import { ChatSeamRow } from './chat/ChatSeamRow';
 import { CompactProcessToggle } from './chat/CompactProcessToggle';
 import { DesktopOfflineOverlay } from './DesktopOfflineOverlay';
 import { DirectiveText } from './chat/DirectiveText';
-import { ExploreGroupRow } from './chat/ExploreGroupRow';
+import { ToolGroupRow } from './chat/ToolGroupRow';
 import { MessageFooter } from './chat/MessageFooter';
 import { ReasoningRow } from './chat/ReasoningRow';
 import { RuntimeSwitchRow } from './chat/RuntimeSwitchRow';
@@ -552,18 +552,20 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
       );
     }
 
-    const active = row.messages.some((message) => (
-      message.kind === 'tool' && message.status === 'running'
-    )) || row.messages.some((message) => message.kind === 'reasoning' && message.streaming);
+    if (row.kind === 'tool-group') {
+      const active = row.messages.some((message) => message.status === 'running');
 
-    return (
-      <ExploreGroupRow
-        toolNames={row.toolNames}
-        messages={row.messages}
-        active={active}
-        renderMessage={renderMessage}
-      />
-    );
+      return (
+        <ToolGroupRow
+          toolNames={row.toolNames}
+          messages={row.messages}
+          active={active}
+          renderMessage={renderMessage}
+        />
+      );
+    }
+
+    return null;
   }, [expandedTurnKeys, renderMessage, toggleTurnExpanded]);
 
   const { connected } = useCompanionSocket(
@@ -629,7 +631,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
               key={
                 row.kind === 'single'
                   ? row.message.id
-                  : row.kind === 'explore' || row.kind === 'thinking'
+                  : row.kind === 'tool-group' || row.kind === 'thinking'
                     ? row.id
                     : row.turnKey
               }

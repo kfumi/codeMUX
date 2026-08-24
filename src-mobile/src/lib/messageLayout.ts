@@ -1,5 +1,4 @@
 import type { ChatMessage, SessionSummaryDiff } from './eventToMessages';
-import { isFileMutationTool } from './toolHeaderSummary';
 
 export interface MessageFooterData {
   timestamp?: number;
@@ -15,7 +14,7 @@ export type DisplayRow =
       footer?: MessageFooterData;
     }
   | { kind: 'thinking'; id: string; messages: Extract<ChatMessage, { kind: 'reasoning' }>[] }
-  | { kind: 'explore'; id: string; messages: ChatMessage[]; toolNames: string[] }
+  | { kind: 'tool-group'; id: string; messages: Extract<ChatMessage, { kind: 'tool' }>[]; toolNames: string[] }
   | { kind: 'compact-toggle'; turnKey: string; processCount: number; durationMs?: number };
 
 export interface BuildDisplayRowsOptions {
@@ -39,14 +38,59 @@ type TurnPiece =
   | { type: 'seam'; message: ChatMessage }
   | { type: 'chunk'; messages: ChatMessage[] };
 
-function isExploreProcessMessage(message: ChatMessage): boolean {
-  if (message.kind === 'reasoning') {
-    return true;
+function isGroupableToolMessage(message: ChatMessage): message is Extract<ChatMessage, { kind: 'tool' }> {
+  return message.kind === 'tool';
+}
+
+function groupProcessRows(messages: ChatMessage[]): DisplayRow[] {
+  const rows: DisplayRow[] = [];
+  let toolBuffer: Extract<ChatMessage, { kind: 'tool' }>[] = [];
+  let reasoningBuffer: Extract<ChatMessage, { kind: 'reasoning' }>[] = [];
+
+  const flushReasoning = () => {
+    if (reasoningBuffer.length === 0) {
+      return;
+    }
+    rows.push({
+      kind: 'thinking',
+      id: reasoningBuffer[0]?.id ?? `thinking-${rows.length}`,
+      messages: [...reasoningBuffer],
+    });
+    reasoningBuffer = [];
+  };
+
+  const flushTools = () => {
+    if (toolBuffer.length === 0) {
+      return;
+    }
+    rows.push({
+      kind: 'tool-group',
+      id: toolBuffer[0]?.id ?? `tool-group-${rows.length}`,
+      messages: [...toolBuffer],
+      toolNames: toolBuffer.map((message) => message.name),
+    });
+    toolBuffer = [];
+  };
+
+  for (const message of messages) {
+    if (message.kind === 'reasoning') {
+      flushTools();
+      reasoningBuffer.push(message);
+      continue;
+    }
+    if (isGroupableToolMessage(message)) {
+      flushReasoning();
+      toolBuffer.push(message);
+      continue;
+    }
+    flushReasoning();
+    flushTools();
+    rows.push({ kind: 'single', message });
   }
-  if (message.kind === 'tool') {
-    return !isFileMutationTool(message.name, message.inputObj);
-  }
-  return false;
+
+  flushReasoning();
+  flushTools();
+  return rows;
 }
 
 function partitionTurnSegment(segment: ChatMessage[]): {
@@ -94,50 +138,6 @@ function splitTurnSegment(
   }
 
   return { process, answer };
-}
-
-function groupExploreRows(messages: ChatMessage[]): DisplayRow[] {
-  const rows: DisplayRow[] = [];
-  let buffer: ChatMessage[] = [];
-
-  const flushExplore = () => {
-    if (buffer.length === 0) {
-      return;
-    }
-    const toolNames = buffer
-      .filter((message): message is Extract<ChatMessage, { kind: 'tool' }> => message.kind === 'tool')
-      .map((message) => message.name);
-    if (toolNames.length === 0) {
-      rows.push({
-        kind: 'thinking',
-        id: buffer[0]?.id ?? `thinking-${rows.length}`,
-        messages: buffer.filter(
-          (message): message is Extract<ChatMessage, { kind: 'reasoning' }> => message.kind === 'reasoning',
-        ),
-      });
-      buffer = [];
-      return;
-    }
-    rows.push({
-      kind: 'explore',
-      id: buffer[0]?.id ?? `explore-${rows.length}`,
-      messages: [...buffer],
-      toolNames,
-    });
-    buffer = [];
-  };
-
-  for (const message of messages) {
-    if (isExploreProcessMessage(message)) {
-      buffer.push(message);
-      continue;
-    }
-    flushExplore();
-    rows.push({ kind: 'single', message });
-  }
-
-  flushExplore();
-  return rows;
 }
 
 function splitTurnBodyIntoPieces(body: ChatMessage[]): TurnPiece[] {
@@ -210,10 +210,10 @@ function emitTurnRows(
         durationMs: options.turnDurationsByUserId?.get(turnKey),
       });
       if (expanded) {
-        rows.push(...groupExploreRows(process));
+        rows.push(...groupProcessRows(process));
       }
     } else if (process.length > 0) {
-      rows.push(...groupExploreRows(process));
+      rows.push(...groupProcessRows(process));
     }
 
     if (answer) {

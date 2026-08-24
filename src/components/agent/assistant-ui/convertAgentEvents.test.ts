@@ -672,7 +672,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
-  it('coalesces reasoning and tool events between text messages into one process message', () => {
+  it('keeps reasoning separate from tool events between text messages', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -743,13 +743,14 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     const messages = convertAgentEventsToAssistantMessages(events);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual([
-      'reasoning',
-      'tool-call',
-      'reasoning',
+    expect(messages).toHaveLength(4);
+    expect(messages.map((message) => message.content.map((part) => part.type))).toEqual([
+      ['reasoning'],
+      ['tool-call'],
+      ['reasoning'],
+      ['text'],
     ]);
-    expect(messages[1]?.content).toEqual([{ type: 'text', text: '架构已摸清。' }]);
+    expect(messages[3]?.content).toEqual([{ type: 'text', text: '架构已摸清。' }]);
   });
 
   it('ignores whitespace-only text so tools stay in one process group', () => {
@@ -831,7 +832,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
-  it('ignores whitespace-only text so trailing thinking joins the previous explore group', () => {
+  it('keeps trailing thinking with the final answer text instead of merging into tools', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -893,11 +894,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
     const messages = convertAgentEventsToAssistantMessages(events);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
-    expect(messages[1]?.content).toEqual([{ type: 'text', text: '探活和 opencode 打的不是同一条路。' }]);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call']);
+    expect(messages[1]?.content.map((part) => part.type)).toEqual(['reasoning', 'text']);
   });
 
-  it('keeps thinking with a later explore tool when narration arrives between them', () => {
+  it('keeps thinking separate from a later tool when narration arrives between them', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -946,8 +947,9 @@ describe('convertAgentEventsToAssistantMessages', () => {
     const messages = convertAgentEventsToAssistantMessages(events);
 
     expect(messages.map((message) => message.content.map((part) => part.type))).toEqual([
-      ['reasoning', 'tool-call'],
+      ['reasoning'],
       ['text'],
+      ['tool-call'],
     ]);
   });
 
@@ -978,7 +980,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
   });
 
-  it('keeps write and edit tools out of process groups so they split explore runs', () => {
+  it('merges write and edit tools into consecutive grouped tool messages', () => {
     const mutationNames = ['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'NotebookEdit', 'apply_patch'];
 
     for (const name of mutationNames) {
@@ -1053,14 +1055,12 @@ describe('convertAgentEventsToAssistantMessages', () => {
       expect(messages.map((message) => message.content.map((part) => (
         part.type === 'tool-call' ? part.toolName : part.type
       ))), name).toEqual([
-        ['Read'],
-        [name],
-        ['Bash'],
+        ['Read', name, 'Bash'],
       ]);
     }
   });
 
-  it('treats Codex apply_patch shell commands as file mutation separators', () => {
+  it('merges Codex apply_patch shell commands into surrounding tool groups', () => {
     const messages = convertAgentEventsToAssistantMessages([
       {
         kind: 'assistant',
@@ -1113,13 +1113,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages.map((message) => message.content.map((part) => (
       part.type === 'tool-call' ? part.toolName : part.type
     )))).toEqual([
-      ['Read'],
-      ['shell_command'],
-      ['Bash'],
+      ['Read', 'shell_command', 'Bash'],
     ]);
   });
 
-  it('peels trailing thinking off a mixed thinking-and-text event into the previous process group', () => {
+  it('keeps trailing thinking with the final answer text instead of peeling into tools', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -1168,15 +1166,16 @@ describe('convertAgentEventsToAssistantMessages', () => {
     const messages = convertAgentEventsToAssistantMessages(events);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
-    expect(messages[0]?.content[1]).toEqual({
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call']);
+    expect(messages[1]?.content.map((part) => part.type)).toEqual(['reasoning', 'text']);
+    expect(messages[1]?.content[0]).toEqual({
       type: 'reasoning',
       text: '架构已摸清。先给你我的分析，再确认几个关键决策点。',
     });
-    expect(messages[1]?.content).toEqual([{ type: 'text', text: '现状关键事实' }]);
+    expect(messages[1]?.content[1]).toEqual({ type: 'text', text: '现状关键事实' });
   });
 
-  it('keeps the final footer on trailing text instead of peeled thinking', () => {
+  it('keeps the final footer on trailing text instead of merged thinking', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: '定稿方案' } },
       {
@@ -1242,13 +1241,13 @@ describe('convertAgentEventsToAssistantMessages', () => {
     const assistantMessages = messages.filter((message) => message.role === 'assistant');
 
     expect(assistantMessages).toHaveLength(2);
-    expect(assistantMessages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+    expect(assistantMessages[0]?.content.map((part) => part.type)).toEqual(['tool-call']);
     expect(assistantMessages[0]?.metadata.isFinalAssistantMessage).toBeUndefined();
-    expect(assistantMessages[1]?.content).toEqual([{ type: 'text', text: '方案已定稿，汇总如下。' }]);
+    expect(assistantMessages[1]?.content.map((part) => part.type)).toEqual(['reasoning', 'text']);
     expect(assistantMessages[1]?.metadata.isFinalAssistantMessage).toBe(true);
   });
 
-  it('merges thinking that arrives after a pending tool instead of inserting it before', () => {
+  it('keeps thinking in its own message when it arrives after a pending tool', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -1293,11 +1292,12 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     const messages = convertAgentEventsToAssistantMessages(events);
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call']);
+    expect(messages[1]?.content.map((part) => part.type)).toEqual(['reasoning']);
   });
 
-  it('keeps ask-user-question tools out of the surrounding process message', () => {
+  it('keeps ask-user-question tools out of surrounding grouped tool messages', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -1407,15 +1407,16 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     const messages = convertAgentEventsToAssistantMessages(events);
 
-    expect(messages).toHaveLength(4);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
-    expect(messages[1]?.content).toEqual([
+    expect(messages).toHaveLength(5);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning']);
+    expect(messages[1]?.content.map((part) => part.type)).toEqual(['tool-call']);
+    expect(messages[2]?.content).toEqual([
       expect.objectContaining({ type: 'tool-call', toolName: 'AskUserQuestion', toolCallId: 'ask-1' }),
     ]);
-    expect(messages[2]?.content).toEqual([
+    expect(messages[3]?.content).toEqual([
       expect.objectContaining({ type: 'tool-call', toolName: 'Glob', toolCallId: 'tool-2' }),
     ]);
-    expect(messages[3]?.content).toEqual([{ type: 'text', text: '确认后再继续。' }]);
+    expect(messages[4]?.content).toEqual([{ type: 'text', text: '确认后再继续。' }]);
   });
 
   it('marks trailing assistant text as final when the result event arrives before it', () => {

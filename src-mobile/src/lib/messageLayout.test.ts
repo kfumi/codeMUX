@@ -34,7 +34,7 @@ const user = (id: string, content: string): ChatMessage => ({
 });
 
 describe('buildDisplayRows', () => {
-  it('groups reasoning and read tools into an explore row', () => {
+  it('groups reasoning and tools into separate rows', () => {
     const rows = buildDisplayRows([
       user('u1', 'hi'),
       reasoning('r1'),
@@ -42,9 +42,9 @@ describe('buildDisplayRows', () => {
       assistant('a1', 'done'),
     ], { compactAiOutput: false, expandedTurnKeys: new Set() });
 
-    expect(rows.map((row) => row.kind)).toEqual(['single', 'explore', 'single']);
-    const explore = rows.find((row) => row.kind === 'explore');
-    expect(explore?.kind === 'explore' && explore.toolNames).toEqual(['Read']);
+    expect(rows.map((row) => row.kind)).toEqual(['single', 'thinking', 'tool-group', 'single']);
+    const toolGroup = rows.find((row) => row.kind === 'tool-group');
+    expect(toolGroup?.kind === 'tool-group' && toolGroup.toolNames).toEqual(['Read']);
   });
 
   it('renders a reasoning-only process as a thinking row', () => {
@@ -59,7 +59,7 @@ describe('buildDisplayRows', () => {
     expect(thinking?.kind === 'thinking' && thinking.messages.map((message) => message.id)).toEqual(['r1']);
   });
 
-  it('keeps write tools outside explore groups', () => {
+  it('groups write tools with surrounding tools in one tool group', () => {
     const rows = buildDisplayRows([
       user('u1', 'hi'),
       tool('t1', 'Read'),
@@ -67,8 +67,9 @@ describe('buildDisplayRows', () => {
       tool('t3', 'Bash'),
     ], { compactAiOutput: false, expandedTurnKeys: new Set() });
 
-    expect(rows.filter((row) => row.kind === 'explore')).toHaveLength(2);
-    expect(rows.some((row) => row.kind === 'single' && row.message.kind === 'tool' && row.message.name === 'Write')).toBe(true);
+    expect(rows.filter((row) => row.kind === 'tool-group')).toHaveLength(1);
+    const toolGroup = rows.find((row) => row.kind === 'tool-group');
+    expect(toolGroup?.kind === 'tool-group' && toolGroup.toolNames).toEqual(['Read', 'Write', 'Bash']);
   });
 
   it('collapses process rows behind a compact toggle', () => {
@@ -90,7 +91,7 @@ describe('buildDisplayRows', () => {
       assistant('a1', 'done'),
     ], { compactAiOutput: true, expandedTurnKeys: new Set(['u1']) });
 
-    expect(rows.map((row) => row.kind)).toEqual(['single', 'compact-toggle', 'explore', 'single']);
+    expect(rows.map((row) => row.kind)).toEqual(['single', 'compact-toggle', 'thinking', 'tool-group', 'single']);
   });
 
   it('passes the completed turn duration to the compact process toggle', () => {

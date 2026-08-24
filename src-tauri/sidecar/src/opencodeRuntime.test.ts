@@ -84,7 +84,6 @@ function createPort() {
     compactSession: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
     respondToPermission: vi.fn().mockResolvedValue(true),
-    setAutoApprovePermissions: vi.fn().mockResolvedValue(undefined),
   };
   const port: OpenCodeSdkPort = {
     start: vi.fn().mockResolvedValue({ server, client }),
@@ -165,52 +164,54 @@ describe('OpenCodeRuntime', () => {
     expect((runtime as unknown as { planMode: string }).planMode).toBe('off');
   });
 
-  it('pushes the OpenCode auto-approve shield toggle through the client', async () => {
+  it('auto-approves OpenCode tool permissions without emitting a UI prompt', async () => {
     const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    runtime.updatePermissions({ permissionConfig: { kind: 'opencode', autoApprovePermissions: true } });
+    await runtime.start();
+
+    onEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-auto-1',
+        sessionID: 'opencode-new',
+        permission: 'bash',
+        title: 'Run command',
+      },
+    });
+    await flushAsync();
+
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'permission_requested')).toEqual([]);
+    expect(client.respondToPermission).toHaveBeenCalledWith({
+      sessionId: 'opencode-new',
+      requestId: 'permission-auto-1',
+      response: 'once',
+    });
+    await runtime.shutdown();
+  });
+
+  it('stores OpenCode permission config without writing project config files', async () => {
+    const { port } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);
 
-    // Updates arriving before start() are deferred until the client exists.
     runtime.updatePermissions({
       permissionConfig: { kind: 'opencode', autoApprovePermissions: true },
       planMode: 'off',
     });
-    expect(client.setAutoApprovePermissions).not.toHaveBeenCalled();
-
-    await runtime.start();
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).toHaveBeenCalledWith({ enable: true });
-
     runtime.updatePermissions({ permissionConfig: { kind: 'opencode', autoApprovePermissions: false } });
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).toHaveBeenLastCalledWith({ enable: false });
-
-    // Unchanged state is not pushed again.
     runtime.updatePermissions({ planMode: 'on' });
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).toHaveBeenCalledTimes(2);
-  });
 
-  it('does not push auto-approve for non-OpenCode configs and retries after failures', async () => {
-    const { port, client } = createPort();
-    client.setAutoApprovePermissions = vi.fn()
-      .mockRejectedValueOnce(new Error('server unreachable'))
-      .mockResolvedValueOnce(undefined);
-    const runtime = new OpenCodeRuntime(createConfig(), port);
-    await runtime.start();
-
-    runtime.updatePermissions({ permissionConfig: { kind: 'claude_code', permissionMode: 'default' } });
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).not.toHaveBeenCalled();
-
-    runtime.updatePermissions({ permissionConfig: { kind: 'opencode', autoApprovePermissions: true } });
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).toHaveBeenCalledTimes(1);
-
-    // The failed enable is retried by the next lifecycle update.
-    runtime.updatePermissions({ planMode: 'on' });
-    await flushAsync();
-    expect(client.setAutoApprovePermissions).toHaveBeenCalledTimes(2);
-    expect(client.setAutoApprovePermissions).toHaveBeenLastCalledWith({ enable: true });
+    expect((runtime as unknown as { permissionConfig: unknown }).permissionConfig).toEqual({
+      kind: 'opencode',
+      autoApprovePermissions: false,
+    });
+    expect((runtime as unknown as { planMode: string }).planMode).toBe('on');
   });
 
   it('emits a CodeMUX lifecycle around an OpenCode user question', async () => {

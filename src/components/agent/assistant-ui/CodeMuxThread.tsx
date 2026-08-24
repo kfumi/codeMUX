@@ -40,7 +40,6 @@ import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib
 import type { ConversationTurn } from '../../../types/conversationTurn';
 
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
-import { isFileMutationTool } from '../toolHeaderSummary';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   CodeMuxDataMessagePart,
@@ -84,9 +83,6 @@ type CodeMuxThreadRenderContextValue = {
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  activeExploreGroup: boolean;
-  hasCommittedThinkingInCurrentTurn: boolean;
-  latestExploreAssistantEventIndex: number | null;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -102,18 +98,15 @@ const ASK_USER_QUESTION_TOOL_NAMES = new Set([
   'question',
 ]);
 const GROUP_BY_PART_INNER = groupPartByType({
-  reasoning: ['group-explore', 'group-thinking'],
-  'tool-call': ['group-explore'],
+  reasoning: ['group-thinking'],
+  'tool-call': ['group-tool-call'],
   'standalone-tool-call': [],
 });
 const GROUP_BY_PART = (
   part: Parameters<typeof GROUP_BY_PART_INNER>[0],
   context?: Parameters<typeof GROUP_BY_PART_INNER>[1],
 ) => {
-  if (part.type === 'tool-call' && (
-    ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)
-    || isFileMutationTool(part.toolName, asRecord(part.args))
-  )) {
+  if (part.type === 'tool-call' && ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)) {
     return [];
   }
   return GROUP_BY_PART_INNER(part, context);
@@ -204,18 +197,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => new Map(conversationTurns.map((turn, index) => [turn.id, index])),
     [conversationTurns],
   );
-  const activeExploreGroup = useMemo(
-    () => hasActiveExploreGroup(events),
-    [events],
-  );
-  const hasCommittedThinkingInCurrentTurn = useMemo(
-    () => getCurrentTurnCommittedThinking(events) != null,
-    [events],
-  );
-  const latestExploreAssistantEventIndex = useMemo(
-    () => getLastExploreAssistantEventIndex(events),
-    [events],
-  );
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
@@ -241,9 +222,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    activeExploreGroup,
-    hasCommittedThinkingInCurrentTurn,
-    latestExploreAssistantEventIndex,
   }), [
     sessionId,
     compactAiOutput,
@@ -256,9 +234,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    activeExploreGroup,
-    hasCommittedThinkingInCurrentTurn,
-    latestExploreAssistantEventIndex,
   ]);
 
   return (
@@ -562,9 +537,6 @@ function CodeMuxAssistantMessage() {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    activeExploreGroup,
-    hasCommittedThinkingInCurrentTurn,
-    latestExploreAssistantEventIndex,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -578,9 +550,6 @@ function CodeMuxAssistantMessage() {
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
       turnOrdinalById={turnOrdinalById}
-      activeExploreGroup={activeExploreGroup}
-      hasCommittedThinkingInCurrentTurn={hasCommittedThinkingInCurrentTurn}
-      latestExploreAssistantEventIndex={latestExploreAssistantEventIndex}
     />
   );
 }
@@ -1188,9 +1157,6 @@ function AssistantLikeMessage({
   toolDurations,
   turnByEventIndex,
   turnOrdinalById,
-  activeExploreGroup,
-  hasCommittedThinkingInCurrentTurn,
-  latestExploreAssistantEventIndex,
 }: {
   message: MessageState;
   sessionId: string;
@@ -1202,32 +1168,13 @@ function AssistantLikeMessage({
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  activeExploreGroup: boolean;
-  hasCommittedThinkingInCurrentTurn: boolean;
-  latestExploreAssistantEventIndex: number | null;
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
-  const streamingThinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const [isForking, setIsForking] = useState(false);
   if (message.content.length === 0) {
     return null;
   }
 
-  const sourceEventIndices = getSourceEventIndices(message);
-  const isLatestExploreAssistantMessage =
-    latestExploreAssistantEventIndex != null
-    && sourceEventIndices.includes(latestExploreAssistantEventIndex);
-  const lastExplorePartIndex = getLastExplorePartIndex(message);
-  const hasLiveThinking = streamingThinking.length > 0 && !hasCommittedThinkingInCurrentTurn;
-  const shouldAttachStreamingThinking =
-    isRunning
-    && isLatestExploreAssistantMessage
-    && hasLiveThinking
-    && lastExplorePartIndex != null;
-  const shouldHideHistoricalStreamingThinking =
-    isRunning
-    && hasLiveThinking
-    && activeExploreGroup;
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
   const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
@@ -1300,7 +1247,7 @@ function AssistantLikeMessage({
             {({ part, children }) => {
               switch (part.type) {
                 case 'group-thinking':
-                  if (shouldHideCollapsedReasoning || shouldHideHistoricalStreamingThinking) {
+                  if (shouldHideCollapsedReasoning) {
                     return null;
                   }
                   return (
@@ -1312,29 +1259,19 @@ function AssistantLikeMessage({
                     </CodeMuxReasoningGroup>
                   );
 
-                case 'group-explore': {
-                  const endIndex = part.indices[part.indices.length - 1] ?? 0;
+                case 'group-tool-call': {
                   const toolNames = part.indices
                     .map((idx) => message.content[idx])
                     .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call')
-                    .filter((c) => !ASK_USER_QUESTION_TOOL_NAMES.has(c.toolName) && !isFileMutationTool(c.toolName, asRecord(c.args)))
                     .map((c) => c.toolName);
-                  if (toolNames.length === 0) {
-                    return children;
-                  }
                   return (
-                    <CodeMuxExploreGroup
+                    <CodeMuxToolGroup
                       startIndex={part.indices[0] ?? 0}
-                      endIndex={endIndex}
+                      endIndex={part.indices[part.indices.length - 1] ?? 0}
                       toolNames={toolNames}
-                      liveThinking={
-                        shouldAttachStreamingThinking && endIndex === lastExplorePartIndex
-                          ? streamingThinking
-                          : undefined
-                      }
                     >
                       {children}
-                    </CodeMuxExploreGroup>
+                    </CodeMuxToolGroup>
                   );
                 }
 
@@ -1446,18 +1383,16 @@ function CodeMuxReasoningGroup({
   );
 }
 
-function CodeMuxExploreGroup({
+function CodeMuxToolGroup({
   children,
   startIndex,
   endIndex,
   toolNames,
-  liveThinking,
 }: {
   children?: ReactNode;
   startIndex: number;
   endIndex: number;
   toolNames: string[];
-  liveThinking?: string;
 }) {
   const isRunning = useAuiState((state) => {
     if (state.message.status?.type !== 'running') return false;
@@ -1466,31 +1401,16 @@ function CodeMuxExploreGroup({
     }
     return false;
   });
-  const active = isRunning || Boolean(liveThinking);
 
   return (
     <ToolGroup
       startIndex={startIndex}
       endIndex={endIndex}
       toolNames={toolNames}
-      active={active}
-      liveContent={liveThinking ? <LiveExploreReasoning thinking={liveThinking} /> : undefined}
-      hideReasoningContent={Boolean(liveThinking)}
+      active={isRunning}
     >
       {children}
     </ToolGroup>
-  );
-}
-
-function LiveExploreReasoning({ thinking }: { thinking: string }) {
-  return (
-    <div
-      data-slot="live-explore-reasoning"
-      aria-live="polite"
-      className="min-w-0 pl-6 text-ui-caption leading-relaxed text-muted-foreground/75"
-    >
-      <pre className="whitespace-pre-wrap">{thinking}</pre>
-    </div>
   );
 }
 
@@ -1529,7 +1449,6 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   );
   // Prefer reasoning panel: never show live thinking content as answer markdown.
   const visibleThinking = hasCommittedThinking ? '' : (thinking || (textIsMisroutedThinking ? text : ''));
-  const thinkingAttachedToExplore = isRunning && visibleThinking.length > 0 && hasActiveExploreGroup(events);
   const visibleText = (
     duplicateLiveText
     || textIsMisroutedThinking
@@ -1540,7 +1459,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
     return null;
   }
 
-  const isThinking = visibleThinking.length > 0 && !thinkingAttachedToExplore;
+  const isThinking = visibleThinking.length > 0;
 
   return (
     <div className="mb-5 flex w-full justify-start">
@@ -1629,42 +1548,6 @@ function getLastAssistantThinking(events: AgentMessage[]): string {
   return '';
 }
 
-function getLastExploreAssistantEventIndex(events: AgentMessage[]): number | null {
-  let turnStartIndex = -1;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === 'user' && !isToolResultOnlyUserEvent(event)) {
-      turnStartIndex = index;
-      break;
-    }
-  }
-
-  for (let index = events.length - 1; index > turnStartIndex; index -= 1) {
-    const event = events[index];
-    if (event?.kind !== 'assistant') {
-      continue;
-    }
-
-    const content = event.data.message?.content;
-    if (!Array.isArray(content)) {
-      continue;
-    }
-
-    if (content.some((block) => {
-      if (!isRecord(block) || block.type !== 'tool_use' || typeof block.name !== 'string') {
-        return false;
-      }
-
-      return !ASK_USER_QUESTION_TOOL_NAMES.has(block.name)
-        && !isFileMutationTool(block.name, asRecord(block.input));
-    })) {
-      return index;
-    }
-  }
-
-  return null;
-}
-
 function getCurrentTurnCommittedThinking(
   events: AgentMessage[],
 ): { eventIndex: number; text: string } | undefined {
@@ -1693,42 +1576,6 @@ function getCurrentTurnCommittedThinking(
       return { eventIndex: index, text: thinkingBlock.thinking };
     }
   }
-}
-
-function hasActiveExploreGroup(events: AgentMessage[]): boolean {
-  let turnStartIndex = -1;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === 'user' && !isToolResultOnlyUserEvent(event)) {
-      turnStartIndex = index;
-      break;
-    }
-  }
-
-  for (let index = turnStartIndex + 1; index < events.length; index += 1) {
-    const event = events[index];
-    if (event?.kind !== 'assistant') {
-      continue;
-    }
-
-    const content = event.data.message?.content;
-    if (!Array.isArray(content)) {
-      continue;
-    }
-
-    if (content.some((block) => {
-      if (!isRecord(block) || block.type !== 'tool_use' || typeof block.name !== 'string') {
-        return false;
-      }
-
-      return !ASK_USER_QUESTION_TOOL_NAMES.has(block.name)
-        && !isFileMutationTool(block.name, asRecord(block.input));
-    })) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function getMessageText(message: MessageState) {
@@ -1870,27 +1717,6 @@ function isOpenCodeToolOnlyAssistantEvent(event: AgentMessage | undefined): bool
   return Array.isArray(content)
     && content.length > 0
     && content.every((block) => block?.type === 'tool_use');
-}
-
-function getLastExplorePartIndex(message: MessageState): number | undefined {
-  let lastIndex: number | undefined;
-
-  message.content.forEach((part, index) => {
-    if (part.type === 'reasoning') {
-      lastIndex = index;
-      return;
-    }
-
-    if (
-      part.type === 'tool-call'
-      && !ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)
-      && !isFileMutationTool(part.toolName, asRecord(part.args))
-    ) {
-      lastIndex = index;
-    }
-  });
-
-  return lastIndex;
 }
 
 function hasAssistantReasoningAndText(event: AgentMessage | undefined): boolean {

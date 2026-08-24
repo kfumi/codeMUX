@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAutoApprovedPermissionValue, buildOpenCodeServerConfig, normalizeOpenCodeModelReference, officialOpenCodeSdkPort, transformPermissionAskToAllow } from './opencodeSdk.js';
+import { buildOpenCodeServerConfig, normalizeOpenCodeModelReference, officialOpenCodeSdkPort } from './opencodeSdk.js';
 
 
 const sdkMocks = vi.hoisted(() => {
@@ -428,67 +428,5 @@ describe('official OpenCode SDK adapter', () => {
     await subscription.close();
     options.onSseError!(new Error('late retry'));
     expect(retries).toHaveLength(1);
-  });
-});
-
-describe('OpenCode auto-approve permission rules', () => {
-  it('rewrites ask rules to allow while preserving deny rules', () => {
-    expect(transformPermissionAskToAllow('ask')).toBe('allow');
-    expect(transformPermissionAskToAllow('deny')).toBe('deny');
-    expect(transformPermissionAskToAllow('allow')).toBe('allow');
-    expect(transformPermissionAskToAllow({
-      '*': 'ask',
-      'git *': 'allow',
-      'rm *': 'deny',
-      nested: { inner: 'ask', keep: 'deny' },
-    })).toEqual({
-      '*': 'allow',
-      'git *': 'allow',
-      'rm *': 'deny',
-      nested: { inner: 'allow', keep: 'deny' },
-    });
-    expect(transformPermissionAskToAllow([{ pattern: '*', action: 'ask' }])).toEqual([{ pattern: '*', action: 'allow' }]);
-  });
-
-  it('adds explicit allows for the ask-by-default guards and handles shorthand configs', () => {
-    const rules = buildAutoApprovedPermissionValue({ bash: { '*': 'ask' } }) as Record<string, unknown>;
-    expect(rules.bash).toEqual({ '*': 'allow' });
-    expect(rules.doom_loop).toBe('allow');
-    expect(rules.external_directory).toBe('allow');
-
-    expect(buildAutoApprovedPermissionValue('ask')).toBe('allow');
-    expect(buildAutoApprovedPermissionValue(undefined)).toEqual({ doom_loop: 'allow', external_directory: 'allow' });
-    // Shorthand deny stays enforced even in auto mode.
-    expect(buildAutoApprovedPermissionValue('deny')).toBe('deny');
-  });
-
-  it('enables auto-approve by patching the server config and disables by restoring the snapshot', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ permission: { bash: { '*': 'ask' }, edit: 'deny' } }), { status: 200 }))
-      .mockResolvedValue(new Response('{}', { status: 200 }));
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    try {
-      const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
-      await expect(resources.client.setAutoApprovePermissions!({ enable: true })).resolves.toBeUndefined();
-      await expect(resources.client.setAutoApprovePermissions!({ enable: false })).resolves.toBeUndefined();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-
-    const configGet = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(configGet[0]).toBe('http://127.0.0.1:4097/config');
-    const enablePatch = fetchMock.mock.calls[1] as [string, RequestInit];
-    expect(enablePatch[0]).toBe('http://127.0.0.1:4097/config');
-    expect(enablePatch[1].method).toBe('PATCH');
-    expect(JSON.parse(enablePatch[1].body as string)).toEqual({
-      permission: { bash: { '*': 'allow' }, edit: 'deny', doom_loop: 'allow', external_directory: 'allow' },
-    });
-    const disablePatch = fetchMock.mock.calls[2] as [string, RequestInit];
-    expect(disablePatch[1].method).toBe('PATCH');
-    // Restore puts the exact pre-enable snapshot back.
-    expect(JSON.parse(disablePatch[1].body as string)).toEqual({
-      permission: { bash: { '*': 'ask' }, edit: 'deny' },
-    });
   });
 });

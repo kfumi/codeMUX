@@ -1438,7 +1438,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByRole('button', { name: /探索/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /已执行/ })).toBeTruthy();
     expect(screen.getByText('运行命令×1')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
@@ -1648,21 +1648,23 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(container.querySelector('[data-slot="tool-group-trigger"]')).toBeTruthy();
   });
 
-  it('collapses thinking and tools between two text messages into one explore group', () => {
+  it('keeps thinking separate from grouped tools between two text messages', () => {
     const { container } = render(<Harness sessionId="session-explore-group" />);
 
     expect(screen.getByText('先确认范围。')).toBeTruthy();
     expect(screen.getByText('架构已摸清。')).toBeTruthy();
-    expect(screen.getByText('读取×1、任务×1、匹配文件×1、运行命令×1')).toBeTruthy();
+    expect(screen.getByText('读取×1')).toBeTruthy();
+    expect(screen.getByText('任务×1、匹配文件×1、运行命令×1')).toBeTruthy();
     expect(screen.queryByText('先探索下当前桌面端架构。')).toBeNull();
     expect(screen.queryByText('再核对任务入口。')).toBeNull();
     expect(screen.queryByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeNull();
-    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /思考/ })).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole('button', { name: /探索/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /已执行/ })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: /已执行/ })[1]!);
 
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
-    expect(reasoningTriggers).toHaveLength(3);
     fireEvent.click(reasoningTriggers[0]!);
     fireEvent.click(reasoningTriggers[1]!);
     fireEvent.click(reasoningTriggers[2]!);
@@ -1676,20 +1678,19 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('运行命令')).toBeTruthy();
   });
 
-  it('renders write tools outside explore groups and splits surrounding tools', () => {
+  it('groups write tools with surrounding tools in one tool group', () => {
     const { container } = render(<Harness sessionId="session-file-mutation-split" />);
 
-    const exploreTriggers = screen.getAllByRole('button', { name: /探索/ });
-    expect(exploreTriggers).toHaveLength(2);
-    expect(exploreTriggers[0]?.textContent).toContain('读取×1');
-    expect(exploreTriggers[1]?.textContent).toContain('运行命令×1');
-    expect(screen.getByText('写入')).toBeTruthy();
+    const toolGroupTriggers = screen.getAllByRole('button', { name: /已执行/ });
+    expect(toolGroupTriggers).toHaveLength(1);
+    expect(toolGroupTriggers[0]?.textContent).toContain('读取×1');
+    expect(toolGroupTriggers[0]?.textContent).toContain('写入×1');
+    expect(toolGroupTriggers[0]?.textContent).toContain('运行命令×1');
     expect(screen.getByText('文件已写好。')).toBeTruthy();
-    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
 
-    const writeTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
-    expect(writeTrigger).toBeTruthy();
-    expect(writeTrigger?.closest('[data-slot="tool-group-root"]')).toBeNull();
+    fireEvent.click(toolGroupTriggers[0]!);
+    expect(screen.getByText('写入')).toBeTruthy();
   });
 
   it('keeps expanded tool details open across large-history running updates', async () => {
@@ -2183,7 +2184,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(longView.container.textContent).not.toContain('tokens');
   });
 
-  it('keeps live thinking inside the active explore group when a tool is already streaming', () => {
+  it('shows live thinking in the streaming panel while a tool group is active', () => {
     const sessionId = 'session-live-explore';
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: '检查项目接入方式' } },
@@ -2214,13 +2215,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId={sessionId} />);
-    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
+    const toolGroupRoot = container.querySelector('[data-slot="tool-group-root"]');
 
-    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
-    expect(exploreRoot?.querySelectorAll('[data-slot="live-explore-reasoning"]')).toHaveLength(1);
-    expect(exploreRoot?.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
-    expect(exploreRoot?.textContent).toContain('正在确认项目入口');
-    expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+    expect(toolGroupRoot?.getAttribute('data-active')).toBe('true');
+    expect(toolGroupRoot?.textContent).not.toContain('正在确认项目入口');
+    expect(useAgentStore.getState().streamingThinking[sessionId]).toBe('正在确认项目入口');
   });
 
   it('suppresses the stale live preview once thinking is committed across assistant messages', () => {
@@ -2269,10 +2268,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId={sessionId} />);
-    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
+    const toolGroupRoot = container.querySelector('[data-slot="tool-group-root"]');
 
-    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
-    expect(exploreRoot?.querySelector('[data-slot="live-explore-reasoning"]')).toBeNull();
+    expect(toolGroupRoot?.getAttribute('data-active')).toBe('true');
     expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
   });
 
@@ -2333,11 +2331,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId={sessionId} />);
-    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
 
-    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
-    expect(exploreRoot?.querySelector('[data-slot="live-explore-reasoning"]')).toBeNull();
     expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+    expect(container.textContent).not.toContain('正在继续探索剩余入口');
   });
 
   it('keeps the live reasoning viewport pinned to the newest content', async () => {
@@ -2573,13 +2569,13 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-claude-thinking-turn" />);
 
     expect(screen.getByText('最终总结结果')).toBeTruthy();
-    expect(screen.queryByText('思考')).toBeNull();
+    expect(screen.queryByText('内部思考过程')).toBeNull();
     expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
 
     const textRow = screen.getByText('最终总结结果').closest('[data-message-row]');
     const toggleRow = screen.getByRole('button', { name: /展开AI过程/ }).closest('[data-message-row]');
     expect(textRow?.querySelector('[data-message-footer]')).toBeTruthy();
-    expect(toggleRow?.querySelector('[data-message-footer]')).toBeNull();
+    expect(textRow).toBe(toggleRow);
     expect(screen.getAllByText(/耗时/)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
@@ -2607,14 +2603,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
     expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
-    expect(screen.getByRole('button', { name: /探索.*任务/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /已执行.*任务/ })).toBeTruthy();
 
-    const firstReasoningTrigger = screen.getByRole('button', { name: /思考/ });
+    const firstReasoningTrigger = screen.getAllByRole('button', { name: /思考/ })[0]!;
     expect(firstReasoningTrigger.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(firstReasoningTrigger);
     expect(screen.getByText('第一段内部思考')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /探索.*任务/ }));
+    fireEvent.click(screen.getByRole('button', { name: /已执行.*任务/ }));
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     expect(reasoningTriggers).toHaveLength(2);
     expect(reasoningTriggers[1]?.getAttribute('aria-expanded')).toBe('false');
@@ -2635,7 +2631,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: /探索.*运行命令/ }));
+    fireEvent.click(screen.getByRole('button', { name: /已执行.*运行命令/ }));
     expect(screen.getByText('运行命令')).toBeTruthy();
   });
 
@@ -2660,14 +2656,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('历史过程二')).toBeTruthy();
     expect(screen.queryByText('最终思考泄漏')).toBeNull();
 
-    const exploreTriggers = screen.getAllByRole('button', { name: /探索/ });
+    const exploreTriggers = screen.getAllByRole('button', { name: /已执行/ });
     fireEvent.click(exploreTriggers[exploreTriggers.length - 1]!);
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     fireEvent.click(reasoningTriggers[reasoningTriggers.length - 1]!);
 
     expect(screen.getByText('最终思考泄漏')).toBeTruthy();
     const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
-    expect(finalRow?.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
+    expect(finalRow?.querySelector('[data-slot="reasoning-trigger"]')).toBeTruthy();
   });
 
   it('keeps the session summary card outside the compact process group', () => {
@@ -2774,7 +2770,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     fireEvent.click(toggle);
 
     expect(screen.getByText('编辑')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /探索/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /已执行/ })).toBeNull();
     expect(screen.getByText('1 个文件已更改').closest('[data-message-row]')).toBe(textRow);
   });
 
