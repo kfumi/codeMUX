@@ -194,7 +194,7 @@ interface AgentState {
   /** Rewind the latest user turn and prepare its payload for composer editing */
   rewindLastTurn: (sessionId: string) => Promise<AgentInputPayload | null>;
   /** Rewind to an arbitrary historical user message by its event index and prepare its payload for composer editing */
-  rewindToMessage: (sessionId: string, userEventIndex: number) => Promise<AgentInputPayload | null>;
+  rewindToMessage: (sessionId: string, userEventIndex: number, mode?: RewindMode) => Promise<AgentInputPayload | null>;
   /** Queue composer text to be restored for a session (applied only when the composer is empty) */
   requestComposerRestore: (sessionId: string, text: string) => void;
   /** Consume and clear any pending composer restore text for a session */
@@ -910,6 +910,8 @@ function getSessionAgentKind(sessionId: string) {
 }
 
 /** Static rewind capability declaration per agent kind (files/both reserved for a later phase). */
+export type RewindMode = 'conversation' | 'files' | 'both';
+
 export const AGENT_REWIND_CAPABILITIES: Record<AgentKind, {
   conversation: boolean;
   files: boolean;
@@ -920,6 +922,13 @@ export const AGENT_REWIND_CAPABILITIES: Record<AgentKind, {
   gemini_cli: { conversation: false, files: false, both: false },
   opencode: { conversation: true, files: false, both: false },
 };
+
+export function supportsRewindMode(agentKind: AgentKind | undefined, mode: RewindMode): boolean {
+  if (!agentKind) {
+    return false;
+  }
+  return AGENT_REWIND_CAPABILITIES[agentKind][mode];
+}
 
 function hasCurrentTurnCommittedThinking(events: AgentMessage[]): boolean {
   let lastUserIdx = -1;
@@ -2626,7 +2635,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     return get().composerDrafts[sessionId] ?? '';
   },
 
-  rewindToMessage: async (sessionId: string, userEventIndex: number) => {
+  rewindToMessage: async (sessionId: string, userEventIndex: number, mode: RewindMode = 'conversation') => {
     const state = get();
     const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
       ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
@@ -2654,6 +2663,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     if (userEventIndex !== latestRewindableIndex && !hasStrongLocator) {
       return null;
     }
+    if (mode !== 'conversation' && !hasStrongLocator) {
+      // File checkpoints are keyed by the provider message ID.
+      return null;
+    }
 
     const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
     const payload = buildInputPayloadFromUserEvent(userEvent);
@@ -2663,7 +2676,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       .filter((event) => event.kind === 'user')
       .length - 1;
 
-    await agentApi.rewindSession(sessionId, agentKind, target, rewindUserIndex);
+    await agentApi.rewindSession(sessionId, agentKind, target, rewindUserIndex, mode);
+
+    if (mode === 'files') {
+      // File-only rewind keeps the conversation intact; nothing to truncate.
+      return payload;
+    }
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);

@@ -1223,6 +1223,13 @@ function Harness({
   return wrapped;
 }
 
+function openRewindMenu(trigger: Element) {
+  // Radix dropdown menus open on pointerdown, which jsdom does not derive
+  // from fireEvent.click.
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+}
+
 describe('CodeMuxAssistantRuntimeProvider', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1966,10 +1973,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId="session-nav" onSend={onSend} />);
 
-    const rewindButtons = screen.getAllByRole('button', { name: '回退并编辑这条消息' });
+    const rewindButtons = screen.getAllByRole('button', { name: '回退到此消息' });
     expect(rewindButtons).toHaveLength(1);
 
-    fireEvent.click(rewindButtons[0]);
+    openRewindMenu(rewindButtons[0]);
+    fireEvent.click(await screen.findByText('回退并编辑对话'));
 
     expect(rewindLastTurn).not.toHaveBeenCalled();
     expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
@@ -2023,7 +2031,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId="session-image-rewind" onSend={onSend} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '回退并编辑这条消息' }));
+    openRewindMenu(screen.getByRole('button', { name: '回退到此消息' }));
+    fireEvent.click(await screen.findByText('回退并编辑对话'));
 
     expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
     expect(screen.queryByTestId('edit-composer-attachment-list')).toBeNull();
@@ -2071,7 +2080,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId={longSessionId} onSend={onSend} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '回退并编辑这条消息' }));
+    openRewindMenu(screen.getByRole('button', { name: '回退到此消息' }));
+    fireEvent.click(await screen.findByText('回退并编辑对话'));
     const sendButton = await screen.findByRole<HTMLButtonElement>('button', { name: '发送' });
     await waitFor(() => expect(sendButton.disabled).toBe(false));
 
@@ -2094,14 +2104,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId="session-rewind-history" onSend={onSend} />);
 
-    const historicalButtons = screen.getAllByRole('button', { name: '回退到此消息（之后的内容将被移除）' });
-    expect(historicalButtons).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: '回退并编辑这条消息' })).toHaveLength(1);
+    const rewindButtons = screen.getAllByRole('button', { name: '回退到此消息' });
+    expect(rewindButtons).toHaveLength(2);
 
-    fireEvent.click(historicalButtons[0]);
+    openRewindMenu(rewindButtons[0]);
+    fireEvent.click(await screen.findByText('回退对话'));
 
     await waitFor(() => {
-      expect(rewindToMessage).toHaveBeenCalledWith('session-rewind-history', 0);
+      expect(rewindToMessage).toHaveBeenCalledWith('session-rewind-history', 0, 'conversation');
       expect(requestComposerRestore).toHaveBeenCalledWith('session-rewind-history', 'first instruction');
     });
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
@@ -2111,8 +2121,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('does not offer in-place rewind on historical optimistic user messages without locators', () => {
     render(<Harness sessionId="session-nav" />);
 
-    expect(screen.queryByRole('button', { name: '回退到此消息（之后的内容将被移除）' })).toBeNull();
-    expect(screen.getAllByRole('button', { name: '回退并编辑这条消息' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '回退到此消息' })).toHaveLength(1);
   });
 
   it('hides rewind entries in read-only sessions', () => {
@@ -2124,8 +2133,21 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId="session-rewind-history" />);
 
-    expect(screen.queryByRole('button', { name: '回退并编辑这条消息' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '回退到此消息（之后的内容将被移除）' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '回退到此消息' })).toBeNull();
+  });
+
+  it('offers file rewind modes only for agents that declare them', async () => {
+    const rewindToMessage = vi.fn().mockResolvedValue(null);
+    useAgentStore.setState({ rewindToMessage } as any);
+
+    // session-rewind-history is primed as a Codex session (conversation-only).
+    render(<Harness sessionId="session-rewind-history" />);
+
+    openRewindMenu(screen.getAllByRole('button', { name: '回退到此消息' })[0]);
+
+    expect(await screen.findByText('回退对话')).toBeTruthy();
+    expect(screen.queryByText('回退文件')).toBeNull();
+    expect(screen.queryByText('回退对话和文件')).toBeNull();
   });
 
   it('renders streaming thinking content in a live reasoning panel', () => {

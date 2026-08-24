@@ -9,7 +9,7 @@ import {
   type MessageState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
-import { ArrowDown, ChevronRight, ChevronDown, Loader2, Undo2 } from 'lucide-react';
+import { ArrowDown, ChevronRight, ChevronDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
@@ -19,6 +19,7 @@ import { MessageFooter, type MessageFooterStats } from '@/components/assistant-u
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { TooltipHint } from '@/components/ui/tooltip';
 import {
   ReasoningContent,
@@ -27,7 +28,13 @@ import {
   ReasoningTrigger,
 } from '@/components/reasoning';
 import { cn } from '../../../lib/utils';
-import { AGENT_REWIND_CAPABILITIES, hasStrongRewindLocator, useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import {
+  AGENT_REWIND_CAPABILITIES,
+  hasStrongRewindLocator,
+  useAgentStore,
+  type AgentMessage,
+  type RewindMode,
+} from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn } from '../../../types/conversationTurn';
@@ -502,21 +509,21 @@ function CodeMuxUserMessage() {
     ? hasStrongRewindLocator(event.data.locator)
     : false;
   const isLatestRewindable = sourceEventIndex != null && sourceEventIndex === latestRewindableUserIndex;
-  const supportsConversationRewind = agentKind
-    ? AGENT_REWIND_CAPABILITIES[agentKind].conversation
-    : false;
-  const handleRewindToMessage = useCallback(async () => {
+  const rewindModes: RewindMode[] = agentKind
+    ? (['conversation', 'files', 'both'] as const).filter((mode) => AGENT_REWIND_CAPABILITIES[agentKind][mode])
+    : [];
+  const handleRewindToMessage = useCallback(async (mode: RewindMode) => {
     if (sourceEventIndex == null || isRewinding) {
       return;
     }
     setIsRewinding(true);
     try {
-      const payload = await rewindToMessage(sessionId, sourceEventIndex);
+      const payload = await rewindToMessage(sessionId, sourceEventIndex, mode);
       if (!payload) {
         toast.warning('当前无法回退：会话正在运行或该消息不可回退');
         return;
       }
-      if (payload.text.trim().length > 0) {
+      if (mode !== 'files' && payload.text.trim().length > 0) {
         requestComposerRestore(sessionId, payload.text);
       }
     } catch (error) {
@@ -529,9 +536,10 @@ function CodeMuxUserMessage() {
     <UserMessage
       message={message}
       sourceEventIndex={sourceEventIndex}
-      canRewind={supportsConversationRewind && !isRunning && !isReadOnly && (isLatestRewindable || hasStrongLocator)}
+      canRewind={rewindModes.length > 0 && !isRunning && !isReadOnly && (isLatestRewindable || hasStrongLocator)}
       isLatestRewindable={isLatestRewindable}
       isRewinding={isRewinding}
+      rewindModes={rewindModes}
       onRewindToMessage={handleRewindToMessage}
     />
   );
@@ -593,6 +601,7 @@ function UserMessage({
   canRewind,
   isLatestRewindable = false,
   isRewinding = false,
+  rewindModes = [],
   onRewindToMessage,
 }: {
   message: MessageState;
@@ -600,7 +609,8 @@ function UserMessage({
   canRewind?: boolean;
   isLatestRewindable?: boolean;
   isRewinding?: boolean;
-  onRewindToMessage?: () => Promise<void> | void;
+  rewindModes?: RewindMode[];
+  onRewindToMessage?: (mode: RewindMode) => Promise<void> | void;
 }) {
   const aui = useAui();
   const text = getMessageText(message);
@@ -611,18 +621,16 @@ function UserMessage({
   const beginInlineEdit = () => {
     aui.message().composer().beginEdit();
   };
-  const rewindTooltip = isLatestRewindable
-    ? '回退并编辑这条消息'
-    : '回退到此消息（之后的内容将被移除）';
-  const handleRewindClick = () => {
+  const rewindTooltip = '回退到此消息';
+  const handleRewindSelect = (mode: RewindMode) => {
     if (isRewinding) {
       return;
     }
-    if (isLatestRewindable) {
+    if (mode === 'conversation' && isLatestRewindable) {
       beginInlineEdit();
       return;
     }
-    void onRewindToMessage?.();
+    void onRewindToMessage?.(mode);
   };
 
   if (!text && imageAttachments.length === 0) {
@@ -684,19 +692,42 @@ function UserMessage({
         <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
           <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
-            <TooltipHint content={rewindTooltip}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={rewindTooltip}
-                disabled={isRewinding}
-                onClick={handleRewindClick}
-                className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-              >
-                <Undo2 className="h-3 w-3" />
-              </Button>
-            </TooltipHint>
+            <DropdownMenu>
+              <TooltipHint content={rewindTooltip}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={rewindTooltip}
+                    disabled={isRewinding}
+                    className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    {isRewinding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipHint>
+              <DropdownMenuContent align="end" side="top" className="min-w-44">
+                <div className="px-2.5 pb-1.5 pt-1.5 text-xs text-muted-foreground">
+                  此操作无法撤销
+                </div>
+                {rewindModes.includes('conversation') ? (
+                  <DropdownMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('conversation')}>
+                    {isLatestRewindable ? '回退并编辑对话' : '回退对话'}
+                  </DropdownMenuItem>
+                ) : null}
+                {rewindModes.includes('files') ? (
+                  <DropdownMenuItem icon={<FileText className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('files')}>
+                    回退文件
+                  </DropdownMenuItem>
+                ) : null}
+                {rewindModes.includes('both') ? (
+                  <DropdownMenuItem icon={<Layers className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('both')}>
+                    回退对话和文件
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
         </div>
       </div>

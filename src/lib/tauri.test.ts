@@ -354,11 +354,12 @@ describe('agentApi', () => {
     const { agentApi } = await import('./tauri');
 
     await agentApi.rewindSession('session-1', 'codex');
-
     expect(invokeMock).toHaveBeenCalledWith('rewind_agent_session', {
       appSessionId: 'session-1',
       agentKind: 'codex',
+      target: undefined,
       rewindUserIndex: null,
+      mode: null,
     });
   });
 });

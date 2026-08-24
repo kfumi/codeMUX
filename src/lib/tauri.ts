@@ -424,18 +424,20 @@ export const agentApi = {
     freshness: 'live_synced' | 'restored',
   ): Promise<Record<string, unknown> | null> =>
     invokeLogged('load_agent_latest_token_usage', { appSessionId, agentKind, freshness }),
-  /** Rewind the latest visible turn in the provider session history. */
+  /** Rewind the conversation and/or files to a target user message in the provider session history. */
   rewindSession: (
     appSessionId: string,
     agentKind: AgentKind,
     target?: AgentUserMessageLocator,
     rewindUserIndex?: number,
+    mode?: 'conversation' | 'files' | 'both',
   ): Promise<void> =>
     invokeLogged('rewind_agent_session', {
       appSessionId,
       agentKind,
       target,
       rewindUserIndex: rewindUserIndex ?? null,
+      mode: mode ?? null,
     }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
