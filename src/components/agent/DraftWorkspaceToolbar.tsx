@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check,
   ChevronDown,
-  Circle,
   Folder,
   FolderPlus,
   GitBranch,
   GitBranchPlus,
+  MessageSquare,
   Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -176,7 +176,11 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
       <Popover open={projectOpen} onOpenChange={setProjectOpen}>
         <PopoverTrigger asChild>
           <button type="button" className={pickerButtonClass} data-testid="draft-project-picker">
-            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {draftProject ? (
+              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
             <span className="truncate">{getProjectLabel(draftProject)}</span>
             <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/70" />
           </button>
@@ -229,7 +233,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
               }}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
             >
-              <Circle className="h-3.5 w-3.5 text-muted-foreground" />
+              <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
               <span>不在项目中工作</span>
             </button>
           </div>

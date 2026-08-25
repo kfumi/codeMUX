@@ -544,6 +544,18 @@ export class OpenCodeRuntime {
     }
   }
 
+  isStarted(): boolean {
+    return this.state === 'started' && !!this.agentSessionId;
+  }
+
+  buildSessionMapping(runtimeGeneration: number): OpenCodeSessionMapping {
+    const mapping = this.mapping();
+    return {
+      ...mapping,
+      runtimeGeneration,
+    };
+  }
+
   private mapping(): OpenCodeSessionMapping {
     if (!this.agentSessionId) {
       throw new Error('OpenCode session mapping is unavailable');

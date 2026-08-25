@@ -122,6 +122,13 @@ describe('OpenCodeRuntime', () => {
       runtimeGeneration: 2,
     }))).toBe(false);
 
+    expect(runtime.isStarted()).toBe(true);
+    expect(runtime.buildSessionMapping(2)).toEqual({
+      sessionId: 'codemux-session-1',
+      agentSessionId: 'opencode-new',
+      runtimeGeneration: 2,
+    });
+
     await runtime.shutdown();
   });
 

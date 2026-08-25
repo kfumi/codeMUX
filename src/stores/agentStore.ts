@@ -178,6 +178,8 @@ interface AgentState {
   reorderQueuedQuery: (sessionId: string, queryId: string, targetIndex: number) => void;
   /** Resume dispatching queued messages after a stop or failure. */
   resumeQueuedQueries: (sessionId: string) => void;
+  /** Interrupt the active turn (if any) and immediately dispatch one queued message ahead of the rest. */
+  runQueuedQueryNow: (sessionId: string, queryId: string) => Promise<void>;
   /** Clear all queued messages for a session. */
   clearQueuedQueries: (sessionId: string) => void;
   /** Clear events for a session */
@@ -2534,6 +2536,22 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         : state.error,
     }));
     dispatchNextQueuedQuery(sessionId);
+  },
+
+  runQueuedQueryNow: async (sessionId: string, queryId: string) => {
+    const queue = get().queuedQueries[sessionId] ?? [];
+    if (!queue.some((query) => query.id === queryId)) {
+      return;
+    }
+
+    // Promote the chosen message to the front; the remaining messages keep their relative order.
+    get().reorderQueuedQuery(sessionId, queryId, 0);
+
+    // Stop the active turn first (no-op when nothing is running).
+    await get().interrupt(sessionId);
+
+    // Interrupting pauses the queue by design — lift the pause so the promoted message runs now.
+    get().resumeQueuedQueries(sessionId);
   },
 
   clearQueuedQueries: (sessionId: string) => {

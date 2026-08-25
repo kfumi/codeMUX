@@ -1,9 +1,10 @@
-import { GripVertical, Pencil, Trash2, Play } from 'lucide-react';
+import { ArrowUp, GripVertical, Pencil, Trash2, Play } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { useAgentStore } from '../../../stores/agentStore';
 import type { QueuedAgentQuery } from '../../../types/agentQueue';
 import { cn } from '../../../lib/utils';
+import { TooltipHint } from '../../ui/tooltip';
 
 interface QueuedMessagesProps {
   sessionId: string;
@@ -19,6 +20,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
   const reorderQueuedQuery = useAgentStore((state) => state.reorderQueuedQuery);
   const resumeQueuedQueries = useAgentStore((state) => state.resumeQueuedQueries);
   const clearQueuedQueries = useAgentStore((state) => state.clearQueuedQueries);
+  const runQueuedQueryNow = useAgentStore((state) => state.runQueuedQueryNow);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<{
@@ -143,6 +145,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
               }}
               onEdit={() => onEdit(query)}
               onDelete={() => removeQueuedQuery(sessionId, query.id)}
+              onRunNow={() => void runQueuedQueryNow(sessionId, query.id)}
             />
           ))}
         </div>
@@ -169,6 +172,7 @@ function QueuedMessageRow({
   onDragStart,
   onEdit,
   onDelete,
+  onRunNow,
 }: {
   query: QueuedAgentQuery;
   index: number;
@@ -177,6 +181,7 @@ function QueuedMessageRow({
   onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onEdit: () => void | Promise<void>;
   onDelete: () => void;
+  onRunNow: () => void;
 }) {
   const content = query.displayContent?.trim() || query.prompt.trim() || '空消息';
   const hasImages = (query.inputPayload?.attachments?.length ?? query.inputPayload?.images?.length ?? 0) > 0;
@@ -213,6 +218,17 @@ function QueuedMessageRow({
         {hasImages ? <span className="ml-1 text-[10px] text-muted-foreground">· 图片</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+        <TooltipHint content="打断当前任务并立即执行这条消息">
+          <button
+            type="button"
+            onClick={onRunNow}
+            className="inline-flex items-center gap-1 rounded-md border border-border/55 px-1.5 py-1 text-ui-meta text-muted-foreground transition-colors hover:border-primary/45 hover:bg-primary/10 hover:text-primary"
+            aria-label={`立即执行第 ${index + 1} 条排队消息`}
+          >
+            <ArrowUp className="h-3 w-3" />
+            <span>立即</span>
+          </button>
+        </TooltipHint>
         <button
           type="button"
           onClick={() => void onEdit()}

@@ -61,6 +61,14 @@ _Avoid_: provider event, stream event
 用户提交给智能体、并且应当在对话历史中恢复的可见消息。它与智能体内部注入的环境上下文、压缩摘要和工具结果不同。
 _Avoid_: prompt, input event
 
+### Queued Message
+一轮进行中提交的 User Message，在当前 Turn 结束后才作为下一轮发送。队列按提交顺序执行，可重排、编辑与删除；中断或失败后队列保持暂停，需手动放行。
+_Avoid_: steering（注入进行中的一轮）, 把排队消息当作已进入对话历史的消息
+
+### Immediate Run
+把某条 Queued Message 提前为下一轮的动作：打断当前进行中的 turn（该轮 Turn Outcome 记为中断），被选中的消息立即发送，其余排队消息保留原顺序随后执行。它作用于 turn 边界，不是 turn 中途的 steer。
+_Avoid_: 轮中热切 / steer, 清空剩余队列, 中断后自动放行整个队列
+
 ### System Event
 不属于用户或助手正文、但会改变对话解释方式的领域事件，例如上下文压缩边界和 Agent Kind Switch。它可以被 UI 投影为状态提示，但不应被当作助手正文或 User Message。
 _Avoid_: provider system message
@@ -192,6 +200,8 @@ _Avoid_: 登录, 连接（当指长期信任时）
 | Companion Server / 伴侣服务 | 中继服务, 云服务 |
 | Pairing Token / 配对令牌 | 会话 token, API key |
 | Device Pairing / 设备配对 | 登录, 普通连接 |
+| Queued Message / 排队消息 | steering（注入进行中的一轮） |
+| Immediate Run / 立即执行 | 轮中热切 / steer, 清空剩余队列 |
 
 ## Notes
 

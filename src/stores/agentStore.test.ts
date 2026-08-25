@@ -269,6 +269,62 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
+  it('runQueuedQueryNow interrupts the active turn and runs the chosen message first', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, _onEvent) => {});
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'third message', 'D:\\workspace');
+
+    const queueBefore = useAgentStore.getState().queuedQueries[session.id] ?? [];
+    const promoted = queueBefore[1];
+    expect(promoted?.prompt).toBe('third message');
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
+
+    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(useAgentStore.getState().queuePaused[session.id]).toBe(false);
+
+    await vi.waitFor(() => {
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
+        'first message',
+        'third message',
+        'second message',
+      ]);
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
+  it('runQueuedQueryNow promotes the chosen message without interrupting when nothing is running', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      queuedQueries: {
+        [session.id]: [
+          { id: 'queued-a', prompt: 'alpha', cwd: 'D:\\workspace', createdAt: 1 },
+          { id: 'queued-b', prompt: 'beta', cwd: 'D:\\workspace', createdAt: 2 },
+        ],
+      },
+      queuePaused: { [session.id]: true },
+    });
+
+    await useAgentStore.getState().runQueuedQueryNow(session.id, 'queued-b');
+
+    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual(['beta', 'alpha']);
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
   it('deduplicates concurrent loads but refreshes history on later loads', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');

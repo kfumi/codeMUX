@@ -375,6 +375,16 @@ pub(crate) async fn begin_session_generation(agent_state: &AgentState, session_i
     *generation
 }
 
+async fn opencode_runtime_generation(agent_state: &AgentState, session_id: &str) -> u64 {
+    if agent_state.sidecars.lock().await.contains_key(session_id) {
+        let generations = agent_state.session_generations.lock().await;
+        if let Some(&generation) = generations.get(session_id) {
+            return generation;
+        }
+    }
+    begin_session_generation(agent_state, session_id).await
+}
+
 pub(crate) async fn invalidate_session_generation(agent_state: &AgentState, session_id: &str) {
     let _ = begin_session_generation(agent_state, session_id).await;
 }
@@ -1141,7 +1151,7 @@ pub async fn ensure_agent_session_for_companion(
     let agent_kind = resolve_session_agent_kind(state, session_id)?;
     let runtime_config = resolve_active_runtime_config(state, session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
-        Some(begin_session_generation(agent_state, session_id).await)
+        Some(opencode_runtime_generation(agent_state, session_id).await)
     } else {
         None
     };
@@ -1319,7 +1329,7 @@ pub async fn ensure_agent_session(
     let resolved_cwd = resolve_session_cwd(state.inner(), &session_id, &cwd)?;
     let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
-        Some(begin_session_generation(agent_state.inner(), &session_id).await)
+        Some(opencode_runtime_generation(agent_state.inner(), &session_id).await)
     } else {
         None
     };
@@ -1413,7 +1423,7 @@ pub async fn start_agent_session(
         let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
         let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
         let runtime_generation = if agent_kind == "opencode" {
-            Some(begin_session_generation(agent_state.inner(), &session_id).await)
+            Some(opencode_runtime_generation(agent_state.inner(), &session_id).await)
         } else {
             None
         };

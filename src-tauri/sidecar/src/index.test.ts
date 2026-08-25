@@ -8,6 +8,7 @@ function createRuntime() {
   return {
     ensure: vi.fn().mockResolvedValue(undefined),
     canReuse: vi.fn().mockReturnValue(false),
+    emitSessionMapping: vi.fn(),
     updatePermissions: vi.fn(),
     sendInput: vi.fn().mockResolvedValue(undefined),
     forkSession: vi.fn().mockResolvedValue('forked-session'),
@@ -429,12 +430,13 @@ describe('sidecar command dispatcher', () => {
   it('reuses the active OpenCode runtime for a duplicate ensure', async () => {
     const opencode = createRuntime();
     opencode.canReuse.mockReturnValue(true);
+    const emit = vi.fn();
     const createOpenCodeRuntime = vi.fn(() => opencode);
     const dispatcher = createSidecarCommandDispatcher({
       claudeRuntime: createRuntime(),
       codexRuntime: createRuntime(),
       createOpenCodeRuntime,
-      emit: vi.fn(),
+      emit,
       stopProxy: vi.fn().mockResolvedValue(undefined),
       exit: vi.fn(),
     });
@@ -464,6 +466,10 @@ describe('sidecar command dispatcher', () => {
     expect(createOpenCodeRuntime).toHaveBeenCalledTimes(1);
     expect(opencode.shutdown).not.toHaveBeenCalled();
     expect(opencode.updatePermissions).toHaveBeenCalledWith(expect.objectContaining({ planMode: 'on' }));
+    expect(opencode.emitSessionMapping).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      runtimeGeneration: 2,
+    }));
   });
 
   it('suppresses abort failures but reports permission failures without stopping dispatch', async () => {

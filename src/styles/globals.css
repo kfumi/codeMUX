@@ -423,7 +423,7 @@ input[type='password']::-ms-reveal {
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: shimmer 1.5s linear infinite;
+  animation: shimmer 2.5s linear infinite;
 }
 
 @keyframes fade-in-up {

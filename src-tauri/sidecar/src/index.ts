@@ -1452,6 +1452,7 @@ const codexRuntime = new CodexAppServerRuntime();
 type SidecarRuntime = {
   ensure(cmd: EnsureSessionCommand): Promise<void>;
   canReuse?(cmd: EnsureSessionCommand): boolean;
+  emitSessionMapping?(cmd: EnsureSessionCommand): void;
   updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
   forkSession?(
@@ -1533,6 +1534,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         permissionConfig: cmd.permissionConfig,
         planMode: cmd.planMode,
       });
+      current.emitSessionMapping?.(cmd);
       return;
     }
 
@@ -1911,6 +1913,14 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     ensure: async () => {
       const mapping = await openCodeRuntime.start();
       emit(buildOpenCodeSessionMappingEvent(mapping));
+    },
+    emitSessionMapping: (cmd) => {
+      if (!openCodeRuntime.isStarted()) {
+        return;
+      }
+      emit(buildOpenCodeSessionMappingEvent(
+        openCodeRuntime.buildSessionMapping(cmd.runtimeGeneration ?? 0),
+      ));
     },
     canReuse: (nextCmd) => openCodeRuntime.canReuse(buildOpenCodeSessionConfig(nextCmd)),
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
