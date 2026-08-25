@@ -698,28 +698,6 @@ export function MobileComposer({
     }
   }, [onSettingsChange]);
 
-  const handleAgentChange = (nextAgentKind: MobileAgentKind) => {
-    if (!canEditSettings || !bootstrap) return;
-    const nextProvider = resolveDefaultProvider(bootstrap, nextAgentKind);
-    const nextProviderId = nextProvider?.id ?? '';
-    const nextModel = nextProvider?.defaultModel || nextProvider?.models[0]?.id || '';
-    const nextPermissionMode = PERMISSION_OPTIONS[nextAgentKind][0]?.mode ?? 'full_access';
-    const nextPlanMode = nextPermissionMode === 'plan' ? 'on' : 'off';
-    setAgentKind(nextAgentKind);
-    setProviderId(nextProviderId);
-    setModel(nextModel);
-    setPermissionMode(nextPermissionMode);
-    setPlanMode(nextPlanMode);
-    void commitSettings(buildSettingsPatch(
-      nextAgentKind,
-      nextProviderId,
-      nextModel,
-      reasoningEffort,
-      nextPermissionMode,
-      nextPlanMode,
-    ));
-  };
-
   const handleProviderChange = (nextProviderId: string) => {
     if (!canEditSettings) return;
     const nextProvider = providers.find((provider) => provider.id === nextProviderId);
@@ -1117,31 +1095,11 @@ export function MobileComposer({
 
           <div className="relative">
             <ToolbarMenuButton
-              active={openMenu === 'agent'}
-              disabled={!canEditSettings || !bootstrap}
+              disabled
               icon={Bot}
               iconNode={selectedAgentDefinition ? <AgentBrandIcon agent={selectedAgentDefinition} size="sm" /> : undefined}
               label={`智能体：${selectedAgent?.label ?? agentKind}`}
-              onClick={() => setOpenMenu((current) => current === 'agent' ? null : 'agent')}
             />
-            {openMenu === 'agent' ? (
-              <ToolbarPopover className="w-52">
-                <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground/70">智能体</div>
-                {AGENT_OPTIONS.map((option) => (
-                  <ToolbarMenuItem
-                    key={option.id}
-                    active={agentKind === option.id}
-                    icon={Bot}
-                    iconNode={getAgentDefinition(option.id) ? <AgentBrandIcon agent={getAgentDefinition(option.id)!} size="sm" /> : undefined}
-                    label={option.label}
-                    onClick={() => {
-                      handleAgentChange(option.id);
-                      setOpenMenu(null);
-                    }}
-                  />
-                ))}
-              </ToolbarPopover>
-            ) : null}
           </div>
 
           <div className="relative">

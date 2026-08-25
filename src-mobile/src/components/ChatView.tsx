@@ -9,7 +9,6 @@ import { DirectiveText } from './chat/DirectiveText';
 import { ToolGroupRow } from './chat/ToolGroupRow';
 import { MessageFooter } from './chat/MessageFooter';
 import { ReasoningRow } from './chat/ReasoningRow';
-import { RuntimeSwitchRow } from './chat/RuntimeSwitchRow';
 import { SessionSummaryRow } from './chat/SessionSummaryRow';
 import { ToolCallRow } from './chat/ToolCallRow';
 import { ThinkingGroupRow } from './chat/ThinkingGroupRow';
@@ -360,18 +359,6 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
               />
             ) : null}
           </div>
-        </div>
-      );
-    }
-
-    if (message.kind === 'runtime_switch') {
-      return (
-        <div data-message-row className="flex w-full justify-center">
-          <RuntimeSwitchRow
-            fromKind={message.fromKind}
-            toKind={message.toKind}
-            briefing={message.briefing}
-          />
         </div>
       );
     }

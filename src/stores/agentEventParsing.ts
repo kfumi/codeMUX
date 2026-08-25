@@ -20,7 +20,6 @@ const VISIBLE_CONVERSATION_EVENT_KINDS = new Set([
   'ask_user_question',
   'session_summary',
   'compact',
-  'runtime_switch',
   'error',
 ]);
 
@@ -57,7 +56,6 @@ export type ParsedStoreEvent =
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
-  | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
   | { kind: 'native_session_rebuilt'; data: { content: string; agent_kind?: string; previous_agent_session_id?: string; agent_session_id?: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
@@ -417,22 +415,6 @@ function getRawUserText(raw: Record<string, unknown>): string {
     .join('\n');
 }
 
-function mapRuntimeSwitch(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'runtime_switch' }> | null {
-  if (raw.type !== 'system' || raw.subtype !== 'runtime_switch') {
-    return null;
-  }
-
-  return {
-    kind: 'runtime_switch',
-    data: {
-      ...(typeof raw.from_kind === 'string' ? { from_kind: raw.from_kind } : {}),
-      ...(typeof raw.to_kind === 'string' ? { to_kind: raw.to_kind } : {}),
-      content: typeof raw.content === 'string' ? raw.content : '',
-      ...(typeof raw.briefing === 'string' ? { briefing: raw.briefing } : {}),
-    },
-  };
-}
-
 export type NativeSessionRebuiltData = Extract<ParsedStoreEvent, { kind: 'native_session_rebuilt' }>['data'];
 
 /**
@@ -561,11 +543,6 @@ export function mapPersistedClaudeMessage(
   const compactEvent = mapCompactBoundary(raw);
   if (compactEvent) {
     return compactEvent;
-  }
-
-  const runtimeSwitchEvent = mapRuntimeSwitch(raw);
-  if (runtimeSwitchEvent) {
-    return runtimeSwitchEvent;
   }
 
   const nativeSessionRebuiltEvent = mapNativeSessionRebuilt(raw);

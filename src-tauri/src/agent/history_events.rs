@@ -1,7 +1,5 @@
 use serde_json::{json, Value};
 
-use crate::agent::switch_briefing::strip_switch_briefing_prefix;
-
 /// Converts provider history records into the CodeMUX Event interface.
 ///
 /// Provider-specific loaders may keep their native parsing logic and fixtures;
@@ -146,10 +144,6 @@ fn normalize_user(raw: Value) -> Vec<Value> {
     }
 
     if !user_content.is_empty() {
-        strip_briefing_from_user_blocks(&mut user_content);
-    }
-
-    if !user_content.is_empty() {
         let mut user = json!({
             "type": "user_message",
             "content": user_content,
@@ -158,26 +152,6 @@ fn normalize_user(raw: Value) -> Vec<Value> {
         events.insert(0, user);
     }
     events
-}
-
-fn strip_briefing_from_user_blocks(blocks: &mut Vec<Value>) {
-    for block in blocks.iter_mut() {
-        if block.get("type").and_then(Value::as_str) != Some("text") {
-            continue;
-        }
-        if let Some(text) = block.get("text").and_then(Value::as_str) {
-            block["text"] = json!(strip_switch_briefing_prefix(text));
-        }
-    }
-    blocks.retain(|block| {
-        if block.get("type").and_then(Value::as_str) != Some("text") {
-            return true;
-        }
-        block
-            .get("text")
-            .and_then(Value::as_str)
-            .is_some_and(|text| !text.is_empty())
-    });
 }
 
 fn normalize_result(raw: Value) -> Vec<Value> {
@@ -490,24 +464,6 @@ mod tests {
         );
 
         assert!(events.is_empty());
-    }
-
-    #[test]
-    fn strips_switch_briefing_prefix_from_native_user_messages() {
-        let events = normalize_history_events(
-            vec![json!({
-                "type": "user",
-                "uuid": "user-1",
-                "message": {
-                    "role": "user",
-                    "content": "[CodeMUX runtime switch]\nPrevious driver: Claude Code.\n\n---\nUser follow-up:\n刚才问了什么？"
-                }
-            })],
-            "app-1",
-        );
-
-        assert_eq!(events[0]["type"], "user_message");
-        assert_eq!(events[0]["content"][0]["text"], "刚才问了什么？");
     }
 
     #[test]

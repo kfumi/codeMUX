@@ -270,24 +270,6 @@ describe('appendEvent', () => {
     expect(messages).toHaveLength(0);
   });
 
-  it('parses runtime_switch as a dedicated seam instead of a system pill', () => {
-    const messages = appendEvent([], {
-      type: 'system_event',
-      event_id: 'rs1',
-      subtype: 'runtime_switch',
-      from_kind: 'codex',
-      to_kind: 'opencode',
-      content: '已切换到 OpenCode。',
-      briefing: '[CodeMUX runtime switch]\nPrevious driver: Codex.',
-    });
-    expect(messages[0]).toMatchObject({
-      kind: 'runtime_switch',
-      fromKind: 'codex',
-      toKind: 'opencode',
-      briefing: expect.stringContaining('Previous driver: Codex'),
-    });
-  });
-
   it('preserves tool name when tool_finished omits name', () => {
     let messages = appendEvent([], {
       type: 'tool_started',

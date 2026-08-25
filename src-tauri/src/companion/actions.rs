@@ -136,114 +136,23 @@ pub async fn update_companion_settings(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "会话不存在".to_string())?
     };
-    let abandoned_native_sessions = if current.agent_kind != update.agent_kind {
-        let db = app_state.db.lock().map_err(|error| error.to_string())?;
-        operations::current_native_sessions_for_kinds(
-            &db,
-            session_id,
-            &[current.agent_kind, update.agent_kind],
-        )
-        .map_err(|error| error.to_string())?
-    } else {
-        Vec::new()
-    };
     if current.agent_kind != update.agent_kind {
-        use crate::agent::switch_briefing::{
-            build_runtime_switch_system_event, build_switch_briefing, is_switchable_agent_kind,
-        };
-
-        if !is_switchable_agent_kind(current.agent_kind)
-            || !is_switchable_agent_kind(update.agent_kind)
-        {
-            return Err("该智能体种类当前不可切换".to_string());
-        }
-        if current.origin == "imported" {
-            return Err("导入快照会话不能切换智能体".to_string());
-        }
-
-        let events = {
-            let db = app_state.db.lock().map_err(|error| error.to_string())?;
-            operations::get_session_snapshot(&db, session_id)
-                .map_err(|error| error.to_string())?
-                .unwrap_or_default()
-        };
-        let briefing = build_switch_briefing(&events, current.agent_kind, update.agent_kind);
-        let switch_event = build_runtime_switch_system_event(
-            session_id,
-            current.agent_kind,
-            update.agent_kind,
-            events.len(),
-            &briefing,
-        );
-        let mut snapshot_events = events;
-        snapshot_events.push(switch_event);
-
-        let mut db = app_state.db.lock().map_err(|error| error.to_string())?;
-        operations::upsert_session_kind_model_selection(
-            &db,
-            &operations::SessionKindModelSelection {
-                session_id: session_id.to_string(),
-                agent_kind: current.agent_kind,
-                provider_id: current.provider_id.clone(),
-                model: current.model.clone(),
-                reasoning_effort: current.reasoning_effort.clone(),
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        operations::update_session_settings(
-            &mut db,
-            session_id,
-            update.agent_kind,
-            &update.permission_config.to_string(),
-            &update.plan_mode,
-            update.provider_id.as_deref(),
-            update.model.as_deref(),
-            update.reasoning_effort.as_deref(),
-        )
-        .map_err(|error| error.to_string())?;
-        operations::delete_agent_session_mapping(&db, session_id, current.agent_kind)
-            .map_err(|error| error.to_string())?;
-        operations::delete_agent_session_mapping(&db, session_id, update.agent_kind)
-            .map_err(|error| error.to_string())?;
-        operations::replace_session_snapshot(&mut db, session_id, &snapshot_events)
-            .map_err(|error| error.to_string())?;
-        operations::insert_session_runtime_switch(
-            &db,
-            session_id,
-            current.agent_kind,
-            update.agent_kind,
-            snapshot_events.len() as i64 - 1,
-            None,
-            Some(&briefing),
-        )
-        .map_err(|error| error.to_string())?;
-        operations::set_pending_switch_briefing(&db, session_id, Some(&briefing))
-            .map_err(|error| error.to_string())?;
-    } else {
-        let mut db = app_state.db.lock().map_err(|error| error.to_string())?;
-        operations::update_session_settings(
-            &mut db,
-            session_id,
-            update.agent_kind,
-            &update.permission_config.to_string(),
-            &update.plan_mode,
-            update.provider_id.as_deref(),
-            update.model.as_deref(),
-            update.reasoning_effort.as_deref(),
-        )
-        .map_err(|error| error.to_string())?;
+        return Err("会话创建后不能更换智能体种类".to_string());
     }
 
-    if !abandoned_native_sessions.is_empty() {
-        crate::commands::session::cleanup_native_sessions_best_effort(
-            app,
-            app_state.inner(),
-            agent_state.inner(),
+    {
+        let mut db = app_state.db.lock().map_err(|error| error.to_string())?;
+        operations::update_session_settings(
+            &mut db,
             session_id,
-            &abandoned_native_sessions,
-            false,
+            update.agent_kind,
+            &update.permission_config.to_string(),
+            &update.plan_mode,
+            update.provider_id.as_deref(),
+            update.model.as_deref(),
+            update.reasoning_effort.as_deref(),
         )
-        .await;
+        .map_err(|error| error.to_string())?;
     }
 
     let sidecar_running = {

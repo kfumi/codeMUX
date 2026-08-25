@@ -548,7 +548,6 @@ pub fn run() {
             commands::session::update_session_permissions,
             commands::session::save_session_message_attachments,
             commands::session::get_session_message_attachments,
-            commands::session::switch_session_agent_kind,
             commands::usage::get_usage_stats,
             commands::usage::get_usage_token_breakdown,
             commands::project::create_project,

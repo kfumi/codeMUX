@@ -150,10 +150,10 @@ Tauri events / 内存态 (live)                             WS live + gap fetch
 
 ### 任务清单
 
-- [ ] 移除 switch 命令、UI、companion 改 kind 分支
-- [ ] 删除 `switch_briefing` 模块及所有引用
-- [ ] 删除 DB 表/列（无迁移脚本）
-- [ ] ADR 0007 superseded 说明
+- [x] 移除 switch 命令、UI、companion 改 kind 分支
+- [x] 删除 `switch_briefing` 模块及所有引用
+- [x] 删除 DB 表/列（无迁移脚本）
+- [x] ADR 0007 superseded 说明
 - [ ] 测试：创建会话、Fork、导入、Companion 发消息回归
 
 **风险**：低。无存量会话，边界清晰。

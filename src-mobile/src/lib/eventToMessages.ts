@@ -41,14 +41,6 @@ export type ChatMessage =
       sourceUuid?: string;
     }
   | { kind: 'system'; id: string; content: string }
-  | {
-      kind: 'runtime_switch';
-      id: string;
-      fromKind?: string;
-      toKind?: string;
-      content: string;
-      briefing?: string;
-    }
   | { kind: 'reasoning'; id: string; content: string; collapsed: boolean; streaming?: boolean }
   | {
       kind: 'tool';
@@ -235,19 +227,6 @@ function parseSystemEvent(event: Record<string, unknown>, id: string): ChatMessa
         ? ` · 节省 ${preTokens} tokens`
         : '';
     return { kind: 'system', id, content: `— 上下文已压缩${tokenText} —` };
-  }
-
-  if (subtype === 'runtime_switch') {
-    return {
-      kind: 'runtime_switch',
-      id,
-      fromKind: typeof event.from_kind === 'string' ? event.from_kind : undefined,
-      toKind: typeof event.to_kind === 'string' ? event.to_kind : undefined,
-      content: typeof event.content === 'string' && event.content.trim()
-        ? event.content
-        : '已切换智能体。原生会话已重建。',
-      briefing: typeof event.briefing === 'string' ? event.briefing : undefined,
-    };
   }
 
   if (subtype === 'error') {

@@ -4,7 +4,7 @@
 
 ## Status
 
-accepted
+superseded by [Session Timeline 重构设计](../superpowers/specs/2026-08-25-session-timeline-refactor-design.md)（2026-08-25）
 
 ## Context
 

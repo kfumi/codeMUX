@@ -1819,34 +1819,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
-  it('renders a runtime switch as a visible timeline seam', () => {
-    const events: AgentMessage[] = [
-      { kind: 'user', data: { content: '请重构 auth.ts' } },
-      {
-        kind: 'runtime_switch',
-        data: {
-          from_kind: 'claude_code',
-          to_kind: 'codex',
-          content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
-          briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code.',
-        },
-      },
-      { kind: 'user', data: { content: '刚才我问了你哪些问题？' } },
-    ];
-
-    const messages = convertAgentEventsToAssistantMessages(events);
-
-    expect(messages).toHaveLength(3);
-    expect(messages[1]).toMatchObject({
-      role: 'system',
-      content: [{ type: 'data-codemux-event', eventKind: 'runtime_switch' }],
-    });
-    expect(messages[2]).toMatchObject({
-      role: 'user',
-      content: [{ type: 'text', text: '刚才我问了你哪些问题？' }],
-    });
-  });
-
   it('renders session_summary events as data-codemux-event parts', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: 'hello' } },

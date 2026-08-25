@@ -25,9 +25,6 @@ export interface BuildDisplayRowsOptions {
 
 /** Boundary markers that must stay visible outside compact process folds. */
 export function isSeamMessage(message: ChatMessage): boolean {
-  if (message.kind === 'runtime_switch') {
-    return true;
-  }
   if (message.kind === 'system' && message.content.trimStart().startsWith('—')) {
     return true;
   }

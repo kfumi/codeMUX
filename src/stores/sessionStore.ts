@@ -35,13 +35,6 @@ interface SessionState {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, model: string) => void;
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
-  switchSessionAgentKind: (
-    sessionId: string,
-    toKind: AgentKind,
-    providerId?: string | null,
-    model?: string | null,
-    reasoningEffort?: ReasoningEffort | null,
-  ) => Promise<Session>;
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
   markSessionUnread: (sessionId: string) => void;
@@ -359,19 +352,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ error: String(error) });
       throw error;
     }
-  },
-  switchSessionAgentKind: async (sessionId, toKind, providerId, model, reasoningEffort) => {
-    const updated = await sessionApi.switchAgentKind(sessionId, toKind, providerId, model, reasoningEffort);
-    set((state) => ({
-      sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, ...updated } : session),
-      error: null,
-    }));
-    useAgentStore.setState((state) => ({
-      queuePaused: { ...state.queuePaused, [sessionId]: true },
-    }));
-    useAgentStore.getState().clearEvents(sessionId);
-    await useAgentStore.getState().loadSessionMessages(sessionId);
-    return updated;
   },
   touchSession: (sessionId: string) => {
     const now = new Date().toISOString();

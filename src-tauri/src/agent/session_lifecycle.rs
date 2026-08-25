@@ -1420,19 +1420,6 @@ pub async fn start_agent_session(
         let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
         preload_project_skills(skill_cwd, &agent_kind).await?;
 
-        let mut input_payload = input_payload;
-        let prompt = {
-            let db = state.db.lock().unwrap();
-            match operations::take_pending_switch_briefing(&db, &session_id) {
-                Ok(Some(briefing)) => crate::agent::switch_briefing::apply_switch_briefing(
-                    prompt,
-                    input_payload.as_mut(),
-                    Some(&briefing),
-                ),
-                _ => prompt,
-            }
-        };
-
         let ensure_cmd = build_ensure_session_command(
             &state,
             &session_id,

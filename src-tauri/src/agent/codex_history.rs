@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use log::{debug, info};
 use tauri::State;
 
-use crate::agent::switch_briefing::strip_switch_briefing_prefix;
 use crate::config::types::AgentKind;
 
 use super::native_jsonl::{
@@ -138,22 +137,13 @@ fn codex_assistant_message_event(
 
 /// Build a CodeMUX `user_message` event from converted content blocks.
 ///
-/// Strips switch briefing prefixes from text blocks and drops blocks left
-/// empty; returns `None` when no visible content remains.
+/// Drops empty text blocks; returns `None` when no visible content remains.
 fn codex_user_message_event(
     mut blocks: Vec<serde_json::Value>,
     timestamp: Option<serde_json::Value>,
     provider_message_id: Option<String>,
     line_index: Option<serde_json::Value>,
 ) -> Option<serde_json::Value> {
-    for block in blocks.iter_mut() {
-        if block.get("type").and_then(|t| t.as_str()) != Some("text") {
-            continue;
-        }
-        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-            block["text"] = serde_json::json!(strip_switch_briefing_prefix(text));
-        }
-    }
     blocks.retain(|block| {
         if block.get("type").and_then(|t| t.as_str()) != Some("text") {
             return true;

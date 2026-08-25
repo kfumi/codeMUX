@@ -1680,7 +1680,6 @@ function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
     || event.kind === 'api_retry'
     || event.kind === 'compact'
     || event.kind === 'error'
-    || event.kind === 'runtime_switch'
     || event.kind === 'native_session_rebuilt'
     || event.kind === 'stream_status';
 }

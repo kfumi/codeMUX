@@ -465,10 +465,6 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     );
   }
 
-  if (isRuntimeSwitchData(data)) {
-    return <RuntimeSwitchSeam event={data.event} />;
-  }
-
   if (isNativeSessionRebuiltData(data)) {
     return <NativeSessionRebuiltSeam event={data.event} />;
   }
@@ -553,15 +549,6 @@ function isCompactData(value: unknown): value is { eventKind: string; event: Ext
   );
 }
 
-function isRuntimeSwitchData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'runtime_switch' }> } {
-  return (
-    isRecord(value) &&
-    value.eventKind === 'runtime_switch' &&
-    isRecord(value.event) &&
-    value.event.kind === 'runtime_switch'
-  );
-}
-
 function isNativeSessionRebuiltData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'native_session_rebuilt' }> } {
   return (
     isRecord(value) &&
@@ -596,49 +583,6 @@ function agentKindDisplayLabel(kind?: string): string | undefined {
   }
 
   return getAgentDefinition(kind as AgentKind)?.label ?? kind;
-}
-
-function runtimeSwitchCaption(fromKind?: string, toKind?: string): string {
-  const fromLabel = agentKindDisplayLabel(fromKind);
-  const toLabel = agentKindDisplayLabel(toKind);
-  if (fromLabel && toLabel) {
-    return `— 已从 ${fromLabel} 切换到 ${toLabel} —`;
-  }
-  if (toLabel) {
-    return `— 已切换到 ${toLabel} —`;
-  }
-  return '— 已切换智能体 —';
-}
-
-function RuntimeSwitchSeam({ event }: { event: Extract<AgentMessage, { kind: 'runtime_switch' }> }) {
-  const caption = runtimeSwitchCaption(event.data.from_kind, event.data.to_kind);
-  const briefing = event.data.briefing?.trim();
-
-  if (!briefing) {
-    return (
-      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-        <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
-          {caption}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <Collapsible className="py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-      <div className="text-center">
-        <CollapsibleTrigger className="group inline-flex items-center gap-1 text-ui-caption text-muted-foreground tracking-normal font-medium transition-colors hover:text-foreground">
-          {caption}
-          <ChevronDown className="h-3 w-3 opacity-70 transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
-      </div>
-      <CollapsibleContent>
-          <pre className="mt-2 mx-auto max-w-2xl whitespace-pre-wrap wrap-break-word rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
-          {briefing}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
-  );
 }
 
 function nativeSessionRebuiltCaption(agentKind?: string): string {

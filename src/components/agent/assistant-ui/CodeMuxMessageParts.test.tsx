@@ -358,34 +358,6 @@ describe('CodeMuxDataMessagePart', () => {
     cleanup();
   });
 
-  it('把运行时切换渲染成可展开的时间线缝，默认不展示 briefing', () => {
-    const { container } = render(
-      <CodeMuxDataMessagePart
-        name="codemux-event"
-        data={{
-          eventKind: 'runtime_switch',
-          event: {
-            kind: 'runtime_switch',
-            data: {
-              from_kind: 'claude_code',
-              to_kind: 'codex',
-              content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
-              briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code. Current driver: Codex.',
-            },
-          },
-        }}
-      />,
-    );
-
-    const view = within(container);
-    expect(view.getByText(/已从 Claude Code 切换到 Codex/)).toBeTruthy();
-    expect(view.queryByText(/Previous driver: Claude Code/)).toBeNull();
-
-    fireEvent.click(view.getByRole('button', { name: /已从 Claude Code 切换到 Codex/ }));
-
-    expect(view.getByText(/Previous driver: Claude Code/)).toBeTruthy();
-  });
-
   it('把 Claude 空闲超时的 sidecar 错误展示成中文提示', () => {
     render(
       <CodeMuxDataMessagePart

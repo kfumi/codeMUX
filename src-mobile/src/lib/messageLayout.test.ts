@@ -232,26 +232,6 @@ describe('buildDisplayRows', () => {
     expect(rows.some((row) => row.kind === 'single' && row.message.kind === 'session_summary')).toBe(false);
   });
 
-  it('keeps runtime switch seams visible when compact output is enabled', () => {
-    const rows = buildDisplayRows([
-      user('u1', 'hi'),
-      reasoning('r1'),
-      tool('t1', 'Read'),
-      {
-        kind: 'runtime_switch',
-        id: 'sw1',
-        fromKind: 'opencode',
-        toKind: 'claude_code',
-        content: '已切换智能体',
-      },
-      assistant('a1', 'done'),
-    ], { compactAiOutput: true, expandedTurnKeys: new Set() });
-
-    expect(rows.map((row) => row.kind)).toEqual(['single', 'compact-toggle', 'single', 'single']);
-    const seam = rows.find((row) => row.kind === 'single' && row.message.kind === 'runtime_switch');
-    expect(seam?.kind === 'single' && seam.message.kind === 'runtime_switch').toBe(true);
-  });
-
   it('keeps compact boundary seams visible when compact output is enabled', () => {
     const rows = buildDisplayRows([
       user('u1', 'hi'),
