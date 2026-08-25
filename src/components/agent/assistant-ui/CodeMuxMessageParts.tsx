@@ -24,7 +24,6 @@ import { cn } from '../../../lib/utils';
 import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { getAgentDefinition } from '@/types/agentRegistry';
 import type { AgentKind } from '@/types/session';
 

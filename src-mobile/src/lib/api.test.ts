@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { CompanionConnectionProfile } from '@shared/lib/companion-connection';
 import {
   ApiRequestError,
   isAuthError,
@@ -8,6 +9,13 @@ import {
   shouldAttemptDirectPairing,
   type MobileBootstrap,
 } from './api';
+
+const testConnection: CompanionConnectionProfile = {
+  desktopId: 'desktop-1',
+  deviceId: 'device',
+  token: 'token',
+  connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+};
 
 const bootstrap: MobileBootstrap = {
   defaultAgentKind: 'claude_code',
@@ -65,12 +73,7 @@ describe('request helpers', () => {
     globalThis.fetch = async () => new Response(null, { status: 202 });
     const { sendSessionMessage } = await import('./api');
     await expect(sendSessionMessage(
-      {
-        desktopId: 'desktop-1',
-        deviceId: 'device',
-        token: 'token',
-        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-      },
+      testConnection,
       'session-1',
       'hello',
     )).resolves.toBeUndefined();
@@ -87,12 +90,7 @@ describe('request helpers', () => {
 
     const { fetchSessionRuntimeState } = await import('./api');
     await expect(fetchSessionRuntimeState(
-      {
-        desktopId: 'desktop-1',
-        deviceId: 'device',
-        token: 'token',
-        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-      },
+      testConnection,
       'session-1',
     )).resolves.toEqual({ running: false });
 
@@ -110,12 +108,7 @@ describe('request helpers', () => {
 
     const { sendSessionMessage } = await import('./api');
     await sendSessionMessage(
-      {
-        desktopId: 'desktop-1',
-        deviceId: 'device',
-        token: 'token',
-        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-      },
+      testConnection,
       'session-1',
       '请查看这张图',
       {
@@ -175,18 +168,12 @@ describe('request helpers', () => {
     };
 
     const { fetchSessionTimeline, fetchSessionTimelineAfter } = await import('./api');
-    const connection = {
-      desktopId: 'desktop-1',
-      deviceId: 'device',
-      token: 'token',
-      connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-    };
 
-    await expect(fetchSessionTimeline(connection, 'session-1', { direction: 'tail' }))
+    await expect(fetchSessionTimeline(testConnection, 'session-1', { direction: 'tail' }))
       .resolves.toMatchObject({ seqEnd: 0, historyComplete: true });
     expect(requestUrl).toContain('/timeline?direction=tail');
 
-    await expect(fetchSessionTimelineAfter(connection, 'session-1', 0))
+    await expect(fetchSessionTimelineAfter(testConnection, 'session-1', 0))
       .resolves.toEqual([{ sequence: 1 }, { sequence: 2 }]);
     expect(afterIndex).toBe(2);
 
@@ -214,14 +201,8 @@ describe('request helpers', () => {
     };
 
     const { fetchSessionTimelineBefore } = await import('./api');
-    const connection = {
-      desktopId: 'desktop-1',
-      deviceId: 'device',
-      token: 'token',
-      connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-    };
 
-    await expect(fetchSessionTimelineBefore(connection, 'session-1', 4))
+    await expect(fetchSessionTimelineBefore(testConnection, 'session-1', 4))
       .resolves.toEqual({
         events: [{ sequence: 0 }, { sequence: 1 }, { sequence: 2 }, { sequence: 3 }],
         hasOlder: false,
@@ -249,12 +230,7 @@ describe('request helpers', () => {
 
     const { createSession } = await import('./api');
     await expect(createSession(
-      {
-        desktopId: 'desktop-1',
-        deviceId: 'device',
-        token: 'token',
-        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-      },
+      testConnection,
       {
         title: 'Mobile session',
         agentKind: 'claude_code',
@@ -288,12 +264,7 @@ describe('request helpers', () => {
 
     const { updateSessionSettings } = await import('./api');
     await expect(updateSessionSettings(
-      {
-        desktopId: 'desktop-1',
-        deviceId: 'device',
-        token: 'token',
-        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
-      },
+      testConnection,
       'session-1',
       {
         agentKind: 'codex',

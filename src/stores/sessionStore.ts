@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
+import type { AgentKind, Session, SessionMode } from '../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
 import { isValidWorkingPath } from '../lib/sessionCwd';
 import { sessionApi, agentApi } from '../lib/tauri';

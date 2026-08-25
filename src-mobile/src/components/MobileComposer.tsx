@@ -24,7 +24,6 @@ import {
 import {
   fetchComposerContext,
   providerSupportsAgent,
-  resolveDefaultProvider,
   type MobileAgentKind,
   type MobileBootstrap,
   type MobileComposerCommand,
