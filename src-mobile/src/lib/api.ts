@@ -389,6 +389,30 @@ export async function fetchSessionTimelineAfter(
   return events;
 }
 
+export async function fetchSessionTimelineBefore(
+  connection: CompanionConnection,
+  sessionId: string,
+  beforeSequence: number,
+): Promise<{ events: unknown[]; hasOlder: boolean }> {
+  const events: unknown[] = [];
+  let cursor = beforeSequence;
+  let hasOlder = false;
+  while (true) {
+    const page = await fetchSessionTimeline(connection, sessionId, {
+      direction: 'before',
+      cursor,
+      limit: DEFAULT_TIMELINE_PAGE_SIZE,
+    });
+    events.unshift(...page.events);
+    hasOlder = page.hasOlder;
+    if (!page.hasOlder) {
+      break;
+    }
+    cursor = page.seqStart;
+  }
+  return { events, hasOlder };
+}
+
 export async function fetchSessionEvents(
   connection: CompanionConnection,
   sessionId: string,

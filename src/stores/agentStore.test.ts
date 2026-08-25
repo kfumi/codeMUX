@@ -22,6 +22,7 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
 const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number) => Promise<void>>();
 const respondToAgentPermissionMock = vi.fn();
@@ -49,6 +50,7 @@ vi.mock('../lib/tauri', () => ({
     getEvents: getEventsMock,
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
+    loadSessionEvents: loadSessionEventsMock,
     loadLatestTokenUsage: loadLatestTokenUsageMock,
     rewindSession: rewindSessionMock,
     startProxy: vi.fn(),
@@ -66,6 +68,7 @@ vi.mock('../lib/tauri', () => ({
     touch: vi.fn(() => Promise.resolve()),
     saveMessageAttachments: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
+    getMessageAttachments: vi.fn(() => Promise.resolve([])),
   },
   configApi: {
     get: vi.fn(),
@@ -317,6 +320,47 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id]?.[0]).toMatchObject({
       kind: 'user',
       data: { content: '完整历史消息' },
+    });
+  });
+
+  it('loads CodeMUX timeline events through loadSessionEvents when reopening a session', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('opencode');
+    loadSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user_message',
+        sequence: 0,
+        session_id: session.id,
+        event_id: 'timeline-user',
+        content: 'timeline hello',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        type: 'assistant_message',
+        sequence: 1,
+        session_id: session.id,
+        event_id: 'timeline-assistant',
+        content: [{ type: 'text', text: 'timeline reply' }],
+        timestamp: '2026-01-01T00:00:01.000Z',
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(loadSessionEventsMock).toHaveBeenCalledWith(session.id);
+    expect(loadClaudeSessionEventsMock).not.toHaveBeenCalled();
+    expect(loadCodexSessionEventsMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().events[session.id]?.[0]).toMatchObject({
+      kind: 'user',
+      data: { content: 'timeline hello' },
+    });
+    expect(useAgentStore.getState().events[session.id]?.[1]).toMatchObject({
+      kind: 'assistant',
+      data: {
+        message: {
+          content: [{ type: 'text', text: 'timeline reply' }],
+        },
+      },
     });
   });
 

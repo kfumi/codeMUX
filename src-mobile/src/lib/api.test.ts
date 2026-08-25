@@ -193,6 +193,84 @@ describe('request helpers', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it('fetches older timeline pages with direction=before', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestUrl = '';
+    const beforePages = [
+      { events: [{ sequence: 2 }, { sequence: 3 }], seqStart: 2, hasOlder: true },
+      { events: [{ sequence: 0 }, { sequence: 1 }], seqStart: 0, hasOlder: false },
+    ];
+    let beforeIndex = 0;
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      const page = beforePages[beforeIndex] ?? beforePages[beforePages.length - 1];
+      beforeIndex += 1;
+      return Response.json({
+        ...page,
+        seqEnd: page.events[page.events.length - 1]?.sequence ?? page.seqStart,
+        hasNewer: true,
+        historyComplete: false,
+      });
+    };
+
+    const { fetchSessionTimelineBefore } = await import('./api');
+    const connection = {
+      desktopId: 'desktop-1',
+      deviceId: 'device',
+      token: 'token',
+      connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+    };
+
+    await expect(fetchSessionTimelineBefore(connection, 'session-1', 4))
+      .resolves.toEqual({
+        events: [{ sequence: 0 }, { sequence: 1 }, { sequence: 2 }, { sequence: 3 }],
+        hasOlder: false,
+      });
+    expect(requestUrl).toContain('direction=before');
+    expect(beforeIndex).toBe(2);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it('creates a companion session through POST /api/sessions', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestMethod = '';
+    let requestBody = '';
+    globalThis.fetch = async (_input, init) => {
+      requestMethod = init?.method ?? '';
+      requestBody = String(init?.body ?? '');
+      return Response.json({
+        id: 'session-new',
+        title: 'Mobile session',
+        agent_kind: 'claude_code',
+        updated_at: '2026-08-18T00:00:00Z',
+      });
+    };
+
+    const { createSession } = await import('./api');
+    await expect(createSession(
+      {
+        desktopId: 'desktop-1',
+        deviceId: 'device',
+        token: 'token',
+        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+      },
+      {
+        title: 'Mobile session',
+        agentKind: 'claude_code',
+        projectId: 'project-1',
+      },
+    )).resolves.toMatchObject({ id: 'session-new', agent_kind: 'claude_code' });
+    expect(requestMethod).toBe('POST');
+    expect(JSON.parse(requestBody)).toMatchObject({
+      title: 'Mobile session',
+      agentKind: 'claude_code',
+      projectId: 'project-1',
+    });
+
+    globalThis.fetch = originalFetch;
+  });
+
   it('patches all session settings atomically', async () => {
     const originalFetch = globalThis.fetch;
     let requestMethod = '';

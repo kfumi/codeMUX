@@ -99,7 +99,10 @@ export async function loadCachedSessionList(): Promise<CachedSessionList | null>
   });
 }
 
+export const TIMELINE_CACHE_VERSION = 1;
+
 export interface CachedSessionEvents {
+  cacheVersion: number;
   updatedAt: string;
   lastSequence: number;
   events: unknown[];
@@ -139,4 +142,16 @@ export function maxEventSequence(events: unknown[]): number {
     }
   }
   return max;
+}
+
+export function minEventSequence(events: unknown[]): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue;
+    const sequence = (event as { sequence?: unknown }).sequence;
+    if (typeof sequence === 'number') {
+      min = Math.min(min, sequence);
+    }
+  }
+  return Number.isFinite(min) ? min : -1;
 }

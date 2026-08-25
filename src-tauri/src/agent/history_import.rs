@@ -686,4 +686,45 @@ mod tests {
         ));
         assert!(super::should_hydrate_timeline_from_native(&session, &None, true));
     }
+
+    #[test]
+    fn persisted_timeline_skips_native_hydration() {
+        use crate::db::{operations, schema::initialize_database};
+        use rusqlite::Connection;
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, origin, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                "session-1",
+                "Test",
+                "opencode",
+                "agent",
+                "native",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        operations::append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({
+                "type": "user_message",
+                "event_id": "e1",
+                "content": "hello"
+            })],
+        )
+        .unwrap();
+
+        let timeline = operations::get_session_timeline(&conn, "session-1").unwrap();
+        let session = test_session("native");
+        assert!(!super::should_hydrate_timeline_from_native(
+            &session,
+            &timeline,
+            true
+        ));
+        assert_eq!(timeline.as_ref().map(|events| events.len()), Some(1));
+    }
 }

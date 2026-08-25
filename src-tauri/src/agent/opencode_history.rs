@@ -162,6 +162,95 @@ mod tests {
     }
 
     #[test]
+    fn normalized_opencode_history_emits_codemux_domain_events() {
+        use super::super::history_events::normalize_history_events;
+
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1000_i64,
+                    r#"{"role":"user","time":{"created":1000}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-1",
+                    "session-1",
+                    2000_i64,
+                    2600_i64,
+                    r#"{"role":"assistant","tokens":{"input":3,"output":2,"reasoning":1,"cache":{"read":4,"write":0}},"providerID":"openai","modelID":"model-1"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-user",
+                    "user-1",
+                    "session-1",
+                    1001_i64,
+                    r#"{"type":"text","text":"hello"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-text",
+                    "assistant-1",
+                    "session-1",
+                    2002_i64,
+                    r#"{"type":"text","text":"answer"}"#
+                ],
+            )
+            .unwrap();
+
+        let raw = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let normalized = normalize_history_events(raw, "app-session-1");
+
+        assert!(!normalized.is_empty());
+        for (sequence, event) in normalized.iter().enumerate() {
+            assert_eq!(event["sequence"], sequence);
+            assert_eq!(event["session_id"], "app-session-1");
+            let event_type = event["type"].as_str().unwrap_or_default();
+            assert!(
+                matches!(
+                    event_type,
+                    "user_message"
+                        | "assistant_message"
+                        | "text_delta"
+                        | "tool_started"
+                        | "tool_finished"
+                        | "turn_finished"
+                        | "system_event"
+                        | "diagnostic"
+                ),
+                "unexpected event type: {event_type}"
+            );
+        }
+        assert_eq!(normalized[0]["type"], "user_message");
+        assert!(
+            normalized
+                .iter()
+                .any(|event| event["type"] == "assistant_message" || event["type"] == "text_delta")
+        );
+        assert!(normalized.iter().any(|event| event["type"] == "turn_finished"));
+    }
+
+    #[test]
     fn keeps_one_success_result_for_a_multi_assistant_turn() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(

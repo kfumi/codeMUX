@@ -20,6 +20,7 @@ import {
   fetchBootstrap,
   fetchSessionTimeline,
   fetchSessionTimelineAfter,
+  fetchSessionTimelineBefore,
   interruptSession,
   isAuthError,
   respondPermission,
@@ -45,7 +46,10 @@ import { buildTurnDurationMap } from '../lib/turnDuration';
 import {
   cacheSessionEvents,
   clearConnection,
+  loadCachedSessionEvents,
   maxEventSequence,
+  minEventSequence,
+  TIMELINE_CACHE_VERSION,
   type CompanionConnection,
 } from '../lib/storage';
 import { cn } from '../lib/utils';
@@ -72,6 +76,8 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
   const [session, setSession] = useState<MobileSession>(initialSession);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<MobileBootstrap | null>(null);
@@ -87,6 +93,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
 
   const persistEvents = useCallback(async (events: unknown[]) => {
     await cacheSessionEvents(sessionId, {
+      cacheVersion: TIMELINE_CACHE_VERSION,
       updatedAt: new Date().toISOString(),
       lastSequence: maxEventSequence(events),
       events,
@@ -106,6 +113,17 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     void persistEvents(rawEventsRef.current);
   }, [persistEvents]);
 
+  const prependEvents = useCallback((events: unknown[]) => {
+    if (events.length === 0) {
+      return;
+    }
+    rawEventsRef.current = [...events, ...rawEventsRef.current];
+    setMessages(eventsToMessages(rawEventsRef.current));
+    lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+    setTurnDurationsByUserId(buildTurnDurationMap(rawEventsRef.current));
+    void persistEvents(rawEventsRef.current);
+  }, [persistEvents]);
+
   const loadBootstrap = useCallback(async () => {
     try {
       const nextBootstrap = await fetchBootstrap(connection);
@@ -119,12 +137,41 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
   const loadHistory = useCallback(async (after = -1) => {
     setError(null);
     try {
-      const events = after < 0
-        ? (await fetchSessionTimeline(connection, sessionId, { direction: 'tail' })).events
-        : await fetchSessionTimelineAfter(connection, sessionId, after);
       if (after < 0) {
-        ingestEvents(events, true);
-      } else if (events.length > 0) {
+        const cached = await loadCachedSessionEvents(sessionId);
+        if (
+          cached?.cacheVersion === TIMELINE_CACHE_VERSION
+          && cached.events.length > 0
+        ) {
+          ingestEvents(cached.events, true);
+          setLoading(false);
+        }
+
+        const tailPage = await fetchSessionTimeline(connection, sessionId, { direction: 'tail' });
+        const localLast = lastSequenceRef.current;
+        if (localLast >= tailPage.seqStart && localLast <= tailPage.seqEnd) {
+          if (localLast < tailPage.seqEnd) {
+            const gap = await fetchSessionTimelineAfter(connection, sessionId, localLast);
+            if (gap.length > 0) {
+              ingestEvents(gap, false);
+            }
+          }
+        } else {
+          ingestEvents(tailPage.events, true);
+          const refreshedLast = lastSequenceRef.current;
+          if (refreshedLast < tailPage.seqEnd) {
+            const gap = await fetchSessionTimelineAfter(connection, sessionId, refreshedLast);
+            if (gap.length > 0) {
+              ingestEvents(gap, false);
+            }
+          }
+        }
+        setHasOlder(tailPage.hasOlder);
+        return true;
+      }
+
+      const events = await fetchSessionTimelineAfter(connection, sessionId, after);
+      if (events.length > 0) {
         ingestEvents(events, false);
       } else {
         lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
@@ -140,6 +187,42 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
       return false;
     }
   }, [connection, ingestEvents, onDisconnected, sessionId]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (loadingOlder || !hasOlder) {
+      return;
+    }
+    const beforeSequence = minEventSequence(rawEventsRef.current);
+    if (beforeSequence < 0) {
+      return;
+    }
+
+    setLoadingOlder(true);
+    const viewport = viewportRef.current;
+    const previousHeight = viewport?.scrollHeight ?? 0;
+    try {
+      const page = await fetchSessionTimelineBefore(connection, sessionId, beforeSequence);
+      if (page.events.length > 0) {
+        prependEvents(page.events);
+        requestAnimationFrame(() => {
+          if (!viewport) {
+            return;
+          }
+          viewport.scrollTop = viewport.scrollHeight - previousHeight;
+        });
+      }
+      setHasOlder(page.hasOlder);
+    } catch (err) {
+      if (isAuthError(err)) {
+        await clearConnection();
+        onDisconnected('桌面端已撤销此设备或配对已失效，请重新配对。');
+        return;
+      }
+      setError(String(err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [connection, hasOlder, loadingOlder, onDisconnected, prependEvents, sessionId]);
 
   const handleAuthFailure = useCallback(() => {
     void (async () => {
@@ -168,6 +251,8 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     rawEventsRef.current = [];
     setMessages([]);
     setLoading(true);
+    setLoadingOlder(false);
+    setHasOlder(false);
     setError(null);
     setBootstrap(null);
     setDesktopRunning(false);
@@ -178,6 +263,22 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
       setLoading(false);
     })();
   }, [connection, loadBootstrap, loadHistory, sessionId]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || loading) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (viewport.scrollTop < 80 && hasOlder && !loadingOlder) {
+        void loadOlderHistory();
+      }
+    };
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, [hasOlder, loadOlderHistory, loading, loadingOlder]);
 
   const appendIncomingEvent = useCallback((event: Record<string, unknown>) => {
     rawEventsRef.current = [...rawEventsRef.current, event];
@@ -605,6 +706,9 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
       >
         {loading ? (
           <div className="text-sm text-muted-foreground">加载历史…</div>
+        ) : null}
+        {loadingOlder ? (
+          <div className="pb-3 text-sm text-muted-foreground">加载更早消息…</div>
         ) : null}
         {!loading && messages.length === 0 ? (
           <div className="text-sm text-muted-foreground">暂无消息记录，发送第一条消息开始对话。</div>

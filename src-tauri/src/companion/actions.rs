@@ -110,6 +110,16 @@ pub async fn send_companion_message(
     result
 }
 
+fn validate_companion_agent_kind(
+    current: AgentKind,
+    requested: AgentKind,
+) -> Result<(), String> {
+    if current != requested {
+        return Err("会话创建后不能更换智能体种类".to_string());
+    }
+    Ok(())
+}
+
 pub async fn update_companion_settings(
     app: &AppHandle,
     session_id: &str,
@@ -136,8 +146,8 @@ pub async fn update_companion_settings(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "会话不存在".to_string())?
     };
-    if current.agent_kind != update.agent_kind {
-        return Err("会话创建后不能更换智能体种类".to_string());
+    if let Err(error) = validate_companion_agent_kind(current.agent_kind, update.agent_kind) {
+        return Err(error);
     }
 
     {
@@ -241,4 +251,23 @@ pub fn resolve_static_dir() -> PathBuf {
         return release_dir;
     }
     manifest_dir.join("../src-mobile/dist")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_companion_agent_kind;
+    use crate::config::types::AgentKind;
+
+    #[test]
+    fn rejects_companion_agent_kind_changes() {
+        assert_eq!(
+            validate_companion_agent_kind(AgentKind::ClaudeCode, AgentKind::Codex),
+            Err("会话创建后不能更换智能体种类".to_string())
+        );
+    }
+
+    #[test]
+    fn allows_companion_settings_when_agent_kind_is_unchanged() {
+        assert!(validate_companion_agent_kind(AgentKind::Opencode, AgentKind::Opencode).is_ok());
+    }
 }

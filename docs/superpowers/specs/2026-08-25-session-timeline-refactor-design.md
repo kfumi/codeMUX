@@ -154,7 +154,7 @@ Tauri events / 内存态 (live)                             WS live + gap fetch
 - [x] 删除 `switch_briefing` 模块及所有引用
 - [x] 删除 DB 表/列（无迁移脚本）
 - [x] ADR 0007 superseded 说明
-- [ ] 测试：创建会话、Fork、导入、Companion 发消息回归
+- [x] 测试：创建会话、Fork、导入、Companion 发消息回归
 
 **风险**：低。无存量会话，边界清晰。
 
@@ -227,8 +227,8 @@ return Ok(timeline.unwrap_or_default());
 
 - [x] 重写 `load_session_events`：只读 timeline + 空时 hydration
 - [x] 删除 native 覆盖 timeline 逻辑
-- [ ] 加强 sidecar vs history loader 等价性测试（重点 OpenCode）
-- [ ] 桌面重开会话回归：消息与实时对话时一致
+- [x] 加强 sidecar vs history loader 等价性测试（重点 OpenCode）
+- [x] 桌面重开会话回归：消息与实时对话时一致
 
 **风险**：中。需 Claude / Codex / OpenCode 三条历史路径回归。
 
@@ -314,6 +314,11 @@ Response:
 - 连上后：`fetch timeline tail` 与本地 `seqEnd` 对账
 - 上滑：`direction=before`
 - 删除 agent switch settings 相关逻辑
+
+### 任务清单（移动端补充）
+
+- [x] IndexedDB tail 冷启动缓存（`cacheVersion` + 与 tail 对账）
+- [x] 上滑 `direction=before` 加载更早历史
 
 ### 任务清单
 
