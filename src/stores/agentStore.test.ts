@@ -23,6 +23,7 @@ const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+const resyncSessionFromNativeMock = vi.fn<(appSessionId: string) => Promise<{ eventCount: number }>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
 const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number) => Promise<void>>();
 const respondToAgentPermissionMock = vi.fn();
@@ -51,6 +52,7 @@ vi.mock('../lib/tauri', () => ({
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
     loadSessionEvents: loadSessionEventsMock,
+    resyncSessionFromNative: resyncSessionFromNativeMock,
     loadLatestTokenUsage: loadLatestTokenUsageMock,
     rewindSession: rewindSessionMock,
     startProxy: vi.fn(),
@@ -418,6 +420,56 @@ describe('agent store Codex history loading', () => {
         },
       },
     });
+  });
+
+  it('resyncSessionFromNative replaces cached history from CLI and reloads UI state', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    resyncSessionFromNativeMock.mockResolvedValueOnce({ eventCount: 2 });
+    loadSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user_message',
+        session_id: session.id,
+        event_id: 'resync-user',
+        content: 'cli hello',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        type: 'assistant_message',
+        session_id: session.id,
+        event_id: 'resync-assistant',
+        content: [{ type: 'text', text: 'cli reply' }],
+        timestamp: '2026-01-01T00:00:01.000Z',
+      },
+    ]);
+    useAgentStore.setState({
+      events: {
+        [session.id]: [{
+          kind: 'user',
+          data: { content: 'stale cached message' },
+        }],
+      },
+    });
+
+    const eventCount = await useAgentStore.getState().resyncSessionFromNative(session.id);
+
+    expect(eventCount).toBe(2);
+    expect(resyncSessionFromNativeMock).toHaveBeenCalledWith(session.id);
+    expect(loadSessionEventsMock).toHaveBeenCalledWith(session.id);
+    expect(useAgentStore.getState().events[session.id]?.[0]).toMatchObject({
+      kind: 'user',
+      data: { content: 'cli hello' },
+    });
+  });
+
+  it('resyncSessionFromNative rejects while a turn is running', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    useAgentStore.setState({ isRunning: { [session.id]: true } });
+
+    await expect(useAgentStore.getState().resyncSessionFromNative(session.id))
+      .rejects.toThrow('会话正在运行，请先停止后再同步');
+    expect(resyncSessionFromNativeMock).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

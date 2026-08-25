@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff } from 'lucide-react';
+import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff, RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -34,6 +34,8 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
   const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
+  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const resyncSessionFromNative = useAgentStore((state) => state.resyncSessionFromNative);
   const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[sessionId] ?? null);
   const workingPath = session
     ? resolveSessionWorkingPath(session, projects, {
@@ -88,6 +90,30 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
     await archiveSession(sessionId);
   };
 
+  const canResyncFromCli = Boolean(
+    session
+    && !session.is_read_only
+    && session.agent_kind !== 'gemini_cli',
+  );
+
+  const handleResyncFromCli = async () => {
+    if (!canResyncFromCli) {
+      return;
+    }
+    if (isRunning) {
+      toast.error('会话正在运行，请先停止后再同步');
+      return;
+    }
+
+    const toastId = toast.loading('正在从 CLI 同步历史…');
+    try {
+      const eventCount = await resyncSessionFromNative(sessionId);
+      toast.success(`已从 CLI 同步 ${eventCount} 条历史消息`, { id: toastId });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '从 CLI 同步历史失败', { id: toastId });
+    }
+  };
+
   return (
     <>
       <span className="min-w-0 truncate text-ui-title font-semibold text-foreground/88" data-tauri-drag-region>
@@ -140,6 +166,14 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
             标记为未读
           </DropdownMenuItem>
+          {canResyncFromCli ? (
+            <DropdownMenuItem
+              icon={<RotateCw className="h-3.5 w-3.5" />}
+              onClick={() => void handleResyncFromCli()}
+            >
+              从 CLI 同步历史
+            </DropdownMenuItem>
+          ) : null}
           {workingPath ? (
             <>
               <DropdownMenuItem

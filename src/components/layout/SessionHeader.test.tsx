@@ -13,8 +13,10 @@ import { SessionHeader } from './SessionHeader';
 const mocks = vi.hoisted(() => ({
   openInExplorer: vi.fn(),
   getSessionInfo: vi.fn(),
+  resyncSessionFromNative: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastLoading: vi.fn(() => 'toast-id'),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -28,6 +30,7 @@ vi.mock('sonner', () => ({
   toast: {
     success: mocks.toastSuccess,
     error: mocks.toastError,
+    loading: mocks.toastLoading,
     info: vi.fn(),
     warning: vi.fn(),
   },
@@ -78,6 +81,7 @@ function makeProject(overrides: Partial<Project>): Project {
 describe('SessionHeader', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.resyncSessionFromNative.mockResolvedValue(3);
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -86,6 +90,8 @@ describe('SessionHeader', () => {
     useAgentStore.setState({
       sessionWorkingPaths: {},
       events: {},
+      isRunning: {},
+      resyncSessionFromNative: mocks.resyncSessionFromNative,
     });
     useProjectStore.setState({
       projects: [makeProject({})],
@@ -121,10 +127,29 @@ describe('SessionHeader', () => {
     expect(screen.getByText('重命名任务')).toBeTruthy();
     expect(screen.getByText('归档任务')).toBeTruthy();
     expect(screen.getByText('标记为未读')).toBeTruthy();
+    expect(screen.getByText('从 CLI 同步历史')).toBeTruthy();
     expect(screen.getByText('在资源管理器中打开')).toBeTruthy();
     expect(screen.getByText('复制路径')).toBeTruthy();
     expect(screen.getByText('复制任务路径')).toBeTruthy();
     expect(screen.getByText('复制会话ID')).toBeTruthy();
+  });
+
+  it('syncs history from CLI through the session menu', async () => {
+    openMenu();
+    fireEvent.click(screen.getByText('从 CLI 同步历史'));
+
+    await waitFor(() => expect(mocks.resyncSessionFromNative).toHaveBeenCalledWith('session-1'));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('已从 CLI 同步 3 条历史消息', { id: 'toast-id' });
+  });
+
+  it('hides CLI sync for read-only imported sessions', () => {
+    useSessionStore.setState({
+      sessions: [makeSession({ origin: 'imported', is_read_only: true })],
+    });
+
+    openMenu();
+
+    expect(screen.queryByText('从 CLI 同步历史')).toBeNull();
   });
 
   it('shows the worktree path chip when the session cwd differs from the project root', () => {

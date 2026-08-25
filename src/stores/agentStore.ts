@@ -190,6 +190,8 @@ interface AgentState {
   refreshLatestTokenUsage: (sessionId: string, freshness: 'live_synced' | 'restored') => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
+  /** Replace cached timeline with the latest CLI provider history and reload UI state */
+  resyncSessionFromNative: (sessionId: string) => Promise<number>;
   /** Clear changed files for a session */
   clearChangedFiles: (sessionId: string) => void;
   /** Save composer draft text for a session */
@@ -2791,6 +2793,26 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         pendingSessionMessageLoads.delete(sessionId);
       }
     }
+  },
+
+  resyncSessionFromNative: async (sessionId: string) => {
+    if (get().isRunning[sessionId]) {
+      throw new Error('会话正在运行，请先停止后再同步');
+    }
+
+    const pending = pendingSessionMessageLoads.get(sessionId);
+    if (pending) {
+      await pending;
+    }
+
+    const result = await agentApi.resyncSessionFromNative(sessionId);
+    get().clearEvents(sessionId);
+    await get().loadSessionMessages(sessionId);
+    logger.info('Resynced session history from CLI provider file', {
+      sessionId,
+      eventCount: result.eventCount,
+    });
+    return result.eventCount;
   },
 
   clearChangedFiles: (sessionId: string) => {

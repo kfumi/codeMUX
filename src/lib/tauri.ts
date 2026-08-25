@@ -411,6 +411,9 @@ export const agentApi = {
     invokeLogged('load_opencode_session_events', { appSessionId }),
   loadSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_session_events', { appSessionId }),
+  /** Replace the cached timeline with the latest CLI provider history file. */
+  resyncSessionFromNative: (appSessionId: string): Promise<{ eventCount: number }> =>
+    invokeLogged('resync_session_from_native', { appSessionId }),
   deleteOpenCodeSession: (appSessionId: string): Promise<void> =>
     invokeLogged('delete_opencode_session', { appSessionId }),
   /** Load latest token usage snapshot directly from the agent history file. */

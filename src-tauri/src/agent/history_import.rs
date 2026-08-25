@@ -210,6 +210,69 @@ pub async fn load_session_events(
     Ok(timeline.unwrap_or_default())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResyncSessionFromNativeResult {
+    pub event_count: usize,
+}
+
+#[tauri::command]
+pub async fn resync_session_from_native(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<ResyncSessionFromNativeResult, String> {
+    let session = {
+        let db = state.db.lock().unwrap();
+        operations::get_session(&db, &app_session_id).map_err(|error| error.to_string())?
+    };
+    let Some(session) = session else {
+        return Err(format!("Session not found: {}", app_session_id));
+    };
+
+    let agent_kind = session.agent_kind;
+    let has_mapping = {
+        let db = state.db.lock().unwrap();
+        has_native_mapping(&db, &app_session_id, agent_kind)?
+    };
+
+    if !can_resync_session_from_native(&session, has_mapping) {
+        return Err(
+            "此会话无法从 CLI 同步历史：需要已关联的原生会话且不能为只读".to_string(),
+        );
+    }
+
+    let native_events =
+        load_native_session_events(state.clone(), &app_session_id, agent_kind).await?;
+    if native_events.is_empty() {
+        return Err("未在 CLI 历史文件中找到可同步的消息".to_string());
+    }
+
+    {
+        let mut db = state.db.lock().unwrap();
+        operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
+            .map_err(|error| error.to_string())?;
+        let updated_at = Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![updated_at, app_session_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    Ok(ResyncSessionFromNativeResult {
+        event_count: native_events.len(),
+    })
+}
+
+pub(crate) fn can_resync_session_from_native(
+    session: &operations::Session,
+    has_mapping: bool,
+) -> bool {
+    !session.is_read_only
+        && has_mapping
+        && !matches!(session.agent_kind, AgentKind::GeminiCli)
+}
+
 fn has_native_mapping(
     conn: &Connection,
     app_session_id: &str,
@@ -670,6 +733,31 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             parent_session_id: None,
         }
+    }
+
+    #[test]
+    fn resync_requires_mapping_and_writable_session() {
+        let session = test_session("native");
+        assert!(super::can_resync_session_from_native(&session, true));
+        assert!(!super::can_resync_session_from_native(&session, false));
+        assert!(!super::can_resync_session_from_native(
+            &operations::Session {
+                is_read_only: true,
+                ..session.clone()
+            },
+            true,
+        ));
+        assert!(super::can_resync_session_from_native(
+            &test_session("imported"),
+            true,
+        ));
+        assert!(!super::can_resync_session_from_native(
+            &operations::Session {
+                agent_kind: AgentKind::GeminiCli,
+                ..session
+            },
+            true,
+        ));
     }
 
     #[test]
