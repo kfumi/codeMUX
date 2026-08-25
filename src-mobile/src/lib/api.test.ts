@@ -144,6 +144,55 @@ describe('request helpers', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it('fetches paginated timeline pages and follows after gaps', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestUrl = '';
+    const afterPages = [
+      { events: [{ sequence: 1 }], seqEnd: 1, hasNewer: true },
+      { events: [{ sequence: 2 }], seqEnd: 2, hasNewer: false },
+    ];
+    let afterIndex = 0;
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      if (requestUrl.includes('direction=after')) {
+        const page = afterPages[afterIndex] ?? afterPages[afterPages.length - 1];
+        afterIndex += 1;
+        return Response.json({
+          ...page,
+          seqStart: page.seqEnd,
+          hasOlder: true,
+          historyComplete: false,
+        });
+      }
+      return Response.json({
+        events: [{ sequence: 0 }],
+        seqStart: 0,
+        seqEnd: 0,
+        hasOlder: false,
+        hasNewer: false,
+        historyComplete: true,
+      });
+    };
+
+    const { fetchSessionTimeline, fetchSessionTimelineAfter } = await import('./api');
+    const connection = {
+      desktopId: 'desktop-1',
+      deviceId: 'device',
+      token: 'token',
+      connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+    };
+
+    await expect(fetchSessionTimeline(connection, 'session-1', { direction: 'tail' }))
+      .resolves.toMatchObject({ seqEnd: 0, historyComplete: true });
+    expect(requestUrl).toContain('/timeline?direction=tail');
+
+    await expect(fetchSessionTimelineAfter(connection, 'session-1', 0))
+      .resolves.toEqual([{ sequence: 1 }, { sequence: 2 }]);
+    expect(afterIndex).toBe(2);
+
+    globalThis.fetch = originalFetch;
+  });
+
   it('patches all session settings atomically', async () => {
     const originalFetch = globalThis.fetch;
     let requestMethod = '';

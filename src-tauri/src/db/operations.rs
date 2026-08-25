@@ -1162,6 +1162,166 @@ pub fn get_session_events_after(
     Ok(events)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineDirection {
+    Tail,
+    After,
+    Before,
+}
+
+pub const DEFAULT_SESSION_TIMELINE_LIMIT: usize = 200;
+pub const MAX_SESSION_TIMELINE_LIMIT: usize = 500;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTimelinePage {
+    pub events: Vec<Value>,
+    pub seq_start: i64,
+    pub seq_end: i64,
+    pub has_older: bool,
+    pub has_newer: bool,
+    pub history_complete: bool,
+}
+
+pub fn parse_timeline_direction(value: Option<&str>) -> TimelineDirection {
+    match value.unwrap_or("tail").trim().to_lowercase().as_str() {
+        "after" => TimelineDirection::After,
+        "before" => TimelineDirection::Before,
+        _ => TimelineDirection::Tail,
+    }
+}
+
+pub fn fetch_session_timeline(
+    conn: &Connection,
+    session_id: &str,
+    direction: TimelineDirection,
+    cursor: Option<i64>,
+    limit: usize,
+) -> Result<SessionTimelinePage> {
+    let limit = limit.clamp(1, MAX_SESSION_TIMELINE_LIMIT);
+    let fetch_limit = (limit + 1) as i64;
+    let (min_sequence, max_sequence) = session_timeline_bounds(conn, session_id)?;
+
+    let (rows, has_older, has_newer): (Vec<(i64, String)>, bool, bool) = match direction {
+        TimelineDirection::Tail => {
+            let mut stmt = conn.prepare(
+                "SELECT sequence, event_json FROM session_event_snapshots WHERE session_id = ?1 ORDER BY sequence DESC LIMIT ?2",
+            )?;
+            let mut rows: Vec<(i64, String)> = stmt
+                .query_map(params![session_id, limit as i64], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .collect::<Result<_>>()?;
+            rows.reverse();
+            let seq_start = rows.first().map(|row| row.0);
+            let seq_end = rows.last().map(|row| row.0);
+            let has_older = seq_start
+                .zip(min_sequence)
+                .map(|(start, min)| start > min)
+                .unwrap_or(false);
+            let has_newer = seq_end
+                .zip(max_sequence)
+                .map(|(end, max)| end < max)
+                .unwrap_or(false);
+            (rows, has_older, has_newer)
+        }
+        TimelineDirection::After => {
+            let cursor = cursor.unwrap_or(-1);
+            let mut stmt = conn.prepare(
+                "SELECT sequence, event_json FROM session_event_snapshots WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC LIMIT ?3",
+            )?;
+            let mut rows: Vec<(i64, String)> = stmt
+                .query_map(params![session_id, cursor, fetch_limit], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .collect::<Result<Vec<_>>>()?;
+            let has_newer = rows.len() > limit;
+            if has_newer {
+                rows.truncate(limit);
+            }
+            let has_older = rows
+                .first()
+                .map(|row| row.0)
+                .zip(min_sequence)
+                .map(|(start, min)| start > min)
+                .unwrap_or(false);
+            (rows, has_older, has_newer)
+        }
+        TimelineDirection::Before => {
+            let cursor = cursor.unwrap_or(i64::MAX);
+            let mut stmt = conn.prepare(
+                "SELECT sequence, event_json FROM session_event_snapshots WHERE session_id = ?1 AND sequence < ?2 ORDER BY sequence DESC LIMIT ?3",
+            )?;
+            let mut rows: Vec<(i64, String)> = stmt
+                .query_map(params![session_id, cursor, fetch_limit], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .collect::<Result<_>>()?;
+            let has_older = rows.len() > limit;
+            if has_older {
+                rows.truncate(limit);
+            }
+            rows.reverse();
+            let has_newer = rows
+                .last()
+                .map(|row| row.0)
+                .zip(max_sequence)
+                .map(|(end, max)| end < max)
+                .unwrap_or(false);
+            (rows, has_older, has_newer)
+        }
+    };
+
+    if rows.is_empty() {
+        return Ok(SessionTimelinePage {
+            events: Vec::new(),
+            seq_start: -1,
+            seq_end: -1,
+            has_older: false,
+            has_newer: false,
+            history_complete: true,
+        });
+    }
+
+    let events = rows
+        .iter()
+        .map(|(_, raw)| {
+            serde_json::from_str(raw).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let seq_start = rows[0].0;
+    let seq_end = rows[rows.len() - 1].0;
+
+    Ok(SessionTimelinePage {
+        events,
+        seq_start,
+        seq_end,
+        has_older,
+        has_newer,
+        history_complete: !has_older,
+    })
+}
+
+fn session_timeline_bounds(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<(Option<i64>, Option<i64>)> {
+    let mut stmt = conn.prepare(
+        "SELECT MIN(sequence), MAX(sequence) FROM session_event_snapshots WHERE session_id = ?1",
+    )?;
+    let mut rows = stmt.query([session_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok((None, None));
+    };
+    Ok((row.get(0)?, row.get(1)?))
+}
+
 pub fn append_snapshot_events(
     conn: &mut Connection,
     session_id: &str,
@@ -1217,7 +1377,7 @@ mod tests {
     use super::{
         append_snapshot_events, archive_session, create_forked_session,
         delete_agent_session_mapping,
-        delete_session_message_attachments_from_index, get_agent_distribution,
+        delete_session_message_attachments_from_index, fetch_session_timeline, get_agent_distribution,
         get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
         get_model_distribution, get_session, get_session_events_after,
         get_session_snapshot, get_usage_heatmap,
@@ -1230,6 +1390,7 @@ mod tests {
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
     use rusqlite::Connection;
+    use serde_json::Value;
 
     #[test]
     fn rejects_invalid_agent_kind_when_loading_sessions() {
@@ -2012,5 +2173,56 @@ mod tests {
 
         let events = get_session_events_after(&conn, "session-1", -1).unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn fetch_session_timeline_supports_tail_after_and_before_pages() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        let events: Vec<Value> = (0..5)
+            .map(|index| serde_json::json!({ "type": "user_message", "event_id": format!("e{index}") }))
+            .collect();
+        append_snapshot_events(&mut conn, "session-1", &events).unwrap();
+
+        let tail = fetch_session_timeline(
+            &conn,
+            "session-1",
+            super::TimelineDirection::Tail,
+            None,
+            2,
+        )
+        .unwrap();
+        assert_eq!(tail.events.len(), 2);
+        assert_eq!(tail.seq_start, 3);
+        assert_eq!(tail.seq_end, 4);
+        assert!(tail.has_older);
+        assert!(!tail.has_newer);
+
+        let after = fetch_session_timeline(
+            &conn,
+            "session-1",
+            super::TimelineDirection::After,
+            Some(1),
+            2,
+        )
+        .unwrap();
+        assert_eq!(after.seq_start, 2);
+        assert_eq!(after.seq_end, 3);
+        assert!(after.has_newer);
+
+        let before = fetch_session_timeline(
+            &conn,
+            "session-1",
+            super::TimelineDirection::Before,
+            Some(3),
+            2,
+        )
+        .unwrap();
+        assert_eq!(before.seq_start, 1);
+        assert_eq!(before.seq_end, 2);
+        assert!(before.has_older);
+        assert!(before.has_newer);
     }
 }

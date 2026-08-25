@@ -317,10 +317,10 @@ Response:
 
 ### 任务清单
 
-- [ ] 新增 `fetch_session_timeline` Rust 命令 + Companion HTTP handler
-- [ ] WS 连接改为 tail replay
-- [ ] `src-mobile` gap recovery 分页循环
-- [ ] 兼容旧 `?after=` 参数
+- [x] 新增 `fetch_session_timeline` Rust 命令 + Companion HTTP handler
+- [x] WS 连接改为 tail replay
+- [x] `src-mobile` gap recovery 分页循环
+- [x] 兼容旧 `?after=` 参数
 
 **风险**：中。移动端断连重连需手测。
 

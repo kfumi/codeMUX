@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { normalizeStoredConnection, resolveActiveConnection } from '@shared/lib/companion-connection';
 
-import { buildWsUrl, fetchSessionEvents, fetchSessionRuntimeState } from '../lib/api';
+import { buildWsUrl, fetchSessionEvents, fetchSessionRuntimeState, fetchSessionTimelineAfter } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
 
 export interface WsEventEnvelope {
@@ -59,7 +59,9 @@ export function useCompanionSocket(
       const poll = async () => {
         try {
           const [events, runtimeState] = await Promise.all([
-            fetchSessionEvents(connection, sessionId, after),
+            after < 0
+              ? fetchSessionEvents(connection, sessionId, -1)
+              : fetchSessionTimelineAfter(connection, sessionId, after),
             fetchSessionRuntimeState(connection, sessionId),
           ]);
           if (!activePoll) return;

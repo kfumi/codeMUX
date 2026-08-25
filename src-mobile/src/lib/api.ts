@@ -330,16 +330,75 @@ export async function listProjects(connection: CompanionConnection): Promise<Mob
   });
 }
 
+export interface MobileSessionTimelinePage {
+  events: unknown[];
+  seqStart: number;
+  seqEnd: number;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  historyComplete: boolean;
+}
+
+export type MobileTimelineDirection = 'tail' | 'after' | 'before';
+
+const DEFAULT_TIMELINE_PAGE_SIZE = 200;
+
+export async function fetchSessionTimeline(
+  connection: CompanionConnection,
+  sessionId: string,
+  options: {
+    direction?: MobileTimelineDirection;
+    cursor?: number;
+    limit?: number;
+  } = {},
+): Promise<MobileSessionTimelinePage> {
+  const profile = asProfile(connection);
+  const params = new URLSearchParams();
+  if (options.direction) params.set('direction', options.direction);
+  if (options.cursor !== undefined) params.set('cursor', String(options.cursor));
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  const query = params.toString();
+  return requestJson<MobileSessionTimelinePage>(
+    profile,
+    `/api/sessions/${sessionId}/timeline${query ? `?${query}` : ''}`,
+    {
+      headers: authHeaders(profile.token),
+    },
+  );
+}
+
+export async function fetchSessionTimelineAfter(
+  connection: CompanionConnection,
+  sessionId: string,
+  afterSequence: number,
+): Promise<unknown[]> {
+  const events: unknown[] = [];
+  let cursor = afterSequence;
+  while (true) {
+    const page = await fetchSessionTimeline(connection, sessionId, {
+      direction: 'after',
+      cursor,
+      limit: DEFAULT_TIMELINE_PAGE_SIZE,
+    });
+    events.push(...page.events);
+    if (!page.hasNewer) {
+      break;
+    }
+    cursor = page.seqEnd;
+  }
+  return events;
+}
+
 export async function fetchSessionEvents(
   connection: CompanionConnection,
   sessionId: string,
   after = -1,
 ): Promise<unknown[]> {
-  const profile = asProfile(connection);
-  const query = after >= 0 ? `?after=${after}` : '';
-  return requestJson<unknown[]>(profile, `/api/sessions/${sessionId}/events${query}`, {
-    headers: authHeaders(profile.token),
-  });
+  if (after < 0) {
+    const page = await fetchSessionTimeline(connection, sessionId, { direction: 'tail' });
+    return page.events;
+  }
+  return fetchSessionTimelineAfter(connection, sessionId, after);
 }
 
 export async function fetchSessionRuntimeState(

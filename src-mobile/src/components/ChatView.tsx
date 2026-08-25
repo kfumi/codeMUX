@@ -18,7 +18,8 @@ import { useCompanionSocket } from '../hooks/useCompanionSocket';
 import { useDesktopReachability } from '../hooks/useDesktopReachability';
 import {
   fetchBootstrap,
-  fetchSessionEvents,
+  fetchSessionTimeline,
+  fetchSessionTimelineAfter,
   interruptSession,
   isAuthError,
   respondPermission,
@@ -118,7 +119,9 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
   const loadHistory = useCallback(async (after = -1) => {
     setError(null);
     try {
-      const events = await fetchSessionEvents(connection, sessionId, after);
+      const events = after < 0
+        ? (await fetchSessionTimeline(connection, sessionId, { direction: 'tail' })).events
+        : await fetchSessionTimelineAfter(connection, sessionId, after);
       if (after < 0) {
         ingestEvents(events, true);
       } else if (events.length > 0) {

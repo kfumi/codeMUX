@@ -258,6 +258,21 @@ async fn load_native_session_events(
     }
 }
 
+#[tauri::command]
+pub fn fetch_session_timeline(
+    state: State<'_, crate::AppState>,
+    session_id: String,
+    direction: Option<String>,
+    cursor: Option<i64>,
+    limit: Option<usize>,
+) -> Result<operations::SessionTimelinePage, String> {
+    let db = state.db.lock().unwrap();
+    let direction = operations::parse_timeline_direction(direction.as_deref());
+    let limit = limit.unwrap_or(operations::DEFAULT_SESSION_TIMELINE_LIMIT);
+    operations::fetch_session_timeline(&db, &session_id, direction, cursor, limit)
+        .map_err(|error| error.to_string())
+}
+
 fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, String> {
     value
         .filter(|value| !value.is_empty() && value != "all")

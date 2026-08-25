@@ -127,6 +127,14 @@ struct SessionEventsQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SessionTimelineQuery {
+    direction: Option<String>,
+    cursor: Option<i64>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WsQuery {
     token: String,
     session_id: String,
@@ -278,6 +286,7 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/pair/claim", post(pair_claim))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
+        .route("/sessions/{session_id}/timeline", get(session_timeline))
         .route("/sessions/{session_id}/state", get(session_runtime_state))
         .route("/sessions/{session_id}/messages", post(send_message))
         .route(
@@ -449,14 +458,16 @@ async fn session_events(
     Query(query): Query<SessionEventsQuery>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
     authorize(&ctx, &headers)?;
-    let app_state = ctx.app.state::<AppState>();
     let after = query.after.unwrap_or(-1);
     if after < 0 {
-        let events = crate::agent::history_import::load_session_events(app_state, session_id)
-            .await
-            .map_err(ApiError::internal)?;
-        return Ok(Json(events));
+        let page = read_session_timeline_page(&ctx, &session_id, SessionTimelineQuery {
+            direction: Some("tail".to_string()),
+            cursor: None,
+            limit: None,
+        })?;
+        return Ok(Json(page.events));
     }
+    let app_state = ctx.app.state::<AppState>();
     let db = app_state
         .db
         .lock()
@@ -464,6 +475,35 @@ async fn session_events(
     let events = operations::get_session_events_after(&db, &session_id, after)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(events))
+}
+
+async fn session_timeline(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+    Query(query): Query<SessionTimelineQuery>,
+) -> Result<Json<operations::SessionTimelinePage>, ApiError> {
+    authorize(&ctx, &headers)?;
+    let page = read_session_timeline_page(&ctx, &session_id, query)?;
+    Ok(Json(page))
+}
+
+fn read_session_timeline_page(
+    ctx: &ServerContext,
+    session_id: &str,
+    query: SessionTimelineQuery,
+) -> Result<operations::SessionTimelinePage, ApiError> {
+    let app_state = ctx.app.state::<AppState>();
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let direction = operations::parse_timeline_direction(query.direction.as_deref());
+    let limit = query
+        .limit
+        .unwrap_or(operations::DEFAULT_SESSION_TIMELINE_LIMIT);
+    operations::fetch_session_timeline(&db, session_id, direction, query.cursor, limit)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 async fn session_runtime_state(
@@ -618,17 +658,22 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     let mut rx = companion_state.inner.event_tx.subscribe();
 
     let initial_events = if let Some(app_state) = ctx.app.try_state::<AppState>() {
-        let events = app_state
+        app_state
             .db
             .lock()
             .ok()
             .and_then(|db| {
-                operations::get_session_snapshot(&db, &session_id)
-                    .ok()
-                    .flatten()
+                operations::fetch_session_timeline(
+                    &db,
+                    &session_id,
+                    operations::TimelineDirection::Tail,
+                    None,
+                    operations::DEFAULT_SESSION_TIMELINE_LIMIT,
+                )
+                .ok()
             })
-            .unwrap_or_default();
-        events
+            .map(|page| page.events)
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
