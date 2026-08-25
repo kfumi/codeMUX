@@ -432,6 +432,59 @@ function replaceLastOrAppend(
   return [...events, incoming];
 }
 
+function isNarrationOnlyAssistantEvent(event: AgentMessage): boolean {
+  if (event.kind !== 'assistant') {
+    return false;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  return content.every((block: { type?: string; text?: string }) => (
+    block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0
+  ));
+}
+
+function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessage[]): boolean {
+  if (event.kind !== 'assistant') {
+    return false;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  if (!content.every((block: { type?: string }) => block?.type === 'tool_use')) {
+    return false;
+  }
+  return content.every((block: { type?: string; id?: string }) => {
+    if (block?.type !== 'tool_use' || typeof block.id !== 'string') {
+      return false;
+    }
+    return !events.some((candidate) => (
+      candidate.kind === 'tool_result'
+      && Array.isArray(candidate.data?.message?.content)
+      && candidate.data.message.content.some((result: { tool_use_id?: string }) => (
+        result?.tool_use_id === block.id
+      ))
+    ));
+  });
+}
+
+function findNarrationAssistantInsertionIndex(events: AgentMessage[]): number | undefined {
+  let insertAt: number | undefined;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== 'assistant') {
+      break;
+    }
+    if (!isPendingToolOnlyAssistantEvent(event, events)) {
+      break;
+    }
+    insertAt = index;
+  }
+  return insertAt;
+}
+
 function queueStreamingDelta(
   sessionId: string,
   key: keyof StreamingBuffer,
@@ -2127,9 +2180,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           // Superseding events must replace their target in place; routing them
           // through the simulated-stream buffer would append them at the end.
           const supersedesExisting = Array.isArray(event.data.supersedes) && event.data.supersedes.length > 0;
+          const narrationInsertAt = isNarrationOnlyAssistantEvent(event)
+            ? findNarrationAssistantInsertionIndex(get().events[sessionId] || [])
+            : undefined;
           const shouldSimulate = Boolean(
             !hasToolUse
             && !supersedesExisting
+            && narrationInsertAt == null
             && !currentStreamingText
             && !currentStreamingThinking
             && (textBlock || thinkingBlock),
@@ -2259,6 +2316,15 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
               event,
               (entry) => entry.kind === 'compact' && entry.data.compact_metadata?.status === 'compacting',
             );
+          } else if (
+            event.kind === 'assistant'
+            && isNarrationOnlyAssistantEvent(event)
+            && !hasSuperseded
+          ) {
+            const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
+            newEvents = insertAt != null
+              ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
+              : [...baseEvents, event];
           } else {
             newEvents = [...baseEvents, event];
           }

@@ -1459,7 +1459,8 @@ fn load_opencode_events_from_connection(
             continue;
         }
 
-        let parts = load_opencode_parts(connection, session_id, &message_id)?;
+        let mut parts = load_opencode_parts(connection, session_id, &message_id)?;
+        sort_opencode_parts(&mut parts);
         let mut content = Vec::new();
         let mut tool_results = Vec::new();
         let mut diagnostics = Vec::new();
@@ -1888,6 +1889,22 @@ struct OpenCodePart {
     id: String,
     time_created: i64,
     data: Value,
+}
+
+fn opencode_part_logical_time(part: &OpenCodePart) -> i64 {
+    part.data
+        .get("time")
+        .and_then(|time| time.get("start"))
+        .and_then(Value::as_i64)
+        .unwrap_or(part.time_created)
+}
+
+fn sort_opencode_parts(parts: &mut [OpenCodePart]) {
+    parts.sort_by(|left, right| {
+        opencode_part_logical_time(left)
+            .cmp(&opencode_part_logical_time(right))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
 
 fn load_opencode_parts(

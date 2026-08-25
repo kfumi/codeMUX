@@ -1351,6 +1351,66 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('inserts late narration before a pending tool when sidecar emits tool_started first', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('opencode');
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'late narration after tool', 'D:\\project\\ai-code\\codeMUX');
+
+      const emit = (payload: Record<string, unknown>) => {
+        emitEvent?.(JSON.stringify({ session_id: session.id, ...payload }));
+      };
+
+      emit({
+        type: 'tool_started',
+        event_id: 'evt-tool',
+        tool_use_id: 'call-1',
+        name: 'read',
+        input: { filePath: 'src/App.tsx' },
+      });
+      emit({
+        type: 'assistant_message',
+        event_id: 'evt-text',
+        provider_message_id: 'msg-1',
+        content: [{ type: 'text', text: '先看这个文件：' }],
+      });
+      emit({
+        type: 'tool_finished',
+        event_id: 'evt-tool-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const textIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some((block) => block.type === 'text' && block.text === '先看这个文件：')
+      ));
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+
+      expect(textIndex).toBeGreaterThanOrEqual(0);
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(textIndex).toBeLessThan(toolAssistantIndex);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps Claude answer deltas out of the thinking stream', async () => {
     vi.useFakeTimers();
     let emitEvent: ((event: string) => void) | undefined;

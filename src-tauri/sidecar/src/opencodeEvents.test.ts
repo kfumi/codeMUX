@@ -746,8 +746,11 @@ describe('OpenCode event normalization', () => {
         type: 'message.part.updated',
         properties: { sessionID: 'opencode-session-1', part: { id: 'tool-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'pending', input: {} } } },
       }, ctx);
-      const toolTypes = toolPending.map((event) => event.type);
-      expect(toolTypes.indexOf('assistant_message')).toBeLessThan(toolTypes.indexOf('tool_started') ?? -1);
+      const assistantIndex = toolPending.findIndex((event) => event.type === 'assistant_message');
+      const toolIndex = toolPending.findIndex((event) => event.type === 'tool_started');
+      expect(assistantIndex).toBeGreaterThanOrEqual(0);
+      expect(toolIndex).toBeGreaterThanOrEqual(0);
+      expect(assistantIndex).toBeLessThan(toolIndex);
       expect(toolPending.find((event) => event.type === 'assistant_message')).toMatchObject({
         provider_message_id: 'msg-1:txt-1',
         content: [{ type: 'text', text: '关键在 canReuse——' }],
@@ -772,6 +775,23 @@ describe('OpenCode event normalization', () => {
         supersedes_provider_message_ids: ['msg-1:txt-1'],
         content: [{ type: 'text', text: '关键在 canReuse——查 canReuse 的判断条件:' }],
       });
+    });
+
+    it('flushes narration before tool when text deltas arrive before the start marker', () => {
+      const ctx = streamingContext({ idleStreamKind: { kind: 'text' } });
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'txt-1', messageID: 'msg-1', field: 'text', delta: '字符串匹配 contains' },
+      }, ctx);
+      const toolPending = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'tool-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'edit', state: { status: 'pending', input: {} } } },
+      }, ctx);
+      const assistantIndex = toolPending.findIndex((event) => event.type === 'assistant_message');
+      const toolIndex = toolPending.findIndex((event) => event.type === 'tool_started');
+      expect(assistantIndex).toBeGreaterThanOrEqual(0);
+      expect(toolIndex).toBeGreaterThanOrEqual(0);
+      expect(assistantIndex).toBeLessThan(toolIndex);
     });
 
     it('emits the final text envelope without supersedes when no tool interrupted', () => {

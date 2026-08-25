@@ -279,6 +279,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         return context.idleStreamKind?.kind === 'text' ? 'text' : 'thinking';
       };
 
+      const deltaMessageId = readString(properties.messageID);
       let partState = context.streamingParts.get(partId);
       if (partState?.streamedByNext) break;
       // When session.next.reasoning is active, field=reasoning is redundant.
@@ -287,11 +288,15 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const streamKind = partState?.kind ?? resolveStreamKind();
       if (!partState) {
         const index = context.streamingParts.size;
-        partState = { kind: streamKind, index, started: false };
+        partState = { kind: streamKind, index, started: false, ...(deltaMessageId ? { messageId: deltaMessageId } : {}) };
         context.streamingParts.set(partId, partState);
       } else if (partState.buffered) {
         partState.deltaText!.push(delta);
         break;
+      }
+
+      if (deltaMessageId) {
+        partState.messageId = deltaMessageId;
       }
 
       if (!partState.started) {
@@ -693,7 +698,9 @@ function flushUnfinalizedStreamedParts(
 ): void {
   if (!messageId || !context.streamingParts) return;
   for (const [partId, partState] of context.streamingParts) {
-    if (partState.messageId !== messageId) continue;
+    // Delta streaming can begin before part.updated binds messageId; still flush
+    // when the part has no message yet or already belongs to this message.
+    if (partState.messageId != null && partState.messageId !== messageId) continue;
     if (partState.envelopeEmittedText != null) continue;
     const text = partState.streamedText ?? '';
     if (!hasVisibleContent(text)) continue;
