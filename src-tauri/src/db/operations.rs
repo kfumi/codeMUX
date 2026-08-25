@@ -409,7 +409,7 @@ pub fn get_imported_source(
     }))
 }
 
-pub fn get_session_snapshot(conn: &Connection, session_id: &str) -> Result<Option<Vec<Value>>> {
+pub fn get_session_timeline(conn: &Connection, session_id: &str) -> Result<Option<Vec<Value>>> {
     let mut stmt = conn.prepare(
         "SELECT event_json FROM session_event_snapshots WHERE session_id = ?1 ORDER BY sequence ASC",
     )?;
@@ -431,7 +431,7 @@ pub fn get_session_snapshot(conn: &Connection, session_id: &str) -> Result<Optio
     Ok(Some(events))
 }
 
-pub fn replace_session_snapshot(
+pub fn replace_session_timeline(
     conn: &mut Connection,
     session_id: &str,
     events: &[Value],
@@ -441,7 +441,7 @@ pub fn replace_session_snapshot(
         "DELETE FROM session_event_snapshots WHERE session_id = ?1",
         [session_id],
     )?;
-    insert_snapshot_events(&tx, session_id, events)?;
+    insert_timeline_events(&tx, session_id, events)?;
     tx.commit()
 }
 
@@ -487,7 +487,7 @@ pub fn import_session_snapshot(
             "DELETE FROM session_event_snapshots WHERE session_id = ?1",
             [&existing_source.app_session_id],
         )?;
-        insert_snapshot_events(&tx, &existing_source.app_session_id, &snapshot.events)?;
+        insert_timeline_events(&tx, &existing_source.app_session_id, &snapshot.events)?;
         tx.execute(
             "UPDATE sessions SET title = ?1, updated_at = ?2, project_id = COALESCE(?3, project_id), is_read_only = 0 WHERE id = ?4",
             params![snapshot.title, snapshot.updated_at, snapshot.project_id, existing_source.app_session_id],
@@ -546,7 +546,7 @@ pub fn import_session_snapshot(
         "INSERT INTO session_sources (app_session_id, agent_kind, agent_session_id, source_locator, source_fingerprint, source_modified_at, cwd, snapshot_version, imported_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
         params![app_session_id, snapshot.agent_kind.as_str(), snapshot.agent_session_id, snapshot.source_locator, snapshot.source_fingerprint, snapshot.source_modified_at, snapshot.cwd, imported_at],
     )?;
-    insert_snapshot_events(&tx, &app_session_id, &snapshot.events)?;
+    insert_timeline_events(&tx, &app_session_id, &snapshot.events)?;
     tx.commit()?;
 
     Ok((get_session(conn, &app_session_id)?.unwrap(), true))
@@ -566,7 +566,7 @@ fn insert_imported_mapping(
     Ok(())
 }
 
-fn insert_snapshot_events(
+fn insert_timeline_events(
     conn: &rusqlite::Transaction<'_>,
     session_id: &str,
     events: &[Value],
@@ -1322,7 +1322,7 @@ fn session_timeline_bounds(
     Ok((row.get(0)?, row.get(1)?))
 }
 
-pub fn append_snapshot_events(
+pub fn append_timeline_events(
     conn: &mut Connection,
     session_id: &str,
     events: &[Value],
@@ -1375,12 +1375,12 @@ pub fn append_snapshot_events(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_snapshot_events, archive_session, create_forked_session,
+        append_timeline_events, archive_session, create_forked_session,
         delete_agent_session_mapping,
         delete_session_message_attachments_from_index, fetch_session_timeline, get_agent_distribution,
         get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
         get_model_distribution, get_session, get_session_events_after,
-        get_session_snapshot, get_usage_heatmap,
+        get_session_timeline, get_usage_heatmap,
         get_usage_overview, import_session_snapshot,
         list_native_sessions_for_cleanup, set_session_pinned,
         set_session_read_only, unarchive_session,
@@ -2102,7 +2102,7 @@ mod tests {
             "codex-import-1"
         );
 
-        let events = get_session_snapshot(&conn, &created.id).unwrap().unwrap();
+        let events = get_session_timeline(&conn, &created.id).unwrap().unwrap();
         assert_eq!(events[0]["session_id"], created.id);
         assert_eq!(events[0]["event_id"], "event-1");
 
@@ -2159,17 +2159,17 @@ mod tests {
     }
 
     #[test]
-    fn append_snapshot_events_increments_sequence() {
+    fn append_timeline_events_increments_sequence() {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();
         insert_test_session(&conn, "session-1", "claude_code");
 
         let first =
             serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" });
-        append_snapshot_events(&mut conn, "session-1", &[first]).unwrap();
+        append_timeline_events(&mut conn, "session-1", &[first]).unwrap();
         let second =
             serde_json::json!({ "type": "assistant_message", "event_id": "e2", "content": [] });
-        append_snapshot_events(&mut conn, "session-1", &[second]).unwrap();
+        append_timeline_events(&mut conn, "session-1", &[second]).unwrap();
 
         let events = get_session_events_after(&conn, "session-1", -1).unwrap();
         assert_eq!(events.len(), 2);
@@ -2184,7 +2184,7 @@ mod tests {
         let events: Vec<Value> = (0..5)
             .map(|index| serde_json::json!({ "type": "user_message", "event_id": format!("e{index}") }))
             .collect();
-        append_snapshot_events(&mut conn, "session-1", &events).unwrap();
+        append_timeline_events(&mut conn, "session-1", &events).unwrap();
 
         let tail = fetch_session_timeline(
             &conn,

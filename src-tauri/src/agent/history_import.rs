@@ -180,7 +180,7 @@ pub async fn load_session_events(
 
     let timeline = {
         let db = state.db.lock().unwrap();
-        operations::get_session_snapshot(&db, &app_session_id).map_err(|error| error.to_string())?
+        operations::get_session_timeline(&db, &app_session_id).map_err(|error| error.to_string())?
     };
 
     if timeline.as_ref().is_some_and(|events| !events.is_empty()) {
@@ -201,7 +201,7 @@ pub async fn load_session_events(
             load_native_session_events(state.clone(), &app_session_id, agent_kind).await?;
         if !native_events.is_empty() {
             let mut db = state.db.lock().unwrap();
-            operations::replace_session_snapshot(&mut db, &app_session_id, &native_events)
+            operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
                 .map_err(|error| error.to_string())?;
             return Ok(native_events);
         }

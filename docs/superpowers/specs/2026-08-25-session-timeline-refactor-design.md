@@ -340,9 +340,9 @@ ALTER TABLE sessions ADD COLUMN timeline_history_complete INTEGER NOT NULL DEFAU
 -- ALTER TABLE session_event_snapshots RENAME TO session_timeline_events;
 ```
 
-- [ ] 删废弃表/列
-- [ ] 代码中 `snapshot` → `timeline` 命名收敛（可选）
-- [ ] 更新 ADR 0003 / ADR 0008；ADR 0007 标 superseded
+- [x] 删废弃表/列
+- [x] 代码中 `snapshot` → `timeline` 命名收敛（`timeline_persist`、DB 操作函数；物理表名 `session_event_snapshots` 保留）
+- [x] 更新 ADR 0003 / ADR 0008；ADR 0007 标 superseded
 
 **风险**：低。
 
@@ -353,7 +353,7 @@ ALTER TABLE sessions ADD COLUMN timeline_history_complete INTEGER NOT NULL DEFAU
 | 组件 | 原因 |
 |------|------|
 | `session_event_snapshots` 表 | Timeline 物理存储 |
-| `snapshot_persist.rs` | 实时 append 管道（可重命名为 `timeline_persist.rs`） |
+| `timeline_persist.rs` | 实时 append 管道 |
 | ADR 0003 Event 类型与 sidecar adapter | wire 格式统一 |
 | `agent_session_mappings` | runtime resume |
 | Native history loaders | hydration 输入 |

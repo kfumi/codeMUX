@@ -22,6 +22,7 @@ accepted
 6. **移动端形态为 PWA，不重写原生壳。** 桌面 server 同时托管移动端静态页，扫码即打开。首版复用共享纯 TS 逻辑，DOM 组件针对手机重写（轻量渲染：markdown 正文、工具/思考折叠、文件变更降级为列表；不做 xterm/diff 富渲染）。
 7. **移动端前端为同仓 `src-mobile/`。** 独立 Vite + React + Tailwind 应用，与桌面端共享类型与纯逻辑模块，共享部分继续被 vitest 覆盖。
 8. **断连行为：** IndexedDB 本地只读缓存（会话列表 + 已看到的事件）+ 自动重连 + 基于 Event Sequence 的增量追赶；断连期间可看历史，发消息仍需在线。
+9. **Timeline 分页同步（2026-08）：** Companion 提供 `GET /api/sessions/{id}/timeline`（`direction=tail|after|before`）。WS 连接初始只 replay 尾部页（默认 200 条）；客户端以 `sequence` 检测缺口，循环 `direction=after` 直至 `hasNewer=false`。旧 `GET .../events?after=` 保留为兼容别名。
 
 ## Considered Options
 

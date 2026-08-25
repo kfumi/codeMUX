@@ -19,6 +19,7 @@
 5. 错误事件描述原因，Turn Outcome 描述最终状态；前端不再从 provider 字段推导最终状态。
 6. 批处理属于 transport concern。传输层可以批量发送连续增量事件，但进入 store 前必须展开为单条 CodeMUX Event。
 7. Event Sequence 在会话内单调递增。重复事件在 Sidecar 去重；发现缺口时产生诊断但继续处理后续事件；重复结束事件不得生成第二个结果。
+8. **Timeline 权威存储**：领域事件持久化在 SQLite `session_event_snapshots`（物理表名保留；代码中称 Timeline）。桌面 UI、Companion、搜索默认只读 Timeline；native provider loader 仅在 Timeline 为空且会话为 `origin=native` 时做一次 hydration，或经显式「从 provider 刷新」入口写入。实时 append 经 `timeline_persist.rs`；模型上下文仍由 native session resume 负责，与 Timeline 显示可短暂不一致。
 
 ## 事件分类
 

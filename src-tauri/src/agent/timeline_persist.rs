@@ -67,17 +67,17 @@ pub(crate) fn append_domain_events(
         Err(_) => return,
     };
 
-    if let Err(error) = operations::append_snapshot_events(&mut db, session_id, &persistable) {
+    if let Err(error) = operations::append_timeline_events(&mut db, session_id, &persistable) {
         warn!(
             target: "agent",
-            "Failed to persist snapshot events for session_id={}: {}",
+            "Failed to persist timeline events for session_id={}: {}",
             session_id,
             error
         );
     }
 }
 
-pub(crate) fn handle_sidecar_snapshot_event(state: &crate::AppState, raw_event: &str) {
+pub(crate) fn handle_sidecar_timeline_event(state: &crate::AppState, raw_event: &str) {
     let Ok(value) = serde_json::from_str::<Value>(raw_event) else {
         return;
     };

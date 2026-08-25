@@ -184,6 +184,16 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
     }
 
+    let has_pending_switch_briefing: bool = conn
+        .prepare("SELECT pending_switch_briefing FROM sessions LIMIT 0")
+        .is_ok();
+    if has_pending_switch_briefing {
+        let _ = conn.execute(
+            "ALTER TABLE sessions DROP COLUMN pending_switch_briefing",
+            [],
+        );
+    }
+
     let has_origin: bool = conn.prepare("SELECT origin FROM sessions LIMIT 0").is_ok();
     if !has_origin {
         let _ = conn.execute(

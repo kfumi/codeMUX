@@ -12,7 +12,7 @@ pub(crate) mod native_jsonl;
 pub(crate) mod opencode_history;
 pub(crate) mod rewind;
 pub(crate) mod session_lifecycle;
-pub(crate) mod snapshot_persist;
+pub(crate) mod timeline_persist;
 
 use log::{debug, info, warn};
 use std::io;

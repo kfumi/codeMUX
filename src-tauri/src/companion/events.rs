@@ -1,7 +1,7 @@
 use log::warn;
 use tauri::{AppHandle, Manager};
 
-use crate::agent::snapshot_persist::{
+use crate::agent::timeline_persist::{
     append_domain_events, is_code_mux_domain_event, should_persist_domain_event,
 };
 use crate::companion::actions::send_companion_message;
@@ -125,7 +125,7 @@ fn broadcast_event(companion_state: &CompanionState, session_id: &str, event: se
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::snapshot_persist::{is_code_mux_domain_event, should_persist_domain_event};
+    use crate::agent::timeline_persist::{is_code_mux_domain_event, should_persist_domain_event};
 
     #[test]
     fn recognizes_codemux_domain_events() {

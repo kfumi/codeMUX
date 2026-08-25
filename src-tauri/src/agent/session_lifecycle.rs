@@ -455,7 +455,7 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
-                    crate::agent::snapshot_persist::handle_sidecar_snapshot_event(
+                    crate::agent::timeline_persist::handle_sidecar_timeline_event(
                         app_state.inner(),
                         &event,
                     );
