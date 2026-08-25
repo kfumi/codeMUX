@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import {
   AtSign,
-  Bot,
   Brain,
   Check,
   ChevronDown,
@@ -39,8 +38,6 @@ import type { CompanionConnection } from '../lib/storage';
 import { buildMobileContextUsage, formatMobileTokens, type MobileContextUsage } from '../lib/contextUsage';
 import { cn } from '../lib/utils';
 import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
-import { AgentBrandIcon } from '@/components/agent/AgentBrandIcon';
-import { getAgentDefinition } from '@/types/agentRegistry';
 import {
   codexWorkflowModeToExecutionMode,
   isOpenCodeAutoApproveEnabled,
@@ -49,12 +46,6 @@ import {
   resolveEffectivePermissionConfig,
   type AgentExecutionMode,
 } from '@shared/lib/agentPermissions';
-
-const AGENT_OPTIONS: Array<{ id: MobileAgentKind; label: string }> = [
-  { id: 'claude_code', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-];
 
 const PERMISSION_OPTIONS: Record<MobileAgentKind, Array<{ mode: AgentExecutionMode; label: string }>> = {
   claude_code: [
@@ -559,7 +550,7 @@ export function MobileComposer({
   const [cursor, setCursor] = useState(0);
   const [attachments, setAttachments] = useState<MobileInputAttachment[]>([]);
   const [context, setContext] = useState<MobileComposerContext | null>(null);
-  const [agentKind, setAgentKind] = useState<MobileAgentKind>(sessionAgentKind);
+  const agentKind = sessionAgentKind;
   const [providerId, setProviderId] = useState(session.provider_id ?? '');
   const [model, setModel] = useState(session.model ?? '');
   const [reasoningEffort, setReasoningEffort] = useState(session.reasoning_effort ?? 'high');
@@ -578,7 +569,6 @@ export function MobileComposer({
   const contextRequestRef = useRef(0);
 
   useEffect(() => {
-    setAgentKind(sessionAgentKind);
     setProviderId(session.provider_id ?? '');
     setModel(session.model ?? '');
     setReasoningEffort(session.reasoning_effort ?? 'high');
@@ -671,8 +661,6 @@ export function MobileComposer({
     && !busy
     && canSubmitComposer(text, attachments.length);
   const SelectedPermissionIcon = PERMISSION_ICONS[permissionMode];
-  const selectedAgent = AGENT_OPTIONS.find((option) => option.id === agentKind);
-  const selectedAgentDefinition = getAgentDefinition(agentKind);
   const selectedPermission = PERMISSION_OPTIONS[agentKind].find((option) => option.mode === permissionMode);
   const openCodeAutoApprove = useMemo(
     () => parseOpenCodeAutoApprove(session.permission_config),
@@ -1091,15 +1079,6 @@ export function MobileComposer({
                 <ContextUsageSummary usage={contextUsage} />
               </ToolbarPopover>
             ) : null}
-          </div>
-
-          <div className="relative">
-            <ToolbarMenuButton
-              disabled
-              icon={Bot}
-              iconNode={selectedAgentDefinition ? <AgentBrandIcon agent={selectedAgentDefinition} size="sm" /> : undefined}
-              label={`智能体：${selectedAgent?.label ?? agentKind}`}
-            />
           </div>
 
           <div className="relative">

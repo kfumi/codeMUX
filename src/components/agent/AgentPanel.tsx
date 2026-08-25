@@ -28,7 +28,6 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { AgentModelSelector } from './AgentModelSelector';
-import { AgentSelector } from './AgentSelector';
 import {
   checkProfileModelSupports1m,
   formatModelDisplayName,
@@ -485,13 +484,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   configuredContextWindow={configuredContextWindow}
                   disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(
-                    <>
-                      <AgentSelector
-                        value={agentKind}
-                        disabled
-                        onChange={() => {}}
-                      />
-                      <AgentModelSelector
+                    <AgentModelSelector
                       agentKind={agentKind}
                       providers={modelProviders}
                       activeProviderId={runtimeProvider?.id ?? activeProviderId}
@@ -503,7 +496,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       disabled={isRunning || isReadOnly}
                       compact={compact}
                     />
-                    </>
                   )}
                   permissionSelector={(
                     <AgentPermissionSelector
