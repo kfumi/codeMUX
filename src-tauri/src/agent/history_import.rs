@@ -178,45 +178,84 @@ pub async fn load_session_events(
         .map(|session| session.agent_kind)
         .unwrap_or(AgentKind::ClaudeCode);
 
-    let snapshot = {
+    let timeline = {
         let db = state.db.lock().unwrap();
         operations::get_session_snapshot(&db, &app_session_id).map_err(|error| error.to_string())?
     };
 
-    let native_events = match agent_kind {
+    if timeline.as_ref().is_some_and(|events| !events.is_empty()) {
+        return Ok(timeline.unwrap_or_default());
+    }
+
+    let has_mapping = {
+        let db = state.db.lock().unwrap();
+        has_native_mapping(&db, &app_session_id, agent_kind)?
+    };
+    let should_hydrate = session
+        .as_ref()
+        .map(|session| should_hydrate_timeline_from_native(session, &timeline, has_mapping))
+        .unwrap_or(false);
+
+    if should_hydrate {
+        let native_events =
+            load_native_session_events(state.clone(), &app_session_id, agent_kind).await?;
+        if !native_events.is_empty() {
+            let mut db = state.db.lock().unwrap();
+            operations::replace_session_snapshot(&mut db, &app_session_id, &native_events)
+                .map_err(|error| error.to_string())?;
+            return Ok(native_events);
+        }
+    }
+
+    Ok(timeline.unwrap_or_default())
+}
+
+fn has_native_mapping(
+    conn: &Connection,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<bool, String> {
+    operations::get_agent_session_mapping(conn, app_session_id, agent_kind)
+        .map_err(|error| error.to_string())
+        .map(|mapping| mapping.is_some())
+}
+
+pub(crate) fn should_hydrate_timeline_from_native(
+    session: &operations::Session,
+    timeline: &Option<Vec<Value>>,
+    has_mapping: bool,
+) -> bool {
+    timeline.as_ref().is_none_or(Vec::is_empty)
+        && session.origin == "native"
+        && has_mapping
+}
+
+async fn load_native_session_events(
+    state: State<'_, crate::AppState>,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<Vec<Value>, String> {
+    match agent_kind {
         AgentKind::ClaudeCode => {
             crate::agent::commands::load_claude_session_events(
-                state.clone(),
-                app_session_id.clone(),
+                state,
+                app_session_id.to_string(),
             )
             .await
         }
         AgentKind::Codex => {
-            crate::agent::commands::load_codex_session_events(state.clone(), app_session_id.clone())
+            crate::agent::commands::load_codex_session_events(state, app_session_id.to_string())
                 .await
         }
         AgentKind::Opencode => {
             crate::agent::commands::load_opencode_session_events(
-                state.clone(),
-                app_session_id.clone(),
+                state,
+                app_session_id.to_string(),
             )
             .await
         }
         AgentKind::GeminiCli => Ok(Vec::new()),
-    }?;
-
-    if !native_events.is_empty() {
-        let mut db = state.db.lock().unwrap();
-        operations::replace_session_snapshot(&mut db, &app_session_id, &native_events)
-            .map_err(|error| error.to_string())?;
-        return Ok(native_events);
     }
-
-    if let Some(events) = snapshot {
-        return Ok(events);
-    }
-
-    Ok(Vec::new())
 }
 
 fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, String> {
@@ -593,5 +632,43 @@ mod tests {
             .any(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished")));
 
         let _ = fs::remove_dir_all(home);
+    }
+
+    fn test_session(origin: &str) -> operations::Session {
+        operations::Session {
+            id: "session-1".to_string(),
+            title: "Test".to_string(),
+            agent_kind: AgentKind::Opencode,
+            provider_id: None,
+            model: None,
+            reasoning_effort: None,
+            mode: Some("agent".to_string()),
+            permission_config: None,
+            plan_mode: None,
+            project_id: None,
+            origin: origin.to_string(),
+            is_read_only: false,
+            is_archived: false,
+            is_pinned: false,
+            working_path: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            parent_session_id: None,
+        }
+    }
+
+    #[test]
+    fn hydrates_only_empty_native_timelines_with_mapping() {
+        let session = test_session("native");
+        let timeline = Some(vec![serde_json::json!({"type": "user_message"})]);
+
+        assert!(!super::should_hydrate_timeline_from_native(&session, &timeline, true));
+        assert!(!super::should_hydrate_timeline_from_native(&session, &None, false));
+        assert!(!super::should_hydrate_timeline_from_native(
+            &test_session("imported"),
+            &None,
+            true,
+        ));
+        assert!(super::should_hydrate_timeline_from_native(&session, &None, true));
     }
 }

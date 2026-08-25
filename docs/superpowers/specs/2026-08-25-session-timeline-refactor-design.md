@@ -225,8 +225,8 @@ return Ok(timeline.unwrap_or_default());
 
 ### 任务清单
 
-- [ ] 重写 `load_session_events`：只读 timeline + 空时 hydration
-- [ ] 删除 native 覆盖 timeline 逻辑
+- [x] 重写 `load_session_events`：只读 timeline + 空时 hydration
+- [x] 删除 native 覆盖 timeline 逻辑
 - [ ] 加强 sidecar vs history loader 等价性测试（重点 OpenCode）
 - [ ] 桌面重开会话回归：消息与实时对话时一致
 
