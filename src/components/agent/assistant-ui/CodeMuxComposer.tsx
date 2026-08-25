@@ -217,6 +217,7 @@ export function CodeMuxComposer({
     activeProviderUsesLargeContext: false,
   }), [configuredContextWindow, modelName, tokenUsage]);
   const commands = useMemo(() => getAllCommands(agentKind, projectSkills), [agentKind, projectSkills]);
+  const showComposerPlanControls = agentKind === 'codex';
   const formatter = useMemo(
     () => createCodeMuxFormatter(agentKind, projectSkills),
     [agentKind, projectSkills],
@@ -621,19 +622,21 @@ export function CodeMuxComposer({
                     <FilePlus2 className="h-4 w-4 text-muted-foreground" />
                     <span>选择文件</span>
                   </button>
-                  <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => { onActivatePlanMode?.(); setAddMenuOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
-                  >
-                    <ListTodo className="h-4 w-4" />
-                    <span>计划模式</span>
-                  </button>
+                  {showComposerPlanControls && onActivatePlanMode ? (
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { onActivatePlanMode(); setAddMenuOpen(false); }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
+                    >
+                      <ListTodo className="h-4 w-4" />
+                      <span>计划模式</span>
+                    </button>
+                  ) : null}
                 </PopoverContent>
               </Popover>
                 {permissionSelector}
-                {planMode === 'on' && onTogglePlanMode ? (
+                {showComposerPlanControls && planMode === 'on' && onTogglePlanMode ? (
                   // Active Plan indicator — entry lives in the add (+) menu;
                   // clicking the chip exits plan mode without touching the tier.
                   <TooltipHint content="计划模式：先规划再实施（点击关闭）">

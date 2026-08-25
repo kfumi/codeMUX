@@ -990,12 +990,12 @@ export function MobileComposer({
                   description="输入 / 搜索命令或技能"
                   onClick={() => activateTrigger('/')}
                 />
-                {agentKind !== 'opencode' ? (
+                {agentKind === 'codex' ? (
                   <ToolbarMenuItem
                     active={planMode === 'on'}
                     icon={ClipboardList}
                     label={planMode === 'on' ? '关闭计划模式' : '计划模式'}
-                    description={agentKind === 'codex' ? '正交开关：不改变当前权限档位' : '先分析和规划，不直接修改'}
+                    description="正交开关：不改变当前权限档位"
                     onClick={() => {
                       handlePlanToggle();
                       setOpenMenu(null);

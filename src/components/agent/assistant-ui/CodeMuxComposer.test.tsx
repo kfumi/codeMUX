@@ -354,29 +354,43 @@ describe('CodeMuxComposer', () => {
     expect(editorSetTextMock).not.toHaveBeenCalled();
   });
 
-  it('renders the add menu with file and plan mode options', () => {
-    render(<CodeMuxComposer sessionId="session-1" />);
+  it('renders the add menu with file attachment for Claude Code', () => {
+    render(<CodeMuxComposer sessionId="session-1" agentKind="claude_code" />);
 
     fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
 
     expect(screen.getByText('选择文件')).toBeTruthy();
+    expect(screen.queryByText('计划模式')).toBeNull();
+  });
+
+  it('renders plan mode in the add menu only for Codex', () => {
+    render(<CodeMuxComposer sessionId="session-1" agentKind="codex" onActivatePlanMode={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
+
     expect(screen.getByText('计划模式')).toBeTruthy();
   });
 
-  it('shows the active plan indicator only while plan mode is on', () => {
+  it('shows the active plan indicator only for Codex while plan mode is on', () => {
     const onTogglePlanMode = vi.fn();
     const { rerender } = render(
-      <CodeMuxComposer sessionId="session-1" planMode="off" onTogglePlanMode={onTogglePlanMode} />,
+      <CodeMuxComposer sessionId="session-1" agentKind="codex" planMode="off" onTogglePlanMode={onTogglePlanMode} />,
     );
 
-    // No standing plan toggle in the toolbar; entry lives in the add menu.
-    expect(screen.queryByRole('button', { name: '开启计划模式' })).toBeNull();
     expect(screen.queryByRole('button', { name: '关闭计划模式' })).toBeNull();
 
-    rerender(<CodeMuxComposer sessionId="session-1" planMode="on" onTogglePlanMode={onTogglePlanMode} />);
+    rerender(<CodeMuxComposer sessionId="session-1" agentKind="codex" planMode="on" onTogglePlanMode={onTogglePlanMode} />);
 
     fireEvent.click(screen.getByRole('button', { name: '关闭计划模式' }));
     expect(onTogglePlanMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show the active plan chip for Claude Code', () => {
+    render(
+      <CodeMuxComposer sessionId="session-1" agentKind="claude_code" planMode="on" onTogglePlanMode={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole('button', { name: '关闭计划模式' })).toBeNull();
   });
 
   it('renders assistant-ui image attachment previews without a filename label', () => {
