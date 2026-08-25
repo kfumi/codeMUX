@@ -915,6 +915,9 @@ export class OpenCodeRuntime {
     this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
+    this.streamingParts.clear();
+    this.nextSection.kind = 'idle';
+    this.idleStreamKind.kind = 'thinking';
     this.turnStartedAt = 0;
   }
 

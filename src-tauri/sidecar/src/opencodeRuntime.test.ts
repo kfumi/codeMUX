@@ -827,6 +827,20 @@ describe('OpenCodeRuntime', () => {
     });
   });
 
+  it('forwards declared input modalities to the SDK port via modelLimits', async () => {
+    const { port } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig({
+      modelLimits: { inputModalities: ['text', 'image'] },
+    }), port);
+
+    await runtime.start();
+
+    expect(port.start).toHaveBeenCalledWith(expect.objectContaining({
+      modelLimits: { inputModalities: ['text', 'image'] },
+    }));
+    await runtime.shutdown();
+  });
+
   it('reuses one start promise for concurrent start calls', async () => {
     const { port, server, client } = createPort();
     const startResources = deferred<{ server: typeof server; client: typeof client }>();

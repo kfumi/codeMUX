@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { getOpenCodeEventIdentity, getOpenCodePayloadKey, toCodeMuxEvent, type OpenCodeEventContext } from './opencodeEvents.js';
 
 function context(overrides: Partial<OpenCodeEventContext> = {}): OpenCodeEventContext {
@@ -723,6 +723,74 @@ describe('OpenCode event normalization', () => {
       expect(textStop).toHaveLength(2);
       expect(textStop[0]).toMatchObject({ event: { type: 'content_block_stop', index: 1 } });
       expect(textStop[1]).toMatchObject({ type: 'assistant_message', content: [{ type: 'text', text: 'Hello' }] });
+    });
+
+    it('flushes streamed narration before tool events and supersedes it on late finalization', () => {
+      // Live-order regression: OpenCode can finalize a text part AFTER tool
+      // parts of the same message. The narration must be committed before the
+      // tool events, and the late finalization must replace it in place.
+      const ctx = streamingContext();
+
+      // 1. Narration streams via deltas (no envelope yet).
+      toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'txt-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: '' } },
+      }, ctx);
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'txt-1', messageID: 'msg-1', field: 'text', delta: '关键在 canReuse——' },
+      }, ctx);
+
+      // 2. Tool part updates arrive before the text part finalizes.
+      const toolPending = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'tool-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'pending', input: {} } } },
+      }, ctx);
+      const toolTypes = toolPending.map((event) => event.type);
+      expect(toolTypes.indexOf('assistant_message')).toBeLessThan(toolTypes.indexOf('tool_started') ?? -1);
+      expect(toolPending.find((event) => event.type === 'assistant_message')).toMatchObject({
+        provider_message_id: 'msg-1:txt-1',
+        content: [{ type: 'text', text: '关键在 canReuse——' }],
+      });
+
+      // 3. The completed tool update must not flush a second envelope.
+      const toolDone = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'tool-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'completed', input: {}, output: 'ok' } } },
+      }, ctx);
+      expect(toolDone.map((event) => event.type)).not.toContain('assistant_message');
+
+      // 4. Late text finalization emits the full text, superseding the provisional envelope.
+      const finalized = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'txt-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: '关键在 canReuse——查 canReuse 的判断条件:' } },
+      }, ctx);
+      expect(finalized).toHaveLength(2);
+      expect(finalized[1]).toMatchObject({
+        type: 'assistant_message',
+        provider_message_id: 'msg-1',
+        supersedes_provider_message_ids: ['msg-1:txt-1'],
+        content: [{ type: 'text', text: '关键在 canReuse——查 canReuse 的判断条件:' }],
+      });
+    });
+
+    it('emits the final text envelope without supersedes when no tool interrupted', () => {
+      const ctx = streamingContext();
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'txt-1', messageID: 'msg-1', field: 'text', delta: 'Hello' },
+      }, ctx);
+      const finalized = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'txt-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: 'Hello' } },
+      }, ctx);
+      expect(finalized).toHaveLength(2);
+      expect(finalized[1]).toMatchObject({
+        type: 'assistant_message',
+        provider_message_id: 'msg-1',
+        content: [{ type: 'text', text: 'Hello' }],
+      });
+      expect(finalized[1].supersedes_provider_message_ids).toBeUndefined();
     });
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
 import { ChevronDownIcon, WrenchIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
@@ -209,19 +209,10 @@ const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
   active = false,
 }) => {
   const toolCount = endIndex - startIndex + 1;
-  const [open, setOpen] = useState(active);
-
-  useEffect(() => {
-    if (active) {
-      setOpen(true);
-    }
-  }, [active]);
 
   return (
     <ToolGroupRoot
       variant="ghost"
-      open={open}
-      onOpenChange={setOpen}
       data-active={active ? 'true' : 'false'}
     >
       <ToolGroupTrigger count={toolCount} toolNames={toolNames} active={active} />

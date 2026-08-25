@@ -90,6 +90,7 @@ export interface OpenCodeSdkStartInput {
     contextWindow?: number;
     maxInputTokens?: number;
     maxOutputTokens?: number;
+    inputModalities?: string[];
   };
 }
 
@@ -118,6 +119,7 @@ export interface OpenCodeServerConfigInput {
     contextWindow?: number;
     maxInputTokens?: number;
     maxOutputTokens?: number;
+    inputModalities?: string[];
   };
 }
 
@@ -143,6 +145,7 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
         id: input.model,
         name: input.model,
         ...buildOpenCodeModelLimit(input.modelLimits),
+        ...buildOpenCodeModelModalities(input.modelLimits),
       },
     },
     ...(adapter ? { npm: adapter, name: adapter === '@ai-sdk/openai-compatible' ? 'CodeMUX OpenAI-compatible' : 'CodeMUX Anthropic' } : {}),
@@ -198,6 +201,27 @@ function buildOpenCodeModelLimit(modelLimits: OpenCodeServerConfigInput['modelLi
     limit.output = DEFAULT_OPENCODE_OUTPUT_TOKENS;
   }
   return Object.keys(limit).length > 0 ? { limit } : {};
+}
+
+const OPENCODE_INPUT_MODALITIES = new Set(['text', 'audio', 'image', 'video', 'pdf']);
+
+export function buildOpenCodeModelModalities(modelLimits: OpenCodeServerConfigInput['modelLimits']): {
+  modalities?: { input: string[]; output: string[] };
+} {
+  const input: string[] = [];
+  for (const modality of modelLimits?.inputModalities ?? []) {
+    const normalized = modality.trim().toLowerCase();
+    if (normalized && OPENCODE_INPUT_MODALITIES.has(normalized) && !input.includes(normalized)) {
+      input.push(normalized);
+    }
+  }
+  if (input.length === 0) {
+    return {};
+  }
+  if (!input.includes('text')) {
+    input.unshift('text');
+  }
+  return { modalities: { input, output: ['text'] } };
 }
 function normalizeOpenCodeBaseUrl(baseUrl: string): string {
   let normalized = baseUrl.trim().replace(/\/+$/, '');

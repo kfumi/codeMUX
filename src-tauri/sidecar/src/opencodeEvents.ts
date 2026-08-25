@@ -14,6 +14,13 @@ export type StreamingPartState = {
   buffered?: true;
   deltaText?: string[];
   streamedByNext?: true;
+  messageId?: string;
+  /** Text streamed through part.delta so far (may still be growing). */
+  streamedText?: string;
+  /** Text already committed into an assistant_message envelope for this part. */
+  envelopeEmittedText?: string;
+  /** Synthetic provider_message_id of a provisional envelope that the final envelope supersedes. */
+  provisionalEnvelopeId?: string;
 };
 
 export type NextSectionKind = 'idle' | 'reasoning' | 'text';
@@ -151,6 +158,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (messageId && context.userMessageIds?.has(messageId) && partType !== 'compaction') break;
       const partState = partId ? context.streamingParts?.get(partId) : undefined;
       if (partType === 'text' || partType === 'reasoning') {
+        const finalizedKind = partType === 'reasoning' ? 'thinking' : 'text';
         if (partState?.buffered) {
           if (partType === 'reasoning') partState.kind = 'thinking';
           else if (partType === 'text') partState.kind = 'text';
@@ -163,12 +171,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             }
             events.push(buildStreamEvent(context.sessionId, { type: 'content_block_stop', index: 0 }));
           }
-          if (hasVisibleContent(text)) {
-            events.push(buildAssistantEnvelope(context, sessionId, [{
-              type: partState.kind,
-              ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
-            }], messageId));
-          }
+          if (messageId) partState.messageId = messageId;
+          finalizeStreamedPart(context, sessionId, partState, messageId ?? '', finalizedKind, text, events);
           if (context.idleStreamKind && partType === 'text') context.idleStreamKind.kind = 'text';
         } else if (partState) {
           // Authoritative part type wins over provisional stream kind.
@@ -181,13 +185,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           if (partState.started) {
             events.push(buildStreamEvent(context.sessionId, { type: 'content_block_stop', index: partState.index }));
           }
-          const text = readString(properties.delta) ?? readString(part.text) ?? '';
-          if (hasVisibleContent(text)) {
-            events.push(buildAssistantEnvelope(context, sessionId, [{
-              type: partState.kind,
-              ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
-            }], messageId));
-          }
+          const text = readString(part.text) ?? readString(properties.delta) ?? '';
+          finalizeStreamedPart(context, sessionId, partState, messageId ?? '', finalizedKind, text, events);
           // Only advance idleStreamKind to 'text' when a text part finalizes.
           // A reasoning part finalizing does NOT mean subsequent parts are text —
           // OpenCode may emit multiple reasoning parts within one turn.
@@ -204,24 +203,22 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           // the authoritative kind from partType so subsequent part.delta
           // events stream into the correct block (thinking vs text) instead
           // of falling back to the unreliable idleStreamKind heuristic.
+          const text = readString(part.text) ?? readString(properties.delta) ?? '';
+          let createdState: StreamingPartState | undefined;
           if (partId && context.streamingParts) {
             const index = context.streamingParts.size;
-            const kind = partType === 'reasoning' ? 'thinking' : 'text';
-            context.streamingParts.set(partId, { kind, index, started: false });
+            const kind = finalizedKind;
+            createdState = { kind, index, started: false };
+            context.streamingParts.set(partId, createdState);
           }
-          const text = readString(properties.delta) ?? readString(part.text) ?? '';
-          if (hasVisibleContent(text)) {
-            events.push(buildAssistantEnvelope(context, sessionId, [{
-              type: partType === 'reasoning' ? 'thinking' : 'text',
-              ...(partType === 'reasoning' ? { thinking: text } : { text }),
-            }], messageId));
-          }
+          finalizeStreamedPart(context, sessionId, createdState, messageId ?? '', finalizedKind, text, events);
           // Only advance idleStreamKind to 'text' when a text part is seen.
           if (context.idleStreamKind && partType === 'text') {
             context.idleStreamKind.kind = 'text';
           }
         }
       } else if (partType === 'tool') {
+        flushUnfinalizedStreamedParts(context, sessionId, messageId, events);
         const state = asRecord(part.state);
         const callId = readString(part.callID) ?? readString(part.id) ?? 'unknown-tool';
         if (context.terminalToolIds?.has(callId)) break;
@@ -237,6 +234,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           events.push(buildToolFinishedEvent(context, callId, output, status === 'error'));
         }
       } else if (partType === 'subtask') {
+        flushUnfinalizedStreamedParts(context, sessionId, messageId, events);
         const prompt = readString(part.prompt) ?? '';
         const description = readString(part.description) ?? '';
         const agent = readString(part.agent) ?? '';
@@ -306,6 +304,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             : { type: 'text', text: '' },
         }));
       }
+      partState.streamedText = (partState.streamedText ?? '') + delta;
       events.push(buildStreamEvent(context.sessionId, {
         type: 'content_block_delta',
         index: partState.index,
@@ -454,6 +453,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             content_block: { type: 'thinking', thinking: '' },
           }));
         }
+        partState.streamedText = (partState.streamedText ?? '') + deltaText;
         events.push(buildStreamEvent(context.sessionId, {
           type: 'content_block_delta',
           index: partState.index,
@@ -655,12 +655,14 @@ function buildAssistantEnvelope(
   sessionId: string | undefined,
   content: Array<Record<string, unknown>>,
   providerMessageId?: string,
+  supersedesProviderMessageIds?: string[],
 ): CodeMuxEvent {
   return {
     type: 'assistant_message',
     session_id: context.sessionId,
     content: content as AssistantContentBlock[],
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
+    ...(supersedesProviderMessageIds?.length ? { supersedes_provider_message_ids: supersedesProviderMessageIds } : {}),
     event_id: context.eventIdFactory(),
     ...routingMetadata(context, sessionId),
   };
@@ -673,6 +675,66 @@ function buildStreamEvent(sessionId: string | undefined, event: unknown): CodeMu
     ...(sessionId ? { session_id: sessionId } : {}),
     event_id: crypto.randomUUID(),
   };
+}
+
+/**
+ * OpenCode can finalize a text/reasoning part AFTER tool parts of the same
+ * message have already been emitted (the SDK event order disagrees with the
+ * stored part order). Left alone, the narration text lands after the tools.
+ * Before emitting tool lifecycle events, commit whatever text has already
+ * streamed for the message as a provisional assistant_message envelope so it
+ * keeps its chronological position; the final part.updated supersedes it.
+ */
+function flushUnfinalizedStreamedParts(
+  context: OpenCodeEventContext,
+  sessionId: string | undefined,
+  messageId: string | undefined,
+  events: CodeMuxEvent[],
+): void {
+  if (!messageId || !context.streamingParts) return;
+  for (const [partId, partState] of context.streamingParts) {
+    if (partState.messageId !== messageId) continue;
+    if (partState.envelopeEmittedText != null) continue;
+    const text = partState.streamedText ?? '';
+    if (!hasVisibleContent(text)) continue;
+    const provisionalId = `${messageId}:${partId}`;
+    events.push(buildAssistantEnvelope(context, sessionId, [{
+      type: partState.kind,
+      ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
+    }], provisionalId));
+    partState.envelopeEmittedText = text;
+    partState.provisionalEnvelopeId = provisionalId;
+  }
+}
+
+/**
+ * Commit the final text of a text/reasoning part. Emits nothing when the text
+ * was already fully committed (e.g. by a provisional flush); otherwise emits
+ * the full text, superseding any provisional envelope so the frontend can
+ * replace it in place instead of appending a duplicate.
+ */
+function finalizeStreamedPart(
+  context: OpenCodeEventContext,
+  sessionId: string | undefined,
+  partState: StreamingPartState | undefined,
+  messageId: string,
+  kind: 'thinking' | 'text',
+  text: string,
+  events: CodeMuxEvent[],
+): void {
+  if (partState) {
+    partState.kind = kind;
+    partState.messageId = messageId;
+  }
+  if (!hasVisibleContent(text)) return;
+  const committed = partState?.envelopeEmittedText;
+  if (committed != null && text === committed) return;
+  const provisionalId = partState?.provisionalEnvelopeId;
+  events.push(buildAssistantEnvelope(context, sessionId, [{
+    type: kind,
+    ...(kind === 'thinking' ? { thinking: text } : { text }),
+  }], messageId, provisionalId ? [provisionalId] : undefined));
+  if (partState) partState.envelopeEmittedText = text;
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {

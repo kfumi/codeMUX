@@ -286,10 +286,14 @@ describe('AppServerTransport (fake app-server)', () => {
         clientInfo: { name: 'codemux', title: 'CodeMUX', version: '0.1.0' },
         capabilities: { experimentalApi: true },
       });
-      const initialized = log.find(
-        (entry) => entry.direction === 'received' && entry.message?.method === 'initialized',
-      );
-      expect(initialized).toBeDefined();
+        const initialized = await vi.waitFor(() => {
+          const entry = readLog().find(
+            (candidate) => candidate.direction === 'received' && candidate.message?.method === 'initialized',
+          );
+          expect(entry).toBeDefined();
+          return entry;
+        });
+        expect(initialized).toBeDefined();
     } finally {
       await transport.stop();
     }

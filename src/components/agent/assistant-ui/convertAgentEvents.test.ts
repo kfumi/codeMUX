@@ -1703,6 +1703,81 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('drops duplicate tool calls with the same id inside one assistant event', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-dup-in-event',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-dup',
+                name: 'Bash',
+                input: { command: 'echo first' },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-dup',
+                name: 'Bash',
+                input: { command: 'echo second' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content.filter((part) => part.type === 'tool-call')).toHaveLength(1);
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-dup',
+      args: { command: 'echo first' },
+    });
+  });
+
+  it('drops duplicate tool calls replayed across consecutive assistant events', () => {
+    const toolUseEvent = (uuid: string): AgentMessage => ({
+      kind: 'assistant',
+      data: {
+        type: 'assistant',
+        uuid,
+        session_id: 'session-1',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call-replayed',
+              name: 'Read',
+              input: { path: 'package.json' },
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+    });
+
+    const messages = convertAgentEventsToAssistantMessages([
+      toolUseEvent('assistant-replay-original'),
+      toolUseEvent('assistant-replay-duplicate'),
+    ]);
+
+    const toolCalls = messages.flatMap((message) =>
+      message.content.filter((part) => part.type === 'tool-call'),
+    );
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]).toMatchObject({ toolCallId: 'call-replayed' });
+  });
+
   it('renders only the compact marker for Claude compact turns', () => {
     const events: AgentMessage[] = [
       {

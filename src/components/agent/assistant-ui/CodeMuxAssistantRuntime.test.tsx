@@ -2769,8 +2769,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(toggle);
 
+    const executedTrigger = screen.getByRole('button', { name: /已执行/ });
+    fireEvent.click(executedTrigger);
+
     expect(screen.getByText('编辑')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /已执行/ })).toBeNull();
     expect(screen.getByText('1 个文件已更改').closest('[data-message-row]')).toBe(textRow);
   });
 

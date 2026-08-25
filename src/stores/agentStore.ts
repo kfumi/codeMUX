@@ -2125,8 +2125,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             ),
           );
           const thinkingOnly = Boolean(thinkingBlock && !textBlock && !hasToolUse);
+          // Superseding events must replace their target in place; routing them
+          // through the simulated-stream buffer would append them at the end.
+          const supersedesExisting = Array.isArray(event.data.supersedes) && event.data.supersedes.length > 0;
           const shouldSimulate = Boolean(
             !hasToolUse
+            && !supersedesExisting
             && !currentStreamingText
             && !currentStreamingThinking
             && (textBlock || thinkingBlock),
@@ -2227,12 +2231,23 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           const supersededAssistantIds = event.kind === 'assistant' && Array.isArray(event.data.supersedes)
             ? new Set(event.data.supersedes)
             : null;
-          const baseEvents = supersededAssistantIds && supersededAssistantIds.size > 0
-            ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds.has(entry.data.uuid))
+          const hasSuperseded = Boolean(supersededAssistantIds && supersededAssistantIds.size > 0);
+          const supersededMatchIndex = hasSuperseded
+            ? prev.findIndex((entry) => entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid))
+            : -1;
+          const baseEvents = hasSuperseded
+            ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds!.has(entry.data.uuid))
             : prev;
           // Replace the previous placeholder instead of stacking duplicates.
           let newEvents: AgentMessage[];
-          if (event.kind === 'stream_status' && event.data.is_reconnecting) {
+          if (supersededMatchIndex >= 0) {
+            // Superseding an earlier assistant event replaces it in place so
+            // late-finalizing content keeps its original timeline position.
+            newEvents = prev
+              .filter((entry, index) => index === supersededMatchIndex
+                || !(entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid)))
+              .map((entry, index) => (index === supersededMatchIndex ? event : entry));
+          } else if (event.kind === 'stream_status' && event.data.is_reconnecting) {
             newEvents = replaceLastOrAppend(baseEvents, event, isReconnectingStreamStatus);
           } else if (
             event.kind === 'compact' &&

@@ -59,6 +59,17 @@ describe('ToolGroupTrigger', () => {
     expect(container.querySelector('[data-slot="tool-group-trigger-shimmer"]')?.className).toContain('shimmer');
   });
 
+  it('defaults to collapsed even while tools are running', () => {
+    const { container } = render(
+      <ToolGroup startIndex={0} endIndex={1} toolNames={['Read', 'Bash']} active>
+        <div>工具详情</div>
+      </ToolGroup>,
+    );
+
+    expect(container.querySelector('[data-slot="tool-group-root"]')?.getAttribute('data-state')).toBe('closed');
+    expect(container.querySelector('[data-slot="tool-group-content"]')?.getAttribute('data-state')).toBe('closed');
+  });
+
   it('summarizes MCP grouped tools by server name only', () => {
     const { container } = renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
 

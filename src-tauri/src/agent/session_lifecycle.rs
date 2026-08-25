@@ -109,7 +109,7 @@ fn agent_timeouts(
     }
 }
 
-fn resolve_codex_input_modalities(provider_model: &ProviderModel) -> Vec<String> {
+fn resolve_model_input_modalities(provider_model: &ProviderModel) -> Vec<String> {
     let mut modalities = vec!["text".to_string()];
     let mut has_image = false;
 
@@ -245,8 +245,8 @@ fn resolve_active_runtime_config(
                     serde_json::Value::Number(context_window.into()),
                 );
             }
-            if agent_kind == AgentKind::Codex {
-                let modalities = resolve_codex_input_modalities(provider_model);
+            if matches!(agent_kind, AgentKind::Codex | AgentKind::Opencode) {
+                let modalities = resolve_model_input_modalities(provider_model);
                 limits.insert(
                     "inputModalities".to_string(),
                     serde_json::Value::Array(
@@ -1914,6 +1914,55 @@ mod tests {
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex-vision").unwrap();
+        let limits = resolved.model_limits.expect("model limits");
+        assert_eq!(
+            limits["inputModalities"],
+            serde_json::json!(["text", "image"])
+        );
+    }
+
+    #[test]
+    fn forwards_opencode_input_modalities_in_model_limits() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-opencode-vision",
+                "OpenCode",
+                "opencode",
+                "opencode-provider",
+                "glm-4.7-flash",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let mut provider = test_model_provider(
+            "opencode-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "glm-4.7-flash",
+            &["glm-4.7-flash"],
+            Some(true),
+        );
+        provider.models[0].input_modalities = Some(vec!["text".to_string(), "image".to_string()]);
+
+        let mut config = crate::config::types::AppConfig::default();
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("opencode-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-opencode-vision").unwrap();
+        assert_eq!(resolved.provider.as_deref(), Some("codemux-openai"));
         let limits = resolved.model_limits.expect("model limits");
         assert_eq!(
             limits["inputModalities"],

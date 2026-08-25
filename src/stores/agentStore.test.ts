@@ -62,6 +62,7 @@ vi.mock('../lib/tauri', () => ({
     updateTitle: vi.fn(),
     updateProvider: vi.fn(),
     updatePermissions: vi.fn(() => Promise.resolve()),
+    updateWorkingPath: vi.fn(() => Promise.resolve()),
     touch: vi.fn(() => Promise.resolve()),
     saveMessageAttachments: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
@@ -1226,6 +1227,84 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().pendingPermissions[session.id]).toMatchObject([
       { request_id: 'permission-local' },
     ]);
+  });
+
+  it('replaces superseded assistant events in place to keep timeline order', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('opencode');
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'late narration', 'D:\\project\\ai-code\\codeMUX');
+
+      const emit = (payload: Record<string, unknown>) => {
+        emitEvent?.(JSON.stringify({ session_id: session.id, ...payload }));
+      };
+
+      // Live OpenCode order: thinking → provisional narration → tools → late final narration.
+      emit({
+        type: 'assistant_message',
+        event_id: 'evt-think',
+        provider_message_id: 'msg-1',
+        content: [{ type: 'thinking', thinking: 't' }],
+      });
+      emit({
+        type: 'assistant_message',
+        event_id: 'evt-text-prov',
+        provider_message_id: 'msg-1:part-1',
+        content: [{ type: 'text', text: 'partial narration' }],
+      });
+      emit({
+        type: 'tool_started',
+        event_id: 'evt-tool',
+        tool_use_id: 'call-1',
+        name: 'bash',
+        input: {},
+      });
+      emit({
+        type: 'tool_finished',
+        event_id: 'evt-tool-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      emit({
+        type: 'assistant_message',
+        event_id: 'evt-text-final',
+        provider_message_id: 'msg-1',
+        supersedes_provider_message_ids: ['msg-1:part-1'],
+        content: [{ type: 'text', text: 'full narration' }],
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const textOf = (event: AgentMessage) => (
+        event.kind === 'assistant'
+          ? (event.data.message.content as Array<{ type: string; text?: string }>)
+            .filter((block) => block.type === 'text')
+            .map((block) => block.text ?? '')
+            .join('')
+            : ''
+        );
+        const finalTextIndex = events.findIndex((event) => textOf(event) === 'full narration');
+      const toolResultIndex = events.findIndex((event) => event.kind === 'tool_result');
+
+      expect(finalTextIndex).toBeGreaterThanOrEqual(0);
+      expect(events.some((event) => textOf(event) === 'partial narration')).toBe(false);
+      // The late final narration must keep the provisional event's position,
+      // i.e. stay before the tool events instead of being appended at the end.
+      expect(finalTextIndex).toBeLessThan(toolResultIndex);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps Claude answer deltas out of the thinking stream', async () => {

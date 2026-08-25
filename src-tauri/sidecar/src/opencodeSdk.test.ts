@@ -254,6 +254,60 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('declares input modalities on the model entry for vision-capable models', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      credentialSource: 'codemux',
+      modelLimits: {
+        inputModalities: ['text', 'image'],
+      },
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          models: {
+            'glm-4.7-flash': {
+              modalities: { input: ['text', 'image'], output: ['text'] },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('normalizes input modalities and always keeps text first', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      credentialSource: 'codemux',
+      modelLimits: {
+        inputModalities: ['IMAGE', 'weird', '  ', 'image'],
+      },
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          models: {
+            'glm-4.7-flash': {
+              modalities: { input: ['text', 'image'], output: ['text'] },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('omits modalities when the model declares none', () => {
+    const config = buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      credentialSource: 'codemux',
+    });
+    expect(config.provider?.['codemux-openai']?.models?.['glm-4.7-flash']).toEqual({
+      id: 'glm-4.7-flash',
+      name: 'glm-4.7-flash',
+    });
+  });
+
   it('uses the OpenAI-compatible AI SDK adapter for a custom OpenAI endpoint', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'codemux-openai',

@@ -96,9 +96,22 @@ export function convertAgentEventsToAssistantMessages(
         return;
       }
 
+      const seenToolCallIds = new Set<string>();
       const parts = event.data.message.content
         .flatMap((block, blockIndex) => convertContentBlockToParts(block, index, blockIndex))
-        .filter((part) => !isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds));
+        .filter((part) => {
+          if (part.type !== 'tool-call') {
+            return true;
+          }
+          if (
+            isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds)
+            || isDuplicateToolCall(part.toolCallId, toolCallLocationById, seenToolCallIds)
+          ) {
+            return false;
+          }
+          seenToolCallIds.add(part.toolCallId);
+          return true;
+        });
 
       if (parts.length > 0) {
         const message = createMessage(
@@ -575,6 +588,14 @@ function createAskUserQuestionToolCallPart(
     result: undefined,
     isError: undefined,
   };
+}
+
+function isDuplicateToolCall(
+  toolCallId: string,
+  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
+  seenInBatch: Set<string>,
+): boolean {
+  return toolCallLocationById.has(toolCallId) || seenInBatch.has(toolCallId);
 }
 
 function isDuplicateAskUserQuestionToolCall(
