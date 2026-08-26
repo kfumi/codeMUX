@@ -159,8 +159,21 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(() => convertAgentEventsToAssistantMessages(events)).not.toThrow();
   });
 
-  it('renders assistant narration before a pending tool call when live events arrive out of order', () => {
+  it('renders assistant narration before a pending tool call when events follow store timeline order', () => {
     const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-text-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '让我再次尝试调用 Context7 工具：' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
       {
         kind: 'assistant',
         data: {
@@ -177,19 +190,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
                 input: { libraryName: 'Context7' },
               },
             ],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-text-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: '让我再次尝试调用 Context7 工具：' }],
           },
           parent_tool_use_id: null,
         },
@@ -226,6 +226,78 @@ describe('convertAgentEventsToAssistantMessages', () => {
         toolName: 'mcp__context7__resolve-library-id',
         args: { libraryName: 'Context7' },
         result: '{"libraryId":"/upstash/context7"}',
+        isError: false,
+      },
+    ]);
+  });
+
+  it('renders assistant narration before a finished tool when events follow store timeline order', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-text-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '先看两个页面的现状——' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'bash',
+                input: { command: 'pwd' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'tool-1',
+                content: 'ok',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content).toEqual([{ type: 'text', text: '先看两个页面的现状——' }]);
+    expect(messages[1]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        args: { command: 'pwd' },
+        result: 'ok',
         isError: false,
       },
     ]);

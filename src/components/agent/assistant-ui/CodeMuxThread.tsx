@@ -1517,13 +1517,16 @@ function getLastAssistantText(events: AgentMessage[]): string {
       continue;
     }
 
-    return event.data.message.content
+    const text = event.data.message.content
       .filter((block): block is { type: 'text'; text: string } =>
         block?.type === 'text' && typeof block.text === 'string',
       )
       .map((block) => block.text)
       .join('')
       .trim();
+    if (text) {
+      return text;
+    }
   }
 
   return '';
@@ -1536,13 +1539,16 @@ function getLastAssistantThinking(events: AgentMessage[]): string {
       continue;
     }
 
-    return event.data.message.content
+    const thinking = event.data.message.content
       .filter((block): block is { type: 'thinking'; thinking: string } =>
         block?.type === 'thinking' && typeof block.thinking === 'string',
       )
       .map((block) => block.thinking)
       .join('')
       .trim();
+    if (thinking) {
+      return thinking;
+    }
   }
 
   return '';

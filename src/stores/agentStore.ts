@@ -339,6 +339,7 @@ function applyStreamingBuffer(
   recordStreamingTelemetry(sessionId, 'uiUpdates');
   set((state) => {
     const updates: Partial<AgentState> = {};
+    let nextTextPreview = state.streamingText[sessionId] || '';
 
     if (buffer.thinking) {
       updates.streamingThinking = {
@@ -348,9 +349,35 @@ function applyStreamingBuffer(
     }
 
     if (buffer.text) {
+      nextTextPreview = appendStreamingPreview(nextTextPreview, buffer.text);
       updates.streamingText = {
         ...state.streamingText,
-        [sessionId]: appendStreamingPreview(state.streamingText[sessionId] || '', buffer.text),
+        [sessionId]: nextTextPreview,
+      };
+    }
+
+    if (buffer.text && getSessionStreamPhase(sessionId) === 'answer' && nextTextPreview.trim()) {
+      const uuid = liveStreamNarrationUuid(sessionId);
+      const liveEvent: AgentMessage = {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid,
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: nextTextPreview }],
+          },
+          parent_tool_use_id: null,
+        },
+      };
+      const prevEvents = state.events[sessionId] || [];
+      const existingIndex = prevEvents.findIndex((entry) => isLiveStreamNarrationEvent(entry, sessionId));
+      updates.events = {
+        ...state.events,
+        [sessionId]: existingIndex >= 0
+          ? prevEvents.map((entry, index) => (index === existingIndex ? liveEvent : entry))
+          : [...prevEvents, liveEvent],
       };
     }
 
@@ -449,7 +476,7 @@ function isNarrationOnlyAssistantEvent(event: AgentMessage): boolean {
   ));
 }
 
-function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessage[]): boolean {
+function isToolOnlyAssistantEvent(event: AgentMessage): boolean {
   if (event.kind !== 'assistant') {
     return false;
   }
@@ -457,7 +484,15 @@ function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessa
   if (!Array.isArray(content) || content.length === 0) {
     return false;
   }
-  if (!content.every((block: { type?: string }) => block?.type === 'tool_use')) {
+  return content.every((block: { type?: string }) => block?.type === 'tool_use');
+}
+
+function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessage[]): boolean {
+  if (!isToolOnlyAssistantEvent(event)) {
+    return false;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content)) {
     return false;
   }
   return content.every((block: { type?: string; id?: string }) => {
@@ -474,19 +509,159 @@ function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessa
   });
 }
 
+function narrationTextFromAssistantEvent(event: AgentMessage): string | undefined {
+  if (!isNarrationOnlyAssistantEvent(event)) {
+    return undefined;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return undefined;
+  }
+  const text = content
+    .map((block: { type?: string; text?: string }) => (block?.type === 'text' ? block.text : ''))
+    .join('');
+  return text.trim().length > 0 ? text : undefined;
+}
+
 function findNarrationAssistantInsertionIndex(events: AgentMessage[]): number | undefined {
   let insertAt: number | undefined;
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+    if (event?.kind === 'tool_result') {
+      continue;
+    }
     if (event?.kind !== 'assistant') {
       break;
     }
-    if (!isPendingToolOnlyAssistantEvent(event, events)) {
+    if (!isToolOnlyAssistantEvent(event)) {
       break;
     }
     insertAt = index;
   }
   return insertAt;
+}
+
+function findReplaceableLiveNarrationIndex(
+  events: AgentMessage[],
+  text: string,
+  sessionId: string,
+): number | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind === 'tool_result') {
+      continue;
+    }
+    if (event?.kind !== 'assistant') {
+      break;
+    }
+    if (isLiveStreamNarrationEvent(event, sessionId)) {
+      return index;
+    }
+    if (isToolOnlyAssistantEvent(event)) {
+      continue;
+    }
+    if (isNarrationOnlyAssistantEvent(event)) {
+      const existingText = narrationTextFromAssistantEvent(event);
+      if (
+        existingText
+        && (
+          existingText === text
+          || existingText.startsWith(text)
+          || text.startsWith(existingText)
+        )
+      ) {
+        return index;
+      }
+      break;
+    }
+    break;
+  }
+  return undefined;
+}
+
+function commitLiveStreamingNarration(
+  sessionId: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+  get: () => AgentState,
+): boolean {
+  flushPendingStreaming(sessionId, set);
+  const prev = get().events[sessionId] || [];
+  const liveIndex = prev.findIndex((entry) => isLiveStreamNarrationEvent(entry, sessionId));
+  if (liveIndex >= 0) {
+    set((state) => ({
+      streamingText: { ...state.streamingText, [sessionId]: '' },
+      streamingVersion: {
+        ...state.streamingVersion,
+        [sessionId]: (state.streamingVersion[sessionId] ?? 0) + 1,
+      },
+    }));
+    sessionsWithLiveTextStream.delete(sessionId);
+    return true;
+  }
+
+  const text = get().streamingText[sessionId]?.trim();
+  if (!text) {
+    return false;
+  }
+
+  const now = Date.now();
+  const event: AgentMessage = {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: liveStreamNarrationUuid(sessionId),
+      session_id: sessionId,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+      },
+      parent_tool_use_id: null,
+    },
+  };
+
+  set((state) => ({
+    events: {
+      ...state.events,
+      [sessionId]: [...(state.events[sessionId] || []), event],
+    },
+    eventTimestamps: {
+      ...state.eventTimestamps,
+      [sessionId]: [...(state.eventTimestamps[sessionId] || []), now],
+    },
+    streamingText: { ...state.streamingText, [sessionId]: '' },
+    streamingVersion: {
+      ...state.streamingVersion,
+      [sessionId]: (state.streamingVersion[sessionId] ?? 0) + 1,
+    },
+  }));
+  sessionsWithLiveTextStream.delete(sessionId);
+  return true;
+}
+
+const LIVE_STREAM_NARRATION_UUID_PREFIX = 'live-stream-narration:';
+
+function liveStreamNarrationUuid(sessionId: string): string {
+  return `${LIVE_STREAM_NARRATION_UUID_PREFIX}${sessionId}`;
+}
+
+function isLiveStreamNarrationEvent(event: AgentMessage, sessionId: string): boolean {
+  return event.kind === 'assistant' && event.data?.uuid === liveStreamNarrationUuid(sessionId);
+}
+
+function removeLiveStreamNarrationEvent(
+  sessionId: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+): void {
+  set((state) => {
+    const prev = state.events[sessionId] || [];
+    const next = prev.filter((entry) => !isLiveStreamNarrationEvent(entry, sessionId));
+    if (next.length === prev.length) {
+      return {};
+    }
+    return {
+      events: { ...state.events, [sessionId]: next },
+    };
+  });
 }
 
 function queueStreamingDelta(
@@ -2129,6 +2304,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
           flushPendingStreaming(sessionId, set);
           const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
+          const incomingToolOnly = blocks.length > 0 && blocks.every((block: { type?: string }) => block?.type === 'tool_use');
+          if (incomingToolOnly) {
+            commitLiveStreamingNarration(sessionId, set, get);
+          }
           // Collect all tool_use IDs already present in events (covers race condition)
           const existingToolIds = new Set<string>();
           for (const prevEvt of (get().events[sessionId] || [])) {
@@ -2325,10 +2504,18 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             && isNarrationOnlyAssistantEvent(event)
             && !hasSuperseded
           ) {
-            const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
-            newEvents = insertAt != null
-              ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
-              : [...baseEvents, event];
+            const narrationText = narrationTextFromAssistantEvent(event);
+            const replaceAt = narrationText != null
+              ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+              : undefined;
+            if (replaceAt != null) {
+              newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+            } else {
+              const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
+              newEvents = insertAt != null
+                ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
+                : [...baseEvents, event];
+            }
           } else {
             newEvents = [...baseEvents, event];
           }

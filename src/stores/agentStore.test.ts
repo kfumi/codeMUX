@@ -1519,6 +1519,126 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('inserts late narration before a finished tool when sidecar finalizes text after tool_finished', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('opencode');
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'late narration after tool finished', 'D:\\project\\ai-code\\codeMUX');
+
+      const emit = (payload: Record<string, unknown>) => {
+        emitEvent?.(JSON.stringify({ session_id: session.id, ...payload }));
+      };
+
+      emit({
+        type: 'tool_started',
+        event_id: 'evt-tool',
+        tool_use_id: 'call-1',
+        name: 'bash',
+        input: { command: 'pwd' },
+      });
+      emit({
+        type: 'tool_finished',
+        event_id: 'evt-tool-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      emit({
+        type: 'assistant_message',
+        event_id: 'evt-text',
+        provider_message_id: 'msg-1',
+        content: [{ type: 'text', text: '先看两个页面的现状——' }],
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const textIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some((block) => block.type === 'text' && block.text === '先看两个页面的现状——')
+      ));
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+
+      expect(textIndex).toBeGreaterThanOrEqual(0);
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(textIndex).toBeLessThan(toolAssistantIndex);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('commits live streaming narration before tool_started interrupts answer streaming', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('claude_code');
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream then tool', 'D:\\project\\ai-code\\codeMUX');
+
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_start', content_block: { type: 'text' } },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '先看两个页面的现状——' } },
+      }));
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('先看两个页面的现状——');
+
+      emitEvent?.(JSON.stringify({
+        session_id: session.id,
+        type: 'tool_started',
+        event_id: 'evt-tool',
+        tool_use_id: 'call-1',
+        name: 'bash',
+        input: { command: 'pwd' },
+      }));
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const textIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some((block) => block.type === 'text' && block.text === '先看两个页面的现状——')
+      ));
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+      expect(textIndex).toBeGreaterThanOrEqual(0);
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(textIndex).toBeLessThan(toolAssistantIndex);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps Claude answer deltas out of the thinking stream', async () => {
     vi.useFakeTimers();
     let emitEvent: ((event: string) => void) | undefined;

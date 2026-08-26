@@ -121,7 +121,7 @@ export function convertAgentEventsToAssistantMessages(
           event,
           index,
         );
-        const messageIndex = getAssistantInsertionIndex(messages, message) ?? messages.length;
+        const messageIndex = messages.length;
         const mergedMessageIndex = mergeIntoPreviousToolOnlyMessage(
           messages,
           message,
@@ -697,7 +697,7 @@ function getAssistantInsertionIndex(
       break;
     }
 
-    if (!isPendingToolOnlyAssistantMessage(message)) {
+    if (!isToolOnlyAssistantMessage(message)) {
       break;
     }
 
@@ -716,7 +716,7 @@ function isNarrationOnlyAssistantMessage(message: CodeMuxAssistantMessage): bool
 }
 
 function isPendingToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
-  if (message.role !== 'assistant' || message.content.length === 0) {
+  if (!isToolOnlyAssistantMessage(message)) {
     return false;
   }
 

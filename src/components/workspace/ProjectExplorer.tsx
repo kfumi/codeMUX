@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronDown, ChevronRight, FileWarning, Folder, FolderOpen, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, FileWarning, Folder, FolderOpen, Loader2, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fileApi, type FileTreeNode } from '../../lib/tauri';
@@ -7,6 +7,7 @@ import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { TooltipHint } from '../ui/tooltip';
+import { hasLoadedChildren } from './projectExplorerTree';
 
 interface ProjectExplorerProps {
   project: Project;
@@ -33,21 +34,63 @@ function TreeNode({
   node,
   level,
   query,
+  projectPath,
   onOpenFile,
 }: {
   node: FileTreeNode;
   level: number;
   query: string;
+  projectPath: string;
   onOpenFile: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(level === 0 && Boolean(query));
+  const [children, setChildren] = useState<FileTreeNode[]>(() => node.children ?? []);
+  const [childrenLoaded, setChildrenLoaded] = useState(() => hasLoadedChildren(node));
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const isDirectory = node.is_dir;
-  const children = node.children ?? [];
-  const shouldShowChildren = expanded && children.length > 0;
+
+  useEffect(() => {
+    setChildren(node.children ?? []);
+    setChildrenLoaded(hasLoadedChildren(node));
+    setLoadError(null);
+  }, [node]);
 
   useEffect(() => {
     if (query) setExpanded(true);
   }, [query]);
+
+  const loadChildren = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const fetched = await fileApi.listDirectory(node.path, 1, projectPath, true);
+      setChildren(fetched);
+      setChildrenLoaded(true);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [node.path, projectPath]);
+
+  const handleClick = useCallback(() => {
+    if (!isDirectory) {
+      onOpenFile(node.path);
+      return;
+    }
+
+    const nextExpanded = !expanded;
+    if (nextExpanded && !childrenLoaded) {
+      setExpanded(true);
+      void loadChildren();
+      return;
+    }
+
+    setExpanded(nextExpanded);
+  }, [children, childrenLoaded, expanded, isDirectory, loadChildren, node, onOpenFile]);
+
+  const showChildArea = expanded && (loading || loadError || children.length > 0);
 
   return (
     <div>
@@ -58,13 +101,7 @@ function TreeNode({
           'text-[hsl(var(--sidebar-fg))]/72 hover:bg-[hsl(var(--sidebar-muted))]/80 hover:text-[hsl(var(--sidebar-fg))]',
         )}
         style={{ paddingLeft: `${level * 14 + 10}px` }}
-        onClick={() => {
-          if (isDirectory) {
-            setExpanded((value) => !value);
-          } else {
-            onOpenFile(node.path);
-          }
-        }}
+        onClick={handleClick}
       >
         {isDirectory ? (
           expanded ? (
@@ -85,18 +122,37 @@ function TreeNode({
           <FileTypeIcon filePath={node.path} className="h-3.5 w-3.5" />
         )}
         <span className="truncate">{node.name}</span>
+        {loading && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-[hsl(var(--sidebar-fg))]/35" />}
       </button>
-      {shouldShowChildren && (
+      {showChildArea && (
         <div>
-          {children.map((child) => (
-            <TreeNode
-              key={child.path}
-              node={child}
-              level={level + 1}
-              query={query}
-              onOpenFile={onOpenFile}
-            />
-          ))}
+          {loading && children.length === 0 ? (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-[hsl(var(--sidebar-fg))]/38"
+              style={{ paddingLeft: `${(level + 1) * 14 + 10}px` }}
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              加载中
+            </div>
+          ) : loadError ? (
+            <div
+              className="px-2 py-1 text-ui-micro text-[hsl(var(--destructive))]/75"
+              style={{ paddingLeft: `${(level + 1) * 14 + 10}px` }}
+            >
+              {loadError}
+            </div>
+          ) : (
+            children.map((child) => (
+              <TreeNode
+                key={child.path}
+                node={child}
+                level={level + 1}
+                query={query}
+                projectPath={projectPath}
+                onOpenFile={onOpenFile}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
@@ -205,7 +261,14 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
           </div>
         ) : (
           visibleNodes.map((node) => (
-            <TreeNode key={node.path} node={node} level={0} query={query} onOpenFile={handleOpenFile} />
+            <TreeNode
+              key={node.path}
+              node={node}
+              level={0}
+              query={query}
+              projectPath={project.path}
+              onOpenFile={handleOpenFile}
+            />
           ))
         )}
       </div>
