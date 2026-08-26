@@ -301,6 +301,49 @@ describe('OpenCode event normalization', () => {
     expect(textDelta).toEqual([]);
   });
 
+  it('suppresses compaction summary streaming while compaction summary is in flight', () => {
+    const assistantMessageIdsBeforeCompaction = new Set(['build-message-1']);
+    const reasoningPart = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'part-compaction-reasoning',
+          messageID: 'compaction-summary-1',
+          sessionID: 'opencode-session-1',
+          type: 'reasoning',
+          text: 'Objective: summarize context',
+        },
+      },
+    }, context({
+      compactionSummaryInFlight: true,
+      assistantMessageIdsBeforeCompaction,
+    }));
+    const buildPart = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'part-build-text',
+          messageID: 'build-message-1',
+          sessionID: 'opencode-session-1',
+          type: 'text',
+          text: 'continue build',
+        },
+      },
+    }, context({
+      compactionSummaryInFlight: true,
+      assistantMessageIdsBeforeCompaction,
+    }));
+
+    expect(reasoningPart).toEqual([]);
+    expect(buildPart).toHaveLength(1);
+    expect(buildPart[0]).toMatchObject({
+      type: 'assistant_message',
+      content: [{ type: 'text', text: 'continue build' }],
+    });
+  });
+
   it('converts V2 native compaction lifecycle events into a compact boundary', () => {
     const started = toCodeMuxEvent({
       type: 'session.next.compaction.started',

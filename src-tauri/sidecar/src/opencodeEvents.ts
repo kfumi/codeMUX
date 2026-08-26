@@ -34,6 +34,10 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   compactionBoundarySessionIds?: Set<string>;
   /** Assistant messages that carry OpenCode compaction summaries (must not render). */
   compactionSummaryMessageIds?: ReadonlySet<string>;
+  /** While OpenCode generates a compaction summary, suppress new assistant stream output. */
+  compactionSummaryInFlight?: boolean;
+  /** Assistant message ids that existed before compaction started. */
+  assistantMessageIdsBeforeCompaction?: ReadonlySet<string>;
   turnId?: number;
   assistantMessageIds?: ReadonlySet<string>;
   userMessageIds?: ReadonlySet<string>;
@@ -158,7 +162,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       // OpenCode stores the compaction marker on the synthetic/user message
       // that triggered compaction. It is still a control event, not user text.
       if (messageId && context.userMessageIds?.has(messageId) && partType !== 'compaction') break;
-      if (messageId && context.compactionSummaryMessageIds?.has(messageId)) break;
+      if (shouldSuppressCompactionSummaryStream(context, messageId)) break;
       const partState = partId ? context.streamingParts?.get(partId) : undefined;
       if (partType === 'text' || partType === 'reasoning') {
         const finalizedKind = partType === 'reasoning' ? 'thinking' : 'text';
@@ -271,7 +275,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const messageId = readString(properties.messageID);
       const field = readString(properties.field);
       const delta = readString(properties.delta);
-      if (messageId && context.compactionSummaryMessageIds?.has(messageId)) break;
+      if (shouldSuppressCompactionSummaryStream(context, messageId)) break;
       if (!partId || !field || !delta || !context.streamingParts) break;
 
       const resolveStreamKind = (): 'thinking' | 'text' => {
@@ -428,6 +432,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     }
     case 'session.next.reasoning.started': {
       const reasoningID = readString(properties.reasoningID);
+      const assistantMessageId = readString(properties.assistantMessageID);
+      if (shouldSuppressCompactionSummaryStream(context, assistantMessageId)) break;
       if (reasoningID && context.streamingParts) {
         const index = context.streamingParts.size;
         context.streamingParts.set(reasoningID, { kind: 'thinking', index, started: false, streamedByNext: true });
@@ -437,6 +443,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     }
     case 'session.next.reasoning.delta': {
       const deltaReasoningID = readString(properties.reasoningID);
+      const assistantMessageId = readString(properties.assistantMessageID);
+      if (shouldSuppressCompactionSummaryStream(context, assistantMessageId)) break;
       const deltaText = readString(properties.delta);
       if (deltaReasoningID && deltaText && context.streamingParts) {
         let partState = context.streamingParts.get(deltaReasoningID);
@@ -761,6 +769,22 @@ function routingMetadata(context: OpenCodeEventContext, sessionId: string | unde
     session_id: context.sessionId,
     ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
   };
+}
+
+function shouldSuppressCompactionSummaryStream(
+  context: OpenCodeEventContext,
+  messageId: string | undefined,
+): boolean {
+  if (!messageId) return false;
+  if (context.compactionSummaryMessageIds?.has(messageId)) return true;
+  if (
+    context.compactionSummaryInFlight
+    && context.assistantMessageIdsBeforeCompaction
+    && !context.assistantMessageIdsBeforeCompaction.has(messageId)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function isOpenCodeSessionScopedEvent(type: string): boolean {

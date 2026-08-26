@@ -275,8 +275,11 @@ describe('agent store Codex history loading', () => {
     const { useAgentStore } = await import('./agentStore');
     const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
+    let firstOnEvent: ((event: string) => void) | undefined;
 
-    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, _onEvent) => {});
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
     await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
@@ -287,9 +290,21 @@ describe('agent store Codex history loading', () => {
     expect(promoted?.prompt).toBe('third message');
     expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
 
-    await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
+    const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
     expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(startSessionMock).toHaveBeenCalledTimes(1);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+
+    await runPromise;
+
     expect(useAgentStore.getState().queuePaused[session.id]).toBe(false);
 
     await vi.waitFor(() => {
@@ -301,6 +316,41 @@ describe('agent store Codex history loading', () => {
     });
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
+  it('keeps isRunning true after runQueuedQueryNow until the promoted turn finishes', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    startSessionMock
+      .mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+        firstOnEvent = onEvent;
+      })
+      .mockImplementationOnce(async () => {});
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'queued second', 'D:\\workspace');
+
+    const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    expect(queued?.prompt).toBe('queued second');
+
+    const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+
+    await runPromise;
+
+    await vi.waitFor(() => {
+      expect(startSessionMock).toHaveBeenCalledTimes(2);
+      expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    });
   });
 
   it('dispatches composer input immediately after a failed turn even when queuePaused', async () => {

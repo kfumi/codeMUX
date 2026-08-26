@@ -247,6 +247,38 @@ const sessionsWithLiveTextStream = new Set<string>();
 const sessionStreamPhase = new Map<string, 'thinking' | 'answer'>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
 
+const INTERRUPT_DRAIN_TIMEOUT_MS = 30_000;
+const interruptDrains = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+
+function beginInterruptDrain(sessionId: string): void {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  interruptDrains.set(sessionId, { promise, resolve });
+}
+
+function resolveInterruptDrain(sessionId: string): void {
+  const entry = interruptDrains.get(sessionId);
+  if (!entry) {
+    return;
+  }
+  entry.resolve();
+  interruptDrains.delete(sessionId);
+}
+
+async function waitForInterruptDrain(sessionId: string): Promise<void> {
+  const entry = interruptDrains.get(sessionId);
+  if (!entry) {
+    return;
+  }
+  await Promise.race([
+    entry.promise,
+    new Promise<void>((resolve) => setTimeout(resolve, INTERRUPT_DRAIN_TIMEOUT_MS)),
+  ]);
+  interruptDrains.delete(sessionId);
+}
+
 function enqueuePendingPermission(
   pendingPermissions: Record<string, AgentPermissionRequest[]>,
   sessionId: string,
@@ -1827,7 +1859,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         ...(userAttachments.length > 0 ? { attachments: userAttachments } : {}),
       },
     };
-    const userTs = Date.now();
+    const queryStartedAt = Date.now();
     set((s) => ({
       events: {
         ...s.events,
@@ -1835,10 +1867,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       },
       eventTimestamps: {
         ...s.eventTimestamps,
-        [sessionId]: [...(s.eventTimestamps[sessionId] || []), userTs],
+        [sessionId]: [...(s.eventTimestamps[sessionId] || []), queryStartedAt],
       },
       isRunning: { ...s.isRunning, [sessionId]: true },
-      queryStartTime: { ...s.queryStartTime, [sessionId]: Date.now() },
+      queryStartTime: { ...s.queryStartTime, [sessionId]: queryStartedAt },
       error: { ...s.error, [sessionId]: null },
       queuePaused: { ...s.queuePaused, [sessionId]: false },
     }));
@@ -1903,11 +1935,20 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }));
       }
 
+      const isActiveQuery = () => get().queryStartTime[sessionId] === queryStartedAt;
+
       const handleEvent = (raw: string) => {
         let event = parseAgentEvent(raw);
         const now = Date.now();
+        const forceStoppedNow = get().forceStopped[sessionId] ?? false;
+        if (forceStoppedNow && (event.kind === 'done' || event.kind === 'error')) {
+          resolveInterruptDrain(sessionId);
+        }
 
         if (event.kind === 'resume_failed') {
+          if (!isActiveQuery()) {
+            return;
+          }
           const message = `外部会话恢复失败，已切换为只读快照：${event.data.error}`;
           void useSessionStore.getState().setSessionReadOnly(sessionId, true).catch((error) => {
             logger.error('Failed to persist imported session read-only state', { sessionId }, serializeError(error));
@@ -2268,9 +2309,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           return;
         }
 
-        const forceStopped = get().forceStopped[sessionId] ?? false;
+        const forceStopped = forceStoppedNow;
         if (forceStopped && shouldSuppressLiveEventWhileStopped(event.kind)) {
           if (event.kind === 'result') {
+            resolveInterruptDrain(sessionId);
             const resultData = event.data;
             clearPendingStreaming(sessionId);
             set((s) => {
@@ -2579,6 +2621,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
 
         if (isTerminalEvent) {
+          if (!isActiveQuery()) {
+            return;
+          }
           clearPendingStreaming(sessionId);
           clearPendingStreamingToolInputs(sessionId);
           const terminalFailed = event.kind === 'error'
@@ -2665,6 +2710,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
 
     logger.info('Interrupting agent query', { sessionId });
+    beginInterruptDrain(sessionId);
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => {
       const { [sessionId]: _removed, ...rest } = s.queryStartTime;
@@ -2736,8 +2782,16 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Promote the chosen message to the front; the remaining messages keep their relative order.
     get().reorderQueuedQuery(sessionId, queryId, 0);
 
+    const wasRunning = get().isRunning[sessionId] ?? false;
+
     // Stop the active turn first (no-op when nothing is running).
     await get().interrupt(sessionId);
+
+    // Wait for the interrupted turn to emit its terminal event before starting the promoted message.
+    // Otherwise a stale terminal can land on the new handler and clear isRunning immediately.
+    if (wasRunning) {
+      await waitForInterruptDrain(sessionId);
+    }
 
     // Interrupting pauses the queue by design — lift the pause so the promoted message runs now.
     get().resumeQueuedQueries(sessionId);

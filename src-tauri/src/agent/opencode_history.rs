@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(events[2]["type"], "result");
         assert_eq!(events[2]["subtype"], "success");
         assert_eq!(events[2]["is_error"], false);
-        assert_eq!(events[2]["duration_ms"], 600);
+        assert_eq!(events[2]["duration_ms"], 1600);
         assert_eq!(events[2]["timestamp"], "1970-01-01T00:00:02.600Z");
         assert!(events[2].get("usage").is_none());
         assert!(events[2].get("last_token_usage").is_none());
@@ -342,7 +342,87 @@ mod tests {
 
         assert_eq!(result_count, 1);
         assert_eq!(result["subtype"], "success");
-        assert_eq!(result["duration_ms"], 400);
+        assert_eq!(result["duration_ms"], 1800);
+    }
+
+    #[test]
+    fn measures_turn_duration_from_user_prompt_through_last_assistant_message() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1_000_000_i64,
+                    1_000_000_i64,
+                    r#"{"role":"user"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-user",
+                    "user-1",
+                    "session-1",
+                    1_000_001_i64,
+                    r#"{"type":"text","text":"hello"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-1",
+                    "session-1",
+                    1_100_000_i64,
+                    1_127_785_i64,
+                    r#"{"role":"assistant","tokens":{"input":3,"output":2}}"#
+                ],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+            rusqlite::params![
+                "part-tool", "assistant-1", "session-1", 1_100_001_i64,
+                r#"{"type":"tool","callID":"call-1","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"ok"}}"#
+            ],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-2",
+                    "session-1",
+                    1_424_456_i64,
+                    1_433_801_i64,
+                    r#"{"role":"assistant","tokens":{"input":3,"output":2}}"#
+                ],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+            rusqlite::params![
+                "part-text", "assistant-2", "session-1", 1_424_457_i64,
+                r#"{"type":"text","text":"done"}"#
+            ],
+        ).unwrap();
+
+        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let result = events
+            .iter()
+            .find(|event| event.get("type").and_then(Value::as_str) == Some("result"))
+            .expect("turn result should exist");
+
+        assert_eq!(result["duration_ms"], 433_801);
+        assert_eq!(result["duration_api_ms"], 433_801);
     }
 
     #[test]
@@ -1540,6 +1620,7 @@ fn load_opencode_events_from_connection(
     let mut events = Vec::new();
     let mut pending_success_result: Option<Value> = None;
     let mut pending_session_summary: Option<Value> = None;
+    let mut turn_start_time: Option<i64> = None;
 
     for row in message_rows {
         let (message_id, time_created, time_updated, data) =
@@ -1764,6 +1845,7 @@ fn load_opencode_events_from_connection(
         if role == "user" {
             flush_pending_opencode_result(&mut events, &mut pending_success_result);
             flush_pending_session_summary(&mut events, &mut pending_session_summary);
+            turn_start_time = Some(time_created);
             events.push(serde_json::json!({
                 "type": "user",
                 "uuid": message_id,
@@ -1876,7 +1958,7 @@ fn load_opencode_events_from_connection(
             pending_success_result = build_opencode_success_result_event(
                 &message_id,
                 session_id,
-                time_created,
+                turn_start_time.unwrap_or(time_created),
                 time_updated,
             );
         }
@@ -1901,10 +1983,10 @@ fn flush_pending_session_summary(events: &mut Vec<Value>, pending: &mut Option<V
 fn build_opencode_success_result_event(
     message_id: &str,
     session_id: &str,
-    time_created: i64,
-    time_updated: i64,
+    turn_started_at: i64,
+    completed_at: i64,
 ) -> Option<Value> {
-    let duration_ms = (time_updated - time_created).max(0);
+    let duration_ms = (completed_at - turn_started_at).max(0);
     Some(serde_json::json!({
         "type": "result",
         "subtype": "success",
@@ -1915,7 +1997,7 @@ fn build_opencode_success_result_event(
         "duration_api_ms": duration_ms,
         "num_turns": 1,
         "result": "ok",
-        "timestamp": timestamp_string(time_updated),
+        "timestamp": timestamp_string(completed_at),
     }))
 }
 
