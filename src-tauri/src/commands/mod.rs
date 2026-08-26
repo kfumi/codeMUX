@@ -10,6 +10,7 @@ pub mod perf;
 pub mod project;
 pub mod provider;
 pub mod runtime;
+pub mod scheduled_tasks;
 pub mod session;
 pub mod system;
 pub mod terminal;

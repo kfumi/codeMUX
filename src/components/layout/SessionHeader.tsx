@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff, RotateCw } from 'lucide-react';
+import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff, RotateCw, Timer } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -119,6 +119,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       <span className="min-w-0 truncate text-ui-title font-semibold text-foreground/88" data-tauri-drag-region>
         {session?.title || '新对话'}
       </span>
+      {session?.origin === 'scheduled' && (
+        <span className="flex shrink-0 items-center gap-1 rounded-md border border-primary/25 bg-primary/8 px-1.5 py-0.5 text-ui-micro font-medium text-primary">
+          <Timer className="h-3 w-3" /> 定时
+        </span>
+      )}
       {session?.origin === 'imported' && (
         <TooltipHint content={session.is_read_only ? '外部会话恢复失败，当前为只读快照' : '来自外部 CLI，可继续原生会话'}>
           <span className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/8 px-1.5 py-0.5 text-ui-micro font-medium text-amber-700 dark:text-amber-300">

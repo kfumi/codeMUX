@@ -3,12 +3,13 @@ import { create } from 'zustand';
 import type { SettingsTab } from '../components/settings/SettingsDialog';
 
 export interface NavigationLocation {
-  view: 'app' | 'settings';
+  view: 'app' | 'settings' | 'automation';
   settingsTab: SettingsTab;
   activeSessionId: string | null;
   activeProjectId: string | null;
   draftProjectId: string | null;
   isDraftOpen: boolean;
+  automationTaskId: string | null;
   sidePanel: {
     scopeId: string;
     isOpen: boolean;
@@ -42,6 +43,7 @@ const initialLocation: NavigationLocation = {
   activeProjectId: null,
   draftProjectId: null,
   isDraftOpen: false,
+  automationTaskId: null,
   sidePanel: {
     scopeId: 'home',
     isOpen: false,

@@ -17,7 +17,7 @@ export interface Session {
   /** Effective agent cwd; set for worktree sessions. */
   working_path?: string | null;
   /** `native` sessions are managed by CodeMUX; imported sessions are snapshots. */
-  origin?: 'native' | 'imported';
+  origin?: 'native' | 'imported' | 'scheduled';
   is_read_only?: boolean;
   created_at: string;
   updated_at: string;

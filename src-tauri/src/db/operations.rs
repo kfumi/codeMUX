@@ -260,6 +260,49 @@ pub fn create_session_for_project_with_permissions(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn create_scheduled_session_for_project(
+    conn: &Connection,
+    title: &str,
+    agent_kind: AgentKind,
+    mode: &str,
+    project_id: &str,
+    permission_config: Option<&str>,
+    plan_mode: Option<&str>,
+    model: Option<&str>,
+) -> Result<Session> {
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let permission_config = permission_config.unwrap_or("");
+    let plan_mode = plan_mode.unwrap_or("off");
+
+    conn.execute(
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, origin, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', 'scheduled', ?9, ?9)",
+        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, now],
+    )?;
+
+    Ok(Session {
+        id,
+        title: title.to_string(),
+        agent_kind,
+        provider_id: None,
+        model: model.map(str::to_string),
+        reasoning_effort: Some("high".to_string()),
+        mode: Some(mode.to_string()),
+        permission_config: Some(permission_config.to_string()),
+        plan_mode: Some(plan_mode.to_string()),
+        project_id: Some(project_id.to_string()),
+        origin: "scheduled".to_string(),
+        is_read_only: false,
+        is_archived: false,
+        is_pinned: false,
+        working_path: None,
+        created_at: now.clone(),
+        updated_at: now,
+        parent_session_id: None,
+    })
+}
+
 pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {SESSION_LIST_SELECT} FROM sessions WHERE id = ?1 LIMIT 1"

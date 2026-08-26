@@ -10,6 +10,7 @@ mod mcp;
 mod model_providers;
 mod provider_profiles;
 mod runtime;
+mod scheduled_tasks;
 mod skills;
 
 use log::{info, warn};
@@ -460,6 +461,14 @@ pub fn run() {
                 });
             }
 
+            let tick_app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    scheduled_tasks::tick_async(&tick_app_handle, chrono::Utc::now()).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+            });
+
             let tray_menu = MenuBuilder::new(app)
                 .text(TRAY_OPEN_ID, "打开 CodeMUX")
                 .separator()
@@ -642,6 +651,14 @@ pub fn run() {
             commands::companion::set_companion_relay_config,
             commands::companion::refresh_companion_pairing_code,
             commands::companion::get_companion_pairing_offer,
+            commands::scheduled_tasks::list_scheduled_tasks,
+            commands::scheduled_tasks::get_scheduled_task,
+            commands::scheduled_tasks::create_scheduled_task,
+            commands::scheduled_tasks::update_scheduled_task,
+            commands::scheduled_tasks::delete_scheduled_task,
+            commands::scheduled_tasks::set_scheduled_task_enabled,
+            commands::scheduled_tasks::list_scheduled_task_runs,
+            commands::scheduled_tasks::get_scheduled_task_timezone,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

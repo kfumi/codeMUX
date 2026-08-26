@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { Download, MessageSquarePlus, Search, Settings } from 'lucide-react';
+import { Download, MessageSquarePlus, Search, Settings, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { createLogger, serializeError } from '../../lib/logger';
@@ -21,6 +21,7 @@ interface SidebarProps {
   onNavigateHome: () => void;
   onSelectSession: (sessionId: string, projectId: string | null) => void;
   onOpenSettings: () => void;
+  onOpenAutomation: () => void;
 }
 
 export function Sidebar({
@@ -29,6 +30,7 @@ export function Sidebar({
   onNavigateHome,
   onSelectSession,
   onOpenSettings,
+  onOpenAutomation,
 }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
@@ -95,6 +97,15 @@ export function Sidebar({
         >
           <Search className="h-4 w-4" />
           <span className="flex-1 text-left">搜索</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenAutomation}
+          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+        >
+          <Timer className="h-4 w-4" />
+          <span className="flex-1 text-left">自动化</span>
         </button>
       </div>
 

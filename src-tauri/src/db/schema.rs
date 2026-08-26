@@ -122,6 +122,48 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            instruction TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            agent_kind TEXT NOT NULL,
+            provider_id TEXT,
+            model TEXT,
+            reasoning_effort TEXT,
+            permission_config TEXT NOT NULL DEFAULT '',
+            plan_mode TEXT NOT NULL DEFAULT 'off',
+            schedule_kind TEXT NOT NULL,
+            schedule_time TEXT NOT NULL DEFAULT '09:00',
+            weekly_weekday INTEGER,
+            monthly_day INTEGER,
+            timezone TEXT NOT NULL DEFAULT '',
+            delivery TEXT NOT NULL DEFAULT 'new_session',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_at TEXT,
+            next_run_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            session_id TEXT,
+            scheduled_for TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            skip_reason TEXT,
+            error TEXT,
+            FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(next_run_at);
+        CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task ON scheduled_task_runs(task_id);
         ",
     )?;
 

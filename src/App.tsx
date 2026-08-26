@@ -31,6 +31,7 @@ import type { SettingsTab } from './components/settings/SettingsDialog';
 const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
+const AutomationPanel = lazy(async () => ({ default: (await import('./components/automation/AutomationPanel')).AutomationPanel }));
 const SettingsSidebar = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsSidebar }));
 const SettingsContent = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsContent }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
@@ -87,6 +88,7 @@ function App() {
   const setRestoring = useNavigationStore((state) => state.setRestoring);
   const activeView = navigationLocation.view;
   const settingsTab = navigationLocation.settingsTab;
+  const automationTaskId = navigationLocation.automationTaskId;
   const [perfOverlayVisible, setPerfOverlayVisible] = useState(false);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -139,6 +141,7 @@ function App() {
       activeProjectId: null,
       draftProjectId: null,
       isDraftOpen: false,
+      automationTaskId: null,
       sidePanel: getSidePanelNavigation('home'),
     });
   }, [commitNavigation, navigationLocation]);
@@ -147,6 +150,7 @@ function App() {
     commitNavigation({
       ...navigationLocation,
       view: 'app',
+      automationTaskId: null,
     });
   }, [commitNavigation, navigationLocation]);
 
@@ -166,6 +170,40 @@ function App() {
     commitNavigation({
       ...navigationLocation,
       view: 'settings',
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleOpenAutomation = useCallback(() => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'automation',
+      automationTaskId: null,
+      activeSessionId: null,
+      activeProjectId: null,
+      draftProjectId: null,
+      isDraftOpen: false,
+      sidePanel: getSidePanelNavigation('home'),
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleAutomationTaskChange = useCallback((taskId: string | null) => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'automation',
+      automationTaskId: taskId,
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleOpenScheduledSession = useCallback((sessionId: string, projectId: string | null) => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'app',
+      activeSessionId: sessionId,
+      activeProjectId: projectId,
+      draftProjectId: null,
+      isDraftOpen: false,
+      automationTaskId: null,
+      sidePanel: getSidePanelNavigation(sessionId),
     });
   }, [commitNavigation, navigationLocation]);
 
@@ -365,6 +403,7 @@ function App() {
               onNavigateHome={handleNavigateHome}
               onSelectSession={handleSelectSession}
               onOpenSettings={handleOpenSettings}
+              onOpenAutomation={handleOpenAutomation}
             />
           )}
           sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
@@ -389,6 +428,14 @@ function App() {
             {activeView === 'settings' ? (
               <Suspense fallback={panelFallback}>
               <SettingsContent activeTab={settingsTab} onTabChange={handleSettingsTabChange} />
+              </Suspense>
+            ) : activeView === 'automation' ? (
+              <Suspense fallback={panelFallback}>
+                <AutomationPanel
+                  taskId={automationTaskId}
+                  onTaskIdChange={handleAutomationTaskChange}
+                  onOpenSession={handleOpenScheduledSession}
+                />
               </Suspense>
             ) : activeSessionId ? (
               <Suspense fallback={panelFallback}>

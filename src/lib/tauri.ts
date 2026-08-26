@@ -21,6 +21,7 @@ import type { McpServer } from '../types/mcp';
 import type { ImportableSkill, ProjectSkill, Skill } from '../types/skill';
 import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage';
 import type { CompanionStatus } from '../types/companion';
+import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../types/scheduledTask';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
 
@@ -641,6 +642,21 @@ export const mcpApi = {
     invokeLogged('probe_mcp_server', { id }),
   probeAll: (): Promise<Record<string, boolean>> => invokeLogged('probe_all_mcp_servers'),
   importFromApps: (): Promise<{ total: number }> => invokeLogged('import_mcp_from_apps'),
+};
+
+export const scheduledTaskApi = {
+  list: (): Promise<ScheduledTask[]> => invokeLogged('list_scheduled_tasks'),
+  get: (taskId: string): Promise<ScheduledTask | null> => invokeLogged('get_scheduled_task', { taskId }),
+  create: (input: ScheduledTaskInput): Promise<ScheduledTask> =>
+    invokeLogged('create_scheduled_task', { input }),
+  update: (taskId: string, input: ScheduledTaskInput): Promise<ScheduledTask> =>
+    invokeLogged('update_scheduled_task', { taskId, input }),
+  delete: (taskId: string): Promise<void> => invokeLogged('delete_scheduled_task', { taskId }),
+  setEnabled: (taskId: string, enabled: boolean): Promise<ScheduledTask> =>
+    invokeLogged('set_scheduled_task_enabled', { taskId, enabled }),
+  listRuns: (taskId: string): Promise<TaskRun[]> =>
+    invokeLogged('list_scheduled_task_runs', { taskId }),
+  getTimezone: (): Promise<string> => invokeLogged('get_scheduled_task_timezone'),
 };
 
 export const skillApi = {
