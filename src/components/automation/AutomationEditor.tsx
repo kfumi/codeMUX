@@ -16,10 +16,11 @@ import type { ScheduledTaskDraft, ScheduleKind, TaskRun } from '../../types/sche
 import { AgentPermissionSelector } from '../agent/AgentPermissionSelector';
 import { AgentSelector } from '../agent/AgentSelector';
 import { AgentModelSelector } from '../agent/AgentModelSelector';
+import { CodeMuxAssistantRuntimeProvider } from '../agent/assistant-ui/CodeMuxAssistantRuntime';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 
-const WEEKDAY_OPTIONS = [
+const AUTOMATION_DRAFT_SESSION_ID = 'scheduled-task-draft';
   { value: 0, label: '周一' },
   { value: 1, label: '周二' },
   { value: 2, label: '周三' },
@@ -349,43 +350,45 @@ export function AutomationEditor({
             className="min-h-[160px] w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
           />
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
-            <AgentSelector
-              value={draft.agentKind}
-              onChange={handleAgentKindChange}
-            />
-            <AgentModelSelector
-              agentKind={draft.agentKind}
-              providers={modelProviders}
-              activeProviderId={draft.providerId ?? activeProviderId}
-              value={draft.model ?? ''}
-              onChange={(modelId, providerId) => setDraft((current) => ({
-                ...current,
-                model: modelId,
-                providerId,
-              }))}
-              reasoningEffort={draft.reasoningEffort}
-              onReasoningEffortChange={(effort) => setDraft((current) => ({
-                ...current,
-                reasoningEffort: effort,
-              }))}
-            />
-            <AgentPermissionSelector
-              agentKind={draft.agentKind}
-              permissionConfig={draft.permissionConfig}
-              planMode={draft.planMode}
-              onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
-                ...current,
-                permissionConfig,
-              }))}
-              onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
-              onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
-                ...current,
-                permissionConfig,
-                planMode,
-              }))}
-            />
-          </div>
+          <CodeMuxAssistantRuntimeProvider sessionId={AUTOMATION_DRAFT_SESSION_ID}>
+            <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+              <AgentSelector
+                value={draft.agentKind}
+                onChange={handleAgentKindChange}
+              />
+              <AgentModelSelector
+                agentKind={draft.agentKind}
+                providers={modelProviders}
+                activeProviderId={draft.providerId ?? activeProviderId}
+                value={draft.model ?? ''}
+                onChange={(modelId, providerId) => setDraft((current) => ({
+                  ...current,
+                  model: modelId,
+                  providerId,
+                }))}
+                reasoningEffort={draft.reasoningEffort}
+                onReasoningEffortChange={(effort) => setDraft((current) => ({
+                  ...current,
+                  reasoningEffort: effort,
+                }))}
+              />
+              <AgentPermissionSelector
+                agentKind={draft.agentKind}
+                permissionConfig={draft.permissionConfig}
+                planMode={draft.planMode}
+                onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
+                  ...current,
+                  permissionConfig,
+                }))}
+                onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
+                onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
+                  ...current,
+                  permissionConfig,
+                  planMode,
+                }))}
+              />
+            </div>
+          </CodeMuxAssistantRuntimeProvider>
           {!taskId && (
             <p className="text-ui-caption text-muted-foreground">
               执行档位默认与新建对话一致，可随时下拉切换并随任务保存。
