@@ -328,7 +328,7 @@ pub(crate) type SessionDeleteWaiters =
 pub(crate) type SessionForkWaiters =
     Arc<Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>>;
 pub(crate) type SessionRewindFilesWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Result<(), String>>>>>;
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<Vec<String>, String>>>>>;
 
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
@@ -579,7 +579,7 @@ pub(crate) fn parse_session_fork_result_event(event: &str) -> Option<SessionFork
 
 pub(crate) struct SessionRewindFilesResultEvent {
     pub request_id: String,
-    pub result: Result<(), String>,
+    pub result: Result<Vec<String>, String>,
 }
 
 pub(crate) fn parse_session_rewind_files_result_event(
@@ -595,7 +595,17 @@ pub(crate) fn parse_session_rewind_files_result_event(
         .and_then(|entry| entry.as_bool())
         .unwrap_or(false)
     {
-        Ok(())
+        let files_changed = value
+            .get("files_changed")
+            .and_then(|entry| entry.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(files_changed)
     } else {
         Err(value
             .get("error")

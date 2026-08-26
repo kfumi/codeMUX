@@ -430,7 +430,7 @@ export const agentApi = {
     target?: AgentUserMessageLocator,
     rewindUserIndex?: number,
     mode?: 'conversation' | 'files' | 'both',
-  ): Promise<void> =>
+  ): Promise<{ filesChanged?: number }> =>
     invokeLogged('rewind_agent_session', {
       appSessionId,
       agentKind,

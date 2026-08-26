@@ -431,6 +431,14 @@ pub fn get_session_timeline(conn: &Connection, session_id: &str) -> Result<Optio
     Ok(Some(events))
 }
 
+pub fn clear_session_timeline(conn: &Connection, session_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM session_event_snapshots WHERE session_id = ?1",
+        [session_id],
+    )?;
+    Ok(())
+}
+
 pub fn replace_session_timeline(
     conn: &mut Connection,
     session_id: &str,
@@ -1330,10 +1338,11 @@ pub fn append_timeline_events(
     if events.is_empty() {
         return Ok(());
     }
+    let resolved_session_id = resolve_app_session_id_for_timeline(conn, session_id)?;
     let tx = conn.transaction()?;
     let next_sequence: i64 = tx.query_row(
         "SELECT COALESCE(MAX(sequence), -1) + 1 FROM session_event_snapshots WHERE session_id = ?1",
-        [session_id],
+        [&resolved_session_id],
         |row| row.get(0),
     )?;
     for (offset, event) in events.iter().enumerate() {
@@ -1341,7 +1350,7 @@ pub fn append_timeline_events(
         if let Some(object) = snapshot_event.as_object_mut() {
             object.insert(
                 "session_id".to_string(),
-                Value::String(session_id.to_string()),
+                Value::String(resolved_session_id.clone()),
             );
             if !object.contains_key("timestamp") {
                 object.insert(
@@ -1361,7 +1370,7 @@ pub fn append_timeline_events(
         tx.execute(
             "INSERT OR IGNORE INTO session_event_snapshots (session_id, sequence, event_id, event_timestamp, event_json) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                session_id,
+                resolved_session_id,
                 sequence,
                 event_id,
                 timestamp,
@@ -1372,17 +1381,40 @@ pub fn append_timeline_events(
     tx.commit()
 }
 
+pub fn resolve_app_session_id_for_timeline(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<String> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+        [session_id],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Ok(session_id.to_string());
+    }
+
+    let mapped: Option<String> = conn
+        .query_row(
+            "SELECT app_session_id FROM agent_session_mappings WHERE agent_session_id = ?1 LIMIT 1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .ok();
+    Ok(mapped.unwrap_or_else(|| session_id.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        append_timeline_events, archive_session, create_forked_session,
+        append_timeline_events, archive_session, clear_session_timeline, create_forked_session,
         delete_agent_session_mapping,
         delete_session_message_attachments_from_index, fetch_session_timeline, get_agent_distribution,
         get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
         get_model_distribution, get_session, get_session_events_after,
         get_session_timeline, get_usage_heatmap,
         get_usage_overview, import_session_snapshot,
-        list_native_sessions_for_cleanup, set_session_pinned,
+        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline, set_session_pinned,
         set_session_read_only, unarchive_session,
         update_session_provider, update_session_reasoning_effort, update_session_settings,
         upsert_agent_session_mapping, ImportedSessionSnapshot,
@@ -2173,6 +2205,50 @@ mod tests {
 
         let events = get_session_events_after(&conn, "session-1", -1).unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn append_timeline_events_resolves_provider_session_ids() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "app-session-1", "claude_code");
+        upsert_agent_session_mapping(&conn, "app-session-1", AgentKind::ClaudeCode, "claude-session-1")
+            .unwrap();
+
+        let event = serde_json::json!({
+            "type": "text_delta",
+            "event_id": "delta-1",
+            "text": "hello"
+        });
+        append_timeline_events(&mut conn, "claude-session-1", &[event]).unwrap();
+
+        let events = get_session_events_after(&conn, "app-session-1", -1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].get("session_id").and_then(Value::as_str),
+            Some("app-session-1")
+        );
+        assert_eq!(
+            resolve_app_session_id_for_timeline(&conn, "claude-session-1").unwrap(),
+            "app-session-1"
+        );
+    }
+
+    #[test]
+    fn clear_session_timeline_removes_snapshots() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+        append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" })],
+        )
+        .unwrap();
+
+        clear_session_timeline(&conn, "session-1").unwrap();
+
+        assert!(get_session_timeline(&conn, "session-1").unwrap().is_none());
     }
 
     #[test]

@@ -25,6 +25,11 @@ export interface AgentInputPayload {
   historyAttachments?: AgentInputAttachment[];
 }
 
+/** Rewind result extends the composer payload with optional file-rewind metadata. */
+export type RewindMessageResult = AgentInputPayload & {
+  filesChanged?: number;
+};
+
 export interface UserAttachmentPreview {
   type: 'image';
   name: string;

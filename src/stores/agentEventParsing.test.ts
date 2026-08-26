@@ -257,7 +257,23 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
-  it('keeps persisted user message locator with line index', () => {
+  it('does not treat a CodeMUX event id as a Claude rewind locator', () => {
+    expect(
+      mapPersistedClaudeMessage({
+        type: 'user_message',
+        event_id: 'codemux-event-1',
+        session_id: 'session-1',
+        content: 'hello',
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: {
+        content: 'hello',
+      },
+    });
+  });
+
+  it('keeps a real provider message id as the rewind locator', () => {
     expect(
       mapPersistedClaudeMessage({
         type: 'user',

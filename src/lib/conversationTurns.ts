@@ -182,7 +182,13 @@ function appendEvent(
       }
     }
 
-    if (event.data.message?.stop_reason === 'end_turn') {
+    if ((event.data as { isApiErrorMessage?: boolean }).isApiErrorMessage === true) {
+      const errorText = blocks
+        .flatMap((block) => (block?.type === 'text' && typeof block.text === 'string' ? [block.text] : []))
+        .join('\n')
+        .trim();
+      turn.failureReason = errorText || 'Agent API error.';
+    } else if (event.data.message?.stop_reason === 'end_turn') {
       turn.completionReason = 'end_turn';
     }
     return;

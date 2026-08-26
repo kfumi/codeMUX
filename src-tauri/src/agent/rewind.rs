@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use log::info;
-use serde::Deserialize;
+use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::types::AgentKind;
@@ -20,6 +20,12 @@ use super::session_lifecycle::{
 use super::SidecarHandle;
 use std::str::FromStr;
 use tokio::sync::oneshot;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindSessionResult {
+    pub files_changed: Option<usize>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -286,6 +292,57 @@ fn find_rewind_user_line_by_target(
     None
 }
 
+pub(crate) fn resolve_rewind_provider_message_id(
+    path: &Path,
+    agent_kind: AgentKind,
+    target: Option<&RewindTarget>,
+) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let lines = split_jsonl_preserving_newlines(&content);
+    let user_line_index = if let Some(target) = target {
+        find_rewind_user_line_by_target(&lines, agent_kind, target).or_else(|| {
+            // Live locators may carry a CodeMUX event_id that is not the Claude
+            // JSONL uuid. Retry with turn ordinal + text fingerprint only.
+            if target.turn_ordinal.is_none() && target.text_fingerprint.is_none() {
+                return None;
+            }
+            let fingerprint_only = RewindTarget {
+                provider_message_id: None,
+                source_event_index: None,
+                line_index: None,
+                role: target.role.clone(),
+                text_fingerprint: target.text_fingerprint.clone(),
+                turn_ordinal: target.turn_ordinal,
+            };
+            find_rewind_user_line_by_target(&lines, agent_kind, &fingerprint_only)
+        })
+    } else {
+        find_latest_targetable_rewind_user_line(&lines, agent_kind)
+    }?;
+    let value: serde_json::Value = serde_json::from_str(lines[user_line_index].trim()).ok()?;
+    extract_provider_message_id(&value, agent_kind)
+}
+
+fn find_latest_targetable_rewind_user_line(
+    lines: &[String],
+    agent_kind: AgentKind,
+) -> Option<usize> {
+    let mut latest_index = None;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if is_targetable_rewind_user_value(&value, agent_kind) {
+            latest_index = Some(index);
+        }
+    }
+    latest_index
+}
+
 fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Option<usize> {
     // Step 1: find the latest user line (any type: "user" — plain text, meta,
     // command XML echo, or tool_result). All of these belong to the current turn.
@@ -358,19 +415,33 @@ pub(crate) fn rewind_jsonl_before_target_turn(
         .map_err(|err| format!("Failed to read session history {}: {}", path.display(), err))?;
     let lines = split_jsonl_preserving_newlines(&content);
     let user_line_index = if let Some(target) = target.as_ref() {
-        find_rewind_user_line_by_target(&lines, agent_kind, target).ok_or_else(|| {
-            format!(
-                "Target rewind user message not found in session history {}",
-                path.display()
-            )
-        })?
+        match find_rewind_user_line_by_target(&lines, agent_kind, target) {
+            Some(index) => index,
+            None => {
+                // A previous rewind (or an interrupted turn that never flushed)
+                // can leave the UI holding a locator for a line that is already
+                // gone. If JSONL has no rewindable users left, treat that as
+                // success instead of failing the next composer retry.
+                if find_latest_rewind_user_line(&lines, agent_kind).is_none() {
+                    return Ok(RewindOutcome {
+                        truncated_to_empty: true,
+                    });
+                }
+                return Err(format!(
+                    "Target rewind user message not found in session history {}",
+                    path.display()
+                ));
+            }
+        }
     } else {
-        find_latest_rewind_user_line(&lines, agent_kind).ok_or_else(|| {
-            format!(
-                "No rewindable user message found in session history {}",
-                path.display()
-            )
-        })?
+        match find_latest_rewind_user_line(&lines, agent_kind) {
+            Some(index) => index,
+            None => {
+                return Ok(RewindOutcome {
+                    truncated_to_empty: true,
+                });
+            }
+        }
     };
 
     let next_content = lines[..user_line_index].concat();
@@ -439,7 +510,7 @@ async fn rewind_agent_files_via_sidecar(
     agent_state: &AgentState,
     app_session_id: &str,
     provider_message_id: &str,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let sender = {
         let sidecars = agent_state.sidecars.lock().await;
         sidecars
@@ -496,13 +567,14 @@ pub async fn rewind_agent_session(
     target: Option<RewindTarget>,
     rewind_user_index: Option<i64>,
     mode: Option<String>,
-) -> Result<(), String> {
+) -> Result<RewindSessionResult, String> {
     reject_read_only_session(&state, &app_session_id)?;
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let mode = match mode.as_deref() {
         Some(value) if !value.trim().is_empty() => RewindMode::from_str(value.trim())?,
         _ => RewindMode::Conversation,
     };
+    let mut files_changed: Option<usize> = None;
     let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
     else {
         return Err(format!(
@@ -515,21 +587,63 @@ pub async fn rewind_agent_session(
         if agent_kind != AgentKind::ClaudeCode {
             return Err("This agent does not support rewinding files".to_string());
         }
-        let provider_message_id = target
-            .as_ref()
-            .and_then(|value| value.provider_message_id.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                "File rewind requires the provider message ID of the target".to_string()
-            })?
-            .to_string();
-        rewind_agent_files_via_sidecar(agent_state.inner(), &app_session_id, &provider_message_id)
-            .await?;
+        let resolved_from_jsonl = home_dir().ok().and_then(|home| {
+            find_claude_session_jsonl(&home.join(".claude"), &agent_session_id).and_then(|path| {
+                resolve_rewind_provider_message_id(&path, agent_kind, target.as_ref())
+            })
+        });
+        let provider_message_id = resolved_from_jsonl.or_else(|| {
+            target
+                .as_ref()
+                .and_then(|value| value.provider_message_id.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
+        match provider_message_id {
+            Some(provider_message_id) => {
+                match rewind_agent_files_via_sidecar(
+                    agent_state.inner(),
+                    &app_session_id,
+                    &provider_message_id,
+                )
+                .await
+                {
+                    Ok(changed_files) => {
+                        if changed_files.is_empty() {
+                            if mode == RewindMode::Files {
+                                return Err("该消息没有可回退的文件变更".to_string());
+                            }
+                            warn!(
+                                target: "agent",
+                                "File rewind found no changed files during both-mode rewind for app_session_id={}",
+                                app_session_id
+                            );
+                        }
+                        files_changed = Some(changed_files.len());
+                    }
+                    Err(error) if mode == RewindMode::Both => {
+                        warn!(
+                            target: "agent",
+                            "File rewind failed during both-mode rewind for app_session_id={}; continuing with conversation rewind: {}",
+                            app_session_id,
+                            error
+                        );
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            None if mode == RewindMode::Files => {
+                return Err(
+                    "File rewind requires the provider message ID of the target".to_string(),
+                );
+            }
+            None => {}
+        }
     }
 
     if !mode.includes_conversation() {
-        return Ok(());
+        return Ok(RewindSessionResult { files_changed });
     }
 
     let home = home_dir()?;
@@ -573,6 +687,13 @@ pub async fn rewind_agent_session(
 
         (outcome, history_path.display().to_string())
     };
+
+    {
+        let db = state.db.lock().unwrap();
+        operations::clear_session_timeline(&db, &app_session_id).map_err(|err| {
+            format!("Failed to clear rewound session timeline: {}", err)
+        })?;
+    }
 
     if let Some(user_index) = rewind_user_index {
         let db = state.db.lock().unwrap();
@@ -633,12 +754,15 @@ pub async fn rewind_agent_session(
         history_display,
     );
 
-    Ok(())
+    Ok(RewindSessionResult { files_changed })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{rewind_jsonl_before_latest_turn, rewind_jsonl_before_target_turn, RewindTarget};
+    use super::{
+        resolve_rewind_provider_message_id, rewind_jsonl_before_latest_turn,
+        rewind_jsonl_before_target_turn, RewindTarget,
+    };
     use crate::config::types::AgentKind;
 
     #[test]
@@ -950,6 +1074,50 @@ mod tests {
     }
 
     #[test]
+    fn rewind_missing_target_on_empty_history_is_already_rewound() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-already-empty-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "").unwrap();
+
+        let outcome = rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(RewindTarget {
+                provider_message_id: Some("already-gone".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: None,
+                turn_ordinal: None,
+            }),
+        )
+        .expect("empty history should not fail a stale locator rewind");
+
+        assert!(outcome.truncated_to_empty);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewind_without_target_on_empty_history_is_already_rewound() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-empty-ordinal-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "{\"type\":\"system\",\"subtype\":\"init\"}\n").unwrap();
+
+        let outcome = rewind_jsonl_before_target_turn(&path, AgentKind::ClaudeCode, None)
+            .expect("history with no user turns is already rewound");
+
+        assert!(outcome.truncated_to_empty);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn rewind_single_claude_user_reports_empty_history() {
         let path = std::env::temp_dir().join(format!(
             "codemux-claude-rewind-empty-{}.jsonl",
@@ -1108,6 +1276,57 @@ mod tests {
                 "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"first answer\"}}\n"
             )
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn resolves_claude_uuid_from_fingerprint_without_provider_id() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-resolve-uuid-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"second answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let resolved = resolve_rewind_provider_message_id(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(&RewindTarget {
+                provider_message_id: None,
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("first".to_string()),
+                turn_ordinal: Some(1),
+            }),
+        );
+        assert_eq!(resolved.as_deref(), Some("u1"));
+
+        let latest = resolve_rewind_provider_message_id(&path, AgentKind::ClaudeCode, None);
+        assert_eq!(latest.as_deref(), Some("u2"));
+
+        let stale_locator = resolve_rewind_provider_message_id(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(&RewindTarget {
+                provider_message_id: Some("codemux-event-id".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("second".to_string()),
+                turn_ordinal: Some(2),
+            }),
+        );
+        assert_eq!(stale_locator.as_deref(), Some("u2"));
 
         let _ = std::fs::remove_file(&path);
     }

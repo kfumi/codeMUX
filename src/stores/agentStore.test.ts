@@ -25,7 +25,7 @@ const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Recor
 const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const resyncSessionFromNativeMock = vi.fn<(appSessionId: string) => Promise<{ eventCount: number }>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number) => Promise<void>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number, mode?: string) => Promise<{ filesChanged?: number }>>();
 const respondToAgentPermissionMock = vi.fn();
 
 vi.mock('sonner', () => ({
@@ -232,7 +232,7 @@ describe('agent store Codex history loading', () => {
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
     loadLatestTokenUsageMock.mockResolvedValue(null);
-    rewindSessionMock.mockResolvedValue();
+    rewindSessionMock.mockResolvedValue({});
     localStorage.clear();
   });
 
@@ -3031,7 +3031,7 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().streamingText[session.id]).toBe('');
   });
 
-  it('rejects rewinding an optimistic earlier user message without a strong locator', async () => {
+  it('rewinds an earlier user message by turn ordinal and text fingerprint', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
@@ -3066,9 +3066,13 @@ describe('agent store Codex history loading', () => {
 
     const payload = await useAgentStore.getState().rewindToMessage(session.id, 0);
 
-    expect(payload).toBeNull();
-    expect(rewindSessionMock).not.toHaveBeenCalled();
-    expect(useAgentStore.getState().events[session.id]).toHaveLength(4);
+    expect(payload).toEqual({ text: 'first turn' });
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', {
+      role: 'user',
+      textFingerprint: 'first turn',
+      turnOrdinal: 1,
+    }, 0, 'conversation');
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
   });
 
   it('allows rewinding the latest message without a strong locator via index fallback', async () => {
@@ -3099,6 +3103,54 @@ describe('agent store Codex history loading', () => {
 
     expect(payload).toEqual({ text: 'second turn' });
     expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 1, 'conversation');
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
+  });
+
+  it('falls back to ordinal rewind when the latest locator is missing from native history', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    const staleLocator = {
+      providerMessageId: 'codemux-event-id-not-in-jsonl',
+      role: 'user' as const,
+      textFingerprint: 'second turn',
+    };
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: 'second turn', locator: staleLocator } },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3] },
+    });
+
+    rewindSessionMock
+      .mockRejectedValueOnce(new Error('Target rewind user message not found in session history C:\\Users\\x.jsonl'))
+      .mockResolvedValueOnce({});
+
+    const payload = await useAgentStore.getState().rewindLastTurn(session.id);
+
+    expect(payload).toEqual({ text: 'second turn' });
+    expect(rewindSessionMock).toHaveBeenNthCalledWith(1, session.id, 'claude_code', {
+      ...staleLocator,
+      turnOrdinal: 2,
+    }, 1, 'conversation');
+    expect(rewindSessionMock).toHaveBeenNthCalledWith(2, session.id, 'claude_code', {
+      role: 'user',
+      textFingerprint: 'second turn',
+      turnOrdinal: 2,
+    }, 1, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 
@@ -3187,6 +3239,60 @@ describe('agent store Codex history loading', () => {
     expect(rewindSessionMock).not.toHaveBeenCalled();
   });
 
+  it('sends a fingerprint target for Claude file rewind without a provider locator', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: 'second turn' } },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3] },
+    });
+
+    rewindSessionMock.mockResolvedValueOnce({ filesChanged: 2 });
+
+    const payload = await useAgentStore.getState().rewindToMessage(session.id, 0, 'files');
+
+    expect(payload).toEqual({ text: 'first turn', filesChanged: 2 });
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', {
+      role: 'user',
+      textFingerprint: 'first turn',
+      turnOrdinal: 1,
+    }, 0, 'files');
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(3);
+  });
+
+  it('rejects file rewind for agents that do not support it', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+        ],
+      },
+    });
+
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 0, 'files')).toBeNull();
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 0, 'both')).toBeNull();
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+  });
+
   it('keeps rewindLastTurn equivalent to rewinding the latest rewindable message', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
@@ -3247,5 +3353,155 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().loadSessionMessages(session.id);
 
     expect(useAgentStore.getState().acknowledgedFiles[session.id]).toBeUndefined();
+  });
+
+  it('does not rewind history when sending a new message after an interrupted turn', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    const previousPrompt = '系统怎么实现定时任务功能，在我确认方案之前不要改任何代码';
+    const nextPrompt = '怎么实现定时任务功能，在我确认之前不要改任何代码';
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: previousPrompt } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-interrupted',
+              session_id: session.id,
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: '我先探索一下代码库架构' }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2] },
+      isRunning: { [session.id]: false },
+      forceStopped: { [session.id]: true },
+    });
+
+    rewindSessionMock.mockClear();
+    startSessionMock.mockImplementationOnce(async () => {});
+
+    await useAgentStore.getState().startQuery(session.id, nextPrompt, 'D:\\workspace');
+
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toEqual([
+      { kind: 'user', data: { content: previousPrompt } },
+      { kind: 'user', data: { content: nextPrompt } },
+    ]);
+  });
+
+  it('allows sending the same content again after a completed turn', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'repeat me' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-1',
+              session_id: session.id,
+              duration_ms: 10,
+              duration_api_ms: 10,
+              num_turns: 1,
+              result: '',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3] },
+      isRunning: { [session.id]: false },
+      forceStopped: { [session.id]: false },
+    });
+
+    rewindSessionMock.mockClear();
+    startSessionMock.mockImplementationOnce(async () => {});
+
+    await useAgentStore.getState().startQuery(session.id, 'repeat me', 'D:\\workspace');
+
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toHaveLength(2);
+  });
+
+  it('does not restore a rewound turn from a stale history reload before resend', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    const prompt = '系统怎么实现定时任务功能，在我确认方案之前不要改任何代码';
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: prompt } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: '我先探索一下代码库架构，了解现有的模式，再设计定时任务方案。' }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2] },
+      isRunning: { [session.id]: false },
+      forceStopped: { [session.id]: true },
+    });
+
+    let resolveHistory: ((events: Record<string, unknown>[]) => void) | undefined;
+    loadSessionEventsMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveHistory = resolve;
+    }));
+
+    const staleLoad = useAgentStore.getState().loadSessionMessages(session.id);
+    await useAgentStore.getState().rewindLastTurn(session.id);
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
+
+    resolveHistory?.([
+      { type: 'user_message', session_id: session.id, content: prompt, event_id: 'stale-user' },
+      {
+        type: 'assistant_message',
+        session_id: session.id,
+        event_id: 'stale-assistant',
+        content: [{ type: 'text', text: '我先探索一下代码库架构，了解现有的模式，再设计定时任务方案。' }],
+      },
+    ]);
+    await staleLoad;
+
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
+
+    startSessionMock.mockImplementationOnce(async () => {});
+    await useAgentStore.getState().startQuery(session.id, prompt, 'D:\\workspace');
+
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toEqual([
+      { kind: 'user', data: { content: prompt } },
+    ]);
   });
 });

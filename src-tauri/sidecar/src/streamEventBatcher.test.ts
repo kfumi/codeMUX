@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushStreamEvents, emit, resetStreamEventSequences } from './streamEventBatcher.js';
+import { flushStreamEvents, emit, resetStreamEventSequences, syncStreamSessionContext } from './streamEventBatcher.js';
 
 describe('stream event transport batching', () => {
   afterEach(() => {
     flushStreamEvents();
     resetStreamEventSequences();
+    syncStreamSessionContext({ clear: true });
     vi.restoreAllMocks();
   });
 
@@ -130,6 +131,38 @@ describe('stream event transport batching', () => {
       event_id: expect.any(String),
       sequence: expect.any(Number),
       timestamp: expect.any(String),
+    });
+  });
+
+  it('rewrites provider stream session ids to the app session id', () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    syncStreamSessionContext({
+      appSessionId: 'app-session-1',
+      providerSessionId: 'claude-session-1',
+    });
+
+    emit({
+      type: 'stream_event',
+      session_id: 'claude-session-1',
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } },
+    });
+    flushStreamEvents();
+
+    expect(JSON.parse(writes[0])).toMatchObject({
+      type: 'codemux_event_batch',
+      session_id: 'app-session-1',
+      events: [
+        expect.objectContaining({
+          type: 'text_delta',
+          session_id: 'app-session-1',
+          text: 'hello',
+        }),
+      ],
     });
   });
 });

@@ -640,9 +640,10 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
     };
   }
   if (raw.type === 'user_message') {
+    const providerMessageId = typeof raw.provider_message_id === 'string' ? raw.provider_message_id.trim() : '';
     return {
       type: 'user',
-      uuid: raw.provider_message_id ?? raw.event_id,
+      ...(providerMessageId ? { uuid: providerMessageId } : {}),
       session_id: raw.session_id,
       timestamp: raw.timestamp,
       ...(raw.line_index !== undefined ? { __lineIndex: raw.line_index } : {}),

@@ -25,7 +25,7 @@ import {
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
 import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './turnEventNormalizer.js';
 import { proxyManager } from './proxyManager.js';
-import { emit } from './streamEventBatcher.js';
+import { emit, resetStreamEventSequences, syncStreamSessionContext } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
@@ -309,6 +309,10 @@ export class SessionRuntime {
     this.providerMode = getProviderMode(normalized.baseUrl);
     this.activeConfigGeneration += 1;
     this.applyActivePermissionState(normalized);
+    syncStreamSessionContext({
+      appSessionId: normalized.sessionId,
+      ...(normalized.agentSessionId ? { providerSessionId: normalized.agentSessionId } : {}),
+    });
 
     await this.resetForReconfigure();
 
@@ -466,7 +470,7 @@ export class SessionRuntime {
     return forkedSessionId;
   }
 
-  async rewindFiles(providerMessageId: string): Promise<void> {
+  async rewindFiles(providerMessageId: string): Promise<string[]> {
     const config = this.config;
     if (!config?.agentSessionId) {
       throw new Error('Claude session has not been created yet');
@@ -521,9 +525,11 @@ export class SessionRuntime {
       if (!result?.canRewind) {
         throw new Error(result?.error ?? `No file checkpoint found for message ${providerMessageId}`);
       }
+      const filesChanged = Array.isArray(result.filesChanged) ? result.filesChanged : [];
       process.stderr.write(
-        `[sidecar] Rewound Claude files to ${providerMessageId} files=${result.filesChanged?.length ?? 0}\n`,
+        `[sidecar] Rewound Claude files to ${providerMessageId} files=${filesChanged.length}\n`,
       );
+      return filesChanged;
     } finally {
       try {
         rewindQuery.close();
@@ -580,6 +586,8 @@ export class SessionRuntime {
     this.config = null;
     this.configFingerprint = null;
     this.providerMode = getProviderMode(undefined);
+    syncStreamSessionContext({ clear: true });
+    resetStreamEventSequences();
     process.stderr.write(`[sidecar] Reset session ${sessionId}\n`);
   }
 
@@ -1158,6 +1166,7 @@ export class SessionRuntime {
               this.configFingerprint = JSON.stringify(this.config);
             }
             process.stderr.write(`[sidecar] Captured Claude session ID: ${sdkSessionId} for app session: ${appSessionId}\n`);
+            syncStreamSessionContext({ providerSessionId: sdkSessionId });
             emit({
               type: 'agent_session_mapping',
               app_session_id: appSessionId,
@@ -1208,7 +1217,15 @@ export class SessionRuntime {
                 emit(normalizedEvent);
               }
             } else {
-              emit(projection.remainingEvent);
+              const remainingEvent = projection.remainingEvent as Record<string, unknown>;
+              if (remainingEvent.type === 'stream_event') {
+                emit({
+                  ...remainingEvent,
+                  session_id: appSessionId ?? this.config?.sessionId ?? remainingEvent.session_id,
+                });
+              } else {
+                emit(projection.remainingEvent);
+              }
             }
           }
         }
@@ -1461,7 +1478,7 @@ type SidecarRuntime = {
     sourceProviderTurnOrdinal?: number,
     sourceProviderMessageId?: string,
   ): Promise<string>;
-  rewindFiles?(providerMessageId: string): Promise<void>;
+  rewindFiles?(providerMessageId: string): Promise<string[]>;
   resetSession(sessionId: string): Promise<void>;
   deleteSession?(agentSessionId: string): Promise<void>;
   interrupt(): Promise<void>;
@@ -1710,12 +1727,13 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           if (flavor !== 'claude' || !current?.rewindFiles) {
             throw new Error('This provider runtime does not support file rewind');
           }
-          await current.rewindFiles(cmd.providerMessageId);
+          const filesChanged = await current.rewindFiles(cmd.providerMessageId);
           options.emit({
             type: 'session_rewind_files_result',
             request_id: cmd.requestId,
             session_id: cmd.sessionId,
             ok: true,
+            files_changed: filesChanged,
           });
         } catch (error) {
           options.emit({
@@ -1903,6 +1921,10 @@ function buildOpenCodeSessionConfig(cmd: EnsureSessionCommand): OpenCodeSessionC
 
 function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
   const config = buildOpenCodeSessionConfig(cmd);
+  syncStreamSessionContext({
+    appSessionId: config.sessionId,
+    ...(config.agentSessionId ? { providerSessionId: config.agentSessionId } : {}),
+  });
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {
     openCodeRuntime.updatePermissions({ permissionConfig: cmd.permissionConfig, planMode: cmd.planMode });

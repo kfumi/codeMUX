@@ -30,7 +30,7 @@ import {
 import { cn } from '../../../lib/utils';
 import {
   AGENT_REWIND_CAPABILITIES,
-  hasStrongRewindLocator,
+  isRewindableUserEvent,
   useAgentStore,
   type AgentMessage,
   type RewindMode,
@@ -464,9 +464,25 @@ function useCodeMuxThreadRenderContext() {
   return value;
 }
 
+function showRewindResultToast(mode: RewindMode, filesChanged?: number) {
+  if (mode === 'files') {
+    toast.success(`已回退 ${filesChanged ?? 0} 个文件`);
+    return;
+  }
+  if (mode === 'both') {
+    const count = filesChanged ?? 0;
+    if (count > 0) {
+      toast.success(`已回退对话和 ${count} 个文件`);
+      return;
+    }
+    toast.success('对话已回退');
+    toast.warning('该消息没有可回退的文件变更');
+  }
+}
+
 function CodeMuxUserMessage() {
   const message = useAuiState((state) => state.message);
-  const { sessionId, isRunning, events, latestRewindableUserIndex } = useCodeMuxThreadRenderContext();
+  const { sessionId, isRunning, events } = useCodeMuxThreadRenderContext();
   const rewindToMessage = useAgentStore((state) => state.rewindToMessage);
   const requestComposerRestore = useAgentStore((state) => state.requestComposerRestore);
   const agentKind = useSessionStore((state) =>
@@ -480,26 +496,24 @@ function CodeMuxUserMessage() {
   const [isRewinding, setIsRewinding] = useState(false);
   const sourceEventIndex = getSourceEventIndex(message);
   const event = sourceEventIndex != null ? events[sourceEventIndex] : undefined;
-  const hasStrongLocator = event?.kind === 'user'
-    ? hasStrongRewindLocator(event.data.locator)
-    : false;
-  const isLatestRewindable = sourceEventIndex != null && sourceEventIndex === latestRewindableUserIndex;
   const rewindModes: RewindMode[] = agentKind
     ? (['conversation', 'files', 'both'] as const).filter((mode) => AGENT_REWIND_CAPABILITIES[agentKind][mode])
     : [];
+  const rewindableUser = event != null && isRewindableUserEvent(event);
   const handleRewindToMessage = useCallback(async (mode: RewindMode) => {
     if (sourceEventIndex == null || isRewinding) {
       return;
     }
     setIsRewinding(true);
     try {
-      const payload = await rewindToMessage(sessionId, sourceEventIndex, mode);
-      if (!payload) {
+      const result = await rewindToMessage(sessionId, sourceEventIndex, mode);
+      if (!result) {
         toast.warning('当前无法回退：会话正在运行或该消息不可回退');
         return;
       }
-      if (mode !== 'files' && payload.text.trim().length > 0) {
-        requestComposerRestore(sessionId, payload.text);
+      showRewindResultToast(mode, result.filesChanged);
+      if (mode !== 'files' && result.text.trim().length > 0) {
+        requestComposerRestore(sessionId, result.text);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '回退失败，请重试');
@@ -511,8 +525,7 @@ function CodeMuxUserMessage() {
     <UserMessage
       message={message}
       sourceEventIndex={sourceEventIndex}
-      canRewind={rewindModes.length > 0 && !isRunning && !isReadOnly && (isLatestRewindable || hasStrongLocator)}
-      isLatestRewindable={isLatestRewindable}
+      canRewind={rewindModes.length > 0 && rewindableUser && !isRunning && !isReadOnly}
       isRewinding={isRewinding}
       rewindModes={rewindModes}
       onRewindToMessage={handleRewindToMessage}
@@ -568,7 +581,6 @@ function UserMessage({
   message,
   sourceEventIndex,
   canRewind,
-  isLatestRewindable = false,
   isRewinding = false,
   rewindModes = [],
   onRewindToMessage,
@@ -576,27 +588,18 @@ function UserMessage({
   message: MessageState;
   sourceEventIndex?: number;
   canRewind?: boolean;
-  isLatestRewindable?: boolean;
   isRewinding?: boolean;
   rewindModes?: RewindMode[];
   onRewindToMessage?: (mode: RewindMode) => Promise<void> | void;
 }) {
-  const aui = useAui();
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
   const [expanded, setExpanded] = useState(false);
   const canCollapse = isLongUserMessage(text);
   const imageAttachments = getImageAttachmentItems(message);
-  const beginInlineEdit = () => {
-    aui.message().composer().beginEdit();
-  };
   const rewindTooltip = '回退到此消息';
   const handleRewindSelect = (mode: RewindMode) => {
     if (isRewinding) {
-      return;
-    }
-    if (mode === 'conversation' && isLatestRewindable) {
-      beginInlineEdit();
       return;
     }
     void onRewindToMessage?.(mode);
@@ -685,7 +688,7 @@ function UserMessage({
                 </div>
                 {rewindModes.includes('conversation') ? (
                   <DropdownMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('conversation')}>
-                    {isLatestRewindable ? '回退并编辑对话' : '回退对话'}
+                    回退对话
                   </DropdownMenuItem>
                 ) : null}
                 {rewindModes.includes('files') ? (

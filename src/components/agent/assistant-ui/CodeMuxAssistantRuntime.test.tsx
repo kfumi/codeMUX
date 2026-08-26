@@ -1967,37 +1967,35 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(chip?.querySelector('.lucide-wand-sparkles')).toBeTruthy();
   });
 
-  it('shows rewind only on the latest user message and rewinds only after inline edit send', async () => {
-    const rewindLastTurn = vi.fn().mockResolvedValue({ text: '琛ュ厖娴嬭瘯瑕嗙洊' });
+  it('rewinds the latest user message into the composer', async () => {
+    const rewindToMessage = vi.fn().mockResolvedValue({ text: '补充测试覆盖' });
+    const requestComposerRestore = vi.fn();
     const onSend = vi.fn(async () => {});
-    useAgentStore.setState({ rewindLastTurn } as any);
+    useAgentStore.setState({ rewindToMessage, requestComposerRestore } as any);
 
     render(<Harness sessionId="session-nav" onSend={onSend} />);
 
     const rewindButtons = screen.getAllByRole('button', { name: '回退到此消息' });
-    expect(rewindButtons).toHaveLength(1);
+    expect(rewindButtons).toHaveLength(5);
 
-    openRewindMenu(rewindButtons[0]);
-    fireEvent.click(await screen.findByText('回退并编辑对话'));
-
-    expect(rewindLastTurn).not.toHaveBeenCalled();
-    expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
-    const sendButton = screen.getByRole<HTMLButtonElement>('button', { name: '发送' });
-    await waitFor(() => expect(sendButton.disabled).toBe(false));
-
-    fireEvent.click(sendButton);
+    openRewindMenu(rewindButtons[rewindButtons.length - 1]);
+    fireEvent.click(await screen.findByText('回退对话'));
 
     await waitFor(() => {
-      expect(rewindLastTurn).toHaveBeenCalledWith('session-nav');
-      expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));
+      expect(rewindToMessage).toHaveBeenCalledWith('session-nav', expect.any(Number), 'conversation');
+      expect(requestComposerRestore).toHaveBeenCalledWith('session-nav', '补充测试覆盖');
     });
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
-  it('rewind inline edit ignores image attachments and resends text only', async () => {
-    const rewindLastTurn = vi.fn().mockResolvedValue({ text: 'describe this image' });
+  it('rewinds the latest user message text into the composer without inline edit', async () => {
+    const rewindToMessage = vi.fn().mockResolvedValue({ text: 'describe this image' });
+    const requestComposerRestore = vi.fn();
     const onSend = vi.fn(async () => {});
     useAgentStore.setState((state) => ({
-      rewindLastTurn,
+      rewindToMessage,
+      requestComposerRestore,
       events: {
         ...state.events,
         'session-image-rewind': [
@@ -2033,19 +2031,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-image-rewind" onSend={onSend} />);
 
     openRewindMenu(screen.getByRole('button', { name: '回退到此消息' }));
-    fireEvent.click(await screen.findByText('回退并编辑对话'));
-
-    expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
-    expect(screen.queryByTestId('edit-composer-attachment-list')).toBeNull();
-
-    const sendButton = screen.getByRole<HTMLButtonElement>('button', { name: '发送' });
-    await waitFor(() => expect(sendButton.disabled).toBe(false));
-    fireEvent.click(sendButton);
+    fireEvent.click(await screen.findByText('回退对话'));
 
     await waitFor(() => {
-      expect(rewindLastTurn).toHaveBeenCalledWith('session-image-rewind');
-      expect(onSend).toHaveBeenCalledWith({ text: 'describe this image' });
+      expect(rewindToMessage).toHaveBeenCalledWith('session-image-rewind', 0, 'conversation');
+      expect(requestComposerRestore).toHaveBeenCalledWith('session-image-rewind', 'describe this image');
     });
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it('does not read stale message indexes when rewind removes the tail of a long thread', async () => {
@@ -2053,7 +2046,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const longEvents = buildLargeToolHistoryEvents(120);
     const latestUserIndex = longEvents.findLastIndex((event) => event.kind === 'user');
     const onSend = vi.fn(async () => {});
-    const rewindLastTurn = vi.fn(async () => {
+    const requestComposerRestore = vi.fn();
+    const rewindToMessage = vi.fn(async () => {
       useAgentStore.setState((state) => ({
         events: {
           ...state.events,
@@ -2068,7 +2062,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
 
     useAgentStore.setState((state) => ({
-      rewindLastTurn,
+      rewindToMessage,
+      requestComposerRestore,
       events: {
         ...state.events,
         [longSessionId]: longEvents,
@@ -2081,20 +2076,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId={longSessionId} onSend={onSend} />);
 
-    openRewindMenu(screen.getByRole('button', { name: '回退到此消息' }));
-    fireEvent.click(await screen.findByText('回退并编辑对话'));
-    const sendButton = await screen.findByRole<HTMLButtonElement>('button', { name: '发送' });
-    await waitFor(() => expect(sendButton.disabled).toBe(false));
-
-    await act(async () => {
-      fireEvent.click(sendButton);
-    });
+    const rewindButtons = screen.getAllByRole('button', { name: '回退到此消息' });
+    openRewindMenu(rewindButtons[rewindButtons.length - 1]);
+    fireEvent.click(await screen.findByText('回退对话'));
 
     await waitFor(() => {
-      expect(rewindLastTurn).toHaveBeenCalledWith(longSessionId);
-      expect(onSend).toHaveBeenCalled();
+      expect(rewindToMessage).toHaveBeenCalledWith(longSessionId, latestUserIndex, 'conversation');
+      expect(requestComposerRestore).toHaveBeenCalledWith(longSessionId, `性能测试消息 ${latestUserIndex}`);
     });
     expect(screen.queryByText('结果 119')).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
   }, 30_000);
 
   it('offers in-place rewind on a historical user message with a strong locator', async () => {
@@ -2119,10 +2110,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it('does not offer in-place rewind on historical optimistic user messages without locators', () => {
+  it('offers in-place rewind on historical user messages without a provider locator', () => {
     render(<Harness sessionId="session-nav" />);
 
-    expect(screen.getAllByRole('button', { name: '回退到此消息' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '回退到此消息' })).toHaveLength(5);
   });
 
   it('hides rewind entries in read-only sessions', () => {
@@ -2149,6 +2140,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(await screen.findByText('回退对话')).toBeTruthy();
     expect(screen.queryByText('回退文件')).toBeNull();
     expect(screen.queryByText('回退对话和文件')).toBeNull();
+  });
+
+  it('offers Claude file rewind modes without a provider locator', async () => {
+    render(<Harness sessionId="session-nav" />);
+
+    openRewindMenu(screen.getAllByRole('button', { name: '回退到此消息' })[0]);
+
+    expect(await screen.findByText('回退对话')).toBeTruthy();
+    expect(screen.getByText('回退文件')).toBeTruthy();
+    expect(screen.getByText('回退对话和文件')).toBeTruthy();
   });
 
   it('renders streaming thinking content in a live reasoning panel', () => {

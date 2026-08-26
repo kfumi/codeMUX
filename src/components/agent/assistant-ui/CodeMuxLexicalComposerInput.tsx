@@ -516,6 +516,8 @@ const InnerCodeMuxLexicalComposerInput = forwardRef<
   ) => {
     const [editor] = useLexicalComposerContext();
     const aui = useAui();
+    const onTextChangeRef = useRef(onTextChange);
+    onTextChangeRef.current = onTextChange;
 
     const sendWithAui = useMemo(() => {
       return () => {
@@ -523,6 +525,7 @@ const InnerCodeMuxLexicalComposerInput = forwardRef<
         aui.composer().setText(text);
         aui.composer().send();
         clearEditor(editor);
+        onTextChangeRef.current?.('');
       };
     }, [editor, aui]);
 
@@ -530,10 +533,16 @@ const InnerCodeMuxLexicalComposerInput = forwardRef<
       ref,
       () => ({
         getText: () => readEditorText(editor),
-        setText: (text: string) => applyTextToEditor(editor, text, resolvedFormatter),
+        setText: (text: string) => {
+          applyTextToEditor(editor, text, resolvedFormatter);
+          onTextChangeRef.current?.(text);
+        },
         send: sendWithAui,
         focus: () => editor.focus(),
-        reset: () => clearEditor(editor),
+        reset: () => {
+          clearEditor(editor);
+          onTextChangeRef.current?.('');
+        },
       }),
       [editor, resolvedFormatter, sendWithAui],
     );

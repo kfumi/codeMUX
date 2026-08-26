@@ -337,6 +337,21 @@ describe('CodeMuxComposer', () => {
     );
   });
 
+  it('enables send after rewound text is restored into the composer', async () => {
+    render(<CodeMuxComposer sessionId="session-restore" />);
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        pendingComposerRestore: { ...state.pendingComposerRestore, 'session-restore': '回退的文本' },
+      }));
+    });
+
+    await waitFor(() => expect(editorSetTextMock).toHaveBeenCalledWith('回退的文本'));
+
+    const sendButton = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(false);
+  });
+
   it('does not overwrite non-empty composer text with restored rewind text', async () => {
     render(<CodeMuxComposer sessionId="session-keep" />);
     composerText = '已有草稿';

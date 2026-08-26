@@ -66,7 +66,7 @@ import type {
   ChangedFile,
 } from '../types/agent';
 import type { AgentKind, ReasoningEffort } from '../types/session';
-import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
+import type { AgentInputPayload, RewindMessageResult, UserAttachmentPreview } from '../types/agentInput';
 import type { QueuedAgentQuery } from '../types/agentQueue';
 import { markModelVisionUnsupported, resolveVisionCapability, findProviderModelMetadata, isImageRecognitionConfigured } from '../lib/modelVisionCapabilities';
 import { getPayloadAttachments, getPayloadImageAttachments, payloadHasAttachments } from '../types/agentInput';
@@ -201,9 +201,9 @@ interface AgentState {
   /** Get composer draft text without clearing it */
   getComposerDraft: (sessionId: string) => string;
   /** Rewind the latest user turn and prepare its payload for composer editing */
-  rewindLastTurn: (sessionId: string) => Promise<AgentInputPayload | null>;
+  rewindLastTurn: (sessionId: string) => Promise<RewindMessageResult | null>;
   /** Rewind to an arbitrary historical user message by its event index and prepare its payload for composer editing */
-  rewindToMessage: (sessionId: string, userEventIndex: number, mode?: RewindMode) => Promise<AgentInputPayload | null>;
+  rewindToMessage: (sessionId: string, userEventIndex: number, mode?: RewindMode) => Promise<RewindMessageResult | null>;
   /** Queue composer text to be restored for a session (applied only when the composer is empty) */
   requestComposerRestore: (sessionId: string, text: string) => void;
   /** Consume and clear any pending composer restore text for a session */
@@ -229,6 +229,17 @@ const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingSessionMessageLoads = new Map<string, Promise<void>>();
+const sessionHistoryEpoch = new Map<string, number>();
+
+function bumpSessionHistoryEpoch(sessionId: string): number {
+  const next = (sessionHistoryEpoch.get(sessionId) ?? 0) + 1;
+  sessionHistoryEpoch.set(sessionId, next);
+  return next;
+}
+
+function getSessionHistoryEpoch(sessionId: string): number {
+  return sessionHistoryEpoch.get(sessionId) ?? 0;
+}
 
 async function hydrateSessionMessageAttachments(sessionId: string, events: AgentMessage[]): Promise<AgentMessage[]> {
   try {
@@ -1223,7 +1234,7 @@ function isOpencodeLikeAgent(sessionId: string): boolean {
   return kind === 'opencode';
 }
 
-function isRewindableUserEvent(event: AgentMessage): event is Extract<AgentMessage, { kind: 'user' }> {
+export function isRewindableUserEvent(event: AgentMessage): event is Extract<AgentMessage, { kind: 'user' }> {
   if (event.kind !== 'user') {
     return false;
   }
@@ -1262,6 +1273,15 @@ export function hasStrongRewindLocator(locator: AgentUserMessageLocator | undefi
     || typeof locator?.lineIndex === 'number'
     || typeof locator?.sourceEventIndex === 'number',
   );
+}
+
+function isMissingRewindTargetError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : String((error as { message?: unknown })?.message ?? error);
+  return /Target rewind user message not found/i.test(message);
 }
 
 function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Record<string, T> {
@@ -1798,6 +1818,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }));
       return;
     }
+
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
@@ -2928,6 +2949,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
     const loadPromise = (async () => {
       const agentKind = getSessionAgentKind(sessionId);
+      const loadEpoch = getSessionHistoryEpoch(sessionId);
 
       try {
         const historyMessages = typeof agentApi.loadSessionEvents === 'function'
@@ -2937,6 +2959,14 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             : agentKind === 'opencode'
               ? await agentApi.loadOpenCodeSessionEvents(sessionId)
               : await agentApi.loadClaudeSessionEvents(sessionId);
+
+        if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
+          logger.info('Discarding stale session history load after rewind', {
+            sessionId,
+            loadEpoch,
+          });
+          return;
+        }
 
         if (!historyMessages || historyMessages.length === 0) {
           logger.info('No agent history found for session', {
@@ -2982,6 +3012,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
 
         const hydratedEvents = await hydrateSessionMessageAttachments(sessionId, events);
+        if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
+          logger.info('Discarding stale session history load after rewind', {
+            sessionId,
+            loadEpoch,
+          });
+          return;
+        }
         const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId)
           ?? useSessionStore.getState().archivedSessions.find((entry) => entry.id === sessionId);
         const projectPath = session?.project_id
@@ -3117,32 +3154,87 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       return null;
     }
 
-    // Arbitrary historical rewinds require a strong provider-side locator so the
-    // native history can locate the target line. The latest rewindable message
-    // keeps the ordinal fallback used by live optimistic turns.
+    // Latest conversation rewind can omit a locator (JSONL falls back to the
+    // latest user line). Historical rows and Claude file/both rewind send
+    // turn ordinal + text fingerprint so the backend can resolve the Claude
+    // JSONL uuid without a UI locator.
+    const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
+    if (!supportsRewindMode(agentKind, mode)) {
+      return null;
+    }
     const latestRewindableIndex = getRewindableUserIndex(events);
     const hasStrongLocator = hasStrongRewindLocator(userEvent.data.locator);
-    if (userEventIndex !== latestRewindableIndex && !hasStrongLocator) {
-      return null;
-    }
-    if (mode !== 'conversation' && !hasStrongLocator) {
-      // File checkpoints are keyed by the provider message ID.
-      return null;
-    }
-
-    const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
     const payload = buildInputPayloadFromUserEvent(userEvent);
-    const target = hasStrongLocator ? userEvent.data.locator : undefined;
     const rewindUserIndex = events
       .slice(0, userEventIndex + 1)
       .filter((event) => event.kind === 'user')
       .length - 1;
+    const turnOrdinal = events
+      .slice(0, userEventIndex + 1)
+      .filter(isRewindableUserEvent)
+      .length;
+    const fingerprintTarget: AgentUserMessageLocator = {
+      role: 'user',
+      textFingerprint: userEvent.data.content,
+      turnOrdinal,
+    };
+    const needsExplicitTarget = mode !== 'conversation'
+      || hasStrongLocator
+      || userEventIndex !== latestRewindableIndex;
+    const target = !needsExplicitTarget
+      ? undefined
+      : hasStrongLocator
+        ? {
+            ...userEvent.data.locator,
+            ...fingerprintTarget,
+          }
+        : fingerprintTarget;
 
-    await agentApi.rewindSession(sessionId, agentKind, target, rewindUserIndex, mode);
+    if (mode !== 'files') {
+      bumpSessionHistoryEpoch(sessionId);
+    }
+
+    let filesChanged: number | undefined;
+    const invokeRewind = async (
+      rewindTarget: AgentUserMessageLocator | undefined,
+    ) => {
+      const result = await agentApi.rewindSession(sessionId, agentKind, rewindTarget, rewindUserIndex, mode);
+      if (result && typeof result.filesChanged === 'number') {
+        filesChanged = result.filesChanged;
+      }
+    };
+
+    try {
+      await invokeRewind(target);
+    } catch (error) {
+      // Live/timeline rows may carry a CodeMUX event_id that is not the Claude
+      // JSONL uuid. Retry conversation rewind by turn ordinal + text fingerprint.
+      const canFallBack = mode === 'conversation' && isMissingRewindTargetError(error);
+      if (!canFallBack) {
+        throw error;
+      }
+      if (target == null) {
+        await invokeRewind(fingerprintTarget);
+      } else if (
+        target.providerMessageId
+        || typeof target.lineIndex === 'number'
+        || typeof target.sourceEventIndex === 'number'
+      ) {
+        await invokeRewind(fingerprintTarget);
+      } else if (userEventIndex === latestRewindableIndex) {
+        await invokeRewind(undefined);
+      } else {
+        throw error;
+      }
+    }
+
+    const rewindResult: RewindMessageResult = mode === 'conversation'
+      ? payload
+      : { ...payload, filesChanged };
 
     if (mode === 'files') {
       // File-only rewind keeps the conversation intact; nothing to truncate.
-      return payload;
+      return rewindResult;
     }
 
     clearPendingStreaming(sessionId);
@@ -3178,7 +3270,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       localStorage.removeItem(`acknowledged-files-${sessionId}`);
     } catch {}
 
-    return payload;
+    return rewindResult;
   },
 
   requestComposerRestore: (sessionId: string, text: string) => {

@@ -6,9 +6,55 @@ const STREAM_EVENT_BATCH_MAX_SIZE = 100;
 let pendingCodeMuxDeltas: CodeMuxStreamEvent[] = [];
 let pendingTimer: NodeJS.Timeout | null = null;
 const nextSequenceBySession = new Map<string, number>();
+let wireSessionId: string | undefined;
+const providerSessionIds = new Set<string>();
 
 export function resetStreamEventSequences(): void {
   nextSequenceBySession.clear();
+}
+
+export function syncStreamSessionContext(options: {
+  appSessionId?: string;
+  providerSessionId?: string;
+  clear?: boolean;
+} = {}): void {
+  if (options.clear) {
+    wireSessionId = undefined;
+    providerSessionIds.clear();
+    return;
+  }
+
+  if (options.appSessionId) {
+    wireSessionId = options.appSessionId;
+  }
+  if (options.providerSessionId) {
+    providerSessionIds.add(options.providerSessionId);
+  }
+}
+
+function resolveWireSessionId(eventSessionId?: string): string | undefined {
+  if (!wireSessionId) {
+    return eventSessionId;
+  }
+  if (!eventSessionId || eventSessionId === wireSessionId || providerSessionIds.has(eventSessionId)) {
+    return wireSessionId;
+  }
+  return eventSessionId;
+}
+
+function withResolvedSessionId(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const event = value as Record<string, unknown>;
+  const eventSessionId = typeof event.session_id === 'string' ? event.session_id : undefined;
+  const resolvedSessionId = resolveWireSessionId(eventSessionId);
+  if (!resolvedSessionId || resolvedSessionId === eventSessionId) {
+    return value;
+  }
+
+  return { ...event, session_id: resolvedSessionId };
 }
 
 function writeJsonLine(obj: unknown): void {
@@ -37,14 +83,17 @@ export function flushStreamEvents(): void {
 }
 
 export function emit(obj: unknown): void {
-  if (isBatchableCodeMuxDelta(obj)) {
-    queueCodeMuxEvent(withCodeMuxEnvelope(obj) as CodeMuxStreamEvent);
+  const resolved = withResolvedSessionId(obj);
+
+  if (isBatchableCodeMuxDelta(resolved)) {
+    queueCodeMuxEvent(withCodeMuxEnvelope(resolved) as CodeMuxStreamEvent);
     return;
   }
 
-  if (obj && typeof obj === 'object' && (obj as { type?: unknown }).type === 'stream_event') {
-    const streamEnvelope = obj as { type: 'stream_event'; session_id?: string; event: unknown };
-    const codeMuxEvent = toCodeMuxStreamEvent(streamEnvelope.session_id, streamEnvelope.event);
+  if (resolved && typeof resolved === 'object' && (resolved as { type?: unknown }).type === 'stream_event') {
+    const streamEnvelope = resolved as { type: 'stream_event'; session_id?: string; event: unknown };
+    const sessionId = resolveWireSessionId(streamEnvelope.session_id);
+    const codeMuxEvent = toCodeMuxStreamEvent(sessionId, streamEnvelope.event);
     if (codeMuxEvent) {
       queueCodeMuxEvent(withCodeMuxEnvelope(codeMuxEvent) as CodeMuxStreamEvent);
       return;
@@ -61,13 +110,13 @@ export function emit(obj: unknown): void {
     writeJsonLine(withCodeMuxEnvelope({
       type: 'diagnostic',
       subtype: 'unsupported_stream_event',
-      session_id: streamEnvelope.session_id,
+      session_id: sessionId ?? streamEnvelope.session_id,
     }));
     return;
   }
 
   flushStreamEvents();
-  writeJsonLine(withCodeMuxEnvelope(obj));
+  writeJsonLine(withCodeMuxEnvelope(resolved));
 }
 
 function queueCodeMuxEvent(event: CodeMuxStreamEvent): void {
