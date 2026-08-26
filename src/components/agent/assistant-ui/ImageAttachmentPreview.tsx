@@ -41,7 +41,8 @@ export function ImageAttachmentPreview({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           overlayClassName="z-[250] bg-black/72 backdrop-blur-sm"
-          className="z-[260] flex h-[min(88vh,54rem)] w-[min(92vw,72rem)] max-w-none items-center justify-center border-border/35 bg-black/92 p-3 shadow-[0_30px_90px_-36px_black] dark:bg-black/92 sm:rounded-lg"
+          closeClassName="rounded-md bg-white/10 text-white/85 opacity-100 hover:bg-white/18 hover:text-white data-[state=open]:bg-white/10 data-[state=open]:text-white/85 focus:ring-white/30 focus:ring-offset-0"
+          className="z-[260] flex h-[min(88vh,54rem)] w-[min(92vw,72rem)] max-w-none items-center justify-center border-border/35 bg-black/92 p-3 text-white shadow-[0_30px_90px_-36px_black] dark:bg-black/92 sm:rounded-lg"
         >
           <DialogTitle className="sr-only">{alt}</DialogTitle>
           <img

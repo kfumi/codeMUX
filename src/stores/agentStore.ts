@@ -1740,13 +1740,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
       await pendingHistoryLoad;
     }
     const currentState = get();
-    const hasQueuedQueries = (currentState.queuedQueries[sessionId]?.length ?? 0) > 0;
+    // Queue composer sends only while a turn is active or a queued dispatch is in flight.
+    // After a failed/paused turn, composer input starts a new turn immediately; existing
+    // queued messages stay in order and run after that turn succeeds.
     const shouldQueue =
       !fromQueue
       && (
         Boolean(currentState.isRunning[sessionId])
-        || Boolean(currentState.queuePaused[sessionId])
-        || hasQueuedQueries
         || queuedDispatches.has(sessionId)
       );
     if (shouldQueue) {

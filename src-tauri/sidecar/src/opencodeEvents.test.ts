@@ -266,6 +266,41 @@ describe('OpenCode event normalization', () => {
     expect(sessionCompacted).toEqual([]);
   });
 
+  it('does not surface compaction summary assistant parts as chat output', () => {
+    const compactionSummaryMessageIds = new Set(['compaction-summary-1']);
+    const reasoningPart = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'part-compaction-reasoning',
+          messageID: 'compaction-summary-1',
+          sessionID: 'opencode-session-1',
+          type: 'reasoning',
+          text: 'Objective: summarize context',
+        },
+      },
+    }, context({ compactionSummaryMessageIds }));
+    const textDelta = toCodeMuxEvent({
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'opencode-session-1',
+        messageID: 'compaction-summary-1',
+        partID: 'part-compaction-text',
+        field: 'text',
+        delta: 'Important details from compaction',
+      },
+    }, context({
+      compactionSummaryMessageIds,
+      streamingParts: new Map(),
+      nextSection: { kind: 'idle' },
+      idleStreamKind: { kind: 'text' },
+    }));
+
+    expect(reasoningPart).toEqual([]);
+    expect(textDelta).toEqual([]);
+  });
+
   it('converts V2 native compaction lifecycle events into a compact boundary', () => {
     const started = toCodeMuxEvent({
       type: 'session.next.compaction.started',

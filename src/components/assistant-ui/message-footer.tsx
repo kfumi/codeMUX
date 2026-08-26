@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Check, Copy, Bug, GitFork, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
+import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
 import { cn } from '@/lib/utils';
 import { TooltipHint } from '@/components/ui/tooltip';
 
@@ -71,7 +72,9 @@ export function MessageFooter({
       </ActionBarPrimitive.Root>
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
-      {stats?.durationMs != null ? <FooterItem>耗时 {(stats.durationMs / 1000).toFixed(1)}s</FooterItem> : null}
+      {stats?.durationMs != null ? (
+        <FooterItem>耗时 {formatElapsed(stats.durationMs)}</FooterItem>
+      ) : null}
     </div>
   );
 }

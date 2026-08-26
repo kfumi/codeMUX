@@ -303,6 +303,109 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
   });
 
+  it('dispatches composer input immediately after a failed turn even when queuePaused', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    let finishFirstTurn: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      finishFirstTurn = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+
+    finishFirstTurn?.(JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      uuid: 'failed-result',
+      session_id: session.id,
+      duration_ms: 5,
+      duration_api_ms: 4,
+      num_turns: 1,
+      result: 'failed',
+    }));
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().queuePaused[session.id]).toBe(true);
+      expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    });
+
+    startSessionMock.mockImplementationOnce(async () => {});
+
+    await useAgentStore.getState().startQuery(session.id, 'retry from composer', 'D:\\workspace');
+
+    expect(useAgentStore.getState().queuedQueries[session.id] ?? []).toEqual([]);
+    expect(useAgentStore.getState().queuePaused[session.id]).toBe(false);
+    expect(startSessionMock).toHaveBeenCalledTimes(2);
+    expect(startSessionMock.mock.calls[1]?.[1]).toBe('retry from composer');
+  });
+
+  it('dispatches composer input after failure before retaining and running prior queued messages', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    let finishFirstTurn: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      finishFirstTurn = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'queued during run', 'D:\\workspace');
+
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'queued during run',
+    ]);
+
+    finishFirstTurn?.(JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      uuid: 'failed-result',
+      session_id: session.id,
+      duration_ms: 5,
+      duration_api_ms: 4,
+      num_turns: 1,
+      result: 'failed',
+    }));
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().queuePaused[session.id]).toBe(true);
+      expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    });
+
+    let finishRetryTurn: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      finishRetryTurn = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'retry from composer', 'D:\\workspace');
+
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'queued during run',
+    ]);
+    expect(useAgentStore.getState().queuePaused[session.id]).toBe(false);
+    expect(startSessionMock).toHaveBeenCalledTimes(2);
+    expect(startSessionMock.mock.calls[1]?.[1]).toBe('retry from composer');
+
+    finishRetryTurn?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+
+    startSessionMock.mockImplementationOnce(async () => {});
+
+    await vi.waitFor(() => {
+      expect(startSessionMock).toHaveBeenCalledTimes(3);
+      expect(startSessionMock.mock.calls[2]?.[1]).toBe('queued during run');
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
   it('runQueuedQueryNow promotes the chosen message without interrupting when nothing is running', async () => {
     const { useAgentStore } = await import('./agentStore');
     const { agentApi } = await import('../lib/tauri');

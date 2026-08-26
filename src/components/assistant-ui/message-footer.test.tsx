@@ -27,7 +27,7 @@ describe('MessageFooter', () => {
   it('renders duration without a turn status label', () => {
     render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} stats={{ durationMs: 1200 }} />);
 
-    expect(screen.getByText(/耗时 1.2s/)).toBeTruthy();
+    expect(screen.getByText(/耗时 1s/)).toBeTruthy();
     expect(screen.queryByText(/token/)).toBeNull();
     expect(screen.queryByText('Failed')).toBeNull();
     expect(screen.queryByText('Interrupted')).toBeNull();

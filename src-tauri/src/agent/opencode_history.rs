@@ -693,6 +693,113 @@ mod tests {
     }
 
     #[test]
+    fn filters_textual_assistant_compaction_summary_from_history() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1000_i64,
+                    r#"{"role":"user","time":{"created":1000}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-user",
+                    "user-1",
+                    "session-1",
+                    1001_i64,
+                    r#"{"type":"text","text":"hello"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "compaction-user-1",
+                    "session-1",
+                    1500_i64,
+                    r#"{"role":"user","time":{"created":1500}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-compaction-marker",
+                    "compaction-user-1",
+                    "session-1",
+                    1501_i64,
+                    r#"{"type":"compaction","auto":true,"overflow":false}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "compaction-summary-1",
+                    "session-1",
+                    2000_i64,
+                    r#"{"role":"assistant","mode":"compaction","summary":true,"time":{"created":2000}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-compaction-reasoning",
+                    "compaction-summary-1",
+                    "session-1",
+                    2001_i64,
+                    r#"{"type":"reasoning","text":"Objective: summarize context"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-compaction-text",
+                    "compaction-summary-1",
+                    "session-1",
+                    2002_i64,
+                    r#"{"type":"text","text":"Important details from compaction"}"#
+                ],
+            )
+            .unwrap();
+
+        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let assistant_events: Vec<&Value> = events
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("assistant"))
+            .collect();
+        let compact_events: Vec<&Value> = events
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(Value::as_str) == Some("system")
+                    && event.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
+            })
+            .collect();
+
+        assert_eq!(assistant_events.len(), 0);
+        assert_eq!(compact_events.len(), 1);
+        assert_eq!(compact_events[0]["compact_metadata"]["trigger"], "auto");
+    }
+
+    #[test]
     fn filters_synthetic_compaction_continue_user_message_from_history() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
@@ -1715,20 +1822,24 @@ fn load_opencode_events_from_connection(
                     .get("summary")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
-                if is_summary && content.is_empty() {
-                    flush_pending_opencode_result(&mut events, &mut pending_success_result);
-                    events.push(serde_json::json!({
-                        "type": "system",
-                        "subtype": "compact_boundary",
-                        "content": "Conversation compacted",
-                        "compact_metadata": {
-                            "trigger": "auto",
-                            "pre_tokens": 0,
-                        },
-                        "uuid": format!("{}-compaction", message_id),
-                        "session_id": session_id,
-                        "timestamp": timestamp_string(time_created),
-                    }));
+                if is_summary {
+                    // OpenCode compaction summaries may include reasoning/text parts.
+                    // They are internal context, not user-facing assistant output.
+                    if content.is_empty() {
+                        flush_pending_opencode_result(&mut events, &mut pending_success_result);
+                        events.push(serde_json::json!({
+                            "type": "system",
+                            "subtype": "compact_boundary",
+                            "content": "Conversation compacted",
+                            "compact_metadata": {
+                                "trigger": "auto",
+                                "pre_tokens": 0,
+                            },
+                            "uuid": format!("{}-compaction", message_id),
+                            "session_id": session_id,
+                            "timestamp": timestamp_string(time_created),
+                        }));
+                    }
                     continue;
                 }
             }

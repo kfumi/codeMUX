@@ -77,6 +77,7 @@ export class OpenCodeRuntime {
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
   private readonly compactionBoundarySessionIds = new Set<string>();
+  private readonly compactionSummaryMessageIds = new Set<string>();
   /** Tool call ids currently in the `running` state. Drives the idle guard: while any tool is running, the guard is suspended so long-running tool execution (e.g. builds, installs) is not mistaken for a hang. The tool layer is authoritative for its own timeouts. */
   private readonly runningToolIds = new Set<string>();
   private readonly pendingQuestionIds = new Set<string>();
@@ -654,6 +655,7 @@ export class OpenCodeRuntime {
         terminalSessionIds: this.terminalSessionIds,
         terminalToolIds: this.terminalToolIds,
         compactionBoundarySessionIds: this.compactionBoundarySessionIds,
+        compactionSummaryMessageIds: this.compactionSummaryMessageIds,
         assistantMessageIds: this.assistantMessageIds,
         userMessageIds: this.userMessageIds,
         turnId: this.turnId,
@@ -718,6 +720,14 @@ export class OpenCodeRuntime {
       const messageId = readString(info?.id);
       if (messageId && readString(info?.role) === 'assistant') this.assistantMessageIds.add(messageId);
       if (messageId && readString(info?.role) === 'user') this.userMessageIds.add(messageId);
+      if (
+        messageId
+        && readString(info?.role) === 'assistant'
+        && readString(info?.mode) === 'compaction'
+        && info?.summary === true
+      ) {
+        this.compactionSummaryMessageIds.add(messageId);
+      }
     }
     if (toolId && this.terminalToolIds.has(toolId)) {
       return;
@@ -745,6 +755,7 @@ export class OpenCodeRuntime {
       terminalSessionIds: this.terminalSessionIds,
       terminalToolIds: this.terminalToolIds,
       compactionBoundarySessionIds: this.compactionBoundarySessionIds,
+      compactionSummaryMessageIds: this.compactionSummaryMessageIds,
       assistantMessageIds: this.assistantMessageIds,
       userMessageIds: this.userMessageIds,
       turnId: this.turnId,
@@ -880,6 +891,7 @@ export class OpenCodeRuntime {
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.compactionBoundarySessionIds.clear();
+    this.compactionSummaryMessageIds.clear();
     this.runningToolIds.clear();
     this.pendingTaskToolCallIds.clear();
     this.childTaskToolIds.clear();
@@ -923,6 +935,7 @@ export class OpenCodeRuntime {
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.compactionBoundarySessionIds.clear();
+    this.compactionSummaryMessageIds.clear();
     this.runningToolIds.clear();
     this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();

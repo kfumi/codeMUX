@@ -1463,7 +1463,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('keeps final message footer hidden until the full message row is hovered', () => {
     render(<Harness sessionId="session-completed-turn" />);
 
-    const footer = screen.getByText('耗时 73.0s').closest('[data-message-footer]');
+    const footer = screen.getByText('耗时 1m 13s').closest('[data-message-footer]');
     const row = screen.getByText('Fixed and verified.').closest('[data-message-row]');
 
     expect(row?.className).toContain('group/message-row');
@@ -1477,11 +1477,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
     const latestRow = screen.getByText('Latest answer.').closest('[data-message-row]');
 
-    expect(earlierRow?.textContent).toContain('耗时 1.0s');
+    expect(earlierRow?.textContent).toContain('耗时 1s');
     expect(earlierRow?.textContent).not.toContain('token');
     expect(earlierRow?.textContent).not.toContain('缓存命中');
 
-    expect(latestRow?.textContent).toContain('耗时 2.0s');
+    expect(latestRow?.textContent).toContain('耗时 2s');
     expect(latestRow?.textContent).not.toContain('token');
     expect(latestRow?.textContent).not.toContain('缓存命中');
   });
@@ -1491,7 +1491,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
 
-    expect(earlierRow?.textContent).toContain('耗时 1.0s');
+    expect(earlierRow?.textContent).toContain('耗时 1s');
     expect(earlierRow?.textContent).not.toContain('token');
   });
 
@@ -1617,11 +1617,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const toolGroupRow = container.querySelector('[data-slot="tool-group-root"]')?.closest('[data-message-row]');
 
     await waitFor(() => {
-      expect(within(finalMessageRow as HTMLElement).getByText(/1\.0s/)).toBeTruthy();
+      expect(within(finalMessageRow as HTMLElement).getByText(/耗时 1s/)).toBeTruthy();
     });
     expect(within(finalMessageRow as HTMLElement).queryByText(/token/)).toBeNull();
     expect(toolGroupRow).toBeTruthy();
-    expect(within(toolGroupRow as HTMLElement).queryByText(/1\.0s/)).toBeNull();
+    expect(within(toolGroupRow as HTMLElement).queryByText(/耗时 1s/)).toBeNull();
     expect(within(toolGroupRow as HTMLElement).queryByText(/token/)).toBeNull();
   });
 

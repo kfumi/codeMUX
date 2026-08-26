@@ -32,6 +32,8 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
   compactionBoundarySessionIds?: Set<string>;
+  /** Assistant messages that carry OpenCode compaction summaries (must not render). */
+  compactionSummaryMessageIds?: ReadonlySet<string>;
   turnId?: number;
   assistantMessageIds?: ReadonlySet<string>;
   userMessageIds?: ReadonlySet<string>;
@@ -156,6 +158,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       // OpenCode stores the compaction marker on the synthetic/user message
       // that triggered compaction. It is still a control event, not user text.
       if (messageId && context.userMessageIds?.has(messageId) && partType !== 'compaction') break;
+      if (messageId && context.compactionSummaryMessageIds?.has(messageId)) break;
       const partState = partId ? context.streamingParts?.get(partId) : undefined;
       if (partType === 'text' || partType === 'reasoning') {
         const finalizedKind = partType === 'reasoning' ? 'thinking' : 'text';
@@ -265,8 +268,10 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     }
     case 'message.part.delta': {
       const partId = readString(properties.partID);
+      const messageId = readString(properties.messageID);
       const field = readString(properties.field);
       const delta = readString(properties.delta);
+      if (messageId && context.compactionSummaryMessageIds?.has(messageId)) break;
       if (!partId || !field || !delta || !context.streamingParts) break;
 
       const resolveStreamKind = (): 'thinking' | 'text' => {
