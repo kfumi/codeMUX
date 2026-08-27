@@ -21,6 +21,8 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 
 const AUTOMATION_DRAFT_SESSION_ID = 'scheduled-task-draft';
+
+const WEEKDAY_OPTIONS = [
   { value: 0, label: '周一' },
   { value: 1, label: '周二' },
   { value: 2, label: '周三' },
