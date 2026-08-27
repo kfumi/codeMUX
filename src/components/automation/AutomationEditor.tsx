@@ -1,5 +1,5 @@
 import { ArrowLeft, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -8,9 +8,11 @@ import {
   type AgentPermissionConfig,
 } from '../../lib/agentPermissions';
 import { scheduledTaskApi } from '../../lib/tauri';
+import { useAgentModels } from '../../hooks/useAgentModels';
 import { useProjectStore } from '../../stores/projectStore';
 import { useScheduledTaskStore } from '../../stores/scheduledTaskStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { ModelProvider } from '../../types/provider';
 import type { AgentKind } from '../../types/session';
 import type { ScheduledTaskDraft, ScheduleKind, TaskRun } from '../../types/scheduledTask';
 import { AgentPermissionSelector } from '../agent/AgentPermissionSelector';
@@ -21,6 +23,8 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 
 const AUTOMATION_DRAFT_SESSION_ID = 'scheduled-task-draft';
+const EMPTY_RUNS: TaskRun[] = [];
+const EMPTY_MODEL_PROVIDERS: ModelProvider[] = [];
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: '周一' },
@@ -93,7 +97,10 @@ export function AutomationEditor({
   const updateTask = useScheduledTaskStore((state) => state.updateTask);
   const deleteTask = useScheduledTaskStore((state) => state.deleteTask);
   const fetchRuns = useScheduledTaskStore((state) => state.fetchRuns);
-  const runs = useScheduledTaskStore((state) => state.runs[taskId ?? ''] ?? []);
+  const runs = useScheduledTaskStore((state) => {
+    if (!taskId) return EMPTY_RUNS;
+    return state.runs[taskId] ?? EMPTY_RUNS;
+  });
 
   const [tab, setTab] = useState<'settings' | 'history'>('settings');
   const [timezone, setTimezone] = useState('');
@@ -115,8 +122,47 @@ export function AutomationEditor({
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  const modelProviders = config?.model_providers ?? [];
+  const modelProviders = config?.model_providers ?? EMPTY_MODEL_PROVIDERS;
   const activeProviderId = config?.active_provider_id ?? null;
+  const preferredProviderId = draft.providerId ?? activeProviderId;
+  const { models } = useAgentModels(draft.agentKind, modelProviders, preferredProviderId);
+
+  const effectiveModel = useMemo(() => {
+    if (
+      draft.model
+      && models.some((model) => model.modelId === draft.model && (
+        !preferredProviderId || model.providerId === preferredProviderId
+      ))
+    ) {
+      return draft.model;
+    }
+    if (preferredProviderId) {
+      const match = models.find((model) => model.providerId === preferredProviderId);
+      if (match) return match.modelId;
+    }
+    return models[0]?.modelId ?? '';
+  }, [draft.model, models, preferredProviderId]);
+
+  const effectiveProviderId = useMemo(() => {
+    if (draft.providerId) return draft.providerId;
+    const match = models.find((model) => model.modelId === effectiveModel);
+    return match?.providerId ?? preferredProviderId;
+  }, [draft.providerId, effectiveModel, models, preferredProviderId]);
+
+  const handleModelChange = useCallback((modelId: string, providerId: string) => {
+    setDraft((current) => ({
+      ...current,
+      model: modelId,
+      providerId,
+    }));
+  }, []);
+
+  const handleReasoningEffortChange = useCallback((effort: ScheduledTaskDraft['reasoningEffort']) => {
+    setDraft((current) => ({
+      ...current,
+      reasoningEffort: effort,
+    }));
+  }, []);
 
   useEffect(() => {
     scheduledTaskApi.getTimezone().then(setTimezone).catch(() => setTimezone(''));
@@ -172,8 +218,8 @@ export function AutomationEditor({
       instruction: draft.instruction.trim(),
       projectId: draft.projectId,
       agentKind: draft.agentKind,
-      providerId: draft.providerId,
-      model: draft.model,
+      providerId: draft.providerId ?? effectiveProviderId,
+      model: draft.model ?? (effectiveModel || null),
       reasoningEffort: draft.reasoningEffort,
       permissionConfig: JSON.stringify(serializePermissionConfig(draft.agentKind, draft.permissionConfig)),
       planMode: draft.planMode,
@@ -366,18 +412,11 @@ export function AutomationEditor({
               <AgentModelSelector
                 agentKind={draft.agentKind}
                 providers={modelProviders}
-                activeProviderId={draft.providerId ?? activeProviderId}
-                value={draft.model ?? ''}
-                onChange={(modelId, providerId) => setDraft((current) => ({
-                  ...current,
-                  model: modelId,
-                  providerId,
-                }))}
+                activeProviderId={effectiveProviderId}
+                value={effectiveModel}
+                onChange={handleModelChange}
                 reasoningEffort={draft.reasoningEffort}
-                onReasoningEffortChange={(effort) => setDraft((current) => ({
-                  ...current,
-                  reasoningEffort: effort,
-                }))}
+                onReasoningEffortChange={handleReasoningEffortChange}
               />
               <AgentPermissionSelector
                 agentKind={draft.agentKind}
