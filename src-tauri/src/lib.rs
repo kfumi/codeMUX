@@ -651,6 +651,7 @@ pub fn run() {
             commands::companion::set_companion_relay_config,
             commands::companion::refresh_companion_pairing_code,
             commands::companion::get_companion_pairing_offer,
+            commands::companion::is_session_turn_active,
             commands::scheduled_tasks::list_scheduled_tasks,
             commands::scheduled_tasks::get_scheduled_task,
             commands::scheduled_tasks::create_scheduled_task,
@@ -659,6 +660,8 @@ pub fn run() {
             commands::scheduled_tasks::set_scheduled_task_enabled,
             commands::scheduled_tasks::list_scheduled_task_runs,
             commands::scheduled_tasks::get_scheduled_task_timezone,
+            commands::scheduled_tasks::run_scheduled_task_now,
+            commands::scheduled_tasks::delete_scheduled_task_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,7 @@ export interface ScheduledTask {
   scheduleKind: ScheduleKind;
   scheduleTime: string;
   weeklyWeekday: number | null;
+  weeklyWeekdays: number[] | null;
   monthlyDay: number | null;
   timezone: string;
   delivery: 'new_session';
@@ -27,6 +28,7 @@ export interface ScheduledTask {
   nextRunAt: string;
   createdAt: string;
   updatedAt: string;
+  runCount: number;
 }
 
 export interface TaskRun {
@@ -54,6 +56,7 @@ export interface ScheduledTaskInput {
   scheduleKind: ScheduleKind;
   scheduleTime: string;
   weeklyWeekday: number | null;
+  weeklyWeekdays: number[] | null;
   monthlyDay: number | null;
   timezone?: string;
   enabled: boolean;
@@ -69,9 +72,9 @@ export interface ScheduledTaskDraft {
   reasoningEffort: ReasoningEffort;
   permissionConfig: AgentPermissionConfig;
   planMode: AgentPlanMode;
-  scheduleKind: ScheduleKind;
-  scheduleTime: string;
-  weeklyWeekday: number;
-  monthlyDay: number;
+  scheduleKind?: ScheduleKind;
+  scheduleTime?: string;
+  weeklyWeekday?: number;
+  monthlyDay?: number;
   enabled: boolean;
 }

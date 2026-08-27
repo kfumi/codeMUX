@@ -25,6 +25,12 @@ vi.mock('../../lib/tauri', () => ({
     getProxyPort: vi.fn(() => Promise.resolve(null)),
     deleteClaudeSessionFiles: vi.fn(),
     resetSession: vi.fn(),
+    loadClaudeSessionEvents: vi.fn(() => Promise.resolve([])),
+    loadCodexSessionEvents: vi.fn(() => Promise.resolve([])),
+    loadSessionEvents: vi.fn(() => Promise.resolve([])),
+  },
+  companionApi: {
+    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
   },
   sessionApi: {
     touch: vi.fn(() => Promise.resolve()),

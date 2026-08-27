@@ -89,6 +89,9 @@ vi.mock('../lib/tauri', () => ({
     deleteFile: vi.fn(),
     listDirectory: vi.fn(),
   },
+  companionApi: {
+    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+  },
   gitApi: {},
   mcpApi: {
     getAll: vi.fn(),
@@ -140,6 +143,7 @@ describe('agent store Codex history loading', () => {
       events: {},
       eventTimestamps: {},
       isRunning: {},
+      backgroundLive: {},
       error: {},
       mcpRuntimeStatus: {},
       todos: {},
@@ -269,6 +273,25 @@ describe('agent store Codex history loading', () => {
       expect(startSessionMock.mock.calls[2]?.[1]).toBe('third message');
     });
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
+  it('does not stop a live desktop query when attaching to a background turn', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { companionApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+    vi.mocked(companionApi.isSessionTurnActive).mockResolvedValue(false);
+
+    startSessionMock.mockImplementationOnce(async () => undefined);
+
+    await useAgentStore.getState().startQuery(session.id, '1111', 'D:\\workspace');
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    await useAgentStore.getState().attachToActiveTurn(session.id, 'D:\\workspace');
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().events[session.id]?.some((event) => (
+      event.kind === 'user' && event.data.content === '1111'
+    ))).toBe(true);
   });
 
   it('runQueuedQueryNow interrupts the active turn and runs the chosen message first', async () => {

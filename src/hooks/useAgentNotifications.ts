@@ -68,7 +68,11 @@ function playNotificationSound(sound: NotificationSound) {
 
 async function showAppSession(sessionId: string) {
   await appApi.showMainWindow();
-  const sessions = useSessionStore.getState().sessions;
+  let sessions = useSessionStore.getState().sessions;
+  if (!sessions.some((session) => session.id === sessionId)) {
+    await useSessionStore.getState().fetchSessions();
+    sessions = useSessionStore.getState().sessions;
+  }
   if (sessions.some((session) => session.id === sessionId)) {
     useSessionStore.getState().setActiveSession(sessionId);
   }

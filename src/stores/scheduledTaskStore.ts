@@ -13,6 +13,8 @@ interface ScheduledTaskState {
   updateTask: (taskId: string, input: ScheduledTaskInput) => Promise<ScheduledTask>;
   deleteTask: (taskId: string) => Promise<void>;
   setEnabled: (taskId: string, enabled: boolean) => Promise<ScheduledTask>;
+  runTaskNow: (taskId: string) => Promise<TaskRun>;
+  deleteRun: (taskId: string, runId: string) => Promise<void>;
 }
 
 export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
@@ -67,5 +69,26 @@ export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
       tasks: state.tasks.map((entry) => entry.id === taskId ? task : entry),
     }));
     return task;
+  },
+
+  runTaskNow: async (taskId) => {
+    const run = await scheduledTaskApi.runNow(taskId);
+    const tasks = await scheduledTaskApi.list();
+    const runs = await scheduledTaskApi.listRuns(taskId);
+    set((state) => ({
+      tasks,
+      runs: { ...state.runs, [taskId]: runs },
+    }));
+    return run;
+  },
+
+  deleteRun: async (taskId, runId) => {
+    await scheduledTaskApi.deleteRun(runId);
+    const tasks = await scheduledTaskApi.list();
+    const runs = await scheduledTaskApi.listRuns(taskId);
+    set((state) => ({
+      tasks,
+      runs: { ...state.runs, [taskId]: runs },
+    }));
   },
 }));

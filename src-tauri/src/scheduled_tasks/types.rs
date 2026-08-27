@@ -117,6 +117,7 @@ pub struct ScheduledTask {
     pub schedule_kind: ScheduleKind,
     pub schedule_time: String,
     pub weekly_weekday: Option<i32>,
+    pub weekly_weekdays: Option<Vec<i32>>,
     pub monthly_day: Option<i32>,
     pub timezone: String,
     pub delivery: RunDelivery,
@@ -125,6 +126,7 @@ pub struct ScheduledTask {
     pub next_run_at: String,
     pub created_at: String,
     pub updated_at: String,
+    pub run_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +157,7 @@ pub struct ScheduledTaskUpsert {
     pub schedule_kind: ScheduleKind,
     pub schedule_time: String,
     pub weekly_weekday: Option<i32>,
+    pub weekly_weekdays: Option<Vec<i32>>,
     pub monthly_day: Option<i32>,
     pub timezone: String,
     pub enabled: bool,

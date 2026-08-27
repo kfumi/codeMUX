@@ -50,6 +50,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const startQuery = useAgentStore((state) => state.startQuery);
   const interrupt = useAgentStore((state) => state.interrupt);
   const loadSessionMessages = useAgentStore((state) => state.loadSessionMessages);
+  const attachToActiveTurn = useAgentStore((state) => state.attachToActiveTurn);
   const sessionsLoading = useSessionStore((state) => state.isLoading);
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
@@ -167,6 +168,21 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       setHistoryReady(true);
     });
   }, [sessionId, loadSessionMessages]);
+
+  useEffect(() => {
+    if (!historyReady || pendingWorkingPath || isRunning) return;
+    if (session?.origin !== 'scheduled') return;
+    void attachToActiveTurn(sessionId, effectiveCwd, reasoningEffort);
+  }, [
+    attachToActiveTurn,
+    effectiveCwd,
+    historyReady,
+    isRunning,
+    pendingWorkingPath,
+    reasoningEffort,
+    session?.origin,
+    sessionId,
+  ]);
 
   useEffect(() => {
     if (workingPath) {

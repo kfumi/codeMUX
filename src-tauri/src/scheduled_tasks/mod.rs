@@ -5,12 +5,44 @@ mod service;
 mod types;
 
 pub use db::{
-    create_task, delete_task, get_task, list_runs, list_tasks, set_task_enabled, update_task,
+    create_task, delete_task, delete_run, get_task, list_runs, list_tasks, set_task_enabled, update_task,
 };
 pub use schedule::local_timezone_label;
 pub use types::{
     ScheduledTask, ScheduledTaskUpsert, ScheduleKind, TaskRun,
 };
+
+pub fn reconcile_runs_for_session(conn: &rusqlite::Connection, session_id: &str) -> Vec<String> {
+    service::reconcile_runs_for_session(conn, session_id)
+}
+
+pub fn emit_scheduled_tasks_changed(
+    app: &tauri::AppHandle,
+    task_ids: Vec<String>,
+    reason: &'static str,
+) {
+    use tauri::Emitter;
+    if task_ids.is_empty() {
+        return;
+    }
+    let mut ids = task_ids;
+    ids.sort();
+    ids.dedup();
+    let _ = app.emit(
+        "scheduled-tasks-changed",
+        ScheduledTasksChangedPayload {
+            task_ids: ids,
+            reason,
+        },
+    );
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduledTasksChangedPayload {
+    task_ids: Vec<String>,
+    reason: &'static str,
+}
 
 pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Utc>) {
     use tauri::Manager;
@@ -29,9 +61,16 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
         .cloned()
         .collect::<Vec<_>>();
 
-    let payloads = {
+    let mut changed_task_ids = Vec::new();
+
+    let (payloads, stale_active_sessions) = {
         let conn = app_state.db.lock().unwrap();
-        service::reconcile_running_runs(&conn, &turn_active);
+        let stale_active_sessions = turn_active
+            .iter()
+            .filter(|session_id| service::session_turn_has_finished(&conn, session_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        changed_task_ids.extend(service::reconcile_running_runs(&conn, &turn_active));
         let now_str = now.to_rfc3339();
         let due_tasks = db::list_due_tasks(&conn, &now_str).unwrap_or_default();
         let mut planned = Vec::new();
@@ -41,12 +80,14 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
                 task.schedule_kind,
                 &task.schedule_time,
                 task.weekly_weekday,
+                task.weekly_weekdays.as_ref(),
                 task.monthly_day,
                 now,
             )
             .to_rfc3339();
             db::update_task_schedule_after_run(&conn, &task.id, &scheduled_for, &next_run_at)
                 .unwrap_or_default();
+            changed_task_ids.push(task.id.clone());
 
             if !task.enabled {
                 continue;
@@ -121,10 +162,15 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
                 },
             ));
         }
-        planned
+        (planned, stale_active_sessions)
     };
 
+    for session_id in stale_active_sessions {
+        companion_state.finish_turn(&session_id);
+    }
+
     for (run_id, payload) in payloads {
+        let task_id = payload.task_id.clone();
         let result = runner::fire_scheduled_task(app, payload).await;
         let conn = app_state.db.lock().unwrap();
         match result {
@@ -137,6 +183,7 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
                     None,
                 )
                 .unwrap_or_default();
+                changed_task_ids.push(task_id);
             }
             types::TaskRunnerResult::Failed { error } => {
                 db::update_run_status(
@@ -147,7 +194,113 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
                     Some(&error),
                 )
                 .unwrap_or_default();
+                changed_task_ids.push(task_id);
             }
         }
     }
+
+    if !changed_task_ids.is_empty() {
+        changed_task_ids.sort();
+        changed_task_ids.dedup();
+        emit_scheduled_tasks_changed(app, changed_task_ids, "tick");
+    }
+}
+
+pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskRun, String> {
+    use chrono::Utc;
+    use tauri::Manager;
+
+    use crate::AppState;
+
+    use types::{
+        MAX_CONCURRENT_SCHEDULED_RUNS, SkipReason, TaskRunPayload, TaskRunnerResult, TaskRunStatus,
+    };
+
+    let app_state = app.state::<AppState>();
+    let now_str = Utc::now().to_rfc3339();
+
+    let (run_id, payload) = {
+        let conn = app_state.db.lock().map_err(|error| error.to_string())?;
+        let task = db::get_task(&conn, task_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "任务不存在".to_string())?;
+
+        if !db::project_exists(&conn, &task.project_id).map_err(|error| error.to_string())? {
+            let run = db::insert_run(
+                &conn,
+                task_id,
+                &now_str,
+                TaskRunStatus::Skipped,
+                Some(SkipReason::ProjectMissing),
+                None,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+            return Ok(run);
+        }
+
+        if db::task_has_active_run(&conn, task_id).map_err(|error| error.to_string())? {
+            return Err("该任务正在运行中".to_string());
+        }
+
+        if db::count_active_runs(&conn).map_err(|error| error.to_string())? >= MAX_CONCURRENT_SCHEDULED_RUNS {
+            return Err("已达定时任务并发上限".to_string());
+        }
+
+        let run = db::insert_run(
+            &conn,
+            task_id,
+            &now_str,
+            TaskRunStatus::Running,
+            None,
+            None,
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+
+        let payload = TaskRunPayload {
+            task_id: task.id.clone(),
+            task_title: task.title.clone(),
+            instruction: task.instruction.clone(),
+            project_id: task.project_id.clone(),
+            agent_kind: task.agent_kind,
+            provider_id: task.provider_id.clone(),
+            model: task.model.clone(),
+            reasoning_effort: task.reasoning_effort.clone(),
+            permission_config: task.permission_config.clone(),
+            plan_mode: task.plan_mode.clone(),
+        };
+
+        (run.id, payload)
+    };
+
+    let result = runner::fire_scheduled_task(app, payload).await;
+
+    let conn = app_state.db.lock().map_err(|error| error.to_string())?;
+    match result {
+        TaskRunnerResult::Started { session_id } => {
+            db::update_run_status(
+                &conn,
+                &run_id,
+                TaskRunStatus::Running,
+                Some(&session_id),
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        TaskRunnerResult::Failed { error } => {
+            db::update_run_status(
+                &conn,
+                &run_id,
+                TaskRunStatus::Failed,
+                None,
+                Some(&error),
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+
+    db::get_run(&conn, &run_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "运行记录不存在".to_string())
 }

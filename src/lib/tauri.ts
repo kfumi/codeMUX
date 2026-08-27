@@ -656,6 +656,10 @@ export const scheduledTaskApi = {
     invokeLogged('set_scheduled_task_enabled', { taskId, enabled }),
   listRuns: (taskId: string): Promise<TaskRun[]> =>
     invokeLogged('list_scheduled_task_runs', { taskId }),
+  runNow: (taskId: string): Promise<TaskRun> =>
+    invokeLogged('run_scheduled_task_now', { taskId }),
+  deleteRun: (runId: string): Promise<void> =>
+    invokeLogged('delete_scheduled_task_run', { runId }),
   getTimezone: (): Promise<string> => invokeLogged('get_scheduled_task_timezone'),
 };
 
@@ -933,6 +937,8 @@ export const appApi = {
 
 export const companionApi = {
   getStatus: (): Promise<CompanionStatus> => invokeLogged('get_companion_status'),
+  isSessionTurnActive: (sessionId: string): Promise<boolean> =>
+    invokeLogged('is_session_turn_active', { sessionId }),
   setEnabled: (enabled: boolean): Promise<CompanionStatus> =>
     invokeLogged('set_companion_enabled', { enabled }),
   refreshPairingCode: (): Promise<CompanionStatus> =>

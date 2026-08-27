@@ -4,12 +4,16 @@ import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
+import { initScheduledTasksBridge } from "./lib/scheduledTasksBridge";
+import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
 
 initLogging();
 initCompanionStreamBridge();
+initSessionsChangeBridge();
+initScheduledTasksBridge();
 void initializeOpenCodeFreeModels();
 
 // In production, block the native browser context menu (refresh, save-as, print, inspect, etc.)

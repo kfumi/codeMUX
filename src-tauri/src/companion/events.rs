@@ -9,14 +9,12 @@ use crate::companion::state::CompanionBroadcastEvent;
 use crate::companion::CompanionState;
 
 pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
-    let companion_state = app.state::<CompanionState>();
-    if !companion_state.inner.is_enabled() {
-        return;
-    }
-
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw_event) else {
         return;
     };
+
+    let companion_state = app.state::<CompanionState>();
+    let companion_enabled = companion_state.inner.is_enabled();
 
     let event_type = value
         .get("type")
@@ -35,32 +33,27 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
             .filter(|event| is_code_mux_domain_event(event))
             .cloned()
             .collect();
-        let persistable_events: Vec<serde_json::Value> = all_domain_events
-            .iter()
-            .filter(|event| should_persist_domain_event(event))
-            .cloned()
-            .collect();
-        if !persistable_events.is_empty() {
-            let app_state = app.state::<crate::AppState>();
-            append_domain_events(app_state.inner(), session_id, &persistable_events);
+        if companion_enabled {
+            let persistable_events: Vec<serde_json::Value> = all_domain_events
+                .iter()
+                .filter(|event| should_persist_domain_event(event))
+                .cloned()
+                .collect();
+            if !persistable_events.is_empty() {
+                let app_state = app.state::<crate::AppState>();
+                append_domain_events(app_state.inner(), session_id, &persistable_events);
+            }
         }
         for event in all_domain_events {
             maybe_finish_turn_and_drain_queue(app, session_id, &event);
-            broadcast_event(&companion_state, session_id, event);
+            if companion_enabled {
+                broadcast_event(&companion_state, session_id, event);
+            }
         }
         return;
     }
 
-    if !should_persist_domain_event(&value) {
-        if is_code_mux_domain_event(&value) {
-            let session_id = value
-                .get("session_id")
-                .and_then(|item| item.as_str())
-                .unwrap_or("")
-                .to_string();
-            maybe_finish_turn_and_drain_queue(app, &session_id, &value);
-            broadcast_event(&companion_state, &session_id, value);
-        }
+    if !is_code_mux_domain_event(&value) {
         return;
     }
 
@@ -69,10 +62,14 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
         .and_then(|item| item.as_str())
         .unwrap_or("")
         .to_string();
-    let app_state = app.state::<crate::AppState>();
-    append_domain_events(app_state.inner(), &session_id, std::slice::from_ref(&value));
     maybe_finish_turn_and_drain_queue(app, &session_id, &value);
-    broadcast_event(&companion_state, &session_id, value);
+    if companion_enabled {
+        if should_persist_domain_event(&value) {
+            let app_state = app.state::<crate::AppState>();
+            append_domain_events(app_state.inner(), &session_id, std::slice::from_ref(&value));
+        }
+        broadcast_event(&companion_state, &session_id, value);
+    }
 }
 
 fn maybe_finish_turn_and_drain_queue(app: &AppHandle, session_id: &str, event: &serde_json::Value) {
@@ -87,8 +84,17 @@ fn maybe_finish_turn_and_drain_queue(app: &AppHandle, session_id: &str, event: &
     if event_type == "user_message" {
         companion_state.mark_turn_active(session_id);
     }
-    if event_type != "turn_finished" {
+    if event_type != "turn_finished" && event_type != "error" {
         return;
+    }
+
+    let task_ids = {
+        let app_state = app.state::<crate::AppState>();
+        let conn = app_state.db.lock().unwrap();
+        crate::scheduled_tasks::reconcile_runs_for_session(&conn, session_id)
+    };
+    if !task_ids.is_empty() {
+        crate::scheduled_tasks::emit_scheduled_tasks_changed(app, task_ids, "turn_finished");
     }
 
     let queued = companion_state.finish_turn(session_id);

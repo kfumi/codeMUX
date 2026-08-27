@@ -187,12 +187,12 @@ export function AgentPermissionSelector({
                     aria-label={selected.label}
                     className={cn(
                       'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                      compact ? 'max-w-9' : 'max-w-40',
+                      compact ? 'max-w-9' : 'max-w-none',
                       selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
                     )}
                   >
                     <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-                    {!compact && <span className="truncate">{selected.label}</span>}
+                    {!compact && <span>{selected.label}</span>}
                     {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
                   </button>
                 </PopoverTrigger>

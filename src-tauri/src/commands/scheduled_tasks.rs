@@ -24,6 +24,7 @@ pub struct ScheduledTaskInput {
     pub schedule_kind: String,
     pub schedule_time: String,
     pub weekly_weekday: Option<i32>,
+    pub weekly_weekdays: Option<Vec<i32>>,
     pub monthly_day: Option<i32>,
     pub timezone: Option<String>,
     pub enabled: bool,
@@ -48,6 +49,7 @@ fn parse_input(input: ScheduledTaskInput) -> Result<ScheduledTaskUpsert, String>
         schedule_kind,
         schedule_time: input.schedule_time,
         weekly_weekday: input.weekly_weekday,
+        weekly_weekdays: input.weekly_weekdays,
         monthly_day: input.monthly_day,
         timezone: input.timezone.unwrap_or_else(local_timezone_label),
         enabled: input.enabled,
@@ -121,4 +123,18 @@ pub fn list_scheduled_task_runs(
 #[tauri::command]
 pub fn get_scheduled_task_timezone() -> String {
     local_timezone_label()
+}
+
+#[tauri::command]
+pub async fn run_scheduled_task_now(
+    app: tauri::AppHandle,
+    task_id: String,
+) -> Result<TaskRun, String> {
+    crate::scheduled_tasks::run_task_now(&app, &task_id).await
+}
+
+#[tauri::command]
+pub fn delete_scheduled_task_run(state: State<'_, AppState>, run_id: String) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|error| error.to_string())?;
+    crate::scheduled_tasks::delete_run(&conn, &run_id).map_err(|error| error.to_string())
 }

@@ -229,6 +229,14 @@ pub async fn refresh_companion_pairing_code(
 }
 
 #[tauri::command]
+pub fn is_session_turn_active(
+    companion_state: State<'_, CompanionState>,
+    session_id: String,
+) -> bool {
+    companion_state.is_turn_active(&session_id)
+}
+
+#[tauri::command]
 pub async fn get_companion_pairing_offer(
     app: AppHandle,
     state: State<'_, AppState>,

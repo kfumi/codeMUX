@@ -1,5 +1,4 @@
-import { ArrowLeft, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -8,41 +7,42 @@ import {
   type AgentPermissionConfig,
 } from '../../lib/agentPermissions';
 import { scheduledTaskApi } from '../../lib/tauri';
+import {
+  buildScheduledTaskDraftFromSettings,
+  getAgentPermissionDefault,
+  getConfiguredAgentModelIds,
+  getDefaultAgentKindFromConfig,
+  resolvePreferredAgentModel,
+} from '../../lib/scheduledTaskDefaults';
 import { useAgentModels } from '../../hooks/useAgentModels';
 import { useProjectStore } from '../../stores/projectStore';
 import { useScheduledTaskStore } from '../../stores/scheduledTaskStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { ModelProvider } from '../../types/provider';
 import type { AgentKind } from '../../types/session';
-import type { ScheduledTaskDraft, ScheduleKind, TaskRun } from '../../types/scheduledTask';
+import type { ScheduledTaskDraft, TaskRun } from '../../types/scheduledTask';
 import { AgentPermissionSelector } from '../agent/AgentPermissionSelector';
 import { AgentSelector } from '../agent/AgentSelector';
 import { AgentModelSelector } from '../agent/AgentModelSelector';
 import { CodeMuxAssistantRuntimeProvider } from '../agent/assistant-ui/CodeMuxAssistantRuntime';
-import { Button } from '../ui/button';
+import { AutomationProjectPicker } from './AutomationProjectPicker';
+import { AutomationPageHeader } from './AutomationPageHeader';
+import { AutomationEditorHeaderActions } from './AutomationEditorHeaderActions';
+import { AutomationTaskHistoryPanel } from './AutomationTaskHistoryPanel';
+import { AutomationTaskStatusBadge } from './AutomationTaskStatusBadge';
+import {
+  normalizeScheduleForSave,
+  ScheduleConfigurator,
+  scheduleValueFromInitialDraft,
+  scheduleValueFromTask,
+  type ScheduleConfiguratorValue,
+} from './ScheduleConfigurator';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Input } from '../ui/input';
 
 const AUTOMATION_DRAFT_SESSION_ID = 'scheduled-task-draft';
 const EMPTY_RUNS: TaskRun[] = [];
 const EMPTY_MODEL_PROVIDERS: ModelProvider[] = [];
-
-const WEEKDAY_OPTIONS = [
-  { value: 0, label: '周一' },
-  { value: 1, label: '周二' },
-  { value: 2, label: '周三' },
-  { value: 3, label: '周四' },
-  { value: 4, label: '周五' },
-  { value: 5, label: '周六' },
-  { value: 6, label: '周日' },
-];
-
-const SCHEDULE_OPTIONS: Array<{ value: ScheduleKind; label: string }> = [
-  { value: 'hourly', label: '每小时' },
-  { value: 'daily', label: '每天' },
-  { value: 'weekdays', label: '每工作日' },
-  { value: 'weekly', label: '每周' },
-  { value: 'monthly', label: '每月' },
-];
 
 function parsePermissionConfig(agentKind: AgentKind, raw: string): AgentPermissionConfig {
   try {
@@ -56,31 +56,10 @@ function parsePermissionConfig(agentKind: AgentKind, raw: string): AgentPermissi
   return buildDefaultPermissionConfig(agentKind);
 }
 
-function runStatusLabel(run: TaskRun): string {
-  switch (run.status) {
-    case 'running':
-      return '运行中';
-    case 'completed':
-      return '已完成';
-    case 'failed':
-      return '失败';
-    case 'awaiting_input':
-      return '等待输入';
-    case 'skipped':
-      if (run.skipReason === 'overlap') return '已跳过（重叠）';
-      if (run.skipReason === 'concurrency_limit') return '已跳过（并发上限）';
-      if (run.skipReason === 'project_missing') return '已跳过（项目缺失）';
-      return '已跳过';
-    default:
-      return run.status;
-  }
-}
-
 interface AutomationEditorProps {
   taskId: string | null;
   initialDraft: ScheduledTaskDraft | null;
   onBack: () => void;
-  onSaved: (taskId: string) => void;
   onOpenSession: (sessionId: string, projectId: string | null) => void;
 }
 
@@ -88,7 +67,6 @@ export function AutomationEditor({
   taskId,
   initialDraft,
   onBack,
-  onSaved,
   onOpenSession,
 }: AutomationEditorProps) {
   const projects = useProjectStore((state) => state.projects);
@@ -104,50 +82,54 @@ export function AutomationEditor({
 
   const [tab, setTab] = useState<'settings' | 'history'>('settings');
   const [timezone, setTimezone] = useState('');
-  const [draft, setDraft] = useState<ScheduledTaskDraft>(() => initialDraft ?? {
-    title: '未命名定时任务',
-    instruction: '',
-    projectId: projects[0]?.id ?? null,
-    agentKind: 'claude_code',
-    providerId: null,
-    model: null,
-    reasoningEffort: 'high',
-    permissionConfig: buildDefaultPermissionConfig('claude_code'),
-    planMode: 'off',
-    scheduleKind: 'weekdays',
-    scheduleTime: '09:00',
-    weeklyWeekday: 1,
-    monthlyDay: 1,
-    enabled: true,
+  const [scheduleValue, setScheduleValue] = useState<ScheduleConfiguratorValue | null>(() =>
+    scheduleValueFromInitialDraft(initialDraft),
+  );
+  const [draft, setDraft] = useState<ScheduledTaskDraft>(() => {
+    const settingsConfig = useSettingsStore.getState().config;
+    if (initialDraft) {
+      return buildScheduledTaskDraftFromSettings(settingsConfig, {
+        title: initialDraft.title,
+        instruction: initialDraft.instruction,
+        projectId: initialDraft.projectId ?? projects[0]?.id ?? null,
+        reasoningEffort: initialDraft.reasoningEffort,
+        planMode: initialDraft.planMode,
+        enabled: initialDraft.enabled,
+        scheduleKind: initialDraft.scheduleKind,
+        scheduleTime: initialDraft.scheduleTime,
+        weeklyWeekday: initialDraft.weeklyWeekday,
+        monthlyDay: initialDraft.monthlyDay,
+      });
+    }
+    return buildScheduledTaskDraftFromSettings(settingsConfig, {
+      projectId: projects[0]?.id ?? null,
+    });
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const initializedFromSettingsRef = useRef(false);
 
   const modelProviders = config?.model_providers ?? EMPTY_MODEL_PROVIDERS;
   const activeProviderId = config?.active_provider_id ?? null;
-  const preferredProviderId = draft.providerId ?? activeProviderId;
+  const configuredModelIds = getConfiguredAgentModelIds(draft.agentKind, config);
+  const preferredProviderId = draft.providerId
+    ?? configuredModelIds.providerId
+    ?? activeProviderId;
   const { models } = useAgentModels(draft.agentKind, modelProviders, preferredProviderId);
 
-  const effectiveModel = useMemo(() => {
-    if (
-      draft.model
-      && models.some((model) => model.modelId === draft.model && (
-        !preferredProviderId || model.providerId === preferredProviderId
-      ))
-    ) {
-      return draft.model;
-    }
-    if (preferredProviderId) {
-      const match = models.find((model) => model.providerId === preferredProviderId);
-      if (match) return match.modelId;
-    }
-    return models[0]?.modelId ?? '';
-  }, [draft.model, models, preferredProviderId]);
+  const preferredModel = useMemo(
+    () => resolvePreferredAgentModel(
+      draft.agentKind,
+      config,
+      models,
+      draft.providerId,
+      draft.model,
+    ),
+    [config, draft.agentKind, draft.model, draft.providerId, models],
+  );
 
-  const effectiveProviderId = useMemo(() => {
-    if (draft.providerId) return draft.providerId;
-    const match = models.find((model) => model.modelId === effectiveModel);
-    return match?.providerId ?? preferredProviderId;
-  }, [draft.providerId, effectiveModel, models, preferredProviderId]);
+  const effectiveModel = preferredModel?.modelId ?? '';
+  const effectiveProviderId = preferredModel?.providerId ?? preferredProviderId;
 
   const handleModelChange = useCallback((modelId: string, providerId: string) => {
     setDraft((current) => ({
@@ -169,6 +151,34 @@ export function AutomationEditor({
   }, []);
 
   useEffect(() => {
+    if (taskId || !config || initializedFromSettingsRef.current) return;
+
+    const agentKind = getDefaultAgentKindFromConfig(config);
+    const modelDefaults = getConfiguredAgentModelIds(agentKind, config);
+
+    setDraft((current) => ({
+      ...current,
+      agentKind,
+      permissionConfig: getAgentPermissionDefault(agentKind, config),
+      providerId: modelDefaults.providerId,
+      model: modelDefaults.model,
+    }));
+    initializedFromSettingsRef.current = true;
+  }, [config, initialDraft, taskId]);
+
+  useEffect(() => {
+    if (!preferredModel) return;
+    if (draft.model === preferredModel.modelId && draft.providerId === preferredModel.providerId) {
+      return;
+    }
+    setDraft((current) => ({
+      ...current,
+      model: preferredModel.modelId,
+      providerId: preferredModel.providerId,
+    }));
+  }, [draft.model, draft.providerId, preferredModel]);
+
+  useEffect(() => {
     if (!taskId) return;
     scheduledTaskApi.get(taskId).then((task) => {
       if (!task) return;
@@ -182,27 +192,28 @@ export function AutomationEditor({
         reasoningEffort: task.reasoningEffort ?? 'high',
         permissionConfig: parsePermissionConfig(task.agentKind, task.permissionConfig),
         planMode: task.planMode,
-        scheduleKind: task.scheduleKind,
-        scheduleTime: task.scheduleTime,
-        weeklyWeekday: task.weeklyWeekday ?? 1,
-        monthlyDay: task.monthlyDay ?? 1,
         enabled: task.enabled,
       });
+      setScheduleValue(scheduleValueFromTask(
+        task.scheduleKind,
+        task.scheduleTime,
+        task.weeklyWeekday,
+        task.weeklyWeekdays,
+        task.monthlyDay,
+      ));
     });
     fetchRuns(taskId);
   }, [taskId, fetchRuns]);
 
   const handleAgentKindChange = useCallback((agentKind: AgentKind) => {
-    const nextDefault = config
-      ? serializePermissionConfig(agentKind, config.agent_configs[agentKind]?.permission_config)
-      : buildDefaultPermissionConfig(agentKind);
+    const modelDefaults = getConfiguredAgentModelIds(agentKind, config);
     setDraft((current) => ({
       ...current,
       agentKind,
-      permissionConfig: nextDefault,
+      permissionConfig: getAgentPermissionDefault(agentKind, config),
       planMode: 'off',
-      providerId: null,
-      model: null,
+      providerId: modelDefaults.providerId,
+      model: modelDefaults.model,
     }));
   }, [config]);
 
@@ -213,6 +224,10 @@ export function AutomationEditor({
     if (!draft.instruction.trim()) {
       throw new Error('任务指令不能为空');
     }
+    if (!scheduleValue) {
+      throw new Error('请添加调度计划');
+    }
+    const schedule = normalizeScheduleForSave(scheduleValue);
     return {
       title: draft.title.trim() || '未命名定时任务',
       instruction: draft.instruction.trim(),
@@ -223,10 +238,11 @@ export function AutomationEditor({
       reasoningEffort: draft.reasoningEffort,
       permissionConfig: JSON.stringify(serializePermissionConfig(draft.agentKind, draft.permissionConfig)),
       planMode: draft.planMode,
-      scheduleKind: draft.scheduleKind,
-      scheduleTime: draft.scheduleTime,
-      weeklyWeekday: draft.scheduleKind === 'weekly' ? draft.weeklyWeekday : null,
-      monthlyDay: draft.scheduleKind === 'monthly' ? draft.monthlyDay : null,
+      scheduleKind: schedule.scheduleKind,
+      scheduleTime: schedule.scheduleTime,
+      weeklyWeekday: schedule.weeklyWeekday,
+      weeklyWeekdays: schedule.weeklyWeekdays,
+      monthlyDay: schedule.monthlyDay,
       timezone,
       enabled: draft.enabled,
     };
@@ -239,11 +255,10 @@ export function AutomationEditor({
       if (taskId) {
         await updateTask(taskId, input);
         toast.success('已保存');
-        onSaved(taskId);
       } else {
-        const created = await createTask(input);
+        await createTask(input);
         toast.success('已创建');
-        onSaved(created.id);
+        onBack();
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -261,213 +276,137 @@ export function AutomationEditor({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-border/60 px-6 py-4">
-        <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <div className="text-ui-caption text-muted-foreground">
-            自动化 &gt; {taskId ? draft.title : '新建任务'}
-          </div>
-        </div>
-        {taskId && (
-          <Button variant="ghost" size="icon" onClick={handleDelete} aria-label="删除任务">
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        )}
-        <Button onClick={handleSave} disabled={isSaving}>
-          保存
-        </Button>
-      </div>
-
-      <div className="flex gap-4 border-b border-border/60 px-6">
-        <button
-          type="button"
-          className={`py-2 text-ui-compact ${tab === 'settings' ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
-          onClick={() => setTab('settings')}
-        >
-          设置
-        </button>
-        {taskId && (
-          <button
-            type="button"
-            className={`py-2 text-ui-compact ${tab === 'history' ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
-            onClick={() => setTab('history')}
-          >
-            历史
-          </button>
-        )}
-      </div>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="删除定时任务"
+        description={`确定删除「${draft.title}」吗？此操作无法撤销。`}
+        confirmLabel="删除"
+        variant="destructive"
+        onConfirm={handleDelete}
+      />
+      <AutomationPageHeader
+        title={taskId ? '编辑定时任务' : '新建任务'}
+        description={taskId ? '调整此任务的执行时间、指令和运行方式。' : '配置指令、调度与运行参数'}
+        onBack={onBack}
+        actions={
+          <AutomationEditorHeaderActions
+            taskId={taskId}
+            enabled={draft.enabled}
+            isSaving={isSaving}
+            onSave={() => void handleSave()}
+            onEnabledChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
+            onDeleteRequest={() => setDeleteConfirmOpen(true)}
+          />
+        }
+        tabs={taskId
+          ? [
+            { id: 'settings', label: '设置' },
+            { id: 'history', label: '历史' },
+          ]
+          : undefined}
+        activeTab={tab}
+        onTabChange={(nextTab) => setTab(nextTab as 'settings' | 'history')}
+      />
 
       {tab === 'settings' ? (
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          <Input
-            value={draft.title}
-            onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-            placeholder="任务标题"
-          />
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+          {taskId && (
+            <div className="flex flex-col items-start gap-2.5">
+              <span className="text-ui-body text-muted-foreground">状态</span>
+              <AutomationTaskStatusBadge enabled={draft.enabled} />
+            </div>
+          )}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-ui-caption text-muted-foreground">计划</span>
-              <select
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
-                value={draft.scheduleKind}
-                onChange={(event) => setDraft((current) => ({
-                  ...current,
-                  scheduleKind: event.target.value as ScheduleKind,
-                }))}
-              >
-                {SCHEDULE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-
-            {draft.scheduleKind !== 'hourly' && (
-              <label className="space-y-1">
-                <span className="text-ui-caption text-muted-foreground">时刻</span>
-                <Input
-                  type="time"
-                  value={draft.scheduleTime}
-                  onChange={(event) => setDraft((current) => ({ ...current, scheduleTime: event.target.value }))}
-                />
-              </label>
-            )}
-
-            {draft.scheduleKind === 'weekly' && (
-              <label className="space-y-1">
-                <span className="text-ui-caption text-muted-foreground">星期</span>
-                <select
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
-                  value={draft.weeklyWeekday}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    weeklyWeekday: Number(event.target.value),
-                  }))}
-                >
-                  {WEEKDAY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            {draft.scheduleKind === 'monthly' && (
-              <label className="space-y-1">
-                <span className="text-ui-caption text-muted-foreground">每月几号</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={draft.monthlyDay}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    monthlyDay: Number(event.target.value),
-                  }))}
-                />
-              </label>
-            )}
-          </div>
-
-          <label className="block space-y-1">
-            <span className="text-ui-caption text-muted-foreground">项目（必选）</span>
-            <select
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
-              value={draft.projectId ?? ''}
-              onChange={(event) => setDraft((current) => ({
-                ...current,
-                projectId: event.target.value || null,
-              }))}
-            >
-              <option value="">选择项目</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
+          <label className="block space-y-2">
+            <span className="text-ui-body text-muted-foreground">任务标题</span>
+            <Input
+              value={draft.title}
+              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              placeholder="未命名定时任务"
+              className="text-ui-body"
+            />
           </label>
 
-          <textarea
-            value={draft.instruction}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft((current) => ({
-              ...current,
-              instruction: event.target.value,
-            }))}
-            placeholder="总结最近 24 小时的提交，标出可能引入的 bug 和修复建议"
-            rows={8}
-            className="min-h-[160px] w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
+          <ScheduleConfigurator
+            value={scheduleValue}
+            timezone={timezone}
+            onChange={setScheduleValue}
           />
 
-          <CodeMuxAssistantRuntimeProvider
-            sessionId={AUTOMATION_DRAFT_SESSION_ID}
-            agentKind={draft.agentKind}
-            onSend={async () => {}}
-            onCommand={async () => {}}
-          >
-            <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
-              <AgentSelector
-                value={draft.agentKind}
-                onChange={handleAgentKindChange}
-              />
-              <AgentModelSelector
-                agentKind={draft.agentKind}
-                providers={modelProviders}
-                activeProviderId={effectiveProviderId}
-                value={effectiveModel}
-                onChange={handleModelChange}
-                reasoningEffort={draft.reasoningEffort}
-                onReasoningEffortChange={handleReasoningEffortChange}
-              />
-              <AgentPermissionSelector
-                agentKind={draft.agentKind}
-                permissionConfig={draft.permissionConfig}
-                planMode={draft.planMode}
-                onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
+          <label className="block space-y-2">
+            <span className="text-ui-body text-muted-foreground">指令</span>
+            <div className="rounded-lg border border-border/70 bg-muted/10">
+              <textarea
+                value={draft.instruction}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft((current) => ({
                   ...current,
-                  permissionConfig,
+                  instruction: event.target.value,
                 }))}
-                onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
-                onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
-                  ...current,
-                  permissionConfig,
-                  planMode,
-                }))}
+                placeholder="例如：Review 最近 24 小时的提交，总结可能引入的 bug 和修复建议"
+                rows={8}
+                className="min-h-[160px] w-full resize-none rounded-t-lg border-0 bg-transparent px-3 py-3 text-ui-body outline-none focus:ring-0"
               />
-            </div>
-          </CodeMuxAssistantRuntimeProvider>
-          {!taskId && (
-            <p className="text-ui-caption text-muted-foreground">
-              执行档位默认与新建对话一致，可随时下拉切换并随任务保存。
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {runs.length === 0 ? (
-            <p className="text-ui-caption text-muted-foreground">还没有执行记录。</p>
-          ) : (
-            <div className="space-y-2">
-              {runs.map((run) => (
-                <button
-                  key={run.id}
-                  type="button"
-                  disabled={!run.sessionId}
-                  onClick={() => run.sessionId && onOpenSession(run.sessionId, draft.projectId)}
-                  className="flex w-full items-center justify-between rounded-lg border border-border/70 px-4 py-3 text-left disabled:opacity-60"
-                >
-                  <div>
-                    <div className="text-ui-compact font-medium">{runStatusLabel(run)}</div>
-                    <div className="text-ui-caption text-muted-foreground">
-                      {new Date(run.scheduledFor).toLocaleString()}
-                    </div>
+              <CodeMuxAssistantRuntimeProvider
+                sessionId={AUTOMATION_DRAFT_SESSION_ID}
+                agentKind={draft.agentKind}
+                onSend={async () => {}}
+                onCommand={async () => {}}
+              >
+                <div className="flex flex-wrap items-center gap-1 border-t border-border/60 px-2 py-1.5">
+                  <AutomationProjectPicker
+                    projects={projects}
+                    value={draft.projectId}
+                    onChange={(projectId) => setDraft((current) => ({ ...current, projectId }))}
+                  />
+                  <AgentSelector
+                    value={draft.agentKind}
+                    onChange={handleAgentKindChange}
+                  />
+                  <AgentPermissionSelector
+                    agentKind={draft.agentKind}
+                    permissionConfig={draft.permissionConfig}
+                    planMode={draft.planMode}
+                    onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
+                      ...current,
+                      permissionConfig,
+                    }))}
+                    onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
+                    onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
+                      ...current,
+                      permissionConfig,
+                      planMode,
+                    }))}
+                  />
+                  <div className="ml-auto flex flex-wrap items-center gap-1">
+                    <AgentModelSelector
+                      agentKind={draft.agentKind}
+                      providers={modelProviders}
+                      activeProviderId={effectiveProviderId}
+                      value={effectiveModel}
+                      onChange={handleModelChange}
+                      reasoningEffort={draft.reasoningEffort}
+                      onReasoningEffortChange={handleReasoningEffortChange}
+                    />
                   </div>
-                  {run.sessionId && <span className="text-ui-caption text-primary">打开会话</span>}
-                </button>
-              ))}
+                </div>
+              </CodeMuxAssistantRuntimeProvider>
             </div>
-          )}
+            {!draft.projectId && (
+              <p className="text-ui-body text-destructive">请选择一个项目后才能保存</p>
+            )}
+          </label>
         </div>
-      )}
+      ) : taskId ? (
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <AutomationTaskHistoryPanel
+            taskId={taskId}
+            projectId={draft.projectId}
+            runs={runs}
+            onOpenSession={onOpenSession}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

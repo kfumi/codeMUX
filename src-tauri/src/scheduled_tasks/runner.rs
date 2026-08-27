@@ -1,12 +1,22 @@
 use chrono::Utc;
 use log::info;
-use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::companion::CompanionState;
 use crate::db::operations;
 use crate::AppState;
 
 use super::types::{TaskRunPayload, TaskRunnerResult};
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionsChangedPayload {
+    session_id: String,
+    project_id: String,
+    task_id: String,
+    reason: &'static str,
+}
 
 pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> TaskRunnerResult {
     info!(
@@ -62,6 +72,16 @@ pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> Ta
             let _ = operations::update_session_reasoning_effort(&conn, &session.id, effort);
         }
     }
+
+    let _ = app.emit(
+        "sessions-changed",
+        SessionsChangedPayload {
+            session_id: session.id.clone(),
+            project_id: payload.project_id.clone(),
+            task_id: payload.task_id.clone(),
+            reason: "scheduled_task",
+        },
+    );
 
     let companion_state = app.state::<CompanionState>();
     if companion_state.is_turn_active(&session.id) {

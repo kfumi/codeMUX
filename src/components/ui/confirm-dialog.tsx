@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 
+import { cn } from '@/lib/utils';
 import { Button } from './button';
 import {
   Dialog,
@@ -53,7 +54,7 @@ export function ConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        overlayClassName={overlayClassName}
+        overlayClassName={cn('z-[240]', overlayClassName)}
         className="z-[240] gap-0 overflow-hidden p-0 sm:max-w-95"
       >
         <DialogHeader className="px-6 pb-4 pt-6">

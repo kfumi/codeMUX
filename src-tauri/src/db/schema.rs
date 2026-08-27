@@ -137,6 +137,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             schedule_kind TEXT NOT NULL,
             schedule_time TEXT NOT NULL DEFAULT '09:00',
             weekly_weekday INTEGER,
+            weekly_weekdays TEXT,
             monthly_day INTEGER,
             timezone TEXT NOT NULL DEFAULT '',
             delivery TEXT NOT NULL DEFAULT 'new_session',
@@ -166,6 +167,13 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task ON scheduled_task_runs(task_id);
         ",
     )?;
+
+    let has_scheduled_task_weekly_weekdays: bool = conn
+        .prepare("SELECT weekly_weekdays FROM scheduled_tasks LIMIT 0")
+        .is_ok();
+    if !has_scheduled_task_weekly_weekdays {
+        let _ = conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT", []);
+    }
 
     // Migration: add mode column if missing
     let has_mode: bool = conn.prepare("SELECT mode FROM sessions LIMIT 0").is_ok();

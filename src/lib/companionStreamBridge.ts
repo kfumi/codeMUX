@@ -1,6 +1,7 @@
 import { listen } from '@tauri-apps/api/event';
 
 import { createLogger } from './logger';
+import { shouldFollowBackgroundStream } from './attachToActiveTurn';
 import { useAgentStore } from '@/stores/agentStore';
 import { useSessionStore } from '@/stores/sessionStore';
 
@@ -22,7 +23,10 @@ export function initCompanionStreamBridge() {
     if (!sessionId || !payload) return;
 
     const store = useAgentStore.getState();
-    if (store.isRunning[sessionId]) {
+    if (!shouldFollowBackgroundStream(
+      Boolean(store.isRunning[sessionId]),
+      Boolean(store.backgroundLive[sessionId]),
+    )) {
       return;
     }
 
@@ -32,7 +36,12 @@ export function initCompanionStreamBridge() {
     } catch {
       return;
     }
-    if (!eventType || !REFRESH_EVENT_TYPES.has(eventType)) {
+    if (
+      eventType !== 'codemux_event_batch'
+      && eventType !== 'text_delta'
+      && eventType !== 'content_finished'
+      && (!eventType || !REFRESH_EVENT_TYPES.has(eventType))
+    ) {
       return;
     }
 
@@ -42,7 +51,13 @@ export function initCompanionStreamBridge() {
     }
     reloadTimers.set(sessionId, window.setTimeout(() => {
       reloadTimers.delete(sessionId);
-      void store.loadSessionMessages(sessionId, { force: true }).catch((error) => {
+      const latest = useAgentStore.getState();
+      void latest.loadSessionMessages(sessionId, { force: true }).then(() => {
+        if (useAgentStore.getState().backgroundLive[sessionId]) {
+          return useAgentStore.getState().completeBackgroundLiveIfIdle(sessionId);
+        }
+        return undefined;
+      }).catch((error) => {
         logger.warn('Failed to refresh session after companion stream event', { sessionId }, error as Error);
       });
       useSessionStore.getState().markSessionUnread(sessionId);

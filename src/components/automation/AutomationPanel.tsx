@@ -32,29 +32,28 @@ export function AutomationPanel({ taskId, onTaskIdChange, onOpenSession }: Autom
   const handleBack = useCallback(() => {
     setNewDraft(null);
     onTaskIdChange(null);
-  }, [onTaskIdChange]);
+    fetchTasks();
+  }, [onTaskIdChange, fetchTasks]);
 
   const editingTaskId = taskId === 'new' ? null : taskId;
 
-  if (taskId) {
-    return (
-      <AutomationEditor
-        taskId={editingTaskId}
-        initialDraft={taskId === 'new' ? newDraft : null}
-        onBack={handleBack}
-        onSaved={(savedId) => {
-          setNewDraft(null);
-          onTaskIdChange(savedId);
-        }}
-        onOpenSession={onOpenSession}
-      />
-    );
-  }
-
-  return (
+  const panelContent = taskId ? (
+    <AutomationEditor
+      taskId={editingTaskId}
+      initialDraft={taskId === 'new' ? newDraft : null}
+      onBack={handleBack}
+      onOpenSession={onOpenSession}
+    />
+  ) : (
     <AutomationLanding
       onCreate={handleCreate}
       onSelectTask={handleSelectTask}
     />
+  );
+
+  return (
+    <div className="mx-auto h-full w-full max-w-4xl">
+      {panelContent}
+    </div>
   );
 }

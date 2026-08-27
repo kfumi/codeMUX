@@ -23,6 +23,7 @@ import { useSidePanelStore } from './stores/sidePanelStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
 import { useNavigationStore, type NavigationLocation, type SidePanelNavigationState } from './stores/navigationStore';
+import { useScheduledTaskStore } from './stores/scheduledTaskStore';
 import { UpdaterProvider } from './features/update/UpdaterProvider';
 import { UpdateEntry } from './features/update/components/UpdateEntry';
 import type { TodoItem } from './types/agent';
@@ -109,6 +110,11 @@ function App() {
 
   useTheme();
   useAgentNotifications();
+
+  useEffect(() => {
+    if (activeView !== 'automation') return;
+    void useScheduledTaskStore.getState().fetchTasks();
+  }, [activeView]);
 
   const applyNavigationLocation = useCallback((location: NavigationLocation) => {
     setRestoring(true);

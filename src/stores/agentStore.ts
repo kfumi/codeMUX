@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { agentApi, fileApi, sessionApi } from '../lib/tauri';
+import { shouldAttachLiveTurn, shouldFollowBackgroundStream, shouldKeepLiveEventsOnHistoryLoad } from '../lib/attachToActiveTurn';
+import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   buildSessionTitleFromUserContent,
@@ -127,6 +128,8 @@ interface AgentState {
   eventTimestamps: Record<string, number[]>;
   /** Whether a query is currently running */
   isRunning: Record<string, boolean>;
+  /** Scheduled/companion turns whose history should keep refreshing while running. */
+  backgroundLive: Record<string, boolean>;
   /** When each running query started (ms epoch) — for elapsed timer */
   queryStartTime: Record<string, number>;
   /** Error message if any */
@@ -193,6 +196,10 @@ interface AgentState {
   refreshLatestTokenUsage: (sessionId: string, freshness: 'live_synced' | 'restored') => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
+  /** Attach live stream UI to a session started in the background (e.g. scheduled task). */
+  attachToActiveTurn: (sessionId: string, cwd: string, reasoningEffort?: ReasoningEffort) => Promise<boolean>;
+  /** Stop the scheduled-turn spinner once history shows the turn has finished. */
+  completeBackgroundLiveIfIdle: (sessionId: string) => Promise<void>;
   /** Replace cached timeline with the latest CLI provider history and reload UI state */
   resyncSessionFromNative: (sessionId: string) => Promise<number>;
   /** Clear changed files for a session */
@@ -237,6 +244,13 @@ const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingSessionMessageLoads = new Map<string, Promise<void>>();
 const sessionHistoryEpoch = new Map<string, number>();
+const backgroundPolls = new Map<string, number>();
+
+function stopBackgroundPoll(sessionId: string) {
+  const timer = backgroundPolls.get(sessionId);
+  if (timer) window.clearInterval(timer);
+  backgroundPolls.delete(sessionId);
+}
 
 function bumpSessionHistoryEpoch(sessionId: string): number {
   const next = (sessionHistoryEpoch.get(sessionId) ?? 0) + 1;
@@ -1575,6 +1589,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   turns: {},
   eventTimestamps: {},
   isRunning: {},
+  backgroundLive: {},
   queryStartTime: {},
   error: {},
   mcpRuntimeStatus: {},
@@ -1665,20 +1680,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
-    logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
-      sessionId,
-      cwd,
-      displayModel: modelForVision || 'default',
-      reasoningEffort: reasoningEffort || 'high',
-      promptLength: prompt.length,
-    });
-    // Clear force-stopped flag when starting a new query
-          resetSessionStreamPhase(sessionId);
-      setSessionStreamPhase(sessionId, 'thinking');
-set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
-    // Auto-update session title from the first user message (skip slash commands)
-    const state = get();
-    const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
+    resetSessionStreamPhase(sessionId);
+    set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
+
+    let queryStartedAt = get().queryStartTime[sessionId] ?? Date.now();
     const originalPayload = inputPayload ?? { text: prompt };
     const attachments = getPayloadAttachments(originalPayload);
     const appConfig = useSettingsStore.getState().config;
@@ -1694,6 +1699,18 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       : { text: originalPayload.text };
     const droppedImages = attachments.length > 0 && !shouldSendImages && !enrichmentEnabled;
     const userContent = displayContent ?? originalPayload.text;
+
+    logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
+      sessionId,
+      cwd,
+      displayModel: modelForVision || 'default',
+      reasoningEffort: reasoningEffort || 'high',
+      promptLength: prompt.length,
+    });
+    setSessionStreamPhase(sessionId, 'thinking');
+    // Auto-update session title from the first user message (skip slash commands)
+    const state = get();
+    const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
     const userAttachments = getPayloadImageAttachments(originalPayload).map((image) => ({
       type: 'image' as const,
       name: image.name,
@@ -1723,7 +1740,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         ...(userAttachments.length > 0 ? { attachments: userAttachments } : {}),
       },
     };
-    const queryStartedAt = Date.now();
+    queryStartedAt = Date.now();
     set((s) => ({
       events: {
         ...s.events,
@@ -1743,6 +1760,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         logger.warn('Failed to persist session message attachments', { sessionId, userMessageIndex }, serializeError(error));
       });
     }
+
     try {
       if (attachments.length > 0 && !supportsVision && enrichmentEnabled) {
         try {
@@ -2537,6 +2555,64 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
   },
 
+  attachToActiveTurn: async (sessionId: string, cwd: string, reasoningEffort?: ReasoningEffort) => {
+    if (get().isRunning[sessionId] && !get().backgroundLive[sessionId]) {
+      return true;
+    }
+
+    set((s) => ({
+      backgroundLive: { ...s.backgroundLive, [sessionId]: true },
+    }));
+    await get().loadSessionMessages(sessionId, { force: true });
+
+    const companionTurnActive = await companionApi.isSessionTurnActive(sessionId);
+    if (!shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
+      stopBackgroundPoll(sessionId);
+      set((s) => {
+        const { [sessionId]: _live, ...liveRest } = s.backgroundLive;
+        return { backgroundLive: liveRest };
+      });
+      return false;
+    }
+
+    const queryStartedAt = get().queryStartTime[sessionId] ?? Date.now();
+    setSessionStreamPhase(sessionId, 'thinking');
+    set((s) => ({
+      isRunning: { ...s.isRunning, [sessionId]: true },
+      backgroundLive: { ...s.backgroundLive, [sessionId]: true },
+      queryStartTime: { ...s.queryStartTime, [sessionId]: queryStartedAt },
+      error: { ...s.error, [sessionId]: null },
+      queuePaused: { ...s.queuePaused, [sessionId]: false },
+    }));
+
+    stopBackgroundPoll(sessionId);
+    backgroundPolls.set(sessionId, window.setInterval(() => {
+      void get().completeBackgroundLiveIfIdle(sessionId);
+    }, 1000));
+
+    await agentApi.ensureSession(sessionId, cwd, undefined, reasoningEffort);
+    return get().isRunning[sessionId] ?? false;
+  },
+
+  completeBackgroundLiveIfIdle: async (sessionId: string) => {
+    if (!get().backgroundLive[sessionId]) return;
+    await get().loadSessionMessages(sessionId, { force: true });
+    const companionTurnActive = await companionApi.isSessionTurnActive(sessionId);
+    if (shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
+      return;
+    }
+    stopBackgroundPoll(sessionId);
+    set((s) => {
+      const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+      const { [sessionId]: _live, ...liveRest } = s.backgroundLive;
+      return {
+        isRunning: { ...s.isRunning, [sessionId]: false },
+        backgroundLive: liveRest,
+        queryStartTime: rest,
+      };
+    });
+  },
+
   respondToPermission: async (sessionId: string, requestId: string, response: AgentPermissionResponse) => {
     const request = (get().pendingPermissions[sessionId] ?? []).find((item) => item.request_id === requestId);
     if (!request) return;
@@ -2872,7 +2948,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
         set((state) => {
           const currentEvents = state.events[sessionId];
-          const keepLiveEvents = Boolean(state.isRunning[sessionId] && currentEvents?.length);
+          const keepLiveEvents = Boolean(
+            currentEvents?.length
+            && shouldKeepLiveEventsOnHistoryLoad(
+              Boolean(state.isRunning[sessionId]),
+              Boolean(state.backgroundLive[sessionId]),
+            )
+          );
           const nextEvents = keepLiveEvents ? currentEvents! : hydratedEvents;
           const nextTimestamps = keepLiveEvents
             ? state.eventTimestamps[sessionId] ?? timestamps
