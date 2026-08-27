@@ -169,6 +169,26 @@ _Avoid_: 会话 token, session credential, API key
 移动端与桌面实例建立信任的动作：扫码读取桌面地址与一次性配对码，换取该设备的 Pairing Token。配对建立后移动端即信任该桌面。
 _Avoid_: 登录, 连接（当指长期信任时）
 
+### Scheduled Task
+一条持久的定时任务定义：绑定项目、Agent Kind、Kind Model Selection、用户为该任务选定的 Permission Snapshot、计划与任务指令。它不是 Session，也不另建一套对话时间线。
+_Avoid_: automation, job, workflow, cron job（当指用户可见实体时）；把权限理解成只能跟全局设置走、创建时不能改档
+
+### Task Instruction
+定时任务到点发出的 User Message 模板。它是用户可见消息，不是 system prompt，也不是 Switch Briefing。
+_Avoid_: prompt, system prompt, 自动化脚本
+
+### Schedule
+绑定在一条 Scheduled Task 上的一条重复规则（每小时、每天、每工作日、每周、每月，加本机时刻）。用户侧不把 cron 当作名称。
+_Avoid_: cron（用户可见名称）, timer, heartbeat
+
+### Task Run
+一次计划触发所产生的执行记录：创建或续上一条 Session，并把任务指令作为 User Message 发出。对话内容仍是该 Session 的 CodeMUX Event 序列。
+_Avoid_: job execution, instance；与 Immediate Run（排队消息插队）混称
+
+### Run Delivery
+一次 Task Run 如何落到 Session：新建一条 Session，或续写该任务上次 Run 的 Session。首版仅新建。
+_Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 当成通知渠道
+
 ## Preferred Terms
 
 
@@ -202,6 +222,11 @@ _Avoid_: 登录, 连接（当指长期信任时）
 | Device Pairing / 设备配对 | 登录, 普通连接 |
 | Queued Message / 排队消息 | steering（注入进行中的一轮） |
 | Immediate Run / 立即执行 | 轮中热切 / steer, 清空剩余队列 |
+| Scheduled Task / 定时任务 | automation, job, workflow（当指用户可见实体时）；创建时不能改权限档
+| Task Instruction / 任务指令 | prompt, system prompt |
+| Schedule / 计划 | cron（用户可见名称）, timer, heartbeat |
+| Task Run / 一次执行 | job execution；与 Immediate Run 混称 |
+| Run Delivery / 执行去向 | 现有聊天 / 新聊天（Codex 用语） |
 
 ## Notes
 
@@ -209,6 +234,7 @@ _Avoid_: 登录, 连接（当指长期信任时）
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
 - 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。
 - Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
+- 定时任务决策见 [docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md](docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md)。
 
 ## Out of Scope (for this feature's first cut)
 
