@@ -3,10 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fileApi, type FileTreeNode } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
+import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
+import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { TooltipHint } from '../ui/tooltip';
+import { ProjectExplorerContextMenu } from './ProjectExplorerContextMenu';
 import { hasLoadedChildren } from './projectExplorerTree';
 
 interface ProjectExplorerProps {
@@ -35,12 +38,14 @@ function TreeNode({
   level,
   query,
   projectPath,
+  sessionId,
   onOpenFile,
 }: {
   node: FileTreeNode;
   level: number;
   query: string;
   projectPath: string;
+  sessionId: string | null;
   onOpenFile: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(level === 0 && Boolean(query));
@@ -94,36 +99,47 @@ function TreeNode({
 
   return (
     <div>
-      <button
-        type="button"
-        className={cn(
-          'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-ui-compact transition-colors',
-          'text-[hsl(var(--sidebar-fg))]/72 hover:bg-[hsl(var(--sidebar-muted))]/80 hover:text-[hsl(var(--sidebar-fg))]',
-        )}
-        style={{ paddingLeft: `${level * 14 + 10}px` }}
-        onClick={handleClick}
-      >
-        {isDirectory ? (
-          expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
-          )
-        ) : (
-          <span className="w-3 shrink-0" />
-        )}
-        {isDirectory ? (
-          expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-glow))]/72" />
-          ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/54" />
-          )
-        ) : (
-          <FileTypeIcon filePath={node.path} className="h-3.5 w-3.5" />
-        )}
-        <span className="truncate">{node.name}</span>
-        {loading && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-[hsl(var(--sidebar-fg))]/35" />}
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-ui-compact transition-colors',
+              'text-[hsl(var(--sidebar-fg))]/72 hover:bg-[hsl(var(--sidebar-muted))]/80 hover:text-[hsl(var(--sidebar-fg))]',
+            )}
+            style={{ paddingLeft: `${level * 14 + 10}px` }}
+            onClick={handleClick}
+          >
+            {isDirectory ? (
+              expanded ? (
+                <ChevronDown className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
+              ) : (
+                <ChevronRight className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
+              )
+            ) : (
+              <span className="w-3 shrink-0" />
+            )}
+            {isDirectory ? (
+              expanded ? (
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-glow))]/72" />
+              ) : (
+                <Folder className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/54" />
+              )
+            ) : (
+              <FileTypeIcon filePath={node.path} className="h-3.5 w-3.5" />
+            )}
+            <span className="truncate">{node.name}</span>
+            {loading && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-[hsl(var(--sidebar-fg))]/35" />}
+          </button>
+        </ContextMenuTrigger>
+        <ProjectExplorerContextMenu
+          path={node.path}
+          projectPath={projectPath}
+          isDirectory={isDirectory}
+          sessionId={sessionId}
+          onOpen={handleClick}
+        />
+      </ContextMenu>
       {showChildArea && (
         <div>
           {loading && children.length === 0 ? (
@@ -149,6 +165,7 @@ function TreeNode({
                 level={level + 1}
                 query={query}
                 projectPath={projectPath}
+                sessionId={sessionId}
                 onOpenFile={onOpenFile}
               />
             ))
@@ -165,6 +182,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const openFileTab = useSidePanelStore((state) => state.openFileTab);
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
 
   const loadTree = useCallback(async () => {
     setIsLoading(true);
@@ -267,6 +285,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
               level={0}
               query={query}
               projectPath={project.path}
+              sessionId={activeSessionId}
               onOpenFile={handleOpenFile}
             />
           ))

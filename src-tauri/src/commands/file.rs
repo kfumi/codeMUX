@@ -372,6 +372,24 @@ fn resolve_explorer_directory(path: &str) -> Result<std::path::PathBuf, String> 
         return Err(format!("不是目录: {}", trimmed));
     }
 
+    normalize_explorer_path(canonical)
+}
+
+/// Resolve and validate a file or directory path before opening it in the system file explorer.
+fn resolve_explorer_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return Err("无效路径".to_string());
+    }
+
+    let canonical = std::path::Path::new(trimmed)
+        .canonicalize()
+        .map_err(|_| format!("路径不存在: {}", trimmed))?;
+
+    normalize_explorer_path(canonical)
+}
+
+fn normalize_explorer_path(canonical: std::path::PathBuf) -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         let mut text = canonical.to_string_lossy().to_string();
@@ -389,10 +407,55 @@ fn resolve_explorer_directory(path: &str) -> Result<std::path::PathBuf, String> 
     }
 }
 
-/// Open a directory in the system file explorer.
+fn reveal_in_explorer(path: &str) -> Result<(), String> {
+    let canonical = resolve_explorer_path(path)?;
+    info!(
+        target: "file",
+        "Revealing in explorer path={}",
+        canonical.display()
+    );
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args(["/select,", &canonical.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in explorer: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &canonical.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in finder: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = canonical
+            .parent()
+            .ok_or_else(|| format!("Invalid path: {}", canonical.display()))?;
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Open a directory in the system file explorer, or reveal a file in its parent folder.
 #[tauri::command]
 pub fn open_in_explorer(path: String) -> Result<(), String> {
-    let canonical = resolve_explorer_directory(&path)?;
+    let trimmed = path.trim();
+    if std::path::Path::new(trimmed)
+        .canonicalize()
+        .map(|canonical| canonical.is_file())
+        .unwrap_or(false)
+    {
+        return reveal_in_explorer(trimmed);
+    }
+
+    let canonical = resolve_explorer_directory(trimmed)?;
     info!(target: "file", "Opening in explorer path={}", canonical.display());
     #[cfg(target_os = "windows")]
     {
@@ -420,12 +483,31 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn open_project_path(path: String, target: String) -> Result<(), String> {
-    if !std::path::Path::new(&path).is_dir() {
-        return Err(format!("Not a directory: {}", path));
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("无效路径".to_string());
     }
 
-    info!(target: "file", "Opening project path={} target={}", path, target);
-    let commands = build_open_project_commands(&target, &path, std::env::consts::OS)?;
+    let canonical = std::path::Path::new(trimmed)
+        .canonicalize()
+        .map_err(|_| format!("路径不存在: {}", trimmed))?;
+
+    info!(
+        target: "file",
+        "Opening project path={} target={}",
+        canonical.display(),
+        target
+    );
+
+    if target == "file_explorer" && canonical.is_file() {
+        return reveal_in_explorer(trimmed);
+    }
+
+    if !canonical.is_dir() && matches!(target.as_str(), "terminal" | "git_bash") {
+        return Err(format!("不是目录: {}", trimmed));
+    }
+
+    let commands = build_open_project_commands(&target, trimmed, std::env::consts::OS)?;
     spawn_open_project_commands(commands)
 }
 

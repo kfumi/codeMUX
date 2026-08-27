@@ -77,6 +77,7 @@ import {
   type ThreadTokenUsage,
 } from '../components/agent/contextUsage';
 import { buildConversationTurns } from '../lib/conversationTurns';
+import { extractTodosFromEvents } from '../lib/extractTodosFromEvents';
 import type { ConversationTurn } from '../types/conversationTurn';
 
 export type AgentMessage =
@@ -132,7 +133,7 @@ interface AgentState {
   error: Record<string, string | null>;
   /** Latest MCP runtime status for each session */
   mcpRuntimeStatus: Record<string, string | null>;
-  /** Current todos per session (extracted from TodoWrite / Task tools) */
+  /** Current todos per session (extracted from todowrite / update_plan / Task tools) */
   todos: Record<string, TodoItem[]>;
   /** Latest normalized token/context usage snapshot per session */
   tokenUsageBySession: Record<string, ThreadTokenUsage | null>;
@@ -157,6 +158,8 @@ interface AgentState {
   composerDrafts: Record<string, string>;
   /** Composer text queued for restoration after a rewind, keyed by session */
   pendingComposerRestore: Record<string, string>;
+  /** File/directory reference queued to append to the composer, keyed by session */
+  pendingComposerReferenceInsert: Record<string, { reference: string; isDirectory: boolean }>;
   /** Sessions whose history load IPC has completed at least once */
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
@@ -208,6 +211,10 @@ interface AgentState {
   requestComposerRestore: (sessionId: string, text: string) => void;
   /** Consume and clear any pending composer restore text for a session */
   clearComposerRestore: (sessionId: string) => void;
+  /** Queue a file/directory reference to append to the composer for a session */
+  requestComposerReferenceInsert: (sessionId: string, reference: string, isDirectory?: boolean) => void;
+  /** Consume and clear any pending composer reference insert for a session */
+  clearComposerReferenceInsert: (sessionId: string) => void;
 }
 
 type StreamingBuffer = {
@@ -506,7 +513,9 @@ function replaceLastOrAppend(
   return [...events, incoming];
 }
 
-function isNarrationOnlyAssistantEvent(event: AgentMessage): boolean {
+function isNarrationOnlyAssistantEvent(
+  event: AgentMessage,
+): event is Extract<AgentMessage, { kind: 'assistant' }> {
   if (event.kind !== 'assistant') {
     return false;
   }
@@ -519,7 +528,9 @@ function isNarrationOnlyAssistantEvent(event: AgentMessage): boolean {
   ));
 }
 
-function isToolOnlyAssistantEvent(event: AgentMessage): boolean {
+function isToolOnlyAssistantEvent(
+  event: AgentMessage,
+): event is Extract<AgentMessage, { kind: 'assistant' }> {
   if (event.kind !== 'assistant') {
     return false;
   }
@@ -528,28 +539,6 @@ function isToolOnlyAssistantEvent(event: AgentMessage): boolean {
     return false;
   }
   return content.every((block: { type?: string }) => block?.type === 'tool_use');
-}
-
-function isPendingToolOnlyAssistantEvent(event: AgentMessage, events: AgentMessage[]): boolean {
-  if (!isToolOnlyAssistantEvent(event)) {
-    return false;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content)) {
-    return false;
-  }
-  return content.every((block: { type?: string; id?: string }) => {
-    if (block?.type !== 'tool_use' || typeof block.id !== 'string') {
-      return false;
-    }
-    return !events.some((candidate) => (
-      candidate.kind === 'tool_result'
-      && Array.isArray(candidate.data?.message?.content)
-      && candidate.data.message.content.some((result: { tool_use_id?: string }) => (
-        result?.tool_use_id === block.id
-      ))
-    ));
-  });
 }
 
 function narrationTextFromAssistantEvent(event: AgentMessage): string | undefined {
@@ -689,22 +678,6 @@ function liveStreamNarrationUuid(sessionId: string): string {
 
 function isLiveStreamNarrationEvent(event: AgentMessage, sessionId: string): boolean {
   return event.kind === 'assistant' && event.data?.uuid === liveStreamNarrationUuid(sessionId);
-}
-
-function removeLiveStreamNarrationEvent(
-  sessionId: string,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-): void {
-  set((state) => {
-    const prev = state.events[sessionId] || [];
-    const next = prev.filter((entry) => !isLiveStreamNarrationEvent(entry, sessionId));
-    if (next.length === prev.length) {
-      return {};
-    }
-    return {
-      events: { ...state.events, [sessionId]: next },
-    };
-  });
 }
 
 function queueStreamingDelta(
@@ -1289,137 +1262,6 @@ function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Re
   return rest;
 }
 
-/**
- * Extract the current todo list from a stream of agent events.
- * Handles TodoWrite (full list replacement), TaskCreate/TaskUpdate (incremental),
- * and infers status from tool execution flow when TodoWrite doesn't update statuses.
- */
-
-function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
-  let todos: TodoItem[] = [];
-  const taskMap = new Map<string, TodoItem>();
-  let hasExplicitUpdates = false; // true if any TodoWrite with non-pending status was seen
-  // Track which task index each tool call is associated with (tool_use_id → task index)
-  const toolToTask = new Map<string, number>();
-  // Auto-incrementing task ID counter (1, 2, 3...) matching SDK convention
-  let nextTaskId = 1;
-
-  for (const evt of events) {
-    if (evt.kind === 'assistant') {
-      const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
-
-      for (const block of blocks) {
-        if (block?.type !== 'tool_use' || !block.name) continue;
-
-        // TodoWrite / Codex update_plan: replaces the entire todo list
-        if (block.name === 'TodoWrite' || block.name === 'todowrite' || block.name === 'update_plan') {
-          const input = block.input as any;
-          const inputTodos = block.name === 'update_plan' ? input?.plan : input?.todos;
-          if (Array.isArray(inputTodos)) {
-            const newTodos = inputTodos.map((t: any) => ({
-              content: String(t.content || t.step || ''),
-              status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
-              activeForm: t.activeForm || undefined,
-            }));
-            // Check if this task update has any non-pending status
-            if (newTodos.some((t) => t.status !== 'pending')) {
-              hasExplicitUpdates = true;
-            }
-            todos = newTodos;
-            // Rebuild taskMap with sequential IDs so subsequent TaskUpdate can find them
-            taskMap.clear();
-            newTodos.forEach((t, i) => {
-              taskMap.set(String(i + 1), t);
-            });
-          }
-          continue; // skip inference for task-management tools
-        }
-
-        // TaskCreate: adds a single task
-        if (block.name === 'TaskCreate') {
-          const input = block.input as any;
-          // Use SDK-provided id if available, otherwise auto-increment (1, 2, 3...)
-          const taskId = String(input?.id || input?.task_id || nextTaskId++);
-          const item: TodoItem = {
-            content: String(input?.subject || input?.description || ''),
-            status: 'pending',
-            activeForm: input?.activeForm || undefined,
-          };
-          taskMap.set(taskId, item);
-          todos.push(item);
-          continue; // skip inference for TaskCreate
-        }
-
-        // TaskUpdate: updates an existing task by taskId
-        if (block.name === 'TaskUpdate') {
-          const input = block.input as any;
-          const taskId = input?.taskId;
-          if (taskId && taskMap.has(taskId)) {
-            const item = taskMap.get(taskId)!;
-            if (input.status) {
-              hasExplicitUpdates = true;
-              item.status = (['pending', 'in_progress', 'completed', 'deleted'].includes(input.status)
-                ? input.status === 'deleted' ? 'completed' : input.status
-                : 'pending') as TodoItem['status'];
-            }
-            if (input.subject) item.content = String(input.subject);
-            if (input.activeForm) item.activeForm = String(input.activeForm);
-          }
-          continue; // skip inference for TaskUpdate
-        }
-
-        // Infer progress from tool calls: mark first pending task as in_progress
-        // and record which task this tool call is associated with.
-        // Skip task-management and read-only query tools — they don't represent work.
-        const skipInferenceTools = ['TodoWrite', 'todowrite', 'update_plan', 'TaskCreate', 'taskcreate', 'TaskUpdate', 'taskupdate', 'TaskList', 'tasklist', 'TaskGet', 'taskget'];
-        if (!hasExplicitUpdates && todos.length > 0 && !skipInferenceTools.includes(block.name)) {
-          const firstPending = todos.find((t) => t.status === 'pending');
-          if (firstPending) {
-            firstPending.status = 'in_progress';
-            if (block.id) {
-              toolToTask.set(block.id, todos.indexOf(firstPending));
-            }
-          }
-        }
-      }
-    }
-
-    // Infer progress from tool results: only complete the task this tool was associated with
-    if (!hasExplicitUpdates && evt.kind === 'tool_result' && todos.length > 0) {
-      const data: any = evt.data;
-      const rawContent = data?.message?.content;
-      if (Array.isArray(rawContent)) {
-        for (const r of rawContent) {
-          if (r?.type === 'tool_result' && r.tool_use_id && toolToTask.has(r.tool_use_id)) {
-            const taskIdx = toolToTask.get(r.tool_use_id)!;
-            if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
-              todos[taskIdx].status = 'completed';
-            }
-            toolToTask.delete(r.tool_use_id);
-          }
-        }
-      }
-      // Fallback: also check tool_use_result and parent_tool_use_id
-      if (data?.tool_use_result?.tool_use_id && toolToTask.has(data.tool_use_result.tool_use_id)) {
-        const taskIdx = toolToTask.get(data.tool_use_result.tool_use_id)!;
-        if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
-          todos[taskIdx].status = 'completed';
-        }
-        toolToTask.delete(data.tool_use_result.tool_use_id);
-      }
-      if (data?.parent_tool_use_id && toolToTask.has(data.parent_tool_use_id)) {
-        const taskIdx = toolToTask.get(data.parent_tool_use_id)!;
-        if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
-          todos[taskIdx].status = 'completed';
-        }
-        toolToTask.delete(data.parent_tool_use_id);
-      }
-    }
-  }
-
-  return todos;
-}
-
 export function extractChangedFilesFromEvents(
   events: AgentMessage[],
   acknowledged?: Set<string>,
@@ -1752,6 +1594,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   acknowledgedFiles: {},
   composerDrafts: {},
   pendingComposerRestore: {},
+  pendingComposerReferenceInsert: {},
   queuedQueries: {},
   sessionWorkingPaths: loadSessionWorkingPaths(),
   queuePaused: {},
@@ -3279,6 +3122,21 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
   clearComposerRestore: (sessionId: string) => {
     set((state) => ({ pendingComposerRestore: removeSessionEntry(state.pendingComposerRestore, sessionId) }));
+  },
+
+  requestComposerReferenceInsert: (sessionId: string, reference: string, isDirectory = false) => {
+    set((state) => ({
+      pendingComposerReferenceInsert: {
+        ...state.pendingComposerReferenceInsert,
+        [sessionId]: { reference, isDirectory },
+      },
+    }));
+  },
+
+  clearComposerReferenceInsert: (sessionId: string) => {
+    set((state) => ({
+      pendingComposerReferenceInsert: removeSessionEntry(state.pendingComposerReferenceInsert, sessionId),
+    }));
   },
 
   rewindLastTurn: async (sessionId: string) => {

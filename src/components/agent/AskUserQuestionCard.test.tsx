@@ -212,12 +212,36 @@ describe('AskUserQuestionCard', () => {
     expect(screen.getByPlaceholderText('输入你的回答...')).toBeTruthy();
     expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByText('批准').closest('button')?.classList.contains('bg-muted/92')).toBe(false);
-    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('bg-muted/92')).toBe(false);
-    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('focus-within:bg-muted/24')).toBe(true);
+    const otherRow = screen.getByPlaceholderText('输入你的回答...').closest('[data-other-input-row]');
+    expect(otherRow?.classList.contains('bg-muted/92')).toBe(false);
+    expect(otherRow?.textContent).toContain('2');
 
     fireEvent.focus(screen.getByPlaceholderText('输入你的回答...'));
     expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
-    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('bg-muted/92')).toBe(true);
+    expect(otherRow?.classList.contains('bg-muted/92')).toBe(true);
+  });
+
+  it('renders the composer other input as the next numbered list row', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="numbered-other-1"
+        variant="composer"
+        questions={[{
+          question: '你写代码时更接近哪种习惯?',
+          options: [
+            { label: '频繁调试', description: '边写边跑，快速验证' },
+            { label: '先规划后编码', description: '先设计好再动手写' },
+            { label: 'TDD 先行', description: '先写测试再写实现' },
+            { label: '直接开写', description: '直接上手，边写边想' },
+          ],
+        }]}
+      />,
+    );
+
+    const otherRow = screen.getByPlaceholderText('输入你的回答...').closest('[data-other-input-row]');
+    expect(otherRow?.textContent).toContain('5');
+    expect(otherRow?.querySelector('.rounded-md.border')).toBeNull();
   });
 
   it('does not mark composer questions as answered before the user chooses', () => {
@@ -379,6 +403,46 @@ describe('AskUserQuestionCard', () => {
     await waitFor(() => {
       expect(sendToolResponse).toHaveBeenCalledWith('session-1', 'exit-plan-input-1', ['请先补充测试']);
     });
+  });
+
+  it('does not select the first option when Enter is pressed in the composer other input inside a form', async () => {
+    render(
+      <form onSubmit={(event) => event.preventDefault()}>
+        <AskUserQuestionCard
+          sessionId="session-1"
+          toolUseId="form-enter-1"
+          variant="composer"
+          questions={[
+            {
+              header: 'SPEC 文件',
+              question: '本次 SDD 开发使用的 SPEC 文件是？',
+              options: [
+                { label: '暂无 SPEC 文件', description: '不反馈' },
+                { label: '手动输入路径', description: '填写相对路径' },
+              ],
+            },
+            {
+              header: '仓库地址',
+              question: '仓库地址是？',
+              options: [{ label: '默认' }],
+            },
+          ]}
+        />
+      </form>,
+    );
+
+    const input = screen.getByPlaceholderText('输入你的回答...');
+    const firstOption = screen.getByText('暂无 SPEC 文件').closest('button');
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'openspec/changes/foo/proposal.md' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(firstOption?.getAttribute('aria-pressed')).toBe('false');
+      expect(input.closest('[data-other-input-row]')?.classList.contains('bg-muted/92')).toBe(true);
+      expect(screen.getByRole('tab', { name: /仓库地址/ }).getAttribute('data-state')).toBe('active');
+    }, { timeout: 500 });
   });
 
   it('keeps a multi-question tab row horizontally scrollable without vertical overflow', () => {
