@@ -1256,7 +1256,7 @@ describe('agent store Codex history loading', () => {
           content: [{
             type: 'tool_use',
             id: 'todo-list-1',
-            name: 'TodoWrite',
+            name: 'todowrite',
             input: {
               todos: [
                 { content: 'Task 1', status: 'completed' },

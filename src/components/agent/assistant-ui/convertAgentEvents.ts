@@ -681,48 +681,6 @@ function attachLatestPendingToolError(
   return false;
 }
 
-function getAssistantInsertionIndex(
-  messages: CodeMuxAssistantMessage[],
-  nextMessage: CodeMuxAssistantMessage,
-): number | undefined {
-  if (!isNarrationOnlyAssistantMessage(nextMessage)) {
-    return undefined;
-  }
-
-  let insertAt: number | undefined;
-
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message?.role !== 'assistant') {
-      break;
-    }
-
-    if (!isToolOnlyAssistantMessage(message)) {
-      break;
-    }
-
-    insertAt = index;
-  }
-
-  return insertAt;
-}
-
-function isNarrationOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
-  if (message.role !== 'assistant' || message.content.length === 0) {
-    return false;
-  }
-
-  return message.content.every((part) => part.type === 'text');
-}
-
-function isPendingToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
-  if (!isToolOnlyAssistantMessage(message)) {
-    return false;
-  }
-
-  return message.content.every((part) => part.type === 'tool-call' && part.result === undefined);
-}
-
 function shiftLocationIndexes(
   locations: Map<string, { messageIndex: number; partIndex: number }>,
   insertedAt: number,

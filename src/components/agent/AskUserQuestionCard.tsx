@@ -153,6 +153,10 @@ export function AskUserQuestionCard({
   );
   const isComposer = variant === 'composer';
   const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const otherInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const showsComposerOtherInput = (question: AskUserQuestion) =>
+    question.presentation === 'plan-approval' || question.allowOther !== false;
 
   // Subscribe to forceStopped so interrupted sessions render as non-interactive cancelled cards.
   const forceStopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
@@ -210,13 +214,23 @@ export function AskUserQuestionCard({
     window.requestAnimationFrame(() => optionRefs.current[`${qIdx}:${nextIndex}`]?.focus());
   };
 
+  const focusOtherInputElement = (qIdx: number) => {
+    focusOtherInput(qIdx);
+    window.requestAnimationFrame(() => otherInputRefs.current[`${qIdx}`]?.focus());
+  };
+
   const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, qIdx: number, oIdx: number) => {
-    const optionCount = questions[qIdx]?.options.length ?? 0;
+    const question = questions[qIdx];
+    const optionCount = question?.options.length ?? 0;
     if (optionCount === 0) return;
 
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
       event.preventDefault();
-      focusOption(qIdx, oIdx + 1);
+      if (isComposer && showsComposerOtherInput(question) && oIdx === optionCount - 1) {
+        focusOtherInputElement(qIdx);
+      } else {
+        focusOption(qIdx, oIdx + 1);
+      }
       return;
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
@@ -255,6 +269,36 @@ export function AskUserQuestionCard({
       }
       return next;
     });
+  };
+
+  const advanceToNextQuestion = (qIdx: number) => {
+    if (!hasMultipleQuestions || qIdx >= questions.length - 1) return;
+    setTimeout(() => setActiveTab(String(qIdx + 1)), 200);
+  };
+
+  const handleOtherInputKeyDown = (event: KeyboardEvent<HTMLInputElement>, qIdx: number) => {
+    if (submitted || expired) return;
+
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      const lastOptionIndex = questions[qIdx]?.options.length ?? 0;
+      if (lastOptionIndex > 0) {
+        focusOption(qIdx, lastOptionIndex - 1);
+      }
+      return;
+    }
+
+    if (event.key !== 'Enter' || event.shiftKey) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    focusOtherInput(qIdx);
+
+    const question = questions[qIdx];
+    if (!isMultiSelectQuestion(question) && otherTexts[qIdx]?.trim()) {
+      advanceToNextQuestion(qIdx);
+    }
   };
 
   const handleSubmit = async () => {
@@ -346,6 +390,7 @@ export function AskUserQuestionCard({
           return (
             <button
               key={oIdx}
+              type="button"
               ref={(element) => { optionRefs.current[`${qIdx}:${oIdx}`] = element; }}
               onClick={() => toggleOption(qIdx, oIdx)}
               onKeyDown={(event) => handleOptionKeyDown(event, qIdx, oIdx)}
@@ -395,6 +440,7 @@ export function AskUserQuestionCard({
 
         {!isComposer && q.presentation !== 'plan-approval' && q.allowOther !== false && (
           <button
+            type="button"
             onClick={() => toggleOption(qIdx, OTHER_IDX)}
             disabled={expired}
             className={cn(
@@ -424,40 +470,68 @@ export function AskUserQuestionCard({
           </button>
         )}
 
-        {q.presentation === 'plan-approval' || (isComposer && q.allowOther !== false) ? (
-          <div className="border-t border-border/12 p-2">
-            <div
+        {isComposer && showsComposerOtherInput(q) ? (
+          <div
+            data-other-input-row
+            className={cn(
+              'flex min-w-0 items-center gap-2 px-3 py-2 text-sm transition-colors',
+              isOtherSelected(qIdx)
+                ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+                : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+            )}
+          >
+            <span
               className={cn(
-                'rounded-md border p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/24',
+                'flex h-5 w-5 shrink-0 items-center justify-center border text-ui-caption font-semibold',
+                isMultiSelectQuestion(q) ? 'rounded-none' : 'rounded-full',
                 isOtherSelected(qIdx)
-                  ? 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28]'
-                  : 'border-border/35 bg-background/45',
+                  ? 'border-foreground bg-foreground text-background'
+                  : 'border-muted-foreground/30 text-muted-foreground',
               )}
             >
-              <input
-                type="text"
-                value={otherTexts[qIdx] || ''}
-                onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
-                onFocus={() => focusOtherInput(qIdx)}
-                placeholder={q.inputPlaceholder || '输入你的回答...'}
-                disabled={expired}
-                className="w-full rounded border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
-              />
-            </div>
+              {q.options.length + 1}
+            </span>
+            <input
+              ref={(element) => { otherInputRefs.current[`${qIdx}`] = element; }}
+              type="text"
+              value={otherTexts[qIdx] || ''}
+              onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
+              onFocus={() => focusOtherInput(qIdx)}
+              onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
+              placeholder={q.inputPlaceholder || '输入你的回答...'}
+              disabled={expired}
+              className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
+            />
+          </div>
+        ) : q.presentation === 'plan-approval' ? (
+          <div className="border-t border-border/12 p-2">
+            <input
+              ref={(element) => { otherInputRefs.current[`${qIdx}`] = element; }}
+              type="text"
+              value={otherTexts[qIdx] || ''}
+              onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
+              onFocus={() => focusOtherInput(qIdx)}
+              onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
+              placeholder={q.inputPlaceholder || '输入你的回答...'}
+              disabled={expired}
+              className={cn(
+                'w-full rounded-md bg-background/45 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0',
+                isOtherSelected(qIdx) ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28]' : '',
+              )}
+            />
           </div>
         ) : !isComposer && isOtherSelected(qIdx) && (
           <div className="pl-3">
-            <div className="rounded-md border border-border/45 bg-background/45 p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/24">
-              <input
-                type="text"
-                value={otherTexts[qIdx] || ''}
-                onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
-                onFocus={() => focusOtherInput(qIdx)}
-                placeholder="请输入..."
-                autoFocus
-                className="w-full rounded border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
-              />
-            </div>
+            <input
+              type="text"
+              value={otherTexts[qIdx] || ''}
+              onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
+              onFocus={() => focusOtherInput(qIdx)}
+              onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
+              placeholder="请输入..."
+              autoFocus
+              className="w-full rounded-md bg-background/45 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
+            />
           </div>
         )}
       </div>
@@ -580,6 +654,7 @@ export function AskUserQuestionCard({
           </span>
           <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={handleCancel}
             disabled={submitting || expired}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground disabled:opacity-60"
@@ -587,6 +662,7 @@ export function AskUserQuestionCard({
             {questions[0]?.presentation === 'plan-approval' ? '忽略' : '跳过'}
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={!allAnswered || submitting || expired}
             className={cn(
@@ -717,6 +793,7 @@ export function AskUserQuestionCard({
 
               <div className="mt-3 flex gap-2">
                 <button
+                  type="button"
                   onClick={handleCancel}
                   disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
@@ -724,6 +801,7 @@ export function AskUserQuestionCard({
                   取消
                 </button>
                 <button
+                  type="button"
                   onClick={handleSubmit}
                   disabled={!allAnswered || submitting || expired}
                   className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
@@ -741,6 +819,7 @@ export function AskUserQuestionCard({
               {questions.map((q, qIdx) => renderQuestion(q, qIdx))}
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={handleCancel}
                   disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
@@ -748,6 +827,7 @@ export function AskUserQuestionCard({
                   取消
                 </button>
                 <button
+                  type="button"
                   onClick={handleSubmit}
                   disabled={!allAnswered || submitting || expired}
                   className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
