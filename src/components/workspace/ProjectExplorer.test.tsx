@@ -4,8 +4,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fileApi } from '../../lib/tauri';
+import { useAgentStore } from '../../stores/agentStore';
+import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
 import { ProjectExplorer } from './ProjectExplorer';
+
+const invokeMock = vi.fn();
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
 
 vi.mock('../../stores/sidePanelStore', () => ({
   useSidePanelStore: (selector: (state: { openFileTab: ReturnType<typeof vi.fn> }) => unknown) =>
@@ -22,6 +30,15 @@ const project: Project = {
 
 describe('ProjectExplorer', () => {
   beforeEach(() => {
+    invokeMock.mockReset();
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    useAgentStore.setState({ pendingComposerReferenceInsert: {} });
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn(async () => undefined),
+      },
+    });
+
     vi.spyOn(fileApi, 'listDirectory').mockImplementation(async (path, depth) => {
       if (path === project.path && depth === 5) {
         return [
@@ -104,5 +121,38 @@ describe('ProjectExplorer', () => {
     });
 
     expect(screen.getByText('feature.md')).toBeTruthy();
+  });
+
+  it('shows the file tree context menu actions', async () => {
+    render(<ProjectExplorer project={project} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeTruthy();
+    });
+
+    fireEvent.contextMenu(screen.getByText('docs'));
+
+    expect(screen.getByText('打开')).toBeTruthy();
+    expect(screen.getByText('打开方式')).toBeTruthy();
+    expect(screen.getByText('在资源管理器中打开')).toBeTruthy();
+    expect(screen.getByText('复制绝对路径')).toBeTruthy();
+    expect(screen.getByText('复制相对路径')).toBeTruthy();
+    expect(screen.getByText('添加到聊天')).toBeTruthy();
+  });
+
+  it('queues a file reference for the active session from the context menu', async () => {
+    render(<ProjectExplorer project={project} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeTruthy();
+    });
+
+    fireEvent.contextMenu(screen.getByText('docs'));
+    fireEvent.click(screen.getByText('添加到聊天'));
+
+    expect(useAgentStore.getState().pendingComposerReferenceInsert['session-1']).toEqual({
+      reference: 'docs',
+      isDirectory: true,
+    });
   });
 });

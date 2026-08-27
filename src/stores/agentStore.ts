@@ -158,6 +158,8 @@ interface AgentState {
   composerDrafts: Record<string, string>;
   /** Composer text queued for restoration after a rewind, keyed by session */
   pendingComposerRestore: Record<string, string>;
+  /** File/directory reference queued to append to the composer, keyed by session */
+  pendingComposerReferenceInsert: Record<string, { reference: string; isDirectory: boolean }>;
   /** Sessions whose history load IPC has completed at least once */
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
@@ -209,6 +211,10 @@ interface AgentState {
   requestComposerRestore: (sessionId: string, text: string) => void;
   /** Consume and clear any pending composer restore text for a session */
   clearComposerRestore: (sessionId: string) => void;
+  /** Queue a file/directory reference to append to the composer for a session */
+  requestComposerReferenceInsert: (sessionId: string, reference: string, isDirectory?: boolean) => void;
+  /** Consume and clear any pending composer reference insert for a session */
+  clearComposerReferenceInsert: (sessionId: string) => void;
 }
 
 type StreamingBuffer = {
@@ -1588,6 +1594,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   acknowledgedFiles: {},
   composerDrafts: {},
   pendingComposerRestore: {},
+  pendingComposerReferenceInsert: {},
   queuedQueries: {},
   sessionWorkingPaths: loadSessionWorkingPaths(),
   queuePaused: {},
@@ -3115,6 +3122,21 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
   clearComposerRestore: (sessionId: string) => {
     set((state) => ({ pendingComposerRestore: removeSessionEntry(state.pendingComposerRestore, sessionId) }));
+  },
+
+  requestComposerReferenceInsert: (sessionId: string, reference: string, isDirectory = false) => {
+    set((state) => ({
+      pendingComposerReferenceInsert: {
+        ...state.pendingComposerReferenceInsert,
+        [sessionId]: { reference, isDirectory },
+      },
+    }));
+  },
+
+  clearComposerReferenceInsert: (sessionId: string) => {
+    set((state) => ({
+      pendingComposerReferenceInsert: removeSessionEntry(state.pendingComposerReferenceInsert, sessionId),
+    }));
   },
 
   rewindLastTurn: async (sessionId: string) => {

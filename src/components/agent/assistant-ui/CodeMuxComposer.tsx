@@ -35,6 +35,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
+import { appendComposerReference, getPathLabel } from '../../../lib/composerReferences';
 import { cn } from '../../../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../../ui/tooltip';
@@ -368,6 +369,8 @@ export function CodeMuxComposer({
   // Restore rewound user text after an arbitrary-message rewind (only-if-empty)
   const pendingComposerRestore = useAgentStore((s) => s.pendingComposerRestore[sessionId]);
   const clearComposerRestore = useAgentStore((s) => s.clearComposerRestore);
+  const pendingComposerReferenceInsert = useAgentStore((s) => s.pendingComposerReferenceInsert[sessionId]);
+  const clearComposerReferenceInsert = useAgentStore((s) => s.clearComposerReferenceInsert);
   useEffect(() => {
     if (!pendingComposerRestore) {
       return;
@@ -379,6 +382,22 @@ export function CodeMuxComposer({
     }
     clearComposerRestore(sessionId);
   }, [pendingComposerRestore, sessionId, clearComposerRestore]);
+
+  useEffect(() => {
+    if (!pendingComposerReferenceInsert) {
+      return;
+    }
+    const currentText = editorRef.current?.getText() ?? '';
+    editorRef.current?.setText(
+      appendComposerReference(
+        currentText,
+        pendingComposerReferenceInsert.reference,
+        pendingComposerReferenceInsert.isDirectory,
+      ),
+    );
+    editorRef.current?.focus();
+    clearComposerReferenceInsert(sessionId);
+  }, [clearComposerReferenceInsert, pendingComposerReferenceInsert, sessionId]);
 
   useEffect(() => {
     setDismissedQuestionIds(new Set());
@@ -1024,11 +1043,6 @@ function getProjectRelativeReference(file: File, projectPath: string | null | un
   return fileItems.find((item) => item.name === file.name)?.relativePath ?? null;
 }
 
-function appendComposerReference(text: string, reference: string): string {
-  const prefix = text.length === 0 || /\s$/.test(text) ? text : `${text} `;
-  const label = getPathLabel(reference);
-  return `${prefix}[${label}](${reference}) `;
-}
 
 function normalizeReferencePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -1274,10 +1288,6 @@ function appendSkillFilePath(directoryPath: string): string {
   const normalized = directoryPath.replace(/[\\/]+$/, '');
   const separator = directoryPath.includes('\\') ? '\\' : '/';
   return normalized + separator + 'SKILL.md';
-}
-function getPathLabel(path: string) {
-  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
-  return normalized.split('/').filter(Boolean).pop() || path;
 }
 
 function toTriggerItem(command: SlashCommand, agentKind: AgentKind): Unstable_TriggerItem {
