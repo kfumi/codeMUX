@@ -1,4 +1,5 @@
 use chrono::Utc;
+use log::info;
 use tauri::{AppHandle, Manager};
 
 use crate::companion::CompanionState;
@@ -8,6 +9,12 @@ use crate::AppState;
 use super::types::{TaskRunPayload, TaskRunnerResult};
 
 pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> TaskRunnerResult {
+    info!(
+        target: "scheduled_tasks",
+        "Firing scheduled task {} ({})",
+        payload.task_id,
+        payload.task_title,
+    );
     let app_state = app.state::<AppState>();
 
     let session_title = format!("{} · {}", payload.task_title, Utc::now().format("%Y-%m-%d %H:%M"));

@@ -180,6 +180,7 @@ pub enum TaskRunnerResult {
     Failed { error: String },
 }
 
+#[cfg(test)]
 pub trait TaskRunner {
     fn run(&mut self, payload: TaskRunPayload) -> TaskRunnerResult;
 }

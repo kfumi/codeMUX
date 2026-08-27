@@ -1,14 +1,18 @@
-use chrono::{DateTime, Utc};
-
 use rusqlite::Connection;
 
 use super::db;
+use super::types::TaskRunStatus;
+
+#[cfg(test)]
+use chrono::{DateTime, Utc};
+#[cfg(test)]
 use super::schedule::compute_next_run_at;
+#[cfg(test)]
 use super::types::{
-    MAX_CONCURRENT_SCHEDULED_RUNS, SkipReason, TaskRunPayload, TaskRunStatus, TaskRunner,
-    TaskRunnerResult,
+    MAX_CONCURRENT_SCHEDULED_RUNS, SkipReason, TaskRunPayload, TaskRunner, TaskRunnerResult,
 };
 
+#[cfg(test)]
 pub fn tick(conn: &Connection, now: DateTime<Utc>, runner: &mut dyn TaskRunner) {
     let now_str = now.to_rfc3339();
     let due_tasks = db::list_due_tasks(conn, &now_str).unwrap_or_default();
