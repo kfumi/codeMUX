@@ -352,7 +352,12 @@ export function AutomationEditor({
             className="min-h-[160px] w-full rounded-md border border-border bg-background px-3 py-2 text-ui-compact"
           />
 
-          <CodeMuxAssistantRuntimeProvider sessionId={AUTOMATION_DRAFT_SESSION_ID}>
+          <CodeMuxAssistantRuntimeProvider
+            sessionId={AUTOMATION_DRAFT_SESSION_ID}
+            agentKind={draft.agentKind}
+            onSend={async () => {}}
+            onCommand={async () => {}}
+          >
             <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
               <AgentSelector
                 value={draft.agentKind}
