@@ -107,6 +107,32 @@ function stringifyToolResult(value: unknown): string {
   }
 }
 
+/**
+ * Project a remaining Claude assistant message into a TurnSourceEvent. Used by
+ * the parent consume loop and by the subagent sidechain projection.
+ */
+export function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSourceEvent | undefined {
+  if (event.type !== 'assistant') return undefined;
+  const message = event.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return undefined;
+  const stopReason = (message as Record<string, unknown>).stop_reason;
+  const providerMessageId = typeof event.uuid === 'string' && event.uuid.length > 0
+    ? event.uuid
+    : undefined;
+  const supersedesProviderMessageIds = Array.isArray(event.supersedes)
+    ? event.supersedes.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : undefined;
+  return {
+    kind: 'assistant_message',
+    content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
+    ...(typeof stopReason === 'string' || stopReason === null ? { stopReason } : {}),
+    ...(providerMessageId ? { providerMessageId } : {}),
+    ...(supersedesProviderMessageIds?.length ? { supersedesProviderMessageIds } : {}),
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>

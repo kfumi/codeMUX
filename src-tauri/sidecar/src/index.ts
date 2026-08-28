@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   Query,
-  SDKUserMessage,
   WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
@@ -19,7 +18,7 @@ import {
   readClaudeCompactPreTokens,
 } from './claudeCompactEvents.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
-import { projectClaudeToolEvents } from './claudeToolEvents.js';
+import { projectClaudeToolEvents, toClaudeAssistantMessageEvent } from './claudeToolEvents.js';
 import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import { deleteOpenCodeSessionWithOfficialSdk, normalizeOpenCodeModelReference } from './opencodeSdk.js';
@@ -51,6 +50,8 @@ import {
 import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
+import { ClaudeTaskProtocolSource } from './claudeTaskProtocolSource.js';
+import { ClaudePromptStream } from './claudePromptStream.js';
 import { nextWithTimeout } from './claudeQueryTimeout.js';
 import { setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
@@ -236,18 +237,6 @@ function isQueryIdleTimeout(errorText: string): boolean {
   return errorText.includes('Query timed out: no message received');
 }
 
-async function* createPromptStream(prompt: string, inputPayload?: AgentInputPayload, includeImages = true): AsyncGenerator<SDKUserMessage, void, void> {
-  const payload = normalizeAgentInputPayload(prompt, inputPayload);
-  yield {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: buildClaudeUserMessageContent(payload, includeImages) as SDKUserMessage['message']['content'],
-    },
-    parent_tool_use_id: null,
-  };
-}
-
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), timeoutMs);
@@ -288,6 +277,9 @@ export class SessionRuntime {
   private providerMode = getProviderMode(undefined);
   private abortController: AbortController | null = null;
   private queryHandle: Query | null = null;
+  private promptStream: ClaudePromptStream | null = null;
+  private queryIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private subagents = new ClaudeTaskProtocolSource();
   private warmQuery: WarmQuery | null = null;
   private warmPromise: Promise<WarmQuery | null> | null = null;
   private turnActive = false;
@@ -393,6 +385,23 @@ export class SessionRuntime {
     }
     if (this.turnActive) {
       throw new Error('A turn is already active for this session');
+    }
+
+    if (this.queryHandle && this.promptStream) {
+      // Persistent query still open (previous turn ended, maybe with running
+      // subagents): push the new prompt into the existing stream instead of
+      // closing the query, which would kill attached subagents.
+      this.clearQueryIdleTimer();
+      this.turnActive = true;
+      this.generation += 1;
+      this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
+      writeLog('[claude-task]', `sendInput START (stream reuse) model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
+      if (this.promptStream.push(prompt, inputPayload)) {
+        return;
+      }
+      // Stream is dead; fall through to a fresh query.
+      this.turnActive = false;
+      this.closeQueryHandle('new_turn_reuse_failed');
     }
 
     if (this.queryHandle) {
@@ -553,6 +562,7 @@ export class SessionRuntime {
       }
       this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       this.finishTurn();
+      this.emitSubagentEvents(this.subagents.failRunningTasks());
       return;
     }
 
@@ -583,6 +593,9 @@ export class SessionRuntime {
       clearTimeout(fallbackTimer);
       this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       this.finishTurn();
+      // User Stop kills every child bound to this Claude query.
+      this.emitSubagentEvents(this.subagents.failRunningTasks());
+      this.scheduleQueryIdleClose();
     }
   }
 
@@ -634,6 +647,7 @@ export class SessionRuntime {
     clearClaudeToolResponses(this.config?.sessionId);
     this.finishTurn();
     this.closeQueryHandle('reconfigure');
+    this.subagents.reset();
     if (this.warmQuery) {
       this.warmQuery.close();
       this.warmQuery = null;
@@ -754,7 +768,9 @@ export class SessionRuntime {
     if (warm) {
       process.stderr.write('[sidecar] Starting persistent query from pre-warmed session\n');
       this.warmQuery = null;
-      this.queryHandle = warm.query(createPromptStream(prompt, inputPayload, includeImages));
+      this.promptStream = new ClaudePromptStream(includeImages);
+      this.promptStream.pushInitial(prompt, inputPayload);
+      this.queryHandle = warm.query(this.promptStream.stream);
     } else {
       process.stderr.write('[sidecar] Starting persistent query directly via query()\n');
       emit({
@@ -765,8 +781,10 @@ export class SessionRuntime {
       if (!this.claudeSdk) {
         throw new Error('Claude SDK not loaded; cannot start query');
       }
+      this.promptStream = new ClaudePromptStream(includeImages);
+      this.promptStream.pushInitial(prompt, inputPayload);
       this.queryHandle = this.claudeSdk.query({
-        prompt: createPromptStream(prompt, inputPayload, includeImages),
+        prompt: this.promptStream.stream,
         options: this.buildOptions(this.config) as any,
       });
     }
@@ -792,14 +810,62 @@ export class SessionRuntime {
   }
 
   private closeQueryHandle(reason: string): void {
+    this.clearQueryIdleTimer();
     if (!this.queryHandle) return;
     process.stderr.write(`[sidecar] Closing persistent query (${reason})\n`);
+    this.promptStream?.close();
+    this.promptStream = null;
     try {
       this.queryHandle.close();
     } catch (err) {
       process.stderr.write(`[sidecar] Failed to close query: ${err}\n`);
     }
     this.queryHandle = null;
+    // Closing the query kills every child bound to it — surface that as
+    // descriptor terminal states so the UI does not show them as running.
+    if (this.subagents.hasRunningTasks()) {
+      this.emitSubagentEvents(this.subagents.failRunningTasks());
+    }
+  }
+
+  /**
+   * After a parent turn ends, keep the persistent query open (subagents may
+   * still be attached and the next turn reuses it). Arm the idle timer only
+   * when no subagent is running; a running child must not be killed by idle.
+   */
+  private scheduleQueryIdleClose(): void {
+    this.clearQueryIdleTimer();
+    if (!this.queryHandle || !this.promptStream || this.turnActive) return;
+    if (this.subagents.hasRunningTasks()) return;
+    if (this.timeouts.idle_timeout_ms <= 0) return;
+    this.queryIdleTimer = setTimeout(() => {
+      this.queryIdleTimer = null;
+      if (this.turnActive || !this.queryHandle || !this.promptStream) return;
+      if (this.subagents.hasRunningTasks()) return;
+      process.stderr.write('[sidecar] Closing idle persistent query\n');
+      this.closeQueryHandle('idle');
+      if (this.config) {
+        this.startWarmup(this.activeConfigGeneration);
+      }
+    }, this.timeouts.idle_timeout_ms);
+    this.queryIdleTimer.unref?.();
+  }
+
+  private clearQueryIdleTimer(): void {
+    if (this.queryIdleTimer) {
+      clearTimeout(this.queryIdleTimer);
+      this.queryIdleTimer = null;
+    }
+  }
+
+  private emitSubagentEvents(events: ReturnType<ClaudeTaskProtocolSource['failRunningTasks']>): void {
+    for (const event of events) {
+      emit(event);
+    }
+    if (!this.turnActive) {
+      // Re-arm (or cancel) the idle close window with fresh subagent state.
+      this.scheduleQueryIdleClose();
+    }
   }
 
   private buildOptions(config: SessionBootstrap): QueryOptions {
@@ -1183,6 +1249,13 @@ export class SessionRuntime {
           }
         }
 
+        // Task protocol frames and sidechain traffic are observed into the
+        // subagent tracks before being dropped from the parent timeline.
+        const subagentEvents = this.subagents.observe(msg, appSessionId ? { sessionId: appSessionId } : {});
+        if (subagentEvents.length > 0) {
+          this.emitSubagentEvents(subagentEvents);
+        }
+
         if (!shouldForwardClaudeSdkMessage(msg)) {
           continue;
         }
@@ -1257,20 +1330,24 @@ export class SessionRuntime {
           sawResult = true;
           writeLog('[claude-task]', 'sendInput COMPLETE');
           this.finishTurn();
-          this.closeQueryHandle('turn_complete');
-          if (this.config) {
-            this.startWarmup(this.activeConfigGeneration);
-          }
+          // Keep the persistent query open — closing it would kill subagents
+          // that outlive the parent turn. Cancel explicitly-foreground
+          // children instead; the next turn reuses this query.
+          this.emitSubagentEvents(this.subagents.cancelRunningForegroundTasks());
+          this.scheduleQueryIdleClose();
         } else if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
           sawResult = true;
           writeLog('[claude-task]', 'sendInput COMPLETE (compact)');
           this.turnIdleGuard?.resume();
           this.finishTurn();
-          this.closeQueryHandle('compact_complete');
-          if (this.config) {
-            this.startWarmup(this.activeConfigGeneration);
-          }
+          this.scheduleQueryIdleClose();
         }
+      }
+      if (this.queryHandle === queryHandle) {
+        // The SDK ended the query by itself (prompt stream drained or the
+        // transport closed). Drop the handle so the next sendInput opens a
+        // fresh query instead of pushing into a dead stream.
+        this.closeQueryHandle('query_ended');
       }
       if (DEBUG_MESSAGE_LOGS) {
         process.stderr.write(`[claude-debug] query iterator ended sessionId=${appSessionId || 'none'} msgCount=${msgCount} sawResult=${sawResult}\n`);
@@ -1284,7 +1361,6 @@ export class SessionRuntime {
         });
         process.stderr.write(`[sidecar] Vision payload unsupported; retrying text-only: ${String(err)}\n`);
         this.closeQueryHandle('vision_unsupported_retry');
-        this.queryHandle = null;
         await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload, false);
         return;
       }
@@ -1326,7 +1402,7 @@ export class SessionRuntime {
         this.finishTurn();
       }
       if (this.queryHandle === queryHandle && this.abortController?.signal.aborted) {
-        this.queryHandle = null;
+        this.closeQueryHandle('aborted_cleanup');
       }
     }
   }
@@ -1404,28 +1480,6 @@ export class SessionRuntime {
       emit(event);
     }
   }
-}
-
-function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSourceEvent | undefined {
-  if (event.type !== 'assistant') return undefined;
-  const message = event.message;
-  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
-  const content = (message as Record<string, unknown>).content;
-  if (!Array.isArray(content)) return undefined;
-  const stopReason = (message as Record<string, unknown>).stop_reason;
-  const providerMessageId = typeof event.uuid === 'string' && event.uuid.length > 0
-    ? event.uuid
-    : undefined;
-  const supersedesProviderMessageIds = Array.isArray(event.supersedes)
-    ? event.supersedes.filter((value): value is string => typeof value === 'string' && value.length > 0)
-    : undefined;
-  return {
-    kind: 'assistant_message',
-    content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
-    ...(typeof stopReason === 'string' || stopReason === null ? { stopReason } : {}),
-    ...(providerMessageId ? { providerMessageId } : {}),
-    ...(supersedesProviderMessageIds?.length ? { supersedesProviderMessageIds } : {}),
-  };
 }
 
 function getClaudePermissionKey(cwd: string, toolName: string, input: Record<string, unknown>): string {

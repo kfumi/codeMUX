@@ -173,6 +173,55 @@ export type CodeMuxTurnEvent =
 
 export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxPermissionModeChangedEvent | CodeMuxPermissionResolvedEvent | CodeMuxTurnEvent;
 
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'canceled';
+
+/**
+ * Descriptor update for a subagent track. These events are NOT members of the
+ * parent timeline: they are routed to the subagent tables / store instead.
+ * Omitted fields keep their previous value (sticky); explicit `null` clears.
+ */
+export type CodeMuxSubagentUpsertEvent = {
+  type: 'subagent_upsert';
+  session_id?: string;
+  subagent_id: string;
+  provider: string;
+  title?: string | null;
+  description?: string | null;
+  status?: SubagentStatus;
+  tool_call_id?: string | null;
+  subtitle?: string | null;
+  event_id: string;
+  timestamp: string;
+};
+
+/**
+ * One CodeMUX domain event placed on a subagent's own timeline. The inner
+ * event carries its own `event_id` and a `sequence` that is monotonic within
+ * that subagent timeline only (independent of the parent session sequence).
+ */
+export type CodeMuxSubagentTimelineEvent = {
+  type: 'subagent_timeline';
+  session_id?: string;
+  subagent_id: string;
+  event: CodeMuxRuntimeEvent;
+  event_id: string;
+  timestamp: string;
+};
+
+export type CodeMuxSubagentEvent = CodeMuxSubagentUpsertEvent | CodeMuxSubagentTimelineEvent;
+
+export function isCodeMuxSubagentUpsertEvent(value: unknown): value is CodeMuxSubagentUpsertEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'subagent_upsert';
+}
+
+export function isCodeMuxSubagentTimelineEvent(value: unknown): value is CodeMuxSubagentTimelineEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'subagent_timeline';
+}
+
+export function isCodeMuxSubagentEvent(value: unknown): value is CodeMuxSubagentEvent {
+  return isCodeMuxSubagentUpsertEvent(value) || isCodeMuxSubagentTimelineEvent(value);
+}
+
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,
   event: unknown,

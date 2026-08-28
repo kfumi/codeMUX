@@ -16,6 +16,7 @@ export type TurnSourceEvent =
   | { kind: 'content_finished'; index: number }
   | { kind: 'tool_started'; toolUseId: string; name: string; input: Record<string, unknown> }
   | { kind: 'tool_finished'; toolUseId: string; content: string; isError: boolean }
+  | { kind: 'user_message'; content: string | Array<Record<string, unknown>> }
   | { kind: 'error'; subtype: string; message: string };
 
 export type TurnUsage = {
@@ -117,6 +118,12 @@ export class TurnEventNormalizer {
       return [this.withSequence({
         type: 'tool_finished', session_id: this.sessionId, tool_use_id: source.toolUseId, content: source.content,
         is_error: source.isError, event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'user_message') {
+      return [this.withSequence({
+        type: 'user_message', session_id: this.sessionId, content: source.content,
+        event_id: this.eventIdFactory(), sequence: 0,
       })];
     }
     if (source.kind === 'error') {
