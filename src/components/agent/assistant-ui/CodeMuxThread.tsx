@@ -17,6 +17,7 @@ import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { useSubagentStore } from '@/stores/subagentStore';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -1268,15 +1269,18 @@ function AssistantLikeMessage({
                   );
 
                 case 'group-tool-call': {
-                  const toolNames = part.indices
+                  const toolCalls = part.indices
                     .map((idx) => message.content[idx])
-                    .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call')
-                    .map((c) => c.toolName);
+                    .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call');
+                  const toolNames = toolCalls.map((c) => c.toolName);
+                  const toolCallIds = toolCalls.map((c) => c.toolCallId).filter((id): id is string => typeof id === 'string');
                   return (
                     <CodeMuxToolGroup
+                      sessionId={sessionId}
                       startIndex={part.indices[0] ?? 0}
                       endIndex={part.indices[part.indices.length - 1] ?? 0}
                       toolNames={toolNames}
+                      toolCallIds={toolCallIds}
                     >
                       {children}
                     </CodeMuxToolGroup>
@@ -1393,14 +1397,18 @@ function CodeMuxReasoningGroup({
 
 function CodeMuxToolGroup({
   children,
+  sessionId,
   startIndex,
   endIndex,
   toolNames,
+  toolCallIds,
 }: {
   children?: ReactNode;
+  sessionId?: string;
   startIndex: number;
   endIndex: number;
   toolNames: string[];
+  toolCallIds: string[];
 }) {
   const isRunning = useAuiState((state) => {
     if (state.message.status?.type !== 'running') return false;
@@ -1409,13 +1417,22 @@ function CodeMuxToolGroup({
     }
     return false;
   });
+  // A subagent descriptor still running keeps its Agent/Task tool group in the
+  // running state even after the parent turn has finished.
+  const hasRunningSubagent = useSubagentStore((state) => {
+    if (!sessionId || toolCallIds.length === 0) return false;
+    const descriptors = state.sessions[sessionId]?.descriptors;
+    if (!descriptors) return false;
+    return toolCallIds.some((toolCallId) => descriptors[toolCallId]?.status === 'running');
+  });
 
   return (
     <ToolGroup
       startIndex={startIndex}
       endIndex={endIndex}
       toolNames={toolNames}
-      active={isRunning}
+      active={isRunning || hasRunningSubagent}
+      running={hasRunningSubagent}
     >
       {children}
     </ToolGroup>

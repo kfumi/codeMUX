@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
+import { useSubagentStore } from '../../../stores/subagentStore';
 import { getKnownSidecarErrorDisplay, getStreamStatusDisplay } from './CodeMuxMessageParts';
 import { CodeMuxDataMessagePart, CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
 
@@ -350,6 +351,56 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(contentBody?.className).not.toContain('overflow-y-auto');
     expect(contentBody?.className).not.toContain('max-h-40');
     expect(diffViewer?.className).toContain('overflow-auto');
+  });
+
+  it('子智能体卡片在描述符存在时显示运行状态徽标，点击打开预览面板', () => {
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: ['toolu_1'],
+          descriptors: {
+            toolu_1: {
+              subagentId: 'toolu_1',
+              provider: 'claude',
+              title: 'Explore',
+              description: '检查消息渲染',
+              status: 'running',
+              toolCallId: 'toolu_1',
+              subtitle: null,
+              updatedAt: 0,
+            },
+          },
+          events: { toolu_1: [] },
+          seenEventIds: {},
+        },
+      },
+    });
+
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Task"
+        toolCallId="toolu_1"
+        sessionId="session-1"
+        args={{ description: '检查消息渲染', prompt: '内部提示词' }}
+        result="Async agent launched successfully"
+      />,
+    );
+
+    // 描述符 running 时，即使 tool result 已返回，卡片状态也是运行中徽标。
+    const chip = container.querySelector('[data-slot="subagent-preview-chip"]');
+    expect(chip?.textContent).toContain('运行中');
+    expect(chip?.getAttribute('data-subagent-id')).toBe('toolu_1');
+
+    fireEvent.click(chip as HTMLElement);
+
+    const panel = useSidePanelStore.getState();
+    expect(panel.isOpen).toBe(true);
+    const tab = panel.tabs.find((entry) => entry.kind === 'subagent');
+    expect(tab).toMatchObject({
+      subagentId: 'toolu_1',
+      subagentSessionId: 'session-1',
+      subagentStatus: 'running',
+    });
   });
 });
 

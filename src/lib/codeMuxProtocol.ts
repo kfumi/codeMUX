@@ -181,6 +181,51 @@ export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
     && ['error', 'turn_finished'].includes((value as { type?: unknown }).type as string);
 }
 
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'canceled';
+
+export type CodeMuxSubagentUpsertEvent = {
+  type: 'subagent_upsert';
+  session_id?: string;
+  subagent_id: string;
+  provider: string;
+  title?: string | null;
+  description?: string | null;
+  status?: SubagentStatus;
+  tool_call_id?: string | null;
+  subtitle?: string | null;
+  event_id: string;
+  timestamp?: string;
+};
+
+export type CodeMuxSubagentTimelineEvent = {
+  type: 'subagent_timeline';
+  session_id?: string;
+  subagent_id: string;
+  event: Record<string, unknown>;
+  event_id: string;
+  timestamp?: string;
+};
+
+export function isCodeMuxSubagentUpsertEvent(value: unknown): value is CodeMuxSubagentUpsertEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'subagent_upsert'
+    && typeof (value as { subagent_id?: unknown }).subagent_id === 'string';
+}
+
+export function isCodeMuxSubagentTimelineEvent(value: unknown): value is CodeMuxSubagentTimelineEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'subagent_timeline'
+    && typeof (value as { subagent_id?: unknown }).subagent_id === 'string'
+    && Boolean((value as { event?: unknown }).event)
+    && typeof (value as { event?: unknown }).event === 'object';
+}
+
+export function isCodeMuxSubagentEvent(value: unknown): value is CodeMuxSubagentUpsertEvent | CodeMuxSubagentTimelineEvent {
+  return isCodeMuxSubagentUpsertEvent(value) || isCodeMuxSubagentTimelineEvent(value);
+}
+
 export function toLegacyStreamingMessage(event: CodeMuxStreamEvent): AgentMessage {
   const index = typeof event.index === 'number' ? event.index : 0;
   if (event.type === 'content_started') {

@@ -1,4 +1,4 @@
-import { ChevronRight, FileSearch, FileCode, FileText, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
+import { Bot, ChevronRight, FileSearch, FileCode, FileText, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
@@ -14,6 +14,7 @@ import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { FileEditorPanel } from './FileEditorPanel';
+import { SubagentPreviewPanel } from './SubagentPreviewPanel';
 
 interface SidePanelProps {
   projectPath?: string | null;
@@ -267,6 +268,12 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               />
             ) : activeTab.kind === 'file' ? (
               <FileEditorPanel key={activeTab.id} tab={activeTab} />
+            ) : activeTab.kind === 'subagent' ? (
+              <SubagentPreviewPanel
+                key={activeTab.id}
+                sessionId={activeTab.subagentSessionId ?? activeTab.subagentId ?? ''}
+                subagentId={activeTab.subagentId ?? ''}
+              />
             ) : null
           ) : (
             <SidePanelEmpty projectPath={projectPath} onOpenReview={openReview} onOpenTerminal={openTerminal} />
@@ -298,7 +305,9 @@ function TabButton({
       ? Terminal
       : tab.kind === 'diff'
         ? FileCode
-        : FileText;
+        : tab.kind === 'subagent'
+          ? Bot
+          : FileText;
 
   return (
     <ContextMenu>
@@ -318,6 +327,9 @@ function TabButton({
             <Icon className="h-3.5 w-3.5 shrink-0" />
           )}
           <span className="truncate">{tab.title}</span>
+          {tab.kind === 'subagent' && tab.subagentStatus && (
+            <SubagentStatusDot status={tab.subagentStatus} />
+          )}
           <span
             role="button"
             tabIndex={-1}
@@ -337,6 +349,21 @@ function TabButton({
         <ContextMenuItem onClick={onCloseAll}>关闭所有标签</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+function SubagentStatusDot({ status }: { status: NonNullable<SidePanelTab['subagentStatus']> }) {
+  return (
+    <span
+      aria-label={`子智能体状态: ${status}`}
+      className={cn(
+        'h-1.5 w-1.5 shrink-0 rounded-full',
+        status === 'running' && 'animate-pulse bg-success',
+        status === 'completed' && 'bg-primary',
+        status === 'failed' && 'bg-destructive',
+        status === 'canceled' && 'bg-muted-foreground/55',
+      )}
+    />
   );
 }
 

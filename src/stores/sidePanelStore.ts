@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { fileApi } from '../lib/tauri';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
-export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file';
+export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file' | 'subagent';
 
 export interface SidePanelTab {
   id: string;
@@ -22,6 +22,10 @@ export interface SidePanelTab {
   fileLoading?: boolean;
   fileError?: string;
   fileSaveState?: 'idle' | 'saving' | 'saved' | 'error';
+  /** kind: 'subagent' — which session owns the track and which subagent it shows. */
+  subagentId?: string;
+  subagentSessionId?: string;
+  subagentStatus?: 'running' | 'completed' | 'failed' | 'canceled';
 }
 
 interface SidePanelSnapshot {
@@ -47,6 +51,7 @@ interface SidePanelState {
   openTerminalTab: (projectPath: string) => void;
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
+  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']) => void;
   openFileTab: (projectPath: string | undefined, filePath: string) => Promise<void>;
   updateFileContent: (tabId: string, content: string) => void;
   saveFileTab: (tabId: string) => Promise<void>;
@@ -119,6 +124,17 @@ function createPlanTab(scopeId: string, planFilePath: string, planContent: strin
     title: getFileName(planFilePath) || '计划',
     planFilePath,
     planContent,
+  };
+}
+
+function createSubagentTab(scopeId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']): SidePanelTab {
+  return {
+    id: `${scopeId}:subagent:${subagentId}`,
+    kind: 'subagent',
+    title: title || '子智能体',
+    subagentId,
+    subagentSessionId: scopeId,
+    subagentStatus: status,
   };
 }
 
@@ -251,6 +267,42 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         : [...state.tabs, createDiffTab(state.activeScopeId, filePath, oldContent, newContent)],
       activeTabId: id,
     }));
+    recordNavigation(get());
+  },
+
+  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']) => {
+    const scopeId = sessionId || get().activeScopeId;
+    const id = `${scopeId}:subagent:${subagentId}`;
+    set((state) => {
+      if (state.activeScopeId !== scopeId) {
+        // Persist the current scope, then switch to the session scope so the
+        // tab lands next to that session's other panels.
+        const scopes = {
+          ...state.scopes,
+          [state.activeScopeId]: snapshotFromState(state),
+        };
+        const next = scopes[scopeId] ?? defaultSnapshot();
+        const tabs = next.tabs.some((tab) => tab.id === id)
+          ? next.tabs.map((tab) => (tab.id === id ? { ...tab, title, subagentStatus: status } : tab))
+          : [...next.tabs, createSubagentTab(scopeId, subagentId, title, status)];
+        return {
+          ...next,
+          tabs,
+          scopes,
+          activeScopeId: scopeId,
+          isOpen: true,
+          activeTabId: id,
+          isResizing: false,
+        };
+      }
+      return {
+        isOpen: true,
+        tabs: state.tabs.some((tab) => tab.id === id)
+          ? state.tabs.map((tab) => (tab.id === id ? { ...tab, title, subagentStatus: status } : tab))
+          : [...state.tabs, createSubagentTab(scopeId, subagentId, title, status)],
+        activeTabId: id,
+      };
+    });
     recordNavigation(get());
   },
 

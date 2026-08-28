@@ -27,6 +27,7 @@ import { useSessionStore } from './sessionStore';
 import { useProjectStore } from './projectStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
+import { useSubagentStore } from './subagentStore';
 import { countDiffLines } from '../lib/diffStats';
 import {
   isCodeMuxStreamEvent,
@@ -939,7 +940,7 @@ function simulateStreamingContent(
   entry.timer = window.setTimeout(tick, 30);
 }
 
-function parseAgentEvent(raw: string): AgentMessage {
+export function parseAgentEvent(raw: string): AgentMessage {
   try {
     const data = JSON.parse(raw);
 
@@ -1820,6 +1821,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const isActiveQuery = () => get().queryStartTime[sessionId] === queryStartedAt;
 
       const handleEvent = (raw: string) => {
+        // Subagent tracks are routed to their own store and never enter the
+        // parent timeline events.
+        if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
+          return;
+        }
         let event = parseAgentEvent(raw);
         const now = Date.now();
         const forceStoppedNow = get().forceStopped[sessionId] ?? false;
@@ -2747,6 +2753,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   clearEvents: (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
+    useSubagentStore.getState().clearSession(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
@@ -2864,6 +2871,18 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const pending = pendingSessionMessageLoads.get(sessionId);
     if (pending) {
       return pending;
+    }
+
+    // Hydrate the subagent tracks in parallel with the parent timeline.
+    if (typeof agentApi.loadSessionSubagents === 'function') {
+      void (async () => {
+        try {
+          const payload = await agentApi.loadSessionSubagents(sessionId);
+          useSubagentStore.getState().replaceSession(sessionId, payload);
+        } catch (error) {
+          logger.warn('Failed to load session subagents', { sessionId }, serializeError(error));
+        }
+      })();
     }
 
     const loadPromise = (async () => {

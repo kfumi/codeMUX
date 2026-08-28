@@ -76,12 +76,14 @@ function ToolGroupTrigger({
   count,
   toolNames,
   active = false,
+  running = false,
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   count: number;
   toolNames?: string[];
   active?: boolean;
+  running?: boolean;
 }) {
   const summary = useMemo(
     () => buildToolGroupSummary(toolNames, count),
@@ -118,14 +120,14 @@ function ToolGroupTrigger({
           'group-data-[variant=muted]/tool-group-root:grow',
         )}
       >
-        <ToolGroupTriggerLabel summary={summary} />
+        <ToolGroupTriggerLabel summary={summary} running={running} />
         {active && (
           <span
             aria-hidden
             data-slot="tool-group-trigger-shimmer"
             className="shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
           >
-            <ToolGroupTriggerLabel summary={summary} />
+            <ToolGroupTriggerLabel summary={summary} running={running} />
           </span>
         )}
       </span>
@@ -193,6 +195,7 @@ type ToolGroupProps = {
   endIndex: number;
   toolNames?: string[];
   active?: boolean;
+  running?: boolean;
 };
 
 type ToolGroupComponent = FC<PropsWithChildren<ToolGroupProps>> & {
@@ -207,6 +210,7 @@ const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
   endIndex,
   toolNames,
   active = false,
+  running = false,
 }) => {
   const toolCount = endIndex - startIndex + 1;
 
@@ -215,7 +219,7 @@ const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
       variant="ghost"
       data-active={active ? 'true' : 'false'}
     >
-      <ToolGroupTrigger count={toolCount} toolNames={toolNames} active={active} />
+      <ToolGroupTrigger count={toolCount} toolNames={toolNames} active={active} running={running} />
       <ToolGroupContent>{children}</ToolGroupContent>
     </ToolGroupRoot>
   );
@@ -227,10 +231,10 @@ ToolGroup.Root = ToolGroupRoot;
 ToolGroup.Trigger = ToolGroupTrigger;
 ToolGroup.Content = ToolGroupContent;
 
-function ToolGroupTriggerLabel({ summary }: { summary?: string }) {
+function ToolGroupTriggerLabel({ summary, running = false }: { summary?: string; running?: boolean }) {
   return (
     <span className="inline-flex items-baseline">
-      <span>已执行</span>
+      <span>{running ? '运行中' : '已执行'}</span>
       {summary ? (
         <>
           <span
@@ -265,9 +269,10 @@ export function buildToolGroupSummary(toolNames?: string[], count = toolNames?.l
   return parts.join('、');
 }
 
-export function buildToolGroupLabel(toolNames?: string[], count = toolNames?.length ?? 0): string {
+export function buildToolGroupLabel(toolNames?: string[], count = toolNames?.length ?? 0, running = false): string {
   const summary = buildToolGroupSummary(toolNames, count);
-  return summary ? `已执行·${summary}` : '已执行';
+  const verb = running ? '运行中' : '已执行';
+  return summary ? `${verb}·${summary}` : verb;
 }
 
 export { ToolGroup, ToolGroupRoot, ToolGroupTrigger, ToolGroupContent, toolGroupVariants };

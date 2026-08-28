@@ -15,11 +15,12 @@ import {
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
-import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { AlertTriangle, Bot, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
+import { useSubagentStore } from '../../../stores/subagentStore';
 import { cn } from '../../../lib/utils';
 import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
@@ -229,8 +230,21 @@ export function CodeMuxToolCallMessagePart({
   status,
 }: CodeMuxToolCallPartProps) {
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
+  const subagentDescriptor = useSubagentStore((state) => (
+    sessionId && toolCallId ? state.sessions[sessionId]?.descriptors[toolCallId] : undefined
+  ));
+  const openSubagentPanel = useSubagentStore((state) => state.openInSidePanel);
   const headerSummary = getToolHeaderSummary(toolName, args);
-  const resolvedStatus = resolveToolStatus(status, result, isError);
+  // For Agent/Task tools the descriptor owns the card state: the async launch
+  // tool result only means the child was declared, not that it finished.
+  const subagentStatus = subagentDescriptor?.status;
+  const resolvedStatus: ToolCallMessagePartStatus | undefined = subagentStatus === 'running'
+    ? { type: 'running' }
+    : subagentStatus === 'failed'
+      ? { type: 'incomplete', reason: 'error' }
+      : subagentStatus === 'canceled'
+        ? { type: 'incomplete', reason: 'cancelled' }
+        : resolveToolStatus(status, result, isError);
   const askQuestions = getAskUserQuestions(toolName, args);
   if (askQuestions && sessionId && toolCallId) {
     const resultContent = typeof result === 'string' ? result : result == null ? undefined : stringifyResult(result);
@@ -278,6 +292,14 @@ export function CodeMuxToolCallMessagePart({
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
       <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
+        {isSubAgentTool(toolName) && subagentDescriptor && sessionId && toolCallId ? (
+          <SubagentPreviewChip
+            sessionId={sessionId}
+            subagentId={subagentDescriptor.subagentId}
+            status={subagentDescriptor.status}
+            onOpen={() => openSubagentPanel(sessionId, subagentDescriptor.subagentId)}
+          />
+        ) : null}
         {exitPlanModePlanFilePath ? (
           <TooltipHint content={exitPlanModePlanFilePath}>
             <span
@@ -995,4 +1017,58 @@ function getNumericField(record: Record<string, unknown>, keys: string[]): numbe
   }
 
   return undefined;
+}
+
+const SUBAGENT_STATUS_LABEL: Record<string, string> = {
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  canceled: '已取消',
+};
+
+function SubagentPreviewChip({
+  sessionId,
+  subagentId,
+  status,
+  onOpen,
+}: {
+  sessionId: string;
+  subagentId: string;
+  status: string;
+  onOpen: () => void;
+}) {
+  const open = () => {
+    onOpen();
+  };
+  return (
+    <TooltipHint content="在右侧面板查看子智能体">
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label={`查看子智能体 ${SUBAGENT_STATUS_LABEL[status] ?? status}`}
+        data-slot="subagent-preview-chip"
+        data-session-id={sessionId}
+        data-subagent-id={subagentId}
+        className={cn(
+          'ml-2 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-border/45 bg-[hsl(var(--surface-3))]/30 px-1.5 py-0.5 align-middle text-ui-caption font-normal text-muted-foreground/78 transition-colors hover:border-primary/30 hover:text-primary',
+        )}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          open();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          open();
+        }}
+      >
+        <Bot className={cn('h-3 w-3 shrink-0', status === 'running' && 'animate-pulse')} />
+        <span>{SUBAGENT_STATUS_LABEL[status] ?? status}</span>
+      </span>
+    </TooltipHint>
+  );
 }

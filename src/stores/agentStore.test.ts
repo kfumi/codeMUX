@@ -52,6 +52,7 @@ vi.mock('../lib/tauri', () => ({
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
     loadSessionEvents: loadSessionEventsMock,
+    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
     resyncSessionFromNative: resyncSessionFromNativeMock,
     loadLatestTokenUsage: loadLatestTokenUsageMock,
     rewindSession: rewindSessionMock,

@@ -412,6 +412,11 @@ export const agentApi = {
     invokeLogged('load_opencode_session_events', { appSessionId }),
   loadSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_session_events', { appSessionId }),
+  /** Load subagent descriptors + per-subagent timelines for a session. */
+  loadSessionSubagents: (
+    appSessionId: string,
+  ): Promise<{ subagents: Array<Record<string, unknown>>; timelines: Record<string, Array<Record<string, unknown>>> }> =>
+    invokeLogged('load_session_subagents', { appSessionId }),
   /** Replace the cached timeline with the latest CLI provider history file. */
   resyncSessionFromNative: (appSessionId: string): Promise<{ eventCount: number }> =>
     invokeLogged('resync_session_from_native', { appSessionId }),
