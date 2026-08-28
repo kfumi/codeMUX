@@ -8,13 +8,14 @@ use crate::config::types::AgentKind;
 
 use super::schedule::compute_next_run_at;
 use super::types::{
-    RunDelivery, ScheduledTask, ScheduledTaskUpsert, ScheduleKind, SkipReason, TaskRun,
+    RunDelivery, ScheduleKind, ScheduledTask, ScheduledTaskUpsert, SkipReason, TaskRun,
     TaskRunStatus,
 };
 
 const TASK_SELECT: &str = "id, title, instruction, project_id, agent_kind, provider_id, model, reasoning_effort, permission_config, plan_mode, schedule_kind, schedule_time, weekly_weekday, monthly_day, timezone, delivery, enabled, last_run_at, next_run_at, created_at, updated_at, weekly_weekdays";
 
-const RUN_SELECT: &str = "id, task_id, session_id, scheduled_for, started_at, finished_at, status, skip_reason, error";
+const RUN_SELECT: &str =
+    "id, task_id, session_id, scheduled_for, started_at, finished_at, status, skip_reason, error";
 
 fn encode_weekly_weekdays(value: &Option<Vec<i32>>) -> Option<String> {
     value.as_ref().and_then(|days| {
@@ -32,13 +33,13 @@ fn decode_weekly_weekdays(raw: Option<String>) -> Option<Vec<i32>> {
 }
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
-    let schedule_kind = ScheduleKind::from_str(row.get::<_, String>(10)?.as_str())
-        .unwrap_or(ScheduleKind::Daily);
+    let schedule_kind =
+        ScheduleKind::from_str(row.get::<_, String>(10)?.as_str()).unwrap_or(ScheduleKind::Daily);
     let delivery = match row.get::<_, String>(15)?.as_str() {
         "new_session" => RunDelivery::NewSession,
         _ => RunDelivery::NewSession,
     };
-  Ok(ScheduledTask {
+    Ok(ScheduledTask {
         id: row.get(0)?,
         title: row.get(1)?,
         instruction: row.get(2)?,
@@ -116,7 +117,9 @@ pub fn list_tasks(conn: &Connection) -> Result<Vec<ScheduledTask>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_SELECT} FROM scheduled_tasks ORDER BY created_at DESC"
     ))?;
-    let mut tasks = stmt.query_map([], row_to_task)?.collect::<Result<Vec<_>>>()?;
+    let mut tasks = stmt
+        .query_map([], row_to_task)?
+        .collect::<Result<Vec<_>>>()?;
     enrich_tasks_run_counts(conn, &mut tasks)?;
     Ok(tasks)
 }
@@ -131,7 +134,7 @@ pub fn get_task(conn: &Connection, task_id: &str) -> Result<Option<ScheduledTask
             let mut task = row?;
             enrich_task_run_count(conn, &mut task)?;
             Ok(Some(task))
-        },
+        }
         None => Ok(None),
     }
 }
@@ -239,7 +242,10 @@ pub fn update_task(
 }
 
 pub fn delete_task(conn: &Connection, task_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM scheduled_tasks WHERE id = ?1", params![task_id])?;
+    conn.execute(
+        "DELETE FROM scheduled_tasks WHERE id = ?1",
+        params![task_id],
+    )?;
     Ok(())
 }
 
@@ -399,11 +405,16 @@ pub fn list_running_runs(conn: &Connection) -> Result<Vec<TaskRun>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {RUN_SELECT} FROM scheduled_task_runs WHERE status = 'running' ORDER BY started_at ASC"
     ))?;
-    let runs = stmt.query_map([], row_to_run)?.collect::<Result<Vec<_>>>()?;
+    let runs = stmt
+        .query_map([], row_to_run)?
+        .collect::<Result<Vec<_>>>()?;
     Ok(runs)
 }
 
 pub fn delete_run(conn: &Connection, run_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM scheduled_task_runs WHERE id = ?1", params![run_id])?;
+    conn.execute(
+        "DELETE FROM scheduled_task_runs WHERE id = ?1",
+        params![run_id],
+    )?;
     Ok(())
 }

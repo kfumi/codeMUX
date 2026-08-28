@@ -106,7 +106,10 @@ pub fn compute_next_run_at(
             }
             candidate.with_timezone(&Utc)
         }
-        ScheduleKind::Daily | ScheduleKind::Weekdays | ScheduleKind::Weekly | ScheduleKind::Monthly => {
+        ScheduleKind::Daily
+        | ScheduleKind::Weekdays
+        | ScheduleKind::Weekly
+        | ScheduleKind::Monthly => {
             let time = parse_schedule_time(schedule_time)
                 .unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).unwrap());
             let weekly_targets = resolve_weekly_weekdays(weekly_weekdays, weekly_weekday);

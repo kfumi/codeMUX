@@ -460,11 +460,15 @@ async fn session_events(
     authorize(&ctx, &headers)?;
     let after = query.after.unwrap_or(-1);
     if after < 0 {
-        let page = read_session_timeline_page(&ctx, &session_id, SessionTimelineQuery {
-            direction: Some("tail".to_string()),
-            cursor: None,
-            limit: None,
-        })?;
+        let page = read_session_timeline_page(
+            &ctx,
+            &session_id,
+            SessionTimelineQuery {
+                direction: Some("tail".to_string()),
+                cursor: None,
+                limit: None,
+            },
+        )?;
         return Ok(Json(page.events));
     }
     let app_state = ctx.app.state::<AppState>();

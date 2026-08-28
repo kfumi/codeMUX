@@ -469,6 +469,10 @@ async fn ensure_sidecar_for_session(
                         app_state.inner(),
                         &event,
                     );
+                    crate::agent::subagent_persist::handle_sidecar_subagent_event(
+                        app_state.inner(),
+                        &event,
+                    );
                     let app_for_companion = app_handle.clone();
                     let event_for_companion = event.clone();
                     crate::companion::handle_sidecar_event_for_companion(

@@ -5,12 +5,11 @@ mod service;
 mod types;
 
 pub use db::{
-    create_task, delete_task, delete_run, get_task, list_runs, list_tasks, set_task_enabled, update_task,
+    create_task, delete_run, delete_task, get_task, list_runs, list_tasks, set_task_enabled,
+    update_task,
 };
 pub use schedule::local_timezone_label;
-pub use types::{
-    ScheduledTask, ScheduledTaskUpsert, ScheduleKind, TaskRun,
-};
+pub use types::{ScheduleKind, ScheduledTask, ScheduledTaskUpsert, TaskRun};
 
 pub fn reconcile_runs_for_session(conn: &rusqlite::Connection, session_id: &str) -> Vec<String> {
     service::reconcile_runs_for_session(conn, session_id)
@@ -213,7 +212,7 @@ pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskR
     use crate::AppState;
 
     use types::{
-        MAX_CONCURRENT_SCHEDULED_RUNS, SkipReason, TaskRunPayload, TaskRunnerResult, TaskRunStatus,
+        SkipReason, TaskRunPayload, TaskRunStatus, TaskRunnerResult, MAX_CONCURRENT_SCHEDULED_RUNS,
     };
 
     let app_state = app.state::<AppState>();
@@ -243,7 +242,9 @@ pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskR
             return Err("该任务正在运行中".to_string());
         }
 
-        if db::count_active_runs(&conn).map_err(|error| error.to_string())? >= MAX_CONCURRENT_SCHEDULED_RUNS {
+        if db::count_active_runs(&conn).map_err(|error| error.to_string())?
+            >= MAX_CONCURRENT_SCHEDULED_RUNS
+        {
             return Err("已达定时任务并发上限".to_string());
         }
 
@@ -289,14 +290,8 @@ pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskR
             .map_err(|error| error.to_string())?;
         }
         TaskRunnerResult::Failed { error } => {
-            db::update_run_status(
-                &conn,
-                &run_id,
-                TaskRunStatus::Failed,
-                None,
-                Some(&error),
-            )
-            .map_err(|error| error.to_string())?;
+            db::update_run_status(&conn, &run_id, TaskRunStatus::Failed, None, Some(&error))
+                .map_err(|error| error.to_string())?;
         }
     }
 

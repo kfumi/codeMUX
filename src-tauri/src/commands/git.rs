@@ -703,12 +703,7 @@ pub fn list_git_worktrees_in_project(project_path: &Path) -> Result<Vec<GitWorkt
             current_path = Some(path.to_string());
             current_branch = None;
         } else if let Some(branch) = line.strip_prefix("branch ") {
-            current_branch = Some(
-                branch
-                    .trim()
-                    .trim_start_matches("refs/heads/")
-                    .to_string(),
-            );
+            current_branch = Some(branch.trim().trim_start_matches("refs/heads/").to_string());
         }
     }
 
@@ -780,22 +775,12 @@ pub fn create_git_worktree_in_project(
 
     let worktree_arg = path_to_display_string(&worktree_path);
     if branch_exists(&root, &branch_name) {
-        run_git(
-            &root,
-            &["worktree", "add", &worktree_arg, &branch_name],
-        )?;
+        run_git(&root, &["worktree", "add", &worktree_arg, &branch_name])?;
     } else {
         let base = resolve_worktree_base_ref(&root, base_branch)?;
         run_git(
             &root,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                &branch_name,
-                &worktree_arg,
-                &base,
-            ],
+            &["worktree", "add", "-b", &branch_name, &worktree_arg, &base],
         )?;
     }
 
@@ -1892,8 +1877,8 @@ mod tests {
         build_pull_request_prompt, checkout_git_branch_in_project, clean_commit_message,
         collect_pr_context, commit_git_changes_in_project, create_git_branch_in_project,
         create_git_worktree_in_project, decode_text_bytes, detect_pr_base_branch,
-        generate_pull_request_description_in_project,
-        list_git_worktrees_in_project, parse_anthropic_commit_message_response, parse_openai_commit_message_response,
+        generate_pull_request_description_in_project, list_git_worktrees_in_project,
+        parse_anthropic_commit_message_response, parse_openai_commit_message_response,
         parse_pull_request_suggestion, push_git_branch_in_project, read_git_changed_files_for_tree,
         read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
         revert_git_status_changes_in_project, select_commit_message_provider,
@@ -2086,13 +2071,9 @@ mod tests {
         let project = temp_project();
         init_project_with_commit(&project);
 
-        let created = create_git_worktree_in_project(
-            &project,
-            "feature/worktree-test",
-            Some("HEAD"),
-            None,
-        )
-        .unwrap();
+        let created =
+            create_git_worktree_in_project(&project, "feature/worktree-test", Some("HEAD"), None)
+                .unwrap();
 
         assert!(!created.is_main);
         assert_eq!(created.branch.as_deref(), Some("feature/worktree-test"));
@@ -2114,10 +2095,8 @@ mod tests {
 
         let project = temp_project();
         init_project_with_commit(&project);
-        let codemux_home = std::env::temp_dir().join(format!(
-            "codemux-home-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let codemux_home =
+            std::env::temp_dir().join(format!("codemux-home-test-{}", uuid::Uuid::new_v4()));
 
         let created = create_git_worktree_in_project(
             &project,

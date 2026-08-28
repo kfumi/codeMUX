@@ -236,9 +236,7 @@ pub async fn resync_session_from_native(
     };
 
     if !can_resync_session_from_native(&session, has_mapping) {
-        return Err(
-            "此会话无法从 CLI 同步历史：需要已关联的原生会话且不能为只读".to_string(),
-        );
+        return Err("此会话无法从 CLI 同步历史：需要已关联的原生会话且不能为只读".to_string());
     }
 
     let native_events =
@@ -268,9 +266,7 @@ pub(crate) fn can_resync_session_from_native(
     session: &operations::Session,
     has_mapping: bool,
 ) -> bool {
-    !session.is_read_only
-        && has_mapping
-        && !matches!(session.agent_kind, AgentKind::GeminiCli)
+    !session.is_read_only && has_mapping && !matches!(session.agent_kind, AgentKind::GeminiCli)
 }
 
 fn has_native_mapping(
@@ -288,9 +284,7 @@ pub(crate) fn should_hydrate_timeline_from_native(
     timeline: &Option<Vec<Value>>,
     has_mapping: bool,
 ) -> bool {
-    timeline.as_ref().is_none_or(Vec::is_empty)
-        && session.origin == "native"
-        && has_mapping
+    timeline.as_ref().is_none_or(Vec::is_empty) && session.origin == "native" && has_mapping
 }
 
 async fn load_native_session_events(
@@ -300,22 +294,16 @@ async fn load_native_session_events(
 ) -> Result<Vec<Value>, String> {
     match agent_kind {
         AgentKind::ClaudeCode => {
-            crate::agent::commands::load_claude_session_events(
-                state,
-                app_session_id.to_string(),
-            )
-            .await
+            crate::agent::commands::load_claude_session_events(state, app_session_id.to_string())
+                .await
         }
         AgentKind::Codex => {
             crate::agent::commands::load_codex_session_events(state, app_session_id.to_string())
                 .await
         }
         AgentKind::Opencode => {
-            crate::agent::commands::load_opencode_session_events(
-                state,
-                app_session_id.to_string(),
-            )
-            .await
+            crate::agent::commands::load_opencode_session_events(state, app_session_id.to_string())
+                .await
         }
         AgentKind::GeminiCli => Ok(Vec::new()),
     }
@@ -765,14 +753,20 @@ mod tests {
         let session = test_session("native");
         let timeline = Some(vec![serde_json::json!({"type": "user_message"})]);
 
-        assert!(!super::should_hydrate_timeline_from_native(&session, &timeline, true));
-        assert!(!super::should_hydrate_timeline_from_native(&session, &None, false));
+        assert!(!super::should_hydrate_timeline_from_native(
+            &session, &timeline, true
+        ));
+        assert!(!super::should_hydrate_timeline_from_native(
+            &session, &None, false
+        ));
         assert!(!super::should_hydrate_timeline_from_native(
             &test_session("imported"),
             &None,
             true,
         ));
-        assert!(super::should_hydrate_timeline_from_native(&session, &None, true));
+        assert!(super::should_hydrate_timeline_from_native(
+            &session, &None, true
+        ));
     }
 
     #[test]
@@ -809,9 +803,7 @@ mod tests {
         let timeline = operations::get_session_timeline(&conn, "session-1").unwrap();
         let session = test_session("native");
         assert!(!super::should_hydrate_timeline_from_native(
-            &session,
-            &timeline,
-            true
+            &session, &timeline, true
         ));
         assert_eq!(timeline.as_ref().map(|events| events.len()), Some(1));
     }

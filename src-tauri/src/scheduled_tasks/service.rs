@@ -10,7 +10,10 @@ pub fn session_turn_has_finished(conn: &Connection, session_id: &str) -> bool {
         return false;
     };
     for event in events.iter().rev() {
-        let event_type = event.get("type").and_then(|value| value.as_str()).unwrap_or("");
+        let event_type = event
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         if event_type == "turn_finished" || event_type == "error" {
             return true;
         }
@@ -34,9 +37,7 @@ pub fn reconcile_running_runs(
             if still_active {
                 continue;
             }
-            if db::update_run_status(conn, &run.id, TaskRunStatus::Completed, None, None)
-                .is_ok()
-            {
+            if db::update_run_status(conn, &run.id, TaskRunStatus::Completed, None, None).is_ok() {
                 updated_task_ids.push(run.task_id);
             }
         }
@@ -65,12 +66,12 @@ mod tests {
     use chrono::{DateTime, Utc};
     use rusqlite::Connection;
 
-    use super::db;
     use super::super::schedule::{compute_next_run_at, local_timezone_label};
     use super::super::types::{
-        MAX_CONCURRENT_SCHEDULED_RUNS, ScheduledTaskUpsert, ScheduleKind, SkipReason,
-        TaskRunPayload, TaskRunner, TaskRunnerResult, TaskRunStatus,
+        ScheduleKind, ScheduledTaskUpsert, SkipReason, TaskRunPayload, TaskRunStatus, TaskRunner,
+        TaskRunnerResult, MAX_CONCURRENT_SCHEDULED_RUNS,
     };
+    use super::db;
     use crate::config::types::AgentKind;
     use crate::db::operations;
     use crate::db::schema;
@@ -176,14 +177,8 @@ mod tests {
                     .unwrap_or_default();
                 }
                 TaskRunnerResult::Failed { error } => {
-                    db::update_run_status(
-                        conn,
-                        &run.id,
-                        TaskRunStatus::Failed,
-                        None,
-                        Some(&error),
-                    )
-                    .unwrap_or_default();
+                    db::update_run_status(conn, &run.id, TaskRunStatus::Failed, None, Some(&error))
+                        .unwrap_or_default();
                 }
             }
         }
@@ -208,9 +203,11 @@ mod tests {
     impl TaskRunner for MockRunner {
         fn run(&mut self, payload: TaskRunPayload) -> TaskRunnerResult {
             self.calls.push(payload);
-            self.results.pop_front().unwrap_or(TaskRunnerResult::Failed {
-                error: "no result".to_string(),
-            })
+            self.results
+                .pop_front()
+                .unwrap_or(TaskRunnerResult::Failed {
+                    error: "no result".to_string(),
+                })
         }
     }
 
@@ -297,7 +294,9 @@ mod tests {
         tick(&conn, now, &mut runner);
         assert_eq!(runner.calls.len(), 1);
         let runs = db::list_runs(&conn, &task.id).unwrap();
-        assert!(runs.iter().any(|run| run.skip_reason == Some(SkipReason::Overlap)));
+        assert!(runs
+            .iter()
+            .any(|run| run.skip_reason == Some(SkipReason::Overlap)));
     }
 
     #[test]
@@ -350,13 +349,16 @@ mod tests {
         operations::append_timeline_events(
             &mut conn,
             &session.id,
-            &[serde_json::json!({
-                "type": "user_message",
-                "session_id": session.id,
-            }), serde_json::json!({
-                "type": "turn_finished",
-                "session_id": session.id,
-            })],
+            &[
+                serde_json::json!({
+                    "type": "user_message",
+                    "session_id": session.id,
+                }),
+                serde_json::json!({
+                    "type": "turn_finished",
+                    "session_id": session.id,
+                }),
+            ],
         )
         .unwrap();
 

@@ -110,10 +110,7 @@ pub async fn send_companion_message(
     result
 }
 
-fn validate_companion_agent_kind(
-    current: AgentKind,
-    requested: AgentKind,
-) -> Result<(), String> {
+fn validate_companion_agent_kind(current: AgentKind, requested: AgentKind) -> Result<(), String> {
     if current != requested {
         return Err("会话创建后不能更换智能体种类".to_string());
     }

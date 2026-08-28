@@ -1424,10 +1424,7 @@ pub fn append_timeline_events(
     tx.commit()
 }
 
-pub fn resolve_app_session_id_for_timeline(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<String> {
+pub fn resolve_app_session_id_for_timeline(conn: &Connection, session_id: &str) -> Result<String> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
         [session_id],
@@ -1447,20 +1444,270 @@ pub fn resolve_app_session_id_for_timeline(
     Ok(mapped.unwrap_or_else(|| session_id.to_string()))
 }
 
+// --- Subagent timeline (session_subagents / session_subagent_events) ---------
+//
+// These rows are a bypass store next to the parent timeline: they never appear
+// in session_event_snapshots and are only read via load_session_subagents.
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSubagent {
+    pub session_id: String,
+    pub subagent_id: String,
+    pub provider: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: String,
+    pub tool_call_id: Option<String>,
+    pub subtitle: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSubagentsPayload {
+    pub subagents: Vec<SessionSubagent>,
+    pub timelines: std::collections::HashMap<String, Vec<Value>>,
+}
+
+pub(crate) fn is_terminal_subagent_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "canceled")
+}
+
+/// Sticky upsert of a `subagent_upsert` descriptor event: omitted fields keep
+/// their stored value, explicit `null` clears, and a terminal descriptor is
+/// never moved back to `running`.
+pub fn upsert_session_subagent(conn: &mut Connection, event: &Value) -> Result<()> {
+    let session_id = event
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let subagent_id = event
+        .get("subagent_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if session_id.is_empty() || subagent_id.is_empty() {
+        return Ok(());
+    }
+    let resolved_session_id = resolve_app_session_id_for_timeline(conn, session_id)?;
+    let now = Utc::now().to_rfc3339();
+    let provider = event
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("claude");
+
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT OR IGNORE INTO session_subagents (session_id, subagent_id, provider, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
+        params![resolved_session_id, subagent_id, provider, now],
+    )?;
+    let existing: (
+        Option<String>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = tx.query_row(
+        "SELECT title, description, status, tool_call_id, subtitle
+         FROM session_subagents WHERE session_id = ?1 AND subagent_id = ?2",
+        params![resolved_session_id, subagent_id],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        },
+    )?;
+
+    let merge = |field: &str, current: Option<String>| -> Option<String> {
+        match event.get(field) {
+            Some(Value::String(text)) => Some(text.clone()),
+            // Explicit null clears; a missing key keeps the stored value.
+            Some(Value::Null) => None,
+            None => current,
+            Some(other) => Some(other.to_string()),
+        }
+    };
+    let title = merge("title", existing.0);
+    let description = merge("description", existing.1);
+    let tool_call_id = merge("tool_call_id", existing.3);
+    let subtitle = merge("subtitle", existing.4);
+    let status = match event.get("status").and_then(Value::as_str) {
+        Some(next_status)
+            if next_status == "running" && is_terminal_subagent_status(&existing.2) =>
+        {
+            existing.2.clone()
+        }
+        Some(next_status) => next_status.to_string(),
+        None => existing.2,
+    };
+
+    tx.execute(
+        "UPDATE session_subagents
+         SET provider = ?3, title = ?4, description = ?5, status = ?6, tool_call_id = ?7, subtitle = ?8, updated_at = ?9
+         WHERE session_id = ?1 AND subagent_id = ?2",
+        params![
+            resolved_session_id,
+            subagent_id,
+            provider,
+            title,
+            description,
+            status,
+            tool_call_id,
+            subtitle,
+            now
+        ],
+    )?;
+    tx.commit()
+}
+
+/// Append the inner CodeMUX event of a `subagent_timeline` envelope. Idempotent
+/// on `event_id`; sequence falls back to per-subagent monotonic allocation.
+pub fn append_session_subagent_event(conn: &mut Connection, event: &Value) -> Result<()> {
+    let session_id = event
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let subagent_id = event
+        .get("subagent_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if session_id.is_empty() || subagent_id.is_empty() {
+        return Ok(());
+    }
+    let resolved_session_id = resolve_app_session_id_for_timeline(conn, session_id)?;
+    let inner = event.get("event").cloned().unwrap_or(Value::Null);
+    let now = Utc::now().to_rfc3339();
+
+    let event_id = inner
+        .get("event_id")
+        .and_then(Value::as_str)
+        .or_else(|| event.get("event_id").and_then(Value::as_str))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let timestamp = inner
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .or_else(|| event.get("timestamp").and_then(Value::as_str));
+    let sequence = inner
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .or_else(|| event.get("sequence").and_then(Value::as_i64));
+
+    let tx = conn.transaction()?;
+    // The descriptor is declared before its timeline in practice; stub it in
+    // defensively so the FK never blocks a live timeline event.
+    tx.execute(
+        "INSERT OR IGNORE INTO session_subagents (session_id, subagent_id, provider, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
+        params![
+            resolved_session_id,
+            subagent_id,
+            event.get("provider").and_then(Value::as_str).unwrap_or("claude"),
+            now
+        ],
+    )?;
+
+    // Idempotency on event_id: a repeated delivery must not create a second
+    // row even when it carries a fresh sequence.
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_subagent_events
+         WHERE session_id = ?1 AND subagent_id = ?2 AND event_id = ?3)",
+        params![resolved_session_id, subagent_id, event_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        let sequence = sequence.unwrap_or_else(|| {
+            tx.query_row(
+                "SELECT COALESCE(MAX(sequence), -1) + 1 FROM session_subagent_events
+                 WHERE session_id = ?1 AND subagent_id = ?2",
+                params![resolved_session_id, subagent_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+        });
+        tx.execute(
+            "INSERT OR IGNORE INTO session_subagent_events (session_id, subagent_id, sequence, event_id, event_timestamp, event_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                resolved_session_id,
+                subagent_id,
+                sequence,
+                event_id,
+                timestamp,
+                serde_json::to_string(&inner).unwrap_or_else(|_| "{}".to_string())
+            ],
+        )?;
+    }
+    tx.commit()
+}
+
+pub fn list_session_subagents(conn: &Connection, session_id: &str) -> Result<Vec<SessionSubagent>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, subagent_id, provider, title, description, status, tool_call_id, subtitle, created_at, updated_at
+         FROM session_subagents WHERE session_id = ?1 ORDER BY created_at, subagent_id",
+    )?;
+    let rows = stmt.query_map([session_id], |row| {
+        Ok(SessionSubagent {
+            session_id: row.get(0)?,
+            subagent_id: row.get(1)?,
+            provider: row.get(2)?,
+            title: row.get(3)?,
+            description: row.get(4)?,
+            status: row.get(5)?,
+            tool_call_id: row.get(6)?,
+            subtitle: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn load_session_subagent_events(
+    conn: &Connection,
+    session_id: &str,
+    subagent_id: &str,
+) -> Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT event_json FROM session_subagent_events
+         WHERE session_id = ?1 AND subagent_id = ?2 ORDER BY sequence",
+    )?;
+    let rows = stmt.query_map(params![session_id, subagent_id], |row| {
+        let json: String = row.get(0)?;
+        Ok(serde_json::from_str::<Value>(&json).unwrap_or(Value::Null))
+    })?;
+    rows.collect()
+}
+
+/// Session open reconcile: descriptors still `running` from a previous process
+/// are marked `failed` (the sidecar that owned them is gone).
+pub fn reconcile_running_session_subagents(conn: &Connection, session_id: &str) -> Result<usize> {
+    conn.execute(
+        "UPDATE session_subagents SET status = 'failed', updated_at = ?2
+         WHERE session_id = ?1 AND status = 'running'",
+        params![session_id, Utc::now().to_rfc3339()],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         append_timeline_events, archive_session, clear_session_timeline, create_forked_session,
-        delete_agent_session_mapping,
-        delete_session_message_attachments_from_index, fetch_session_timeline, get_agent_distribution,
-        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        get_model_distribution, get_session, get_session_events_after,
-        get_session_timeline, get_usage_heatmap,
-        get_usage_overview, import_session_snapshot,
-        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline, set_session_pinned,
-        set_session_read_only, unarchive_session,
-        update_session_provider, update_session_reasoning_effort, update_session_settings,
-        upsert_agent_session_mapping, ImportedSessionSnapshot,
+        delete_agent_session_mapping, delete_session_message_attachments_from_index,
+        fetch_session_timeline, get_agent_distribution, get_agent_session_mapping,
+        get_all_archived_sessions, get_all_sessions, get_model_distribution, get_session,
+        get_session_events_after, get_session_timeline, get_usage_heatmap, get_usage_overview,
+        import_session_snapshot, list_native_sessions_for_cleanup,
+        resolve_app_session_id_for_timeline, set_session_pinned, set_session_read_only,
+        unarchive_session, update_session_provider, update_session_reasoning_effort,
+        update_session_settings, upsert_agent_session_mapping, ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -2255,8 +2502,13 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();
         insert_test_session(&conn, "app-session-1", "claude_code");
-        upsert_agent_session_mapping(&conn, "app-session-1", AgentKind::ClaudeCode, "claude-session-1")
-            .unwrap();
+        upsert_agent_session_mapping(
+            &conn,
+            "app-session-1",
+            AgentKind::ClaudeCode,
+            "claude-session-1",
+        )
+        .unwrap();
 
         let event = serde_json::json!({
             "type": "text_delta",
@@ -2305,14 +2557,9 @@ mod tests {
             .collect();
         append_timeline_events(&mut conn, "session-1", &events).unwrap();
 
-        let tail = fetch_session_timeline(
-            &conn,
-            "session-1",
-            super::TimelineDirection::Tail,
-            None,
-            2,
-        )
-        .unwrap();
+        let tail =
+            fetch_session_timeline(&conn, "session-1", super::TimelineDirection::Tail, None, 2)
+                .unwrap();
         assert_eq!(tail.events.len(), 2);
         assert_eq!(tail.seq_start, 3);
         assert_eq!(tail.seq_end, 4);
@@ -2343,5 +2590,242 @@ mod tests {
         assert_eq!(before.seq_end, 2);
         assert!(before.has_older);
         assert!(before.has_newer);
+    }
+
+    #[test]
+    fn subagent_sticky_upsert_preserves_omitted_fields_and_blocks_resurrection() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "provider": "claude",
+                "title": "Explore",
+                "description": "find entry points",
+                "status": "running",
+                "tool_call_id": "toolu_1"
+            }),
+        )
+        .unwrap();
+
+        // Omitted fields keep their value; subtitle arrives later.
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "subtitle": "tokens up 3.2k"
+            }),
+        )
+        .unwrap();
+
+        // Terminal status, then a stale running patch must not resurrect.
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "status": "completed"
+            }),
+        )
+        .unwrap();
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "status": "running"
+            }),
+        )
+        .unwrap();
+
+        let subagents = super::list_session_subagents(&conn, "session-1").unwrap();
+        assert_eq!(subagents.len(), 1);
+        let descriptor = &subagents[0];
+        assert_eq!(descriptor.title.as_deref(), Some("Explore"));
+        assert_eq!(descriptor.description.as_deref(), Some("find entry points"));
+        assert_eq!(descriptor.subtitle.as_deref(), Some("tokens up 3.2k"));
+        assert_eq!(descriptor.status, "completed");
+    }
+
+    #[test]
+    fn subagent_upsert_explicit_null_clears_field() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "subtitle": "working"
+            }),
+        )
+        .unwrap();
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "subtitle": serde_json::Value::Null
+            }),
+        )
+        .unwrap();
+
+        let subagents = super::list_session_subagents(&conn, "session-1").unwrap();
+        assert_eq!(subagents[0].subtitle, None);
+    }
+
+    #[test]
+    fn subagent_events_dedup_on_event_id_and_load_in_sequence_order() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "provider": "claude",
+                "status": "running"
+            }),
+        )
+        .unwrap();
+
+        let timeline_event = |sequence: i64, event_id: &str| {
+            serde_json::json!({
+                "type": "subagent_timeline",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "event": {
+                    "type": "tool_started",
+                    "tool_use_id": "child-1",
+                    "name": "Grep",
+                    "input": {},
+                    "event_id": event_id,
+                    "sequence": sequence
+                }
+            })
+        };
+
+        super::append_session_subagent_event(&mut conn, &timeline_event(0, "evt-0")).unwrap();
+        super::append_session_subagent_event(&mut conn, &timeline_event(1, "evt-1")).unwrap();
+        // Same event_id delivered again (fresh sequence) must not double-write.
+        super::append_session_subagent_event(&mut conn, &timeline_event(9, "evt-1")).unwrap();
+
+        let events = super::load_session_subagent_events(&conn, "session-1", "toolu_1").unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["event_id"], "evt-0");
+        assert_eq!(events[1]["event_id"], "evt-1");
+
+        // Timeline rows never leak into the parent timeline.
+        let parent = super::fetch_session_timeline(
+            &conn,
+            "session-1",
+            super::TimelineDirection::Tail,
+            None,
+            50,
+        )
+        .unwrap();
+        assert!(parent.events.is_empty());
+    }
+
+    #[test]
+    fn deleting_session_cascades_subagent_tables() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "provider": "claude",
+                "status": "running"
+            }),
+        )
+        .unwrap();
+        super::append_session_subagent_event(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_timeline",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "event": { "type": "tool_started", "tool_use_id": "c1", "name": "Grep", "input": {}, "event_id": "e1", "sequence": 0 }
+            }),
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM sessions WHERE id = ?1", ["session-1"])
+            .unwrap();
+
+        assert!(super::list_session_subagents(&conn, "session-1")
+            .unwrap()
+            .is_empty());
+        assert!(
+            super::load_session_subagent_events(&conn, "session-1", "toolu_1")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn session_open_reconciles_stale_running_descriptors_to_failed() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "provider": "claude",
+                "status": "running"
+            }),
+        )
+        .unwrap();
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_2",
+                "provider": "claude",
+                "status": "completed"
+            }),
+        )
+        .unwrap();
+
+        super::reconcile_running_session_subagents(&conn, "session-1").unwrap();
+
+        let statuses: Vec<(String, String)> = super::list_session_subagents(&conn, "session-1")
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.subagent_id, item.status))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![
+                ("toolu_1".to_string(), "failed".to_string()),
+                ("toolu_2".to_string(), "completed".to_string()),
+            ]
+        );
     }
 }

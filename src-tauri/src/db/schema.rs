@@ -88,6 +88,35 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS session_subagents (
+            session_id TEXT NOT NULL,
+            subagent_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            title TEXT,
+            description TEXT,
+            status TEXT NOT NULL,
+            tool_call_id TEXT,
+            subtitle TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (session_id, subagent_id),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_subagent_events (
+            session_id TEXT NOT NULL,
+            subagent_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            event_timestamp TEXT,
+            event_json TEXT NOT NULL,
+            PRIMARY KEY (session_id, subagent_id, sequence),
+            FOREIGN KEY (session_id, subagent_id)
+                REFERENCES session_subagents(session_id, subagent_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_session_subagents_session ON session_subagents(session_id, created_at);
+
         CREATE TABLE IF NOT EXISTS mcp_servers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -172,7 +201,10 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .prepare("SELECT weekly_weekdays FROM scheduled_tasks LIMIT 0")
         .is_ok();
     if !has_scheduled_task_weekly_weekdays {
-        let _ = conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT",
+            [],
+        );
     }
 
     // Migration: add mode column if missing

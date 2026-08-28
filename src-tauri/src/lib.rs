@@ -622,6 +622,7 @@ pub fn run() {
             agent::history_import::load_session_events,
             agent::history_import::resync_session_from_native,
             agent::history_import::fetch_session_timeline,
+            agent::subagent_persist::load_session_subagents,
             agent::commands::delete_opencode_session,
             agent::commands::load_agent_latest_token_usage,
             agent::commands::rewind_agent_session,

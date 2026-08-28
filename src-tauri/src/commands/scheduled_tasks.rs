@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::scheduled_tasks::{
     create_task, delete_task, get_task, list_runs, list_tasks, local_timezone_label,
-    set_task_enabled, update_task, ScheduledTask, ScheduledTaskUpsert, ScheduleKind, TaskRun,
+    set_task_enabled, update_task, ScheduleKind, ScheduledTask, ScheduledTaskUpsert, TaskRun,
 };
 use crate::AppState;
 
@@ -63,7 +63,10 @@ pub fn list_scheduled_tasks(state: State<'_, AppState>) -> Result<Vec<ScheduledT
 }
 
 #[tauri::command]
-pub fn get_scheduled_task(state: State<'_, AppState>, task_id: String) -> Result<Option<ScheduledTask>, String> {
+pub fn get_scheduled_task(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Option<ScheduledTask>, String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     get_task(&conn, &task_id).map_err(|error| error.to_string())
 }

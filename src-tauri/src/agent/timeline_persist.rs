@@ -44,11 +44,7 @@ pub(crate) fn should_persist_domain_event(value: &Value) -> bool {
     !matches!(subtype, "connected" | "retrying" | "disconnected")
 }
 
-pub(crate) fn append_domain_events(
-    state: &crate::AppState,
-    session_id: &str,
-    events: &[Value],
-) {
+pub(crate) fn append_domain_events(state: &crate::AppState, session_id: &str, events: &[Value]) {
     if session_id.is_empty() || events.is_empty() {
         return;
     }

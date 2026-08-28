@@ -242,12 +242,12 @@ mod tests {
             );
         }
         assert_eq!(normalized[0]["type"], "user_message");
-        assert!(
-            normalized
-                .iter()
-                .any(|event| event["type"] == "assistant_message" || event["type"] == "text_delta")
-        );
-        assert!(normalized.iter().any(|event| event["type"] == "turn_finished"));
+        assert!(normalized
+            .iter()
+            .any(|event| event["type"] == "assistant_message" || event["type"] == "text_delta"));
+        assert!(normalized
+            .iter()
+            .any(|event| event["type"] == "turn_finished"));
     }
 
     #[test]
@@ -407,13 +407,18 @@ mod tests {
                 ],
             )
             .unwrap();
-        connection.execute(
-            "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
-            rusqlite::params![
-                "part-text", "assistant-2", "session-1", 1_424_457_i64,
-                r#"{"type":"text","text":"done"}"#
-            ],
-        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-text",
+                    "assistant-2",
+                    "session-1",
+                    1_424_457_i64,
+                    r#"{"type":"text","text":"done"}"#
+                ],
+            )
+            .unwrap();
 
         let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
         let result = events

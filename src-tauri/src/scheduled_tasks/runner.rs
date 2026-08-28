@@ -27,7 +27,11 @@ pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> Ta
     );
     let app_state = app.state::<AppState>();
 
-    let session_title = format!("{} · {}", payload.task_title, Utc::now().format("%Y-%m-%d %H:%M"));
+    let session_title = format!(
+        "{} · {}",
+        payload.task_title,
+        Utc::now().format("%Y-%m-%d %H:%M")
+    );
 
     let session = match {
         let conn = app_state.db.lock();

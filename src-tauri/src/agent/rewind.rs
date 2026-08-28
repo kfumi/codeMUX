@@ -635,7 +635,7 @@ pub async fn rewind_agent_session(
             }
             None if mode == RewindMode::Files => {
                 return Err(
-                    "File rewind requires the provider message ID of the target".to_string(),
+                    "File rewind requires the provider message ID of the target".to_string()
                 );
             }
             None => {}
@@ -690,9 +690,8 @@ pub async fn rewind_agent_session(
 
     {
         let db = state.db.lock().unwrap();
-        operations::clear_session_timeline(&db, &app_session_id).map_err(|err| {
-            format!("Failed to clear rewound session timeline: {}", err)
-        })?;
+        operations::clear_session_timeline(&db, &app_session_id)
+            .map_err(|err| format!("Failed to clear rewound session timeline: {}", err))?;
     }
 
     if let Some(user_index) = rewind_user_index {

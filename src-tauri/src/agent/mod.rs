@@ -12,6 +12,7 @@ pub(crate) mod native_jsonl;
 pub(crate) mod opencode_history;
 pub(crate) mod rewind;
 pub(crate) mod session_lifecycle;
+pub mod subagent_persist;
 pub(crate) mod timeline_persist;
 
 use log::{debug, info, warn};
@@ -163,9 +164,11 @@ pub async fn spawn_sidecar(
     let resource_dir = app_handle.path().resource_dir().ok();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let environment = build_environment();
-    let script_path = normalize_windows_verbatim_path(
-        resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?,
-    );
+    let script_path = normalize_windows_verbatim_path(resolve_sidecar_script_path(
+        resource_dir.as_deref(),
+        &manifest_dir,
+        environment,
+    )?);
     let node_path = resolve_node_runtime_path(resource_dir.as_deref(), environment)?;
 
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
