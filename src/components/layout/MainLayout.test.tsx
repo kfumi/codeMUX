@@ -92,7 +92,7 @@ describe('MainLayout', () => {
     expect(onForward).not.toHaveBeenCalled();
   });
 
-  it('renders the sidebar as a distinct translucent surface', () => {
+  it('renders the sidebar as a distinct translucent surface without a straight right divider', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -103,7 +103,69 @@ describe('MainLayout', () => {
 
     expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
     expect(sidebar?.className).toContain('backdrop-blur-xl');
-    expect(sidebar?.className).toContain('shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)]');
+    expect(sidebar?.className).not.toContain('border-r');
+  });
+
+  it('rounds the whole workspace section over a notch background matching the sidebar', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const section = document.querySelector('section');
+    const notchBackdrop = section?.parentElement;
+
+    expect(section?.className).toContain('rounded-tl-2xl');
+    expect(section?.className).toContain('rounded-bl-2xl');
+    expect(section?.className).toContain('overflow-hidden');
+    expect(section?.className).not.toContain('border-l');
+    expect(notchBackdrop?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+  });
+
+  it('draws the workspace divider as a crisp straight run plus corner arcs that follow the radius', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const section = document.querySelector('section');
+    const divider = section?.querySelector('div[aria-hidden="true"]');
+
+    expect(divider?.className).toContain('w-px');
+    expect(divider?.className).toContain('bg-[hsl(var(--layout-divider))]');
+    expect(divider?.className).toContain('top-[var(--radius-2xl)]');
+    expect(divider?.className).toContain('bottom-[var(--radius-2xl)]');
+    expect(divider?.className).toContain('pointer-events-none');
+
+    const cornerArcs = Array.from(section?.querySelectorAll('svg[aria-hidden="true"] path') ?? []);
+    expect(cornerArcs).toHaveLength(2);
+    for (const arc of cornerArcs) {
+      expect(arc.getAttribute('d')).toMatch(/^M0\.5 (0|12) A11\.5 11\.5 0 0 [01] 12 (11\.5|0\.5)$/);
+      expect(arc.getAttribute('stroke')).toBe('hsl(var(--layout-divider))');
+      expect(arc.getAttribute('stroke-width')).toBe('1.5');
+      expect(arc.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    }
+  });
+
+  it('keeps the sidebar width fixed when the window is maximized or restored', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    const { unmount } = render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const sidebar = document.querySelector('aside') as HTMLElement;
+    const initialWidth = sidebar.style.width;
+    expect(initialWidth).toBe('300px');
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 });
+    window.dispatchEvent(new Event('resize'));
+    expect(sidebar.style.width).toBe(initialWidth);
+
+    unmount();
   });
 
   it('keeps the side panel mounted while settings only hide it', () => {

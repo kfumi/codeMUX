@@ -1,6 +1,8 @@
 export const LAYOUT_PREFERENCES_STORAGE_KEY = 'codemux-layout-preferences';
 
 export interface LayoutPreferences {
+  /** 侧栏绝对宽度（px）；窗口最大化/还原时不随之缩放 */
+  sidebarWidth?: number;
   sidebarRatio?: number;
   sidePanelRatio?: number;
 }
@@ -39,6 +41,7 @@ export function readLayoutPreferences(storage: Storage | null = getStorage()): L
 
     const value = parsed as Record<string, unknown>;
     return {
+      sidebarWidth: finitePositiveNumber(value.sidebarWidth),
       sidebarRatio: finitePositiveNumber(value.sidebarRatio),
       sidePanelRatio: finitePositiveNumber(value.sidePanelRatio),
     };

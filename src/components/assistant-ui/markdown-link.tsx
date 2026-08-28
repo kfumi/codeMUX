@@ -1,6 +1,7 @@
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 import { defaultRehypePlugins } from 'streamdown';
+import type { StreamdownProps } from 'streamdown';
 
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/stores/projectStore';
@@ -11,8 +12,32 @@ import { FileTypeIcon } from './file-type-icon';
 
 const LOCAL_FILE_LINK_ORIGIN = 'https://codemux.local-file';
 
-export const CODEMUX_MARKDOWN_REHYPE_PLUGINS = [
-  codemuxLocalFileLinkRehypePlugin,
+export type CodemuxLocalFileLinkPluginOptions = {
+  /** 相对路径解析为绝对路径并链接化（仅消息渲染开启；文件预览保持只链接绝对路径） */
+  linkRelativeFilePaths?: boolean;
+};
+
+// 注意：数组里必须放插件工厂本身（unified 会调用它获取 transformer），
+// 选项通过 [plugin, options] 元组传入；Streamdown 的处理器缓存键取
+// `函数名:JSON(options)`，元组形式也避免两条管线匿名插件互相串缓存
+export function codemuxLocalFileLinkRehypePlugin(options: CodemuxLocalFileLinkPluginOptions = {}) {
+  return (tree: unknown) => {
+    rewriteLocalFileLinks(tree);
+    rewritePlainFilePaths(tree, options);
+  };
+}
+
+type CodemuxRehypePluginList = NonNullable<StreamdownProps['rehypePlugins']>;
+
+// 消息渲染管线：相对路径也解析链接
+export const CODEMUX_MARKDOWN_REHYPE_PLUGINS: CodemuxRehypePluginList = [
+  [codemuxLocalFileLinkRehypePlugin, { linkRelativeFilePaths: true }],
+  ...Object.values(defaultRehypePlugins),
+];
+
+// 文件预览管线（FileEditorPanel / PlanPreviewPanel）：维持旧行为，只链接绝对路径
+export const CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS: CodemuxRehypePluginList = [
+  [codemuxLocalFileLinkRehypePlugin, { linkRelativeFilePaths: false }],
   ...Object.values(defaultRehypePlugins),
 ];
 
@@ -190,13 +215,6 @@ function getReactText(value: ReactNode): string {
   return '';
 }
 
-export function codemuxLocalFileLinkRehypePlugin() {
-  return (tree: unknown) => {
-    rewriteLocalFileLinks(tree);
-    rewritePlainFilePaths(tree);
-  };
-}
-
 export function resolveLocalMarkdownBasePath(filePath: string): string | undefined {
   const { projects, activeProjectId } = useProjectStore.getState();
   const normalizedFilePath = normalizePathForCompare(filePath);
@@ -213,6 +231,16 @@ export function resolveLocalMarkdownBasePath(filePath: string): string | undefin
 
   if (!isAbsoluteLocalPath(filePath)) {
     return projects.find((project) => project.id === activeProjectId)?.path;
+  }
+
+  // 会话工作目录可能不是注册项目（如 agent 的 working_path 指向项目外目录），
+  // 命中时仍用它作为预览基准，保证文档内相对资源可解析
+  const sessionProjectPath = usePreviewStore.getState().projectPath;
+  if (sessionProjectPath) {
+    const normalizedSessionPath = normalizePathForCompare(sessionProjectPath).replace(/\/$/, '');
+    if (normalizedFilePath.startsWith(`${normalizedSessionPath}/`)) {
+      return sessionProjectPath;
+    }
   }
 
   return undefined;
@@ -261,8 +289,10 @@ export type PlainFileReference = {
   path: string;
 };
 
+// 相对路径备选项的段字符类排除路径分隔符（原 ASCII 版只允许 [A-Za-z0-9._~-]），
+// 并允许中文等非 ASCII 字符，如 `lnwlcs\docs\research\企宽竣工调研.md`
 const PLAIN_FILE_REFERENCE_RE =
-  /(?:[A-Za-z]:[\\/][^\s<>"'`!&*()\[\]{}|，。；：！？、:;]+|\/[^\s<>"'`!&*()\[\]{}|，。；！？、:;]+|(?:\.{1,2}[\\/])?[A-Za-z0-9._~-]+(?:[\\/][A-Za-z0-9._~-]+)+|[A-Za-z0-9._~-]+\.[A-Za-z][A-Za-z0-9_-]*)/g;
+  /(?:[A-Za-z]:[\\/][^\s<>"'`!&*()\[\]{}|，。；：！？、:;]+|\/[^\s<>"'`!&*()\[\]{}|，。；！？、:;]+|(?:\.{1,2}[\\/])?[^\s<>"'`!&*()\[\]{}|，。；：！？、:;\\/]+(?:[\\/][^\s<>"'`!&*()\[\]{}|，。；：！？、:;\\/]+)+|[A-Za-z0-9._~-]+\.[A-Za-z][A-Za-z0-9_-]*)/g;
 
 const FILE_REFERENCE_SUFFIX_RE =
   /^(?::\d+(?::\d+)?(?:-\d+(?:\.\d+)?)?|#L?\d+(?:-L?\d+)?|\s+\(line\s+\d+\)|\s+\(\d+(?:,\s*\d+)?\)|\s+on\s+line\s+\d+)/i;
@@ -275,7 +305,7 @@ export function parsePlainFileReferences(text: string): PlainFileReference[] {
     const suffix = FILE_REFERENCE_SUFFIX_RE.exec(text.slice(start + match[0].length))?.[0] ?? '';
     const raw = `${match[0]}${suffix}`;
     const parsed = parsePlainFileReference(raw, text, start);
-    if (!parsed || !isAbsoluteLocalPath(stripLocalFileLineSuffix(parsed.path))) {
+    if (!parsed) {
       continue;
     }
 
@@ -374,14 +404,143 @@ function looksLikeFileName(value: string): boolean {
   return Boolean(extension && !/^\d+$/.test(extension));
 }
 
-function shouldLinkPlainFileReference(reference: PlainFileReference): boolean {
+/**
+ * 判定并解析一个纯文本文件引用是否可链接化：
+ * - 绝对路径沿用原逻辑（文件树已知则必须命中，否则回退到注册项目包含判断）；
+ * - 相对路径仅在 `options.linkRelativeFilePaths` 开启时处理（消息管线开启、
+ *   文件预览管线关闭）：优先在已加载的文件树里做后缀匹配（可跨项目命中真实文件），
+ *   未命中或树未加载时，用会话 projectPath（其次活动项目）词法拼接出绝对路径，
+ *   只要落在会话目录或任一注册项目内即可链接（与绝对路径的无树回退同等乐观，
+ *   点击后文件不存在只会让预览 Tab 显示读取错误）。
+ * 返回携带解析后绝对路径的引用（保留原文 label 与行号后缀），不可链接时返回 null。
+ */
+function resolveLinkablePlainFileReference(
+  reference: PlainFileReference,
+  options: CodemuxLocalFileLinkPluginOptions,
+): PlainFileReference | null {
   const path = stripLocalFileLineSuffix(reference.path);
-  if (!isAbsoluteLocalPath(path) || !isLikelyLocalFilePath(path)) {
-    return false;
+  if (!isLikelyLocalFilePath(path)) {
+    return null;
   }
 
-  const hasFileTree = usePreviewStore.getState().treeRoot !== null;
-  return hasFileTree ? isKnownProjectFilePath(path) : isPathInsideRegisteredProject(path);
+  if (isAbsoluteLocalPath(path)) {
+    const hasFileTree = usePreviewStore.getState().treeRoot !== null;
+    return (hasFileTree ? isKnownProjectFilePath(path) : isPathInsideRegisteredProject(path))
+      ? reference
+      : null;
+  }
+
+  if (!options.linkRelativeFilePaths) {
+    return null;
+  }
+
+  const resolvedPath = resolveRelativePlainFileReference(path);
+  if (!resolvedPath) {
+    return null;
+  }
+
+  return { ...reference, path: `${resolvedPath}${reference.path.slice(path.length)}` };
+}
+
+function resolveRelativePlainFileReference(relativePath: string): string | null {
+  const { treeRoot, projectPath } = usePreviewStore.getState();
+
+  const treeMatch = treeRoot ? matchTreePathForRelativePath(treeRoot, relativePath) : null;
+  if (treeMatch) {
+    return treeMatch;
+  }
+
+  // 无分隔符的裸文件名（如 `README.md`）在没有文件树佐证时过于含糊，不做链接
+  if (!/[\\/]/.test(relativePath)) {
+    return null;
+  }
+
+  const basePath = projectPath ?? getActiveProjectPath();
+  if (!basePath) {
+    return null;
+  }
+
+  const resolved = resolvePathAgainstBase(basePath, relativePath);
+  if (!resolved || !isResolvedRelativePathLinkable(resolved)) {
+    return null;
+  }
+
+  return resolved;
+}
+
+function matchTreePathForRelativePath(treeRoot: FileTreeNodeData[], relativePath: string): string | null {
+  const normalizedCandidate = normalizeRelativePathSegments(relativePath);
+  if (!normalizedCandidate) {
+    return null;
+  }
+
+  const candidate = normalizePathForCompare(normalizedCandidate);
+  const matches = flattenFileTreePaths(treeRoot).filter((path) =>
+    normalizePathForCompare(path).replace(/\/+$/, '').endsWith(`/${candidate}`),
+  );
+
+  const { projectPath } = usePreviewStore.getState();
+  const preferredBase = projectPath ?? getActiveProjectPath();
+  const normalizedPreferredBase = preferredBase ? normalizePathForCompare(preferredBase).replace(/\/+$/, '') : null;
+  const preferred = normalizedPreferredBase
+    ? matches.find((path) => normalizePathForCompare(path).startsWith(`${normalizedPreferredBase}/`))
+    : undefined;
+
+  return preferred ?? matches[0] ?? null;
+}
+
+function isResolvedRelativePathLinkable(resolvedPath: string): boolean {
+  const { projectPath } = usePreviewStore.getState();
+  if (projectPath) {
+    const normalizedResolved = normalizePathForCompare(resolvedPath).replace(/\/+$/, '');
+    const normalizedSessionPath = normalizePathForCompare(projectPath).replace(/\/+$/, '');
+    if (normalizedResolved.startsWith(`${normalizedSessionPath}/`)) {
+      return true;
+    }
+  }
+
+  return isPathInsideRegisteredProject(resolvedPath);
+}
+
+/** 词法解析相对路径段（`.` 跳过、`..` 上弹），不访问文件系统 */
+function resolvePathAgainstBase(basePath: string, relativePath: string): string | null {
+  const segments = basePath.replace(/[\\/]+$/, '').split(/[\\/]/);
+  for (const segment of relativePath.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (segments.length <= 1) {
+        return null;
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  const resolved = segments.join('/');
+  return normalizePathForCompare(resolved) === normalizePathForCompare(basePath) ? null : resolved;
+}
+
+function normalizeRelativePathSegments(value: string): string {
+  const segments: string[] = [];
+  for (const segment of value.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
+}
+
+function getActiveProjectPath(): string | null {
+  const { projects, activeProjectId } = useProjectStore.getState();
+  return projects.find((project) => project.id === activeProjectId)?.path ?? null;
 }
 
 function isPathInsideRegisteredProject(filePath: string): boolean {
@@ -412,7 +571,7 @@ function flattenFileTreePaths(nodes: FileTreeNodeData[]): string[] {
   ]);
 }
 
-function rewritePlainFilePaths(node: unknown): void {
+function rewritePlainFilePaths(node: unknown, options: CodemuxLocalFileLinkPluginOptions = {}): void {
   if (!isRecord(node) || !Array.isArray(node.children)) {
     return;
   }
@@ -424,7 +583,9 @@ function rewritePlainFilePaths(node: unknown): void {
   for (let index = 0; index < node.children.length; index += 1) {
     const child = node.children[index];
     if (child.type === 'text' && typeof child.value === 'string') {
-      const references = parsePlainFileReferences(child.value).filter(shouldLinkPlainFileReference);
+      const references = parsePlainFileReferences(child.value)
+        .map((reference) => resolveLinkablePlainFileReference(reference, options))
+        .filter((reference): reference is PlainFileReference => reference !== null);
       if (references.length === 0) {
         continue;
       }
@@ -454,7 +615,7 @@ function rewritePlainFilePaths(node: unknown): void {
       continue;
     }
 
-    rewritePlainFilePaths(child);
+    rewritePlainFilePaths(child, options);
   }
 }
 

@@ -7,7 +7,7 @@ import type { StreamdownProps } from "streamdown";
 import { code } from "@streamdown/code";
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from "./markdown-link";
+import { CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS, CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from "./markdown-link";
 
 const defaultComponents = {
   h1: ({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
@@ -109,6 +109,19 @@ export const CODEMUX_MARKDOWN_STREAMDOWN_PROPS: Omit<
   controls: { code: { copy: true, download: false }, table: false } as never,
   rehypePlugins: CODEMUX_MARKDOWN_REHYPE_PLUGINS,
   linkSafety: { enabled: false },
+};
+
+/**
+ * 文件预览（FileEditorPanel / PlanPreviewPanel 等）专用的 Streamdown 配置：
+ * 与消息渲染共用样式与组件，但 rehype 插件关闭相对路径链接化——
+ * 预览文档里的相对路径保持普通文本，不做解析。
+ */
+export const CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS: Omit<
+  StreamdownProps,
+  "children" | "mode"
+> = {
+  ...CODEMUX_MARKDOWN_STREAMDOWN_PROPS,
+  rehypePlugins: CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS,
 };
 
 const MarkdownTextImpl = () => {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { shouldAttachLiveTurn, shouldFollowBackgroundStream, shouldKeepLiveEventsOnHistoryLoad } from '../lib/attachToActiveTurn';
+import { shouldAttachLiveTurn, shouldKeepLiveEventsOnHistoryLoad } from '../lib/attachToActiveTurn';
 import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {

@@ -1,7 +1,7 @@
 import { FileTypeIcon } from '../../assistant-ui/file-type-icon';
 import { Streamdown } from 'streamdown';
 
-import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '../../assistant-ui/markdown-text';
+import { CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS } from '../../assistant-ui/markdown-text';
 import { FileView } from '../../preview/FileView';
 import { TooltipHint } from '../../ui/tooltip';
 
@@ -59,12 +59,12 @@ export function PlanPreviewPanel({
               <Streamdown
                 mode="static"
                 className="aui-md min-w-0 max-w-full"
-                components={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.components}
-                plugins={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.plugins}
-                shikiTheme={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.shikiTheme}
-                controls={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.controls}
-                rehypePlugins={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.rehypePlugins}
-                linkSafety={CODEMUX_MARKDOWN_STREAMDOWN_PROPS.linkSafety}
+                components={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.components}
+                plugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.plugins}
+                shikiTheme={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.shikiTheme}
+                controls={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.controls}
+                rehypePlugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.rehypePlugins}
+                linkSafety={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.linkSafety}
               >
                 {content.trim()}
               </Streamdown>

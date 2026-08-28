@@ -29,6 +29,14 @@ vi.mock('../assistant-ui/markdown-text', () => ({
     rehypePlugins: [],
     linkSafety: 'safe',
   },
+  CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS: {
+    components: {},
+    plugins: [],
+    shikiTheme: ['github-dark', 'github-light'],
+    controls: {},
+    rehypePlugins: [],
+    linkSafety: 'safe',
+  },
 }));
 
 vi.mock('streamdown', () => ({

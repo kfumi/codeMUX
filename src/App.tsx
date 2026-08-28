@@ -139,19 +139,6 @@ function App() {
     applyNavigationLocation(location);
   }, [applyNavigationLocation, navigate]);
 
-  const handleNavigateHome = useCallback(() => {
-    commitNavigation({
-      ...navigationLocation,
-      view: 'app',
-      activeSessionId: null,
-      activeProjectId: null,
-      draftProjectId: null,
-      isDraftOpen: false,
-      automationTaskId: null,
-      sidePanel: getSidePanelNavigation('home'),
-    });
-  }, [commitNavigation, navigationLocation]);
-
   const handleReturnToApp = useCallback(() => {
     commitNavigation({
       ...navigationLocation,

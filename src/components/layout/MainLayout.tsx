@@ -1,9 +1,8 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { useRef, useState, useCallback, useEffect, useLayoutEffect, type ReactNode } from 'react';
+import { useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
-import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
@@ -18,11 +17,14 @@ function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, width));
 }
 
-function getInitialSidebarWidth(): { width: number; ratio: number } {
+function getInitialSidebarWidth(): number {
   const viewportWidth = typeof window === 'undefined' ? SIDEBAR_DEFAULT : Math.max(window.innerWidth, 1);
   const preferences = readLayoutPreferences();
-  const ratio = preferences.sidebarRatio ?? SIDEBAR_DEFAULT / viewportWidth;
-  return { width: clampSidebarWidth(viewportWidth * ratio), ratio };
+  // 旧版本持久化的是比例，这里一次性换算成绝对宽度；此后宽度只随手动拖拽变化，
+  // 窗口最大化/还原不会改变侧栏宽度
+  const stored = preferences.sidebarWidth
+    ?? (preferences.sidebarRatio ? viewportWidth * preferences.sidebarRatio : undefined);
+  return clampSidebarWidth(stored ?? SIDEBAR_DEFAULT);
 }
 
 interface MainLayoutProps {
@@ -50,39 +52,13 @@ export function MainLayout({
   sidePanelScopeId = 'global',
   todos,
 }: MainLayoutProps) {
-  const initialSidebar = getInitialSidebarWidth();
-  const [sidebarWidth, setSidebarWidth] = useState(initialSidebar.width);
+  const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarDragging = useRef(false);
-  const sidebarRatioRef = useRef(initialSidebar.ratio);
+  const sidebarWidthRef = useRef(sidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const sidebarExistsRef = useRef(false);
   const sidebarInstant = sidebar != null && !sidebarExistsRef.current;
-
-  useEffect(() => {
-    let frameId: number | null = null;
-    const resizeSidebarWithWindow = () => {
-      if (sidebarDragging.current) return;
-      if (typeof window.requestAnimationFrame !== 'function') {
-        setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
-        return;
-      }
-
-      if (frameId !== null) return;
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null;
-        if (!sidebarDragging.current) {
-          setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
-        }
-      });
-    };
-
-    window.addEventListener('resize', resizeSidebarWithWindow);
-    return () => {
-      window.removeEventListener('resize', resizeSidebarWithWindow);
-      if (frameId !== null) window.cancelAnimationFrame(frameId);
-    };
-  }, []);
 
   useLayoutEffect(() => {
     sidebarExistsRef.current = sidebar != null;
@@ -98,14 +74,14 @@ export function MainLayout({
     const onMove = (moveEvent: MouseEvent) => {
       if (!sidebarDragging.current) return;
       const width = clampSidebarWidth(moveEvent.clientX);
-      sidebarRatioRef.current = width / Math.max(window.innerWidth, 1);
+      sidebarWidthRef.current = width;
       setSidebarWidth(width);
     };
 
     const onUp = () => {
       sidebarDragging.current = false;
       setSidebarResizing(false);
-      updateLayoutPreferences({ sidebarRatio: sidebarRatioRef.current });
+      updateLayoutPreferences({ sidebarWidth: sidebarWidthRef.current });
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
@@ -179,7 +155,7 @@ export function MainLayout({
       {sidebar != null && (
         <aside
           className={cn(
-            `relative shrink-0 overflow-hidden border-r ${LAYOUT_DIVIDER_CLASS} bg-[hsl(var(--surface-2)/0.88)] shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)] backdrop-blur-xl`,
+            `relative shrink-0 overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl`,
             sidebarResizing ? 'transition-none' : 'transition-[width,opacity] duration-300 ease-in-out',
           )}
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth, opacity: sidebarCollapsed ? 0 : 1, transitionDuration: sidebarInstant ? '0ms' : undefined }}
@@ -191,29 +167,66 @@ export function MainLayout({
             className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
             onMouseDown={handleSidebarMouseDown}
           >
-            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+            <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
           </div>
         </aside>
       )}
 
-      <section className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]">
-        <TitleBar
-          leftContent={sidebarCollapsed ? sidebarControls : undefined}
-          rightContent={headerContent}
-          projectOpenPath={projectOpenPath}
-          sidePanelAvailable={sidePanelAvailable}
-          todos={todos}
-        />
-
-        <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--sidebar-bg))]">
-          <div className="flex min-w-110 flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
-          <SidePanel
-            projectPath={sidePanelProjectPath}
-            scopeId={sidePanelScopeId}
-            isVisible={sidePanelAvailable}
+      <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--surface-2)/0.88)]">
+        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-2xl rounded-bl-2xl bg-[hsl(var(--background))]">
+          {/* 分割线：直线段用 1px 实线保持锐利；两个圆角段用 1.5px 的 SVG 弧线
+              补偿抗锯齿覆盖率损耗（斜线段每个像素只被覆盖约一半，需要更宽的墨量
+              才能与直线段视觉等粗）。尺寸绑定 --radius-2xl，与圆角始终对齐。 */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] z-30 w-px bg-[hsl(var(--layout-divider))]"
           />
-        </main>
-      </section>
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-0 z-30"
+            style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path
+              d="M0.5 12 A11.5 11.5 0 0 1 12 0.5"
+              stroke="hsl(var(--layout-divider))"
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 z-30"
+            style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path
+              d="M0.5 0 A11.5 11.5 0 0 0 12 11.5"
+              stroke="hsl(var(--layout-divider))"
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          <TitleBar
+            leftContent={sidebarCollapsed ? sidebarControls : undefined}
+            rightContent={headerContent}
+            projectOpenPath={projectOpenPath}
+            sidePanelAvailable={sidePanelAvailable}
+            todos={todos}
+          />
+
+          <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
+            <div className="flex min-w-110 flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
+            <SidePanel
+              projectPath={sidePanelProjectPath}
+              scopeId={sidePanelScopeId}
+              isVisible={sidePanelAvailable}
+            />
+          </main>
+        </section>
+      </div>
     </div>
   );
 }
