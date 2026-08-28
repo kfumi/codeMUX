@@ -906,6 +906,7 @@ export interface RuntimeInstallProgressEvent {
 export const appApi = {
   getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
   getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
+  getUserHomeDirectory: (): Promise<string> => invokeLogged('get_user_home_directory'),
   checkDevelopmentEnvironment: (): Promise<DevelopmentEnvironmentCheck> =>
     invokeLogged('check_development_environment'),
   getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),

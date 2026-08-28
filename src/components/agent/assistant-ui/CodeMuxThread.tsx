@@ -91,6 +91,8 @@ const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
+const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
+const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-3';
 const ASK_USER_QUESTION_TOOL_NAMES = new Set([
   'AskUserQuestion',
   'askUserQuestion',
@@ -250,7 +252,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           {(scrollToBottomButton) => (
             <div
               data-testid="thread-content-shell"
-              className="mx-auto flex w-full flex-1 flex-col px-20 pt-5"
+              className={cn(
+                'mx-auto flex w-full flex-1 flex-col pt-5 transition-[padding] duration-200 ease-out',
+                showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
+              )}
               style={{ maxWidth: 'var(--content-width, 52rem)' }}
             >
               <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>

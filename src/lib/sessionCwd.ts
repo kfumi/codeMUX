@@ -4,12 +4,43 @@ import {
   resolveWorktreeBaseRef,
   type DraftWorkspaceSelection,
 } from './draftWorkspacePicker';
-import { gitApi } from './tauri';
+import { appApi, gitApi } from './tauri';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 
 export const DEFAULT_AGENT_CWD = '.';
+export const DEFAULT_NON_PROJECT_FOLDER = 'CodemuxProject';
+
+function joinPathSegments(base: string, segment: string): string {
+  const separator = base.includes('\\') ? '\\' : '/';
+  const trimmedBase = base.replace(/[/\\]+$/, '');
+  return `${trimmedBase}${separator}${segment}`;
+}
+
+export function isDefaultWorkingDirectoryRequest(cwd: string | null | undefined): boolean {
+  const normalized = cwd?.trim();
+  return !normalized || normalized === DEFAULT_AGENT_CWD;
+}
+
+export function resolveDefaultWorkingDirectory(homeDir: string): string {
+  return joinPathSegments(homeDir, DEFAULT_NON_PROJECT_FOLDER);
+}
+
+export function normalizeSessionWorkingDirectory(cwd: string, homeDir: string): string {
+  if (isDefaultWorkingDirectoryRequest(cwd)) {
+    return resolveDefaultWorkingDirectory(homeDir);
+  }
+  return cwd.trim();
+}
+
+export async function ensureDraftSessionWorkingPath(cwd: string): Promise<string> {
+  if (!isDefaultWorkingDirectoryRequest(cwd)) {
+    return cwd.trim();
+  }
+  const homeDir = await appApi.getUserHomeDirectory();
+  return resolveDefaultWorkingDirectory(homeDir);
+}
 
 export function isValidWorkingPath(path: string | null | undefined): path is string {
   const trimmed = path?.trim();

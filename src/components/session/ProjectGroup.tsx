@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, ChevronRight, ChevronUp, Folder, FolderOpen, FolderTree, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
@@ -28,6 +28,7 @@ interface ProjectGroupProps {
   onRenameSession: (sessionId: string, title: string) => void;
   onNewSessionInProject: (projectId: string) => void;
   onOpenProjectFiles: (project: Project) => void;
+  onOpenImportSessions: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
   onRenameProject: (projectId: string, newName: string) => void;
 }
@@ -44,6 +45,7 @@ export function ProjectGroup({
   onRenameSession,
   onNewSessionInProject,
   onOpenProjectFiles,
+  onOpenImportSessions,
   onDeleteProject,
   onRenameProject,
 }: ProjectGroupProps) {
@@ -117,13 +119,19 @@ export function ProjectGroup({
           <span className="flex-1 truncate text-ui-title font-medium">{project.name}</span>
         )}
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]">
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                icon={<Download className="h-3.5 w-3.5" />}
+                onSelect={() => onOpenImportSessions(project)}
+              >
+                导入外部会话
+              </DropdownMenuItem>
               <DropdownMenuItem
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
                 onClick={() => invoke('open_in_explorer', { path: project.path })}

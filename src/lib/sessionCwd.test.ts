@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '../types/project';
-import { getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd, resolveSessionCwd, resolveSessionWorkingPath, DEFAULT_AGENT_CWD } from './sessionCwd';
+import { getStoredAgentCwd, isDefaultWorkingDirectoryRequest, isValidWorkingPath, ensureDraftSessionWorkingPath, normalizeSessionWorkingDirectory, resolveDefaultWorkingDirectory, resolveDraftSessionCwd, resolveSessionCwd, resolveSessionWorkingPath, DEFAULT_AGENT_CWD } from './sessionCwd';
 
 const projects: Project[] = [
   {
@@ -34,6 +34,43 @@ describe('getStoredAgentCwd', () => {
 
   it('falls back to the default cwd when storage is unavailable', () => {
     expect(getStoredAgentCwd(undefined)).toBe(DEFAULT_AGENT_CWD);
+  });
+});
+
+describe('default working directory helpers', () => {
+  it('treats empty and dot cwd as the default non-project request', () => {
+    expect(isDefaultWorkingDirectoryRequest('')).toBe(true);
+    expect(isDefaultWorkingDirectoryRequest('.')).toBe(true);
+    expect(isDefaultWorkingDirectoryRequest('   ')).toBe(true);
+    expect(isDefaultWorkingDirectoryRequest('D:/project/codeMUX')).toBe(false);
+  });
+
+  it('resolves the default folder under the user home directory', () => {
+    expect(resolveDefaultWorkingDirectory('C:/Users/me')).toBe('C:/Users/me/CodemuxProject');
+    expect(resolveDefaultWorkingDirectory('C:\\Users\\me')).toBe('C:\\Users\\me\\CodemuxProject');
+    expect(normalizeSessionWorkingDirectory('.', 'C:/Users/me')).toBe('C:/Users/me/CodemuxProject');
+    expect(normalizeSessionWorkingDirectory('D:/workspace', 'C:/Users/me')).toBe('D:/workspace');
+  });
+});
+
+const appApiMock = vi.hoisted(() => ({
+  getUserHomeDirectory: vi.fn(),
+}));
+
+describe('ensureDraftSessionWorkingPath', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    appApiMock.getUserHomeDirectory.mockResolvedValue('C:/Users/me');
+  });
+
+  it('resolves the default cwd to CodemuxProject under home', async () => {
+    await expect(ensureDraftSessionWorkingPath('.')).resolves.toBe('C:/Users/me/CodemuxProject');
+    expect(appApiMock.getUserHomeDirectory).toHaveBeenCalled();
+  });
+
+  it('keeps absolute cwd unchanged', async () => {
+    await expect(ensureDraftSessionWorkingPath('D:/workspace')).resolves.toBe('D:/workspace');
+    expect(appApiMock.getUserHomeDirectory).not.toHaveBeenCalled();
   });
 });
 
@@ -141,6 +178,10 @@ vi.mock('./tauri', async () => {
   return {
     ...actual,
     gitApi: gitApiMock,
+    appApi: {
+      ...actual.appApi,
+      getUserHomeDirectory: appApiMock.getUserHomeDirectory,
+    },
   };
 });
 

@@ -143,10 +143,12 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       style={{ width: isVisible && isExpanded ? '100%' : isVisible && isOpen ? panelWidth : 0 }}
     >
       <div
-        className="group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
+        className="group absolute inset-y-0 -left-1 z-40 w-2 cursor-col-resize"
         onMouseDown={handleMouseDown}
         aria-hidden="true"
-      />
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+      </div>
 
       <div className="flex h-full w-full min-w-0 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
@@ -237,7 +239,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                 key={tab.id}
                 className={cn(
                   'absolute inset-0',
-                  isActive ? 'pointer-events-auto visible z-30' : 'pointer-events-none invisible',
+                  isActive ? 'pointer-events-auto visible z-10' : 'pointer-events-none invisible z-0',
                 )}
                 aria-hidden={!isActive}
               >

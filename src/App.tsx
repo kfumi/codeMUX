@@ -10,7 +10,7 @@ import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
-import { getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
+import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { appApi, sessionApi } from './lib/tauri';
@@ -304,16 +304,21 @@ function App() {
       draftProjectId,
       draftWorkspace,
     } = useNewSessionStore.getState();
-    const cwd = await resolveDraftSessionCwd(
+    const rawCwd = await resolveDraftSessionCwd(
       projects,
       draftProjectId,
       getStoredAgentCwd(),
       draftWorkspace,
     );
+    const cwd = await ensureDraftSessionWorkingPath(rawCwd);
 
     let createdSessionId: string | null = null;
 
     try {
+      if (!isValidWorkingPath(cwd)) {
+        throw new Error('无法解析有效的工作目录，请确认已选择项目并重新尝试');
+      }
+
       if (selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode') {
         const runtimeCheck = await appApi.checkManagedRuntimes();
         const runtime = runtimeCheck.runtimes.find((entry) => entry.provider === selectedAgentKind);
@@ -332,9 +337,6 @@ function App() {
         selectedModel ?? undefined,
       );
       createdSessionId = session.id;
-      if (!isValidWorkingPath(cwd)) {
-        throw new Error('无法解析有效的工作目录，请确认已选择项目并重新尝试');
-      }
       useAgentStore.getState().setSessionWorkingPath(session.id, cwd);
       await sessionApi.updateWorkingPath(session.id, cwd);
 
@@ -406,7 +408,6 @@ function App() {
             <Sidebar
               onNewSession={() => handleNewSession()}
               onNewSessionInProject={(projectId) => handleNewSession(projectId)}
-              onNavigateHome={handleNavigateHome}
               onSelectSession={handleSelectSession}
               onOpenSettings={handleOpenSettings}
               onOpenAutomation={handleOpenAutomation}

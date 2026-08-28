@@ -2,8 +2,10 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, MessageSquarePlus, Plus } from 'lucide-react';
 
+import type { Project } from '../../types/project';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
 import { ProjectGroup } from './ProjectGroup';
 import { SessionItem } from './SessionItem';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -95,6 +97,7 @@ export function SessionList({
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
   const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
+  const [importProject, setImportProject] = useState<Project | null>(null);
 
   useEffect(() => {
     fetchSessions();
@@ -138,6 +141,16 @@ export function SessionList({
       saveSectionExpanded(CONVERSATIONS_SECTION_KEY, next);
       return next;
     });
+  }, []);
+
+  const handleOpenImportSessions = useCallback((project: Project) => {
+    setImportProject(project);
+  }, []);
+
+  const handleImportDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setImportProject(null);
+    }
   }, []);
 
   return (
@@ -206,6 +219,7 @@ export function SessionList({
               onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
               onOpenProjectFiles={onOpenProjectFiles}
+              onOpenImportSessions={handleOpenImportSessions}
               onDeleteProject={deleteProject}
               onRenameProject={renameProject}
             />
@@ -268,6 +282,15 @@ export function SessionList({
           <Plus className="h-3.5 w-3.5" />
           添加项目
         </button>
+      )}
+      {importProject && (
+        <ImportSessionsDialog
+          open
+          onOpenChange={handleImportDialogOpenChange}
+          projectId={importProject.id}
+          projectPath={importProject.path}
+          projectName={importProject.name}
+        />
       )}
     </div>
   );

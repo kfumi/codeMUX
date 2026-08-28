@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Download, FolderOpen, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, Check, Download, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { isImportCandidateForProject } from '../../lib/importSessionPaths';
 import { historyImportApi } from '../../lib/tauri';
-import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { AgentKind } from '../../types/session';
 import type { ImportCandidate } from '../../types/historyImport';
@@ -27,7 +27,10 @@ import {
 interface ImportSessionsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImported: () => void;
+  projectId: string;
+  projectPath: string;
+  projectName: string;
+  onImported?: () => void;
 }
 
 const agentLabels: Record<AgentKind, string> = {
@@ -44,14 +47,19 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportSessionsDialogProps) {
-  const projects = useProjectStore((state) => state.projects);
+export function ImportSessionsDialog({
+  open,
+  onOpenChange,
+  projectId,
+  projectPath,
+  projectName,
+  onImported,
+}: ImportSessionsDialogProps) {
   const fetchSessions = useSessionStore((state) => state.fetchSessions);
   const fetchArchivedSessions = useSessionStore((state) => state.fetchArchivedSessions);
   const [candidates, setCandidates] = useState<ImportCandidate[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<ImportFilter>('claude_code');
-  const [projectId, setProjectId] = useState('');
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
@@ -64,7 +72,15 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
     setFilter('claude_code');
     setHasScanned(false);
     setError(null);
-  }, [open]);
+  }, [open, projectId]);
+
+  useEffect(() => {
+    return () => {
+      if (document.body.style.pointerEvents === 'none') {
+        document.body.style.pointerEvents = '';
+      }
+    };
+  }, []);
 
   const handleFilterChange = (value: string) => {
     setFilter(value as ImportFilter);
@@ -90,9 +106,16 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
     }
   };
 
+  const projectCandidates = useMemo(
+    () => candidates.filter((candidate) => isImportCandidateForProject(candidate.cwd, projectPath)),
+    [candidates, projectPath],
+  );
+
   const visibleCandidates = useMemo(
-    () => filter === 'all' ? candidates : candidates.filter((candidate) => candidate.agentKind === filter),
-    [candidates, filter],
+    () => filter === 'all'
+      ? projectCandidates
+      : projectCandidates.filter((candidate) => candidate.agentKind === filter),
+    [filter, projectCandidates],
   );
 
   const toggleSelected = (key: string) => {
@@ -110,7 +133,7 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
     try {
       const result = await historyImportApi.import({
         candidateKeys: [...selected],
-        projectId: projectId || null,
+        projectId,
         refreshExisting: true,
         agentKind: filter === 'all' ? undefined : filter,
       });
@@ -121,7 +144,7 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
       } else {
         toast.success(`已导入 ${count} 个会话`);
       }
-      onImported();
+      onImported?.();
       onOpenChange(false);
     } catch (reason) {
       setError(String(reason));
@@ -146,18 +169,24 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0">
+      <DialogContent
+        overlayClassName="z-[240]"
+        className="z-[240] max-w-3xl gap-0 overflow-hidden rounded-xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)]"
+        closeClassName="right-5 top-5"
+        onCloseAutoFocus={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <DialogHeader className="border-b border-border/60 px-6 py-5">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Download className="h-4 w-4 text-primary" />
             导入外部会话
           </DialogTitle>
           <DialogDescription>
-            先选择一个 CLI 来源再扫描，避免打开窗口时一次性读取全部历史文件。
+            扫描与项目「{projectName}」工作目录匹配的 CLI 历史会话，导入后将归属该项目。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)_auto] items-end gap-3 border-b border-border/45 bg-muted/18 px-6 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 border-b border-border/45 bg-muted/18 px-6 py-3">
           <label className="min-w-0 space-y-1.5">
             <span className="block text-ui-caption font-medium text-muted-foreground">历史来源</span>
             <Select value={filter} onValueChange={handleFilterChange} disabled={loading || importing}>
@@ -169,22 +198,6 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
                 <SelectItem value="codex">Codex</SelectItem>
                 <SelectItem value="opencode">OpenCode</SelectItem>
                 <SelectItem value="all">全部来源（较慢）</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-
-          <label className="min-w-0 space-y-1.5">
-            <span className="flex items-center gap-1.5 text-ui-caption font-medium text-muted-foreground">
-              <FolderOpen className="h-3.5 w-3.5" />
-              归属项目
-            </span>
-            <Select value={projectId || 'none'} onValueChange={(value) => setProjectId(value === 'none' ? '' : value)} disabled={importing}>
-              <SelectTrigger aria-label="导入项目" className="h-9 rounded-lg px-2.5 text-xs">
-                <SelectValue placeholder="暂不绑定项目" />
-              </SelectTrigger>
-              <SelectContent align="start" className="z-260">
-                <SelectItem value="none">暂不绑定项目</SelectItem>
-                {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </label>
@@ -228,14 +241,16 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
                 <Search className="h-5 w-5" />
               </span>
               <p className="text-sm font-medium text-foreground/85">准备扫描 {filter === 'all' ? '全部来源' : agentLabels[filter]}</p>
-              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">扫描只读取默认历史目录，不会执行 CLI，也不会修改原始会话文件。</p>
+              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                仅显示工作目录位于「{projectName}」下的会话，不会修改原始历史文件。
+              </p>
             </div>
           )}
 
           {!loading && !error && hasScanned && visibleCandidates.length === 0 && (
             <div className="flex min-h-56 flex-col items-center justify-center text-center text-sm text-muted-foreground">
-              <p>没有发现可导入的会话历史</p>
-              <p className="mt-1 text-xs">可以切换来源，或重新扫描当前来源。</p>
+              <p>该项目下没有发现可导入的会话历史</p>
+              <p className="mt-1 text-xs">可切换来源后重新扫描，或确认 CLI 会话的工作目录是否在此项目内。</p>
             </div>
           )}
 

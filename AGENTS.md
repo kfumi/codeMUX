@@ -32,13 +32,34 @@ Follow `.editorconfig`: spaces, LF endings, UTF-8, final newline, 2-space indent
 
 For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built on Radix UI) before creating custom controls or raw HTML elements. Use their variants and sizes, such as `Button` with `variant="ghost"`, whenever they fit the interaction.
 
-### UI Typography
+### UI Theming & Typography
 
-- New UI must inherit the global font family from `var(--font-ui)`; do not hard-code a font family unless the content is intentionally code.
-- Use the project's dynamic typography utilities (`text-ui-micro`, `text-ui-caption`, `text-ui-meta`, `text-ui-compact`, `text-ui-body`, and `text-ui-title`) for UI text so it follows the user's global interface font-size setting.
+The app's appearance is user-configurable at runtime (theme, accent color, UI font family, UI/code font sizes, corner radius, content width) via `src/stores/appearanceStore.ts`, which writes CSS variables defined in `src/styles/globals.css`. Components must consume these tokens so new UI follows the user's appearance settings instead of fighting them. Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
+
+**Colors — always semantic tokens, never hard-coded palette values:**
+
+- Use the mapped Tailwind utilities: `bg-background`, `text-foreground`, `text-muted-foreground`, `bg-card`, `bg-primary`, `text-primary-foreground`, `bg-secondary`, `text-destructive`, `text-success`, `text-warning`, `border-border`, etc.
+- Do NOT use hard-coded palette colors (`text-slate-500`, `bg-blue-600`, raw `#hex` or `hsl(...)` values) in component styles. They break dark mode and the user's accent-color setting.
+- Exception: content that is inherently colored (syntax highlighting, diff added/removed lines, accent swatches) may use fixed colors if they are intentional and work in both light and dark modes.
+- For layered surfaces use the existing classes (`surface-panel`, `surface-panel-muted`, `surface-interactive`) or `hsl(var(--surface-1|2|3))` — do not invent new grays.
+
+**Font family:**
+
+- New UI must inherit the global font family from `var(--font-ui)` (Tailwind `font-sans` is mapped to it); do not hard-code a font family unless the content is intentionally code.
+
+**Font sizes — always the dynamic scale, never absolute values:**
+
+- Use the dynamic typography utilities (`text-ui-micro`, `text-ui-caption`, `text-ui-meta`, `text-ui-compact`, `text-ui-body`, `text-ui-title`, `text-ui-heading-sm/md/lg`) so text follows the user's global interface font-size setting.
 - Avoid hard-coded text sizes such as `text-[11px]` or inline `font-size` in UI components. The Tailwind `text-xs` through `text-3xl` utilities are also mapped to the global UI scale and may be used where their semantic size fits.
 - For code, paths, and numeric diff statistics that intentionally use the code style, use `font-mono text-code` so they follow the global code-font-size setting.
-- Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
+
+**Corner radius:**
+
+- Use Tailwind `rounded-sm|md|lg|xl|2xl`, which derive from the user's radius preference via `--radius`. Do not hard-code `border-radius` or `rounded-[Npx]` values.
+
+**When a token is missing:**
+
+- If a new semantic token is genuinely needed, add it to `@theme` plus `:root` and `.dark` in `src/styles/globals.css` and consume the generated utility — do not inline per-component values.
 
 ## Testing Guidelines
 

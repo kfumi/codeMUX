@@ -2870,6 +2870,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('message-nav')).toBeNull();
     });
+
+    const shell = screen.getByTestId('thread-content-shell');
+    expect(shell.className).toContain('px-3');
+    expect(shell.className).not.toContain('px-20');
   });
 
   it('keeps the message navigation floating without shifting thread content off center', () => {
