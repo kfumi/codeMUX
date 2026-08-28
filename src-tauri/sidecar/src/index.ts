@@ -12,6 +12,12 @@ import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
+import {
+  buildClaudeCompactBoundaryEvent,
+  isManualCompactPrompt,
+  normalizeClaudeCompactBoundaryMessage,
+  readClaudeCompactPreTokens,
+} from './claudeCompactEvents.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
 import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
@@ -65,7 +71,6 @@ process.on('unhandledRejection', (reason) => {
 const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
 const MESSAGE_TIMEOUT_MS = 300_000;
-const COMPACT_TIMEOUT_MS = 60_000;
 const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 
 // Gate per-message stderr logs. Each stderr line is read by the Rust backend,
@@ -771,7 +776,19 @@ export class SessionRuntime {
       idleTimeoutMs: this.timeouts.idle_timeout_ms,
     });
 
-    void this.consumeQuery(this.queryHandle, this.config.sessionId, prompt, inputPayload, includeImages);
+    const manualCompact = isManualCompactPrompt(prompt, inputPayload);
+    if (manualCompact && this.config.sessionId) {
+      emit(buildClaudeCompactBoundaryEvent(this.config.sessionId, 'compacting', { trigger: 'manual' }));
+    }
+
+    void this.consumeQuery(
+      this.queryHandle,
+      this.config.sessionId,
+      prompt,
+      inputPayload,
+      includeImages,
+      manualCompact,
+    );
   }
 
   private closeQueryHandle(reason: string): void {
@@ -1082,18 +1099,17 @@ export class SessionRuntime {
     return options;
   }
 
-  private async consumeQuery(queryHandle: Query, appSessionId?: string, prompt?: string, inputPayload?: AgentInputPayload, includeImages = true): Promise<void> {
+  private async consumeQuery(
+    queryHandle: Query,
+    appSessionId?: string,
+    prompt?: string,
+    inputPayload?: AgentInputPayload,
+    includeImages = true,
+    compactingPlaceholderEmitted = false,
+  ): Promise<void> {
     let msgCount = 0;
-    let compacting = false;
     let sawResult = false;
-    let compactTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const clearCompactTimer = () => {
-      if (compactTimer) {
-        clearTimeout(compactTimer);
-        compactTimer = null;
-      }
-    };
+    let compactingPlaceholderShown = compactingPlaceholderEmitted;
 
     const iterator = queryHandle[Symbol.asyncIterator]();
 
@@ -1113,20 +1129,7 @@ export class SessionRuntime {
           }
           throw new Error(`Query timed out: no message received for ${this.timeouts.idle_timeout_ms / 1000}s (after msg #${msgCount})`);
         },
-        compacting ? [new Promise<IteratorResult<unknown>>((resolve) => {
-          compactTimer = setTimeout(() => {
-            process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating turn as complete\n`);
-            emit({
-              type: 'system_event',
-              subtype: 'compact_boundary',
-              compact_metadata: { trigger: 'manual', pre_tokens: 0 },
-              session_id: appSessionId || '',
-              uuid: `compact-timeout-${Date.now()}`,
-            });
-            resolve({ done: true, value: undefined });
-          }, COMPACT_TIMEOUT_MS);
-          if (compactTimer.unref) compactTimer.unref();
-        })] : [],
+        [],
         () => this.turnIdleGuard?.remainingIdleMs() === Infinity,
       );
     };
@@ -1134,7 +1137,6 @@ export class SessionRuntime {
     try {
       while (this.queryHandle === queryHandle) {
         const result = await nextMessage();
-        clearCompactTimer();
         if (result.done) {
           break;
         }
@@ -1153,10 +1155,15 @@ export class SessionRuntime {
         }
 
         if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
-          compacting = true;
-        }
-        if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-          compacting = false;
+          this.turnIdleGuard?.suspend();
+          if (!compactingPlaceholderShown && appSessionId) {
+            const preTokens = readClaudeCompactPreTokens(msg);
+            emit(buildClaudeCompactBoundaryEvent(appSessionId, 'compacting', {
+              trigger: 'auto',
+              ...(preTokens !== undefined ? { pre_tokens: preTokens } : {}),
+            }));
+            compactingPlaceholderShown = true;
+          }
         }
         if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
@@ -1181,7 +1188,7 @@ export class SessionRuntime {
         }
 
         const eventToEmit = msg.type === 'system' && msg.subtype === 'compact_boundary'
-            ? { ...(result.value as Record<string, unknown>), type: 'system_event', event_id: msg.uuid ?? crypto.randomUUID() }
+            ? normalizeClaudeCompactBoundaryMessage(result.value as Record<string, unknown>, appSessionId)
             : result.value;
 
         if (DEBUG_MESSAGE_LOGS) {
@@ -1254,6 +1261,15 @@ export class SessionRuntime {
           if (this.config) {
             this.startWarmup(this.activeConfigGeneration);
           }
+        } else if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+          sawResult = true;
+          writeLog('[claude-task]', 'sendInput COMPLETE (compact)');
+          this.turnIdleGuard?.resume();
+          this.finishTurn();
+          this.closeQueryHandle('compact_complete');
+          if (this.config) {
+            this.startWarmup(this.activeConfigGeneration);
+          }
         }
       }
       if (DEBUG_MESSAGE_LOGS) {
@@ -1299,7 +1315,6 @@ export class SessionRuntime {
         this.startWarmup(this.activeConfigGeneration);
       }
     } finally {
-      clearCompactTimer();
       if (shouldEmitDoneOnClaudeIteratorCompletion({
         turnActive: this.turnActive,
         sawResult,

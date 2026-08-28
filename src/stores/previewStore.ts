@@ -312,7 +312,9 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   loadFileTree: async (rootPath: string) => {
     set({ fileTreeLoading: true });
     try {
-      const nodes = await fileApi.listDirectory(rootPath, 3, rootPath);
+      // 深度 5（Rust 侧上限）：消息里相对路径的链接化依赖树里能找到深层文件，
+      // 如 `lnwlcs\docs\research\xxx.md` 位于根下第 4 层
+      const nodes = await fileApi.listDirectory(rootPath, 5, rootPath);
       set({ treeRoot: convertTree(nodes), treeRootPath: rootPath, fileTreeLoading: false });
     } catch (error) {
       logger.error('Failed to load file tree', { rootPath }, serializeError(error));

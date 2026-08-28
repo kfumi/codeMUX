@@ -428,14 +428,14 @@ function ScrollToBottomButton({
   onScrollToBottom: () => void;
 }) {
   return (
-    <TooltipHint content="Scroll to bottom">
+    <TooltipHint content="滚动到底部">
       <Button
         type="button"
-        variant="ghost"
+        variant="outline"
         size="icon"
-        className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+        className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:bg-[hsl(var(--surface-3))] hover:text-foreground disabled:invisible"
         data-testid="scroll-to-bottom"
-        aria-label="Scroll to bottom"
+        aria-label="滚动到底部"
         disabled={isAtBottom}
         onClick={onScrollToBottom}
       >
@@ -1227,9 +1227,9 @@ function AssistantLikeMessage({
     }
   };
   const messageBottomSpacing = shouldHideCollapsedContent && collapseInfo?.isToggleMessage
-    ? 'mb-2'
+    ? 'mb-4'
     : shouldRenderFooter
-      ? 'mb-2'
+      ? 'mb-4'
       : 'mb-5';
 
   return (

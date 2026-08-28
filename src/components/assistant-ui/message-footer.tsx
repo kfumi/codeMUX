@@ -60,7 +60,7 @@ export function MessageFooter({
     <div
       data-message-footer
       className={cn(
-        'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
+        'mt-4 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
         revealClass,
         className,
       )}

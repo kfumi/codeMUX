@@ -56,7 +56,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
   const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
   const { config, getActiveProvider } = useSettingsStore();
-  const { setProjectPath } = usePreviewStore();
+  const setProjectPath = usePreviewStore((state) => state.setProjectPath);
+  const previewProjectPath = usePreviewStore((state) => state.projectPath);
+  const treeRootPath = usePreviewStore((state) => state.treeRootPath);
+  const fileTreeLoading = usePreviewStore((state) => state.fileTreeLoading);
+  const loadFileTree = usePreviewStore((state) => state.loadFileTree);
   const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
   // 检测容器宽度，窄屏时启用紧凑模式
@@ -194,6 +198,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
   }, [workingPath, project?.path, setProjectPath]);
+
+  // 会话打开时预热项目文件树（根目录变化即重载）：消息里相对路径的链接化
+  // 需要在树里精确命中文件才成立，树必须在消息渲染前就绪；@ 文件提及也复用这份数据
+  useEffect(() => {
+    if (previewProjectPath && treeRootPath !== previewProjectPath && !fileTreeLoading) {
+      void loadFileTree(previewProjectPath);
+    }
+  }, [previewProjectPath, treeRootPath, fileTreeLoading, loadFileTree]);
 
   useEffect(() => {
     if (workingPath) {

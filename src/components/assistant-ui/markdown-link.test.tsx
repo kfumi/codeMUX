@@ -249,7 +249,6 @@ describe('CodeMuxMarkdownLink', () => {
     expect(links.map((link) => link.textContent)).toEqual([
       'App.tsx:20',
       'CodeMuxThread.tsx:1007',
-      'main.rs',
     ]);
 
     fireEvent.click(links[1]!);
@@ -294,9 +293,26 @@ describe('CodeMuxMarkdownLink', () => {
     expect(links.map((link) => link.textContent)).toEqual(['App.tsx:20']);
   });
 
-  it('resolves formatted relative paths in inline code against the session project path', async () => {
+  it('resolves formatted relative paths in inline code through the loaded file tree', async () => {
     readFile.mockResolvedValue('# 调研报告');
-    usePreviewStore.setState({ treeRoot: null, treeRootPath: null, projectPath: 'D:/project/ai-code/codeMUX' });
+    const docName = '企宽竣工FTTO与AC-AP-企业路由器设备组件调研.md';
+    usePreviewStore.setState({
+      treeRoot: [{
+        name: 'docs',
+        path: 'D:/project/ai-code/codeMUX/docs',
+        isDir: true,
+        children: [{
+          name: 'research',
+          path: 'D:/project/ai-code/codeMUX/docs/research',
+          isDir: true,
+          children: [
+            { name: docName, path: `D:/project/ai-code/codeMUX/docs/research/${docName}`, isDir: false },
+          ],
+        }],
+      }],
+      treeRootPath: 'D:/project/ai-code/codeMUX',
+      projectPath: 'D:/project/ai-code/codeMUX',
+    });
 
     const { container } = render(
       <Streamdown
@@ -305,21 +321,19 @@ describe('CodeMuxMarkdownLink', () => {
         rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
         linkSafety={{ enabled: false }}
       >
-        {'调研完成，文档已写入：**`docs/research/企宽竣工FTTO与AC-AP-企业路由器设备组件调研.md`**'}
+        {`调研完成，文档已写入：**\`docs/research/${docName}\`**`}
       </Streamdown>,
     );
 
     const links = await within(container).findAllByRole('link');
-    expect(links.map((link) => link.textContent)).toEqual([
-      '企宽竣工FTTO与AC-AP-企业路由器设备组件调研.md',
-    ]);
+    expect(links.map((link) => link.textContent)).toEqual([docName]);
 
     fireEvent.click(links[0]!);
 
     await waitFor(() => {
       expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
         kind: 'file',
-        filePath: 'D:/project/ai-code/codeMUX/docs/research/企宽竣工FTTO与AC-AP-企业路由器设备组件调研.md',
+        filePath: `D:/project/ai-code/codeMUX/docs/research/${docName}`,
         fileContent: '# 调研报告',
       });
     });
@@ -402,8 +416,19 @@ describe('CodeMuxMarkdownLink', () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it('keeps relative paths that escape the session directory unlinked', async () => {
-    usePreviewStore.setState({ treeRoot: null, treeRootPath: null, projectPath: 'D:/project/ai-code/codeMUX' });
+  it('only links relative paths that exist in the loaded file tree', async () => {
+    usePreviewStore.setState({
+      treeRoot: [{
+        name: 'docs',
+        path: 'D:/project/ai-code/codeMUX/docs',
+        isDir: true,
+        children: [
+          { name: 'design.md', path: 'D:/project/ai-code/codeMUX/docs/design.md', isDir: false },
+        ],
+      }],
+      treeRootPath: 'D:/project/ai-code/codeMUX',
+      projectPath: 'D:/project/ai-code/codeMUX',
+    });
 
     const { container } = render(
       <Streamdown
@@ -412,7 +437,7 @@ describe('CodeMuxMarkdownLink', () => {
         rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
         linkSafety={{ enabled: false }}
       >
-        {'外部引用 ../sibling/design.md 与内部 docs/design.md'}
+        {'外部引用 ../sibling/design.md 与不存在的 docs/missing.md 均不链接，已跟踪的 docs/design.md 会链接'}
       </Streamdown>,
     );
 

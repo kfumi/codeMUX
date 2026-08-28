@@ -408,10 +408,9 @@ function looksLikeFileName(value: string): boolean {
  * 判定并解析一个纯文本文件引用是否可链接化：
  * - 绝对路径沿用原逻辑（文件树已知则必须命中，否则回退到注册项目包含判断）；
  * - 相对路径仅在 `options.linkRelativeFilePaths` 开启时处理（消息管线开启、
- *   文件预览管线关闭）：优先在已加载的文件树里做后缀匹配（可跨项目命中真实文件），
- *   未命中或树未加载时，用会话 projectPath（其次活动项目）词法拼接出绝对路径，
- *   只要落在会话目录或任一注册项目内即可链接（与绝对路径的无树回退同等乐观，
- *   点击后文件不存在只会让预览 Tab 显示读取错误）。
+ *   文件预览管线关闭），且严格以已加载的文件树为准：整条相对路径在树里
+ *   后缀匹配命中才链接，匹配不到（或树未加载）就不链接——宁漏勿错，
+ *   不做路径拼接兜底，避免拼出项目根下并不存在的错误链接。
  * 返回携带解析后绝对路径的引用（保留原文 label 与行号后缀），不可链接时返回 null。
  */
 function resolveLinkablePlainFileReference(
@@ -443,29 +442,12 @@ function resolveLinkablePlainFileReference(
 }
 
 function resolveRelativePlainFileReference(relativePath: string): string | null {
-  const { treeRoot, projectPath } = usePreviewStore.getState();
-
-  const treeMatch = treeRoot ? matchTreePathForRelativePath(treeRoot, relativePath) : null;
-  if (treeMatch) {
-    return treeMatch;
-  }
-
-  // 无分隔符的裸文件名（如 `README.md`）在没有文件树佐证时过于含糊，不做链接
-  if (!/[\\/]/.test(relativePath)) {
+  const { treeRoot } = usePreviewStore.getState();
+  if (!treeRoot) {
     return null;
   }
 
-  const basePath = projectPath ?? getActiveProjectPath();
-  if (!basePath) {
-    return null;
-  }
-
-  const resolved = resolvePathAgainstBase(basePath, relativePath);
-  if (!resolved || !isResolvedRelativePathLinkable(resolved)) {
-    return null;
-  }
-
-  return resolved;
+  return matchTreePathForRelativePath(treeRoot, relativePath);
 }
 
 function matchTreePathForRelativePath(treeRoot: FileTreeNodeData[], relativePath: string): string | null {
@@ -487,40 +469,6 @@ function matchTreePathForRelativePath(treeRoot: FileTreeNodeData[], relativePath
     : undefined;
 
   return preferred ?? matches[0] ?? null;
-}
-
-function isResolvedRelativePathLinkable(resolvedPath: string): boolean {
-  const { projectPath } = usePreviewStore.getState();
-  if (projectPath) {
-    const normalizedResolved = normalizePathForCompare(resolvedPath).replace(/\/+$/, '');
-    const normalizedSessionPath = normalizePathForCompare(projectPath).replace(/\/+$/, '');
-    if (normalizedResolved.startsWith(`${normalizedSessionPath}/`)) {
-      return true;
-    }
-  }
-
-  return isPathInsideRegisteredProject(resolvedPath);
-}
-
-/** 词法解析相对路径段（`.` 跳过、`..` 上弹），不访问文件系统 */
-function resolvePathAgainstBase(basePath: string, relativePath: string): string | null {
-  const segments = basePath.replace(/[\\/]+$/, '').split(/[\\/]/);
-  for (const segment of relativePath.replace(/\\/g, '/').split('/')) {
-    if (!segment || segment === '.') {
-      continue;
-    }
-    if (segment === '..') {
-      if (segments.length <= 1) {
-        return null;
-      }
-      segments.pop();
-      continue;
-    }
-    segments.push(segment);
-  }
-
-  const resolved = segments.join('/');
-  return normalizePathForCompare(resolved) === normalizePathForCompare(basePath) ? null : resolved;
 }
 
 function normalizeRelativePathSegments(value: string): string {
