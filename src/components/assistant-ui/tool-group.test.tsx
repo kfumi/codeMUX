@@ -87,6 +87,27 @@ describe('ToolGroupTrigger', () => {
     );
   });
 
+  it('labels the group 运行中 while a subagent is still running instead of 已执行', () => {
+    const { container } = render(
+      <ToolGroup startIndex={0} endIndex={0} toolNames={['Task']} running>
+        <div>工具详情</div>
+      </ToolGroup>,
+    );
+
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).toContain('运行中');
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).not.toContain('已执行');
+  });
+
+  it('keeps the 已执行 label when no subagent is running', () => {
+    const { container } = render(
+      <ToolGroup startIndex={0} endIndex={0} toolNames={['Task']}>
+        <div>工具详情</div>
+      </ToolGroup>,
+    );
+
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).toContain('已执行');
+  });
+
   it('restores the native collapsible animation for grouped tools', () => {
     const { container } = render(
       <ToolGroupRoot defaultOpen>

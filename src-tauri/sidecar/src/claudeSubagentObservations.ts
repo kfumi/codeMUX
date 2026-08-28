@@ -189,6 +189,19 @@ export function projectSidechainTurnSourceEvents(message: Record<string, unknown
   return events;
 }
 
+/** Project a sidechain frame, recording a projection failure as an error event instead of throwing. */
+function projectSidechainSafely(message: Record<string, unknown>): TurnSourceEvent[] {
+  try {
+    return projectSidechainTurnSourceEvents(message);
+  } catch (error) {
+    return [{
+      kind: 'error',
+      subtype: 'subagent_projection_failed',
+      message: `Failed to project sidechain frame: ${error instanceof Error ? error.message : String(error)}`,
+    }];
+  }
+}
+
 /**
  * Pure Claude adapter seam: SDK message in, observations out. Returns an
  * empty array for messages the adapter does not describe. The caller is
@@ -197,7 +210,7 @@ export function projectSidechainTurnSourceEvents(message: Record<string, unknown
 export function observeClaudeSdkMessage(message: Record<string, unknown>): SubagentObservation[] {
   if (isClaudeSidechainMessage(message)) {
     const parentToolUseId = asString(message.parent_tool_use_id);
-    const events = projectSidechainTurnSourceEvents(message);
+    const events = projectSidechainSafely(message);
     if (events.length === 0) return [];
     return [{ kind: 'timeline', ...(parentToolUseId ? { parentToolUseId } : {}), events }];
   }

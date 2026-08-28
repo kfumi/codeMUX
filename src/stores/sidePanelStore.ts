@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import { fileApi } from '../lib/tauri';
+import type { SubagentStatus } from '../lib/codeMuxProtocol';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
 export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file' | 'subagent';
@@ -25,7 +26,7 @@ export interface SidePanelTab {
   /** kind: 'subagent' — which session owns the track and which subagent it shows. */
   subagentId?: string;
   subagentSessionId?: string;
-  subagentStatus?: 'running' | 'completed' | 'failed' | 'canceled';
+  subagentStatus?: SubagentStatus;
 }
 
 interface SidePanelSnapshot {
@@ -51,7 +52,7 @@ interface SidePanelState {
   openTerminalTab: (projectPath: string) => void;
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
-  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']) => void;
+  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SubagentStatus) => void;
   openFileTab: (projectPath: string | undefined, filePath: string) => Promise<void>;
   updateFileContent: (tabId: string, content: string) => void;
   saveFileTab: (tabId: string) => Promise<void>;
@@ -127,7 +128,7 @@ function createPlanTab(scopeId: string, planFilePath: string, planContent: strin
   };
 }
 
-function createSubagentTab(scopeId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']): SidePanelTab {
+function createSubagentTab(scopeId: string, subagentId: string, title: string, status?: SubagentStatus): SidePanelTab {
   return {
     id: `${scopeId}:subagent:${subagentId}`,
     kind: 'subagent',
@@ -270,7 +271,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     recordNavigation(get());
   },
 
-  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SidePanelTab['subagentStatus']) => {
+  openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SubagentStatus) => {
     const scopeId = sessionId || get().activeScopeId;
     const id = `${scopeId}:subagent:${subagentId}`;
     set((state) => {

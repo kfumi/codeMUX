@@ -48,6 +48,10 @@ export function subagentTabTitle(descriptor: SubagentDescriptor | undefined): st
   return descriptor?.description || descriptor?.title || '子智能体';
 }
 
+function isTerminalSubagentStatus(status: SubagentStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'canceled';
+}
+
 export const useSubagentStore = create<SubagentState>((set, get) => ({
   sessions: {},
 
@@ -56,12 +60,19 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
     set((state) => {
       const current = sessionState(state.sessions, sessionId);
       const existing = current.descriptors[event.subagent_id];
+      // Sticky rule: a terminal descriptor never goes back to running
+      // (mirrors the Rust upsert semantics).
+      const status: SubagentStatus = existing
+        && isTerminalSubagentStatus(existing.status)
+        && (event.status === 'running' || event.status === undefined)
+        ? existing.status
+        : event.status ?? existing?.status ?? 'running';
       const descriptor: SubagentDescriptor = {
         subagentId: event.subagent_id,
         provider: existing?.provider ?? event.provider ?? 'claude',
         title: event.title !== undefined ? event.title : existing?.title ?? null,
         description: event.description !== undefined ? event.description : existing?.description ?? null,
-        status: event.status ?? existing?.status ?? 'running',
+        status,
         toolCallId: event.tool_call_id !== undefined ? event.tool_call_id : existing?.toolCallId ?? event.subagent_id,
         subtitle: event.subtitle !== undefined ? event.subtitle : existing?.subtitle ?? null,
         updatedAt: Date.now(),

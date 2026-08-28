@@ -379,7 +379,7 @@ export function CodeMuxToolCallMessagePart({
             {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
             {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
               isSubAgentToolCall
-                ? <ToolFallbackConversationResult result={stringifyResult(result)} />
+                ? <ToolFallbackConversationResult result={subagentStatus === 'running' ? undefined : stringifyResult(result)} />
                 : <ToolFallbackResult result={stringifyResult(result)} />
             )}
           </>
@@ -1037,9 +1037,6 @@ function SubagentPreviewChip({
   status: string;
   onOpen: () => void;
 }) {
-  const open = () => {
-    onOpen();
-  };
   return (
     <TooltipHint content="在右侧面板查看子智能体">
       <span
@@ -1055,7 +1052,7 @@ function SubagentPreviewChip({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          open();
+          onOpen();
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') {
@@ -1063,7 +1060,7 @@ function SubagentPreviewChip({
           }
           event.preventDefault();
           event.stopPropagation();
-          open();
+          onOpen();
         }}
       >
         <Bot className={cn('h-3 w-3 shrink-0', status === 'running' && 'animate-pulse')} />

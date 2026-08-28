@@ -593,9 +593,13 @@ export class SessionRuntime {
       clearTimeout(fallbackTimer);
       this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       this.finishTurn();
-      // User Stop kills every child bound to this Claude query.
-      this.emitSubagentEvents(this.subagents.failRunningTasks());
-      this.scheduleQueryIdleClose();
+      // User Stop ends the whole query (Stop = all children terminated).
+      // closeQueryHandle fails any still-running children, then warmup re-arms.
+      const hadQuery = this.queryHandle !== null;
+      this.closeQueryHandle('user_stop');
+      if (hadQuery && this.config) {
+        this.startWarmup(this.activeConfigGeneration);
+      }
     }
   }
 
@@ -1387,6 +1391,11 @@ export class SessionRuntime {
         this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       }
       this.finishTurn();
+      // The consume loop is exiting; a leftover handle with no reader would
+      // swallow the next pushed prompt, so tear the query down.
+      if (this.queryHandle === queryHandle) {
+        this.closeQueryHandle('query_error');
+      }
       if (isIdleTimeout && this.config) {
         this.startWarmup(this.activeConfigGeneration);
       }

@@ -50,16 +50,29 @@ pub(crate) fn handle_sidecar_subagent_event(state: &crate::AppState, raw_event: 
 }
 
 /// Load descriptors + per-subagent timelines. Reconciles stale `running`
-/// descriptors (owned by a dead sidecar process) to `failed` once per open.
+/// descriptors to `failed` — but only when no live sidecar owns the session,
+/// so switching between sessions never fails children that are still running.
 #[tauri::command]
 pub async fn load_session_subagents(
+    app: tauri::AppHandle,
     state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<SessionSubagentsPayload, String> {
+    use tauri::Manager;
+
+    let sidecar_alive = app
+        .state::<crate::agent::commands::AgentState>()
+        .sidecars
+        .lock()
+        .await
+        .contains_key(&app_session_id);
+
     // Short-lived lock, matching the load_session_events command pattern.
     let db = state.db.lock().map_err(|_| "Database lock poisoned")?;
-    operations::reconcile_running_session_subagents(&db, &app_session_id)
-        .map_err(|e| e.to_string())?;
+    if !sidecar_alive {
+        operations::reconcile_running_session_subagents(&db, &app_session_id)
+            .map_err(|e| e.to_string())?;
+    }
     let subagents =
         operations::list_session_subagents(&db, &app_session_id).map_err(|e| e.to_string())?;
     let mut timelines: HashMap<String, Vec<Value>> = HashMap::new();
