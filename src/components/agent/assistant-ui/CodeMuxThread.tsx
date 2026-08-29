@@ -84,6 +84,8 @@ type CodeMuxThreadRenderContextValue = {
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
+  lastTurnId: string | undefined;
+  hasRunningSubagents: boolean;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -200,6 +202,14 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => new Map(conversationTurns.map((turn, index) => [turn.id, index])),
     [conversationTurns],
   );
+  const lastTurnId = conversationTurns.length > 0
+    ? conversationTurns[conversationTurns.length - 1].id
+    : undefined;
+  const hasRunningSubagents = useSubagentStore((state) => {
+    const session = state.sessions[sessionId];
+    if (!session) return false;
+    return session.order.some((id) => session.descriptors[id]?.status === 'running');
+  });
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
@@ -225,6 +235,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
+    lastTurnId,
+    hasRunningSubagents,
   }), [
     sessionId,
     compactAiOutput,
@@ -237,6 +249,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
+    lastTurnId,
+    hasRunningSubagents,
   ]);
 
   return (
@@ -557,6 +571,8 @@ function CodeMuxAssistantMessage() {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
+    lastTurnId,
+    hasRunningSubagents,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -570,6 +586,8 @@ function CodeMuxAssistantMessage() {
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
       turnOrdinalById={turnOrdinalById}
+      lastTurnId={lastTurnId}
+      hasRunningSubagents={hasRunningSubagents}
     />
   );
 }
@@ -1167,6 +1185,8 @@ function AssistantLikeMessage({
   toolDurations,
   turnByEventIndex,
   turnOrdinalById,
+  lastTurnId,
+  hasRunningSubagents,
 }: {
   message: MessageState;
   sessionId: string;
@@ -1178,6 +1198,8 @@ function AssistantLikeMessage({
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
+  lastTurnId: string | undefined;
+  hasRunningSubagents: boolean;
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
@@ -1200,10 +1222,15 @@ function AssistantLikeMessage({
     .map((eventIndex) => turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
   const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
+  // A completed turn whose background subagents are still exploring is not
+  // actually finished — hold the footer (timestamp/duration/fork) back the same
+  // way the SubagentRunningRow keeps the "still running" signal visible.
+  const isAwaitingRunningSubagents = hasRunningSubagents && turn != null && turn.id === lastTurnId;
   const shouldRenderFooter =
     isFinal
     && turn?.status === 'completed'
     && message.metadata.custom?.sourceRole !== 'system'
+    && !isAwaitingRunningSubagents
     && turn !== undefined;
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
   const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;

@@ -131,7 +131,7 @@ describe('useAgentNotifications', () => {
     useSubagentStore.setState({ sessions: {} });
   });
 
-  it('background subagents running: holds the terminal notification and pings when they all finish', async () => {
+  it('background subagents running: holds the terminal notification until the summary turn completes', async () => {
     render(<Harness />);
 
     useSubagentStore.setState({
@@ -181,7 +181,8 @@ describe('useAgentNotifications', () => {
     // "task completed" ping yet.
     expect(sendAgentNotificationMock).not.toHaveBeenCalled();
 
-    // All children reach terminal state → the real completion ping.
+    // All children reach terminal state. The parent is about to be woken to
+    // summarize, so the pre-completion result stays held.
     const session = useSubagentStore.getState().sessions['session-1'];
     useSubagentStore.setState({
       sessions: {
@@ -194,12 +195,56 @@ describe('useAgentNotifications', () => {
       },
     });
 
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
+
+    // The summary turn's own terminal event arrives after the subagents
+    // finished — that is the real end of the flow.
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-1',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 800,
+              num_turns: 1,
+              result: '',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-2',
+              session_id: 'session-1',
+              duration_ms: 4000,
+              duration_api_ms: 3200,
+              num_turns: 2,
+              result: '汇总完成',
+              usage: { input_tokens: 2, output_tokens: 2 },
+            },
+          },
+        ],
+      },
+      eventTimestamps: { 'session-1': [Date.now() - 60_000, Date.now()] },
+    });
+
     await waitFor(() => {
-      expect(sendAgentNotificationMock).toHaveBeenCalledWith({
-        title: '子智能体已完成',
-        body: '重构设置页',
-        sessionId: 'session-1',
-      });
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
+    });
+    expect(sendAgentNotificationMock).toHaveBeenCalledWith({
+      title: '任务已完成',
+      body: '重构设置页',
+      sessionId: 'session-1',
     });
   });
 

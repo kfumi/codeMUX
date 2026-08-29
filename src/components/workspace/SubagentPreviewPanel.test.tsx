@@ -142,6 +142,55 @@ describe('SubagentPreviewPanel', () => {
     expect(closestRow(promptText!)?.querySelector('[data-message-footer]')).toBeTruthy();
   });
 
+  it('运行中时最后一条 assistant 消息不显示 footer，仅任务提示显示', () => {
+    seedStore({
+      status: 'running',
+      events: [
+        {
+          type: 'user_message',
+          content: '探索前端技术栈',
+          event_id: 'e0',
+          timestamp: '2026-08-29T05:47:19.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '最终汇总' }],
+          event_id: 'e3',
+          timestamp: '2026-08-29T05:47:25.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+
+    // Still running: only the task prompt row carries a footer.
+    const footers = container.querySelectorAll('[data-message-footer]');
+    expect(footers).toHaveLength(1);
+  });
+
+  it('思考内容用思考折叠组件渲染而不是普通文本', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [
+            { type: 'thinking', thinking: '先看目录结构', signature: 'sig' },
+            { type: 'text', text: '最终汇总' },
+          ],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+      ],
+    });
+
+    renderPanel();
+
+    expect(screen.getByText('思考')).toBeTruthy();
+    // Collapsed by default: the thinking body is not rendered as plain text.
+    expect(screen.queryByText(/先看目录结构/)).toBeNull();
+  });
+
   it('消息 footer 提供复制按钮并可复制文本', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.assign(navigator, { clipboard: { writeText } });

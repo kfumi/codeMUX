@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { formatTime } from '@/components/assistant-ui/message-footer';
 import {
+  ReasoningContent,
+  ReasoningRoot,
+  ReasoningText,
+  ReasoningTrigger,
+} from '@/components/assistant-ui/reasoning';
+import {
   CodeMuxToolCallMessagePart,
 } from '@/components/agent/assistant-ui/CodeMuxMessageParts';
 import {
@@ -137,12 +143,13 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
           </div>
         ) : (
           <div className="space-y-4">
-            {messages.map((message) => (
+            {messages.map((message, messageIndex) => (
               <SubagentPreviewMessage
                 key={message.id}
                 message={message}
                 sessionId={sessionId}
                 timestamp={timestampsByText.get(message)}
+                isTimelineRunning={isRunning && messageIndex === messages.length - 1}
               />
             ))}
             {isRunning ? (
@@ -222,15 +229,19 @@ function SubagentPreviewMessage({
   message,
   sessionId,
   timestamp,
+  isTimelineRunning,
 }: {
   message: CodeMuxAssistantMessage;
   sessionId: string;
   timestamp?: number;
+  /** True while this message is the tail of a still-running subagent. */
+  isTimelineRunning: boolean;
 }) {
   const text = messageText(message);
-  // Align with the main thread: only user messages and the turn's final
-  // assistant message carry a footer; intermediate streaming blocks don't.
-  const showFooter = message.role === 'user' || message.metadata.isFinalAssistantMessage === true;
+  // Align with the main thread: user messages and completed-turn final
+  // assistant messages carry a footer; the running tail doesn't.
+  const showFooter = message.role === 'user'
+    || (message.metadata.isFinalAssistantMessage === true && !isTimelineRunning);
 
   if (message.role === 'user' && typeof message.content[0] === 'object' && 'type' in message.content[0] && message.content[0].type === 'text') {
     // The task prompt opening the timeline.
@@ -256,10 +267,16 @@ function SubagentPreviewMessage({
             );
           }
           if (part.type === 'reasoning') {
+            // Same collapsible thinking block the main thread uses.
             return (
-              <div key={index} className="pl-1 text-muted-foreground/72">
-                <Streamdown mode="static" {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}>{part.text}</Streamdown>
-              </div>
+              <ReasoningRoot key={index}>
+                <ReasoningTrigger />
+                <ReasoningContent>
+                  <ReasoningText>
+                    <Streamdown mode="static" {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}>{part.text}</Streamdown>
+                  </ReasoningText>
+                </ReasoningContent>
+              </ReasoningRoot>
             );
           }
           if (part.type === 'tool-call') {
