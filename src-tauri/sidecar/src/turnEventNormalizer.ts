@@ -135,7 +135,7 @@ export class TurnEventNormalizer {
     return [];
   }
 
-  finish(outcome: TurnOutcome): CodeMuxTurnEvent[] {
+  finish(outcome: TurnOutcome, flags?: { synthetic?: boolean }): CodeMuxTurnEvent[] {
     if (this.finished) return [];
     this.finished = true;
     return [this.withSequence({
@@ -143,6 +143,7 @@ export class TurnEventNormalizer {
       ...(outcome.reason ? { reason: outcome.reason } : {}),
       ...(outcome.usage ? { usage: outcome.usage } : {}),
       ...(outcome.durationMs !== undefined ? { duration_ms: outcome.durationMs } : {}),
+      ...(flags?.synthetic ? { synthetic: true } : {}),
       event_id: this.eventIdFactory(), sequence: 0,
     })];
   }

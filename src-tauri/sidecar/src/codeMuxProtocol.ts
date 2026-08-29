@@ -167,6 +167,8 @@ export type CodeMuxTurnEvent =
         reasoning_output_tokens: number;
       };
       duration_ms?: number;
+      /** True when CodeMUX synthesized this boundary (no CLI `result` arrived). */
+      synthetic?: boolean;
       event_id: string;
       sequence: number;
     };

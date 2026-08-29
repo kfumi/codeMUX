@@ -319,6 +319,50 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime.shutdown();
   });
 
+  it('still synthesizes the continuation boundary when non-content frames trail the summary', async () => {
+    runtime.continuationQuiescenceMs = 250;
+    await runtime.sendInput('launch agent');
+    await flush();
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'launched' });
+    await flush();
+    const emittedAfterFirstTurn = harness.emitted.length;
+
+    query.pushMessage({
+      type: 'assistant',
+      uuid: 'assistant-continuation',
+      session_id: 'native-1',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Both subagents completed, here is the summary' }] },
+    });
+    // A second subagent finishes right after the summary content: its
+    // protocol frames reach the consume loop but project nothing
+    // parent-visible. They must not cancel the pending quiescence timer.
+    query.pushMessage({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'task-2',
+      tool_use_id: 'toolu_2',
+      status: 'completed',
+    });
+    query.pushMessage({
+      type: 'assistant',
+      uuid: 'sidechain-frame',
+      session_id: 'native-1',
+      parent_tool_use_id: 'toolu_2',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain tail' }] },
+    });
+    await flush();
+    expect(harness.emitted.slice(emittedAfterFirstTurn).some((event) => event.type === 'turn_finished')).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const finish = harness.emitted
+      .slice(emittedAfterFirstTurn)
+      .find((event) => event.type === 'turn_finished') as { outcome?: string; synthetic?: boolean } | undefined;
+    expect(finish?.outcome).toBe('completed');
+    expect(finish?.synthetic).toBe(true);
+
+    runtime.shutdown();
+  });
+
   it('closes a pending continuation turn before pushing the next prompt', async () => {
     runtime.continuationQuiescenceMs = 60_000;
     await runtime.sendInput('launch agent');
@@ -340,7 +384,9 @@ describe('SessionRuntime subagent query lifecycle', () => {
     await runtime.sendInput('summarize now');
     await flush();
     // The pending continuation was closed before the new prompt turn started.
-    expect(harness.emitted.filter((event) => event.type === 'turn_finished')).toHaveLength(2);
+    const finishes = harness.emitted.filter((event) => event.type === 'turn_finished');
+    expect(finishes).toHaveLength(2);
+    expect((finishes[1] as { synthetic?: boolean }).synthetic).toBe(true);
     expect(query.prompts).toHaveLength(2);
     expect(query.closed).toBe(false);
 

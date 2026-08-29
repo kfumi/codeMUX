@@ -1242,7 +1242,6 @@ export class SessionRuntime {
         }
 
         this.turnIdleGuard?.reset();
-        this.clearContinuationQuiescence();
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
@@ -1304,7 +1303,7 @@ export class SessionRuntime {
           const emitPreview = (() => { try { return JSON.stringify(emitObj).slice(0, 1000) } catch { return String(emitObj).slice(0, 1000) } })();
           process.stderr.write(`[claude-debug] EMIT type=${emitObj?.type ?? '(no type)'} preview=${emitPreview}\n`);
         }
-        let continuationContentFinished = false;
+        let continuationContentActivity = false;
         if (msg.type === 'result') {
           this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
         } else {
@@ -1323,15 +1322,14 @@ export class SessionRuntime {
           }
           for (const sourceEvent of projection.toolEvents) {
             for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(sourceEvent)) {
-              if (normalizedEvent.type === 'content_finished') continuationContentFinished = true;
+              continuationContentActivity = true;
               emit(normalizedEvent);
             }
           }
           if (projection.remainingEvent) {
             const remainingEvent = projection.remainingEvent as Record<string, unknown>;
             if (remainingEvent.type === 'stream_event') {
-              const inner = remainingEvent.event as Record<string, unknown> | undefined;
-              if (inner?.type === 'content_block_stop') continuationContentFinished = true;
+              continuationContentActivity = true;
               emit({
                 ...remainingEvent,
                 session_id: appSessionId ?? this.config?.sessionId ?? remainingEvent.session_id,
@@ -1340,7 +1338,7 @@ export class SessionRuntime {
               const remainingMessage = toClaudeAssistantMessageEvent(remainingEvent);
               if (remainingMessage) {
                 for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(remainingMessage)) {
-                  if (normalizedEvent.type === 'assistant_message') continuationContentFinished = true;
+                  continuationContentActivity = true;
                   emit(normalizedEvent);
                 }
               } else {
@@ -1351,8 +1349,11 @@ export class SessionRuntime {
         }
 
         // A continuation turn the CLI will never close with a `result`: once
-        // its content stops streaming, synthesize the turn boundary.
-        if (continuationContentFinished) {
+        // its content stops streaming, synthesize the turn boundary. Only
+        // parent-visible content counts as activity — trailing protocol
+        // frames (task_notification, sidechain traffic) project nothing and
+        // must not push the boundary out indefinitely.
+        if (continuationContentActivity) {
           this.armContinuationQuiescence();
         }
 
@@ -1538,7 +1539,7 @@ export class SessionRuntime {
     this.clearContinuationQuiescence();
     if (!this.continuationNormalizer || this.turnEventNormalizer) return;
     writeLog('[claude-task]', `continuation turn COMPLETE (${reason}, synthesized)`);
-    this.emitTurnOutcome({ outcome });
+    this.emitTurnOutcome({ outcome }, { synthetic: true });
     this.continuationNormalizer = null;
   }
 
@@ -1577,8 +1578,8 @@ export class SessionRuntime {
     }
   }
 
-  private emitTurnOutcome(outcome: TurnOutcome): void {
-    for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.finish(outcome) ?? []) {
+  private emitTurnOutcome(outcome: TurnOutcome, flags?: { synthetic?: boolean }): void {
+    for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.finish(outcome, flags) ?? []) {
       emit(event);
     }
   }
