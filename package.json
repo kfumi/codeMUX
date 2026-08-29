@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/copy-mobile-dist.mjs && vite",
     "build": "tsc && vite build",
+    "build:sidecar": "cd src-tauri/sidecar && npm run build",
     "build:mobile": "cd src-mobile && npm ci && npm run build && cd .. && node scripts/copy-mobile-dist.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

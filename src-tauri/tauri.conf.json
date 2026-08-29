@@ -4,9 +4,9 @@
   "version": "0.2.1",
   "identifier": "com.codemux.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run build:sidecar && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build && npm run build:mobile",
+    "beforeBuildCommand": "npm run build && npm run build:sidecar && npm run build:mobile",
     "frontendDist": "../dist"
   },
   "app": {
