@@ -84,8 +84,9 @@ type CodeMuxThreadRenderContextValue = {
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  lastTurnId: string | undefined;
-  hasRunningSubagents: boolean;
+  /** Session uses subagents and the async flow (children running or parent
+   * turn streaming) has not fully settled — footers wait for that moment. */
+  subagentFlowPending: boolean;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -202,14 +203,18 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => new Map(conversationTurns.map((turn, index) => [turn.id, index])),
     [conversationTurns],
   );
-  const lastTurnId = conversationTurns.length > 0
-    ? conversationTurns[conversationTurns.length - 1].id
-    : undefined;
+  const sessionHasSubagents = useSubagentStore((state) => (state.sessions[sessionId]?.order.length ?? 0) > 0);
   const hasRunningSubagents = useSubagentStore((state) => {
     const session = state.sessions[sessionId];
     if (!session) return false;
     return session.order.some((id) => session.descriptors[id]?.status === 'running');
   });
+  // Continuation turns stream without a sendInput, so isRunning alone misses
+  // them — the streaming buffers cover that window.
+  const streamingText = useAgentStore((state) => state.streamingText[sessionId] ?? '');
+  const streamingThinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
+  const subagentFlowPending = sessionHasSubagents
+    && (hasRunningSubagents || isRunning || streamingText.length > 0 || streamingThinking.length > 0);
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
@@ -235,8 +240,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    lastTurnId,
-    hasRunningSubagents,
+    subagentFlowPending,
   }), [
     sessionId,
     compactAiOutput,
@@ -249,8 +253,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    lastTurnId,
-    hasRunningSubagents,
+    subagentFlowPending,
   ]);
 
   return (
@@ -571,8 +574,7 @@ function CodeMuxAssistantMessage() {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    lastTurnId,
-    hasRunningSubagents,
+    subagentFlowPending,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -586,8 +588,7 @@ function CodeMuxAssistantMessage() {
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
       turnOrdinalById={turnOrdinalById}
-      lastTurnId={lastTurnId}
-      hasRunningSubagents={hasRunningSubagents}
+      subagentFlowPending={subagentFlowPending}
     />
   );
 }
@@ -1185,8 +1186,7 @@ function AssistantLikeMessage({
   toolDurations,
   turnByEventIndex,
   turnOrdinalById,
-  lastTurnId,
-  hasRunningSubagents,
+  subagentFlowPending,
 }: {
   message: MessageState;
   sessionId: string;
@@ -1198,8 +1198,7 @@ function AssistantLikeMessage({
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  lastTurnId: string | undefined;
-  hasRunningSubagents: boolean;
+  subagentFlowPending: boolean;
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
@@ -1222,15 +1221,14 @@ function AssistantLikeMessage({
     .map((eventIndex) => turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
   const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
-  // A completed turn whose background subagents are still exploring is not
-  // actually finished — hold the footer (timestamp/duration/fork) back the same
-  // way the SubagentRunningRow keeps the "still running" signal visible.
-  const isAwaitingRunningSubagents = hasRunningSubagents && turn != null && turn.id === lastTurnId;
+  // While the async subagent flow has not settled (children still running, or
+  // the parent streaming around them), no assistant message carries a footer —
+  // a footer would read as "this conversation is finished".
   const shouldRenderFooter =
     isFinal
     && turn?.status === 'completed'
     && message.metadata.custom?.sourceRole !== 'system'
-    && !isAwaitingRunningSubagents
+    && !subagentFlowPending
     && turn !== undefined;
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
   const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;

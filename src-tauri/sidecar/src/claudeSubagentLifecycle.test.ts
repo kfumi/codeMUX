@@ -290,6 +290,63 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime.shutdown();
   });
 
+  it('synthesizes turn_finished when a continuation turn goes quiet without a CLI result', async () => {
+    runtime.continuationQuiescenceMs = 250;
+    await runtime.sendInput('launch agent');
+    await flush();
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'launched' });
+    await flush();
+    const emittedAfterFirstTurn = harness.emitted.length;
+
+    // A task notification wakes the model, but the CLI never sends a result
+    // for the woken turn (observed with gateway providers).
+    query.pushMessage({
+      type: 'assistant',
+      uuid: 'assistant-continuation',
+      session_id: 'native-1',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'All subagents completed, here is the summary' }] },
+    });
+    await flush();
+    expect(harness.emitted.slice(emittedAfterFirstTurn).some((event) => event.type === 'turn_finished')).toBe(false);
+
+    // Silence past the quiescence window closes the turn explicitly.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const finish = harness.emitted
+      .slice(emittedAfterFirstTurn)
+      .find((event) => event.type === 'turn_finished') as { outcome?: string } | undefined;
+    expect(finish?.outcome).toBe('completed');
+
+    runtime.shutdown();
+  });
+
+  it('closes a pending continuation turn before pushing the next prompt', async () => {
+    runtime.continuationQuiescenceMs = 60_000;
+    await runtime.sendInput('launch agent');
+    await flush();
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'launched' });
+    await flush();
+
+    query.pushMessage({
+      type: 'assistant',
+      uuid: 'assistant-continuation',
+      session_id: 'native-1',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Frontend done, waiting for backend' }] },
+    });
+    await flush();
+    expect(harness.emitted.some((event) => event.type === 'turn_finished')).toBe(true);
+    const finishesAfterContent = harness.emitted.filter((event) => event.type === 'turn_finished');
+    expect(finishesAfterContent).toHaveLength(1);
+
+    await runtime.sendInput('summarize now');
+    await flush();
+    // The pending continuation was closed before the new prompt turn started.
+    expect(harness.emitted.filter((event) => event.type === 'turn_finished')).toHaveLength(2);
+    expect(query.prompts).toHaveLength(2);
+    expect(query.closed).toBe(false);
+
+    runtime.shutdown();
+  });
+
   it('pins CLI model-alias env vars to the session model for gateway sessions', async () => {
     runtime = new SessionRuntime();
     await ensure({ model: 'glm-5.3-flash', baseUrl: 'https://gateway.example/anthropic', apiKey: 'k' });

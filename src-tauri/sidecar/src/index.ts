@@ -74,6 +74,8 @@ const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
 const MESSAGE_TIMEOUT_MS = 300_000;
 const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
+/** Silence window after which a pending continuation turn is considered ended. */
+const CONTINUATION_QUIESCENCE_MS = 10_000;
 
 // Gate per-message stderr logs. Each stderr line is read by the Rust backend,
 // mutex-locked into a capture buffer, and logged via tracing — so per-message
@@ -292,6 +294,14 @@ export class SessionRuntime {
    * of being dropped.
    */
   private continuationNormalizer: TurnEventNormalizer | null = null;
+  /**
+   * Some CLI/gateway combinations never emit a `result` message for
+   * notification-woken continuation turns, so the boundary is synthesized:
+   * once continuation content goes quiet (or the next prompt is pushed / the
+   * query closes) the pending continuation turn is finished explicitly.
+   */
+  private continuationQuiescenceTimer: ReturnType<typeof setTimeout> | null = null;
+  continuationQuiescenceMs = CONTINUATION_QUIESCENCE_MS;
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
@@ -402,8 +412,10 @@ export class SessionRuntime {
       this.clearQueryIdleTimer();
       this.turnActive = true;
       this.generation += 1;
-      this.continuationNormalizer = null;
-    this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
+      // Close a pending notification-woken continuation turn explicitly so
+      // its boundary lands in the timeline before the new prompt's content.
+      this.finishPendingContinuation('new_prompt', 'completed');
+      this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
       writeLog('[claude-task]', `sendInput START (stream reuse) model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
       if (this.promptStream.push(prompt, inputPayload)) {
         return;
@@ -420,7 +432,7 @@ export class SessionRuntime {
 
     this.turnActive = true;
     this.generation += 1;
-    this.continuationNormalizer = null;
+    this.finishPendingContinuation('new_prompt', 'completed');
     this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
 
     writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
@@ -825,7 +837,9 @@ export class SessionRuntime {
 
   private closeQueryHandle(reason: string): void {
     this.clearQueryIdleTimer();
-    this.continuationNormalizer = null;
+    // A pending continuation turn dies with the query — give it a terminal
+    // boundary so the timeline (and notification gating) sees it end.
+    this.finishPendingContinuation(reason, reason === 'idle' ? 'completed' : 'interrupted');
     if (!this.queryHandle) return;
     process.stderr.write(`[sidecar] Closing persistent query (${reason})\n`);
     this.promptStream?.close();
@@ -1228,6 +1242,7 @@ export class SessionRuntime {
         }
 
         this.turnIdleGuard?.reset();
+        this.clearContinuationQuiescence();
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
@@ -1289,6 +1304,7 @@ export class SessionRuntime {
           const emitPreview = (() => { try { return JSON.stringify(emitObj).slice(0, 1000) } catch { return String(emitObj).slice(0, 1000) } })();
           process.stderr.write(`[claude-debug] EMIT type=${emitObj?.type ?? '(no type)'} preview=${emitPreview}\n`);
         }
+        let continuationContentFinished = false;
         if (msg.type === 'result') {
           this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
         } else {
@@ -1307,27 +1323,37 @@ export class SessionRuntime {
           }
           for (const sourceEvent of projection.toolEvents) {
             for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(sourceEvent)) {
+              if (normalizedEvent.type === 'content_finished') continuationContentFinished = true;
               emit(normalizedEvent);
             }
           }
           if (projection.remainingEvent) {
-            const remainingMessage = toClaudeAssistantMessageEvent(projection.remainingEvent);
-            if (remainingMessage) {
-              for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(remainingMessage)) {
-                emit(normalizedEvent);
-              }
+            const remainingEvent = projection.remainingEvent as Record<string, unknown>;
+            if (remainingEvent.type === 'stream_event') {
+              const inner = remainingEvent.event as Record<string, unknown> | undefined;
+              if (inner?.type === 'content_block_stop') continuationContentFinished = true;
+              emit({
+                ...remainingEvent,
+                session_id: appSessionId ?? this.config?.sessionId ?? remainingEvent.session_id,
+              });
             } else {
-              const remainingEvent = projection.remainingEvent as Record<string, unknown>;
-              if (remainingEvent.type === 'stream_event') {
-                emit({
-                  ...remainingEvent,
-                  session_id: appSessionId ?? this.config?.sessionId ?? remainingEvent.session_id,
-                });
+              const remainingMessage = toClaudeAssistantMessageEvent(remainingEvent);
+              if (remainingMessage) {
+                for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(remainingMessage)) {
+                  if (normalizedEvent.type === 'assistant_message') continuationContentFinished = true;
+                  emit(normalizedEvent);
+                }
               } else {
-                emit(projection.remainingEvent);
+                emit(remainingEvent);
               }
             }
           }
+        }
+
+        // A continuation turn the CLI will never close with a `result`: once
+        // its content stops streaming, synthesize the turn boundary.
+        if (continuationContentFinished) {
+          this.armContinuationQuiescence();
         }
 
         if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
@@ -1348,6 +1374,7 @@ export class SessionRuntime {
 
         if (msg.type === 'result') {
           sawResult = true;
+          this.clearContinuationQuiescence();
           if (this.turnActive) {
             writeLog('[claude-task]', 'sendInput COMPLETE');
             this.finishTurn();
@@ -1483,6 +1510,36 @@ export class SessionRuntime {
       writeLog('[claude-task]', 'continuation turn START (between turns)');
     }
     return this.continuationNormalizer;
+  }
+
+  private clearContinuationQuiescence(): void {
+    if (this.continuationQuiescenceTimer) {
+      clearTimeout(this.continuationQuiescenceTimer);
+      this.continuationQuiescenceTimer = null;
+    }
+  }
+
+  private armContinuationQuiescence(): void {
+    this.clearContinuationQuiescence();
+    if (!this.continuationNormalizer || this.turnActive) return;
+    this.continuationQuiescenceTimer = setTimeout(() => {
+      this.continuationQuiescenceTimer = null;
+      this.finishPendingContinuation('quiescence', 'completed');
+    }, this.continuationQuiescenceMs);
+    this.continuationQuiescenceTimer.unref?.();
+  }
+
+  /**
+   * Close a pending continuation turn when the CLI never sent the `result`
+   * message that would normally end it. No-op when an active turn owns the
+   * outcome path or when the normalizer already finished.
+   */
+  private finishPendingContinuation(reason: string, outcome: TurnOutcome['outcome']): void {
+    this.clearContinuationQuiescence();
+    if (!this.continuationNormalizer || this.turnEventNormalizer) return;
+    writeLog('[claude-task]', `continuation turn COMPLETE (${reason}, synthesized)`);
+    this.emitTurnOutcome({ outcome });
+    this.continuationNormalizer = null;
   }
 
   private emitTurnError(message: string, subtype = 'runtime'): void {

@@ -121,9 +121,6 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
         <span className="truncate text-ui-meta text-muted-foreground">
           {subagentTabTitle(descriptor)}
         </span>
-        {subtitle ? (
-          <span className="ml-auto shrink-0 truncate pl-2 font-mono text-code text-muted-foreground/70">{subtitle}</span>
-        ) : null}
       </div>
 
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -267,9 +264,9 @@ function SubagentPreviewMessage({
             );
           }
           if (part.type === 'reasoning') {
-            // Same collapsible thinking block the main thread uses.
+            // Same collapsible thinking block the main thread uses (ghost, no border).
             return (
-              <ReasoningRoot key={index}>
+              <ReasoningRoot key={index} variant="ghost">
                 <ReasoningTrigger />
                 <ReasoningContent>
                   <ReasoningText>
