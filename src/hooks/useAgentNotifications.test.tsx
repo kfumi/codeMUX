@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useSubagentStore } from '../stores/subagentStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
@@ -126,6 +127,79 @@ describe('useAgentNotifications', () => {
     useAgentStore.setState({
       events: {},
       eventTimestamps: {},
+    });
+    useSubagentStore.setState({ sessions: {} });
+  });
+
+  it('background subagents running: holds the terminal notification and pings when they all finish', async () => {
+    render(<Harness />);
+
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: ['toolu_1'],
+          descriptors: {
+            toolu_1: {
+              subagentId: 'toolu_1',
+              provider: 'claude',
+              title: 'Explore',
+              description: null,
+              status: 'running',
+              toolCallId: 'toolu_1',
+              subtitle: null,
+              updatedAt: 0,
+            },
+          },
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    });
+    useAgentStore.setState({
+      events: {
+        'session-1': [{
+          kind: 'result',
+          data: {
+            type: 'result',
+            subtype: 'success',
+            is_error: false,
+            uuid: 'result-1',
+            session_id: 'session-1',
+            duration_ms: 1000,
+            duration_api_ms: 800,
+            num_turns: 1,
+            result: '',
+            usage: { input_tokens: 1, output_tokens: 1 },
+          },
+        }],
+      },
+      eventTimestamps: { 'session-1': [Date.now()] },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // The continuation turn completed, but children are still running — no
+    // "task completed" ping yet.
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
+
+    // All children reach terminal state → the real completion ping.
+    const session = useSubagentStore.getState().sessions['session-1'];
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          ...session!,
+          descriptors: {
+            toolu_1: { ...session!.descriptors['toolu_1']!, status: 'completed' },
+          },
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(sendAgentNotificationMock).toHaveBeenCalledWith({
+        title: '子智能体已完成',
+        body: '重构设置页',
+        sessionId: 'session-1',
+      });
     });
   });
 

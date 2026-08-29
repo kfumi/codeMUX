@@ -264,6 +264,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               </CodeMuxThreadRenderContext.Provider>
               {stopped ? <InterruptBanner /> : null}
               <StreamingContent sessionId={sessionId} events={events} />
+              <SubagentRunningRow sessionId={sessionId} />
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
                 className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
@@ -1436,6 +1437,33 @@ function CodeMuxToolGroup({
     >
       {children}
     </ToolGroup>
+  );
+}
+
+/**
+ * Async-agent progress: the parent turn is over but background subagents are
+ * still exploring. Without this row the completed result card would make the
+ * conversation look finished.
+ */
+function SubagentRunningRow({ sessionId }: { sessionId: string }) {
+  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const runningCount = useSubagentStore((state) => {
+    const session = state.sessions[sessionId];
+    if (!session) return 0;
+    return session.order.filter((id) => session.descriptors[id]?.status === 'running').length;
+  });
+
+  if (isRunning || runningCount === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-5 flex w-full justify-start" data-testid="subagent-running-row">
+      <div className="flex items-center gap-2 pl-1 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+        <span>子智能体仍在后台运行 ×{runningCount}，完成后会自动继续</span>
+      </div>
+    </div>
   );
 }
 

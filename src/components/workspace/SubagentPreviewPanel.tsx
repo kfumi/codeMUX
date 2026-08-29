@@ -228,6 +228,9 @@ function SubagentPreviewMessage({
   timestamp?: number;
 }) {
   const text = messageText(message);
+  // Align with the main thread: only user messages and the turn's final
+  // assistant message carry a footer; intermediate streaming blocks don't.
+  const showFooter = message.role === 'user' || message.metadata.isFinalAssistantMessage === true;
 
   if (message.role === 'user' && typeof message.content[0] === 'object' && 'type' in message.content[0] && message.content[0].type === 'text') {
     // The task prompt opening the timeline.
@@ -236,7 +239,7 @@ function SubagentPreviewMessage({
         <div className="rounded-lg border border-border/45 bg-[hsl(var(--surface-2))]/40 px-3 py-2">
           <p className="whitespace-pre-wrap text-ui-body text-foreground/86">{message.content[0].text}</p>
         </div>
-        <SubagentMessageFooter text={text} timestamp={timestamp} />
+        {showFooter ? <SubagentMessageFooter text={text} timestamp={timestamp} /> : null}
       </div>
     );
   }
@@ -275,7 +278,7 @@ function SubagentPreviewMessage({
           return null;
         })}
       </div>
-      <SubagentMessageFooter text={text} timestamp={timestamp} />
+      {showFooter ? <SubagentMessageFooter text={text} timestamp={timestamp} /> : null}
     </div>
   );
 }

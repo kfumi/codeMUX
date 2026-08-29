@@ -7,6 +7,7 @@ import { appApi } from '../lib/tauri';
 import type { AgentMessage } from '../stores/agentStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useSubagentStore } from '../stores/subagentStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { NotificationSound } from '../types/provider';
 
@@ -117,6 +118,12 @@ function isTerminalNotification(candidate: { kind: string }): boolean {
   return candidate.kind === 'task_completed' || candidate.kind === 'task_failed';
 }
 
+function hasRunningSubagents(sessionId: string): boolean {
+  const session = useSubagentStore.getState().sessions[sessionId];
+  if (!session) return false;
+  return session.order.some((id) => session.descriptors[id]?.status === 'running');
+}
+
 export function useAgentNotifications() {
   const events = useAgentStore((state) => state.events);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps);
@@ -189,6 +196,13 @@ export function useAgentNotifications() {
           break;
         }
 
+        // Background subagents still running: a "task completed" ping from the
+        // notification-woken continuation turn would read as "everything is
+        // done". Hold it (without marking seen) while any child is running.
+        if (isTerminalNotification(candidate) && hasRunningSubagents(sessionId)) {
+          break;
+        }
+
         seenNotificationKeysRef.current.add(dispatchKey);
 
         const isTerminal = isTerminalNotification(candidate);
@@ -207,4 +221,31 @@ export function useAgentNotifications() {
       }
     }
   }, [eventTimestamps, events, isAppInactive, notificationSettings, sessionTitles]);
+
+  // Async agents: when the last running subagent of a session reaches a
+  // terminal state, that — not the intermediate continuation turn — is the
+  // real "task finished" moment worth pinging about.
+  const subagentSessions = useSubagentStore((state) => state.sessions);
+  const hadRunningSubagentsRef = useRef<Map<string, boolean>>(new Map());
+  useEffect(() => {
+    for (const [sessionId, session] of Object.entries(subagentSessions)) {
+      const hadRunning = hadRunningSubagentsRef.current.get(sessionId) ?? false;
+      const hasRunning = session.order.some((id) => session.descriptors[id]?.status === 'running');
+      hadRunningSubagentsRef.current.set(sessionId, hasRunning);
+      if (!hadRunning || hasRunning) {
+        continue;
+      }
+
+      if (isAppInactive && (notificationSettings?.system_enabled ?? true)) {
+        void sendNativeAgentNotification({
+          title: '子智能体已完成',
+          body: sessionTitles.get(sessionId) ?? sessionId,
+          sessionId,
+        });
+      }
+      if (isAppInactive && (notificationSettings?.sound_enabled ?? false)) {
+        playNotificationSound(notificationSettings?.sound ?? 'ding');
+      }
+    }
+  }, [isAppInactive, notificationSettings, sessionTitles, subagentSessions]);
 }

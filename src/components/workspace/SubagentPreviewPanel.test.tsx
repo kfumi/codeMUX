@@ -88,6 +88,60 @@ describe('SubagentPreviewPanel', () => {
     expect(screen.getByText(/正在检查 package\.json/)).toBeTruthy();
   });
 
+  it('中间过程的 assistant 消息不显示 footer，仅回合最后一条显示', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'user_message',
+          content: '探索前端技术栈',
+          event_id: 'e0',
+          timestamp: '2026-08-29T05:47:19.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '中间过程说明' }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+        {
+          type: 'tool_started',
+          tool_use_id: 'c1',
+          name: 'Grep',
+          input: {},
+          event_id: 'e2',
+          timestamp: '2026-08-29T05:47:21.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '最终汇总' }],
+          event_id: 'e3',
+          timestamp: '2026-08-29T05:47:25.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+
+    // Footer on the task prompt + the turn's final assistant message only.
+    const footers = container.querySelectorAll('[data-message-footer]');
+    expect(footers).toHaveLength(2);
+    const closestRow = (el: HTMLElement): HTMLElement | null => {
+      let node: HTMLElement | null = el;
+      while (node && !node.className.includes('group/message-row')) {
+        node = node.parentElement;
+      }
+      return node;
+    };
+    const finalRow = closestRow(screen.getByText(/最终汇总/));
+    expect(finalRow?.querySelector('[data-message-footer]')).toBeTruthy();
+    const middleRow = closestRow(screen.getByText(/中间过程说明/));
+    expect(middleRow?.querySelector('[data-message-footer]')).toBeNull();
+    const promptText = screen.getAllByText(/探索前端技术栈/).find((el) => el.tagName === 'P');
+    expect(promptText).toBeTruthy();
+    expect(closestRow(promptText!)?.querySelector('[data-message-footer]')).toBeTruthy();
+  });
+
   it('消息 footer 提供复制按钮并可复制文本', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.assign(navigator, { clipboard: { writeText } });
