@@ -50,6 +50,7 @@ import {
 import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
+import { applyClaudeModelAliasEnv } from './claudeModelAliasEnv.js';
 import { ClaudeTaskProtocolSource } from './claudeTaskProtocolSource.js';
 import { ClaudePromptStream } from './claudePromptStream.js';
 import { nextWithTimeout } from './claudeQueryTimeout.js';
@@ -911,6 +912,11 @@ export class SessionRuntime {
       if (key.startsWith('ANTHROPIC_DEFAULT_')) {
         subprocessEnv[key] = '';
       }
+    }
+    // Subagents resolve fast-model aliases internally; on a custom gateway
+    // those alias codes do not exist, so pin every alias to the session model.
+    if (config.baseUrl) {
+      applyClaudeModelAliasEnv(subprocessEnv, config.model);
     }
 
     const cleanSettings: Record<string, unknown> = {};

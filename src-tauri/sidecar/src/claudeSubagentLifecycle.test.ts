@@ -90,7 +90,10 @@ class FakeQuery {
   }
 }
 
-const harness2 = vi.hoisted(() => ({ sdkRef: { current: null as { query: (args: { prompt: AsyncIterable<Record<string, unknown>> }) => FakeQuery } | null } }));
+const harness2 = vi.hoisted(() => ({
+  sdkRef: { current: null as { query: (args: { prompt: AsyncIterable<Record<string, unknown>> }) => FakeQuery } | null },
+  lastQueryOptions: { current: null as Record<string, unknown> | null },
+}));
 
 vi.mock('./sdkLoader.js', () => ({
   loadClaudeSdk: async () => ({
@@ -108,6 +111,7 @@ const flush = async (): Promise<void> => {
   }
 };
 
+
 function upsertEvents(): CodeMuxSubagentUpsertEvent[] {
   return harness.emitted.filter((event) => event.type === 'subagent_upsert') as CodeMuxSubagentUpsertEvent[];
 }
@@ -116,7 +120,7 @@ describe('SessionRuntime subagent query lifecycle', () => {
   let runtime: SessionRuntime;
   let query: FakeQuery;
 
-  const ensure = async (): Promise<void> => {
+  const ensure = async (overrides: Record<string, unknown> = {}): Promise<void> => {
     await runtime.ensure({
       type: 'ensure_session',
       sessionId: 'app-1',
@@ -124,7 +128,19 @@ describe('SessionRuntime subagent query lifecycle', () => {
       cwd: process.cwd(),
       runtimeGeneration: 1,
       runtimeRef: { provider: 'claude_code', runtimePath: '/fake/runtime', runtimeVersion: 'test' },
+      ...overrides,
     } as never);
+  };
+
+  /** Install a fake SDK query that records the options CodeMUX passes to query(). */
+  const installFakeSdk = (): void => {
+    harness2.sdkRef.current = {
+      query: (args: { prompt: AsyncIterable<Record<string, unknown>>; options?: Record<string, unknown> }) => {
+        harness2.lastQueryOptions.current = args.options ?? null;
+        query = new FakeQuery(args.prompt);
+        return query;
+      },
+    };
   };
 
   beforeEach(async () => {
@@ -132,12 +148,7 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime = new SessionRuntime();
     await ensure();
     query = new FakeQuery({ [Symbol.asyncIterator]: async function* () {} } as never);
-    harness2.sdkRef.current = {
-      query: (args: { prompt: AsyncIterable<Record<string, unknown>> }) => {
-        query = new FakeQuery(args.prompt);
-        return query;
-      },
-    };
+    installFakeSdk();
   });
 
   afterEach(() => {
@@ -246,6 +257,39 @@ describe('SessionRuntime subagent query lifecycle', () => {
 
     expect(query.interrupted).toBe(1);
     expect(upsertEvents().some((event) => event.status === 'failed')).toBe(true);
+    // User Stop ends the whole query; the next turn opens a fresh one.
+    expect(query.closed).toBe(true);
+
+    runtime.shutdown();
+  });
+
+  it('pins CLI model-alias env vars to the session model for gateway sessions', async () => {
+    runtime = new SessionRuntime();
+    await ensure({ model: 'glm-5.3-flash', baseUrl: 'https://gateway.example/anthropic', apiKey: 'k' });
+    installFakeSdk();
+
+    await runtime.sendInput('hello');
+    await flush();
+
+    const env = harness2.lastQueryOptions.current?.env as Record<string, string | undefined>;
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-5.3-flash');
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.3-flash');
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5.3-flash');
+    expect(env.ANTHROPIC_SMALL_FAST_MODEL).toBe('glm-5.3-flash');
+
+    runtime.shutdown();
+  });
+
+  it('leaves model-alias env untouched for direct Anthropic sessions', async () => {
+    runtime = new SessionRuntime();
+    await ensure({ model: 'claude-sonnet-4-5' });
+    installFakeSdk();
+
+    await runtime.sendInput('hello');
+    await flush();
+
+    const env = harness2.lastQueryOptions.current?.env as Record<string, string | undefined>;
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? '').toBe('');
 
     runtime.shutdown();
   });
