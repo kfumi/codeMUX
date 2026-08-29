@@ -1756,6 +1756,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       error: { ...s.error, [sessionId]: null },
       queuePaused: { ...s.queuePaused, [sessionId]: false },
     }));
+    // A new prompt supersedes the "waiting for the parent summary" wait.
+    useSubagentStore.getState().markContinuationSettled(sessionId);
     if (userAttachments.length > 0) {
       void sessionApi.saveMessageAttachments(sessionId, userMessageIndex, userAttachments).catch((error) => {
         logger.warn('Failed to persist session message attachments', { sessionId, userMessageIndex }, serializeError(error));
@@ -2504,7 +2506,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
 
         const isTerminalEvent = isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error));
-        if (isTerminalEvent && !shouldProcessTerminalEvent(get().isRunning[sessionId] ?? false, event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
+        // Any flow terminal event (real or synthesized continuation boundary)
+        // ends the "children done, parent about to summarize" wait.
+        if (isTerminalEvent) {
+          useSubagentStore.getState().markContinuationSettled(sessionId);
+        }
+        const isSyntheticBoundary = event.kind === 'result' && Boolean(event.data?.synthetic);
+        if (isTerminalEvent && !shouldProcessTerminalEvent(get().isRunning[sessionId] ?? false, event.kind, Boolean(event.kind === 'result' && event.data?.is_error), isSyntheticBoundary)) {
           return;
         }
 
@@ -2874,16 +2882,18 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
 
     // Hydrate the subagent tracks in parallel with the parent timeline.
-    if (typeof agentApi.loadSessionSubagents === 'function') {
-      void (async () => {
-        try {
-          const payload = await agentApi.loadSessionSubagents(sessionId);
-          useSubagentStore.getState().replaceSession(sessionId, payload);
-        } catch (error) {
-          logger.warn('Failed to load session subagents', { sessionId }, serializeError(error));
-        }
-      })();
-    }
+    const subagentsFetch: Promise<{ subagents: unknown[]; timelines: Record<string, unknown[]> } | null> =
+      typeof agentApi.loadSessionSubagents === 'function'
+        ? agentApi.loadSessionSubagents(sessionId)
+            .then((payload) => {
+              useSubagentStore.getState().replaceSession(sessionId, payload);
+              return payload;
+            })
+            .catch((error) => {
+              logger.warn('Failed to load session subagents', { sessionId }, serializeError(error));
+              return null;
+            })
+        : Promise.resolve(null);
 
     const loadPromise = (async () => {
       const agentKind = getSessionAgentKind(sessionId);
@@ -2993,6 +3003,20 @@ export const useAgentStore = create<AgentState>((set, get) => {
         ) {
           get().setSessionWorkingPath(sessionId, rememberedCwd);
         }
+
+        // The CLI backfill of subagent tracks runs during the parent timeline
+        // hydration, so an empty first fetch may have raced it — re-fetch once.
+        const firstSubagents = await subagentsFetch;
+        if ((firstSubagents == null || firstSubagents.subagents.length === 0)
+          && typeof agentApi.loadSessionSubagents === 'function') {
+          try {
+            const payload = await agentApi.loadSessionSubagents(sessionId);
+            useSubagentStore.getState().replaceSession(sessionId, payload);
+          } catch (error) {
+            logger.warn('Failed to reload session subagents after history load', { sessionId }, serializeError(error));
+          }
+        }
+
         await get().refreshLatestTokenUsage(sessionId, 'restored');
         logger.info('Loaded session events from agent JSONL', {
           sessionId,

@@ -885,6 +885,12 @@ describe('terminal event helpers', () => {
     expect(shouldProcessTerminalEvent(false, 'result', true)).toBe(false);
     expect(shouldProcessTerminalEvent(false, 'assistant')).toBe(true);
   });
+
+  it('never ends the active run for a synthesized continuation boundary', () => {
+    expect(shouldProcessTerminalEvent(true, 'result', false, true)).toBe(false);
+    expect(shouldProcessTerminalEvent(false, 'result', false, true)).toBe(false);
+    expect(shouldProcessTerminalEvent(true, 'result', false, false)).toBe(true);
+  });
 });
 
 describe('Codex runtime event normalization', () => {

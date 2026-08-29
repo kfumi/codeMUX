@@ -69,6 +69,24 @@ function result(isError = false): AgentMessage {
   };
 }
 
+function syntheticResult(isError = false): AgentMessage {
+  return {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: isError ? 'interrupted' : 'success',
+      is_error: isError,
+      uuid: 'synthetic-result-1',
+      session_id: 'session-1',
+      duration_ms: 0,
+      duration_api_ms: 0,
+      num_turns: 1,
+      result: isError ? 'interrupted' : 'ok',
+      synthetic: true,
+    },
+  };
+}
+
 describe('buildConversationTurns', () => {
   it('completes a user and assistant turn from an explicit end_turn', () => {
     const turns = buildConversationTurns([
@@ -79,6 +97,38 @@ describe('buildConversationTurns', () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({ status: 'completed', pendingToolIds: [] });
     expect(turns[0]?.footerAnchorEventIndex).toBe(1);
+  });
+
+  it('does not complete a freshly started turn via a stale synthetic boundary', () => {
+    // The sidecar emits the previous continuation turn's synthesized boundary
+    // right after the next sendInput — before any content of the new turn.
+    const turns = buildConversationTurns([
+      user('previous question'),
+      assistant([{ type: 'text', text: 'previous answer' }], 'end_turn'),
+      result(),
+      user('follow-up question'),
+      syntheticResult(),
+    ], { isRunning: false });
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0]?.status).toBe('completed');
+    // The fresh turn only contains the optimistic user message plus the
+    // stale boundary — it must not read as completed.
+    expect(turns[1]?.status).not.toBe('completed');
+    expect(turns[1]?.durationMs).toBeUndefined();
+  });
+
+  it('still settles a reloaded turn whose only result marker is synthetic', () => {
+    const turns = buildConversationTurns([
+      user('hello'),
+      assistant([{ type: 'text', text: 'working' }]),
+      assistant([{ type: 'text', text: 'summary after subagents' }]),
+      syntheticResult(),
+    ], { isRunning: false });
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.status).toBe('completed');
+    expect(turns[0]?.durationMs).toBeUndefined();
   });
 
   it('fills durationMs from user and last assistant timestamps when history has no result', () => {

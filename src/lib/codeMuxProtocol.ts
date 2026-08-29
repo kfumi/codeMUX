@@ -122,6 +122,8 @@ type CodeMuxTurnEvent = {
   reason?: string;
   usage?: Record<string, unknown>;
   duration_ms?: number;
+  /** True when CodeMUX synthesized this boundary (no provider `result` arrived). */
+  synthetic?: boolean;
   event_id?: string;
 };
 
@@ -493,6 +495,7 @@ export function toLegacyTurnMessage(event: CodeMuxTurnEvent): AgentMessage {
       duration_api_ms: event.duration_ms ?? 0,
       num_turns: 1,
       result: outcome === 'completed' ? 'ok' : event.reason ?? outcome,
+      ...(event.synthetic ? { synthetic: true } : {}),
       usage: {
         input_tokens: numberValue(usage.input_tokens),
         output_tokens: numberValue(usage.output_tokens),

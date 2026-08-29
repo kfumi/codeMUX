@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
+import { useSubagentStore } from '../../../stores/subagentStore';
 import type { Session } from '../../../types/session';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -2545,8 +2546,98 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
   });
 
-  it('keeps the compact process toggle when the turn starts with empty thinking', () => {
+  it('keeps the latest turn expanded with a live wait row while background subagents run', () => {
     useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+    useSubagentStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        'session-completed-turn': {
+          order: ['toolu-sub-1'],
+          descriptors: {
+            'toolu-sub-1': {
+              subagentId: 'toolu-sub-1',
+              provider: 'claude',
+              title: 'Explore',
+              description: null,
+              status: 'running',
+              toolCallId: 'toolu-sub-1',
+              subtitle: null,
+              updatedAt: 1,
+            },
+          },
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    }));
+
+    try {
+      render(<Harness sessionId="session-completed-turn" />);
+
+      // The async flow is still running: the wait row is visible with a live
+      // timer, and the turn being waited on is not collapsed as finished.
+      expect(screen.getByTestId('subagent-running-row')).toBeTruthy();
+      // The shimmer overlay duplicates the timer text, hence getAllByText.
+      expect(screen.getAllByText(/子智能体仍在后台运行 ×1/).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
+      expect(screen.getByText('I am checking files first.')).toBeTruthy();
+      expect(screen.getByText('Fixed and verified.')).toBeTruthy();
+    } finally {
+      useSubagentStore.setState((state) => {
+        const { 'session-completed-turn': _removed, ...rest } = state.sessions;
+        return { sessions: rest };
+      });
+    }
+  });
+
+  it('keeps the flow alive between the last subagent terminal and the summary settle', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+    useSubagentStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        'session-completed-turn': {
+          order: ['toolu-sub-1'],
+          descriptors: {
+            'toolu-sub-1': {
+              subagentId: 'toolu-sub-1',
+              provider: 'claude',
+              title: 'Explore',
+              description: null,
+              status: 'completed',
+              toolCallId: 'toolu-sub-1',
+              subtitle: null,
+              updatedAt: 1,
+            },
+          },
+          events: {},
+          seenEventIds: {},
+        },
+      },
+      continuationPending: { 'session-completed-turn': true },
+    }));
+
+    try {
+      render(<Harness sessionId="session-completed-turn" />);
+
+      // No child is running anymore, but the parent's summary turn has not
+      // settled: keep the spinner row and the expanded turn.
+      expect(screen.getByTestId('subagent-running-row')).toBeTruthy();
+      expect(screen.getAllByText(/子智能体已完成，主智能体继续输出中/).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
+      expect(screen.getByText('I am checking files first.')).toBeTruthy();
+    } finally {
+      useSubagentStore.setState((state) => {
+        const { 'session-completed-turn': _removed, ...rest } = state.sessions;
+        return { sessions: rest, continuationPending: {} };
+      });
+    }
+  });
+
+  it('keeps the compact process toggle when the turn starts with empty thinking', () => {    useSettingsStore.setState((state) => ({
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 

@@ -28,7 +28,15 @@ export interface SessionSubagentsState {
 
 interface SubagentState {
   sessions: Record<string, SessionSubagentsState>;
+  /**
+   * True while the async flow is unsettled even though no descriptor is
+   * running anymore: the last child just went terminal and the parent is
+   * about to be woken for its summary turn. Cleared by the flow's terminal
+   * event (real or synthesized) or by a new prompt.
+   */
+  continuationPending: Record<string, boolean>;
   applyUpsert: (sessionId: string, event: { subagent_id: string; provider?: string; title?: string | null; description?: string | null; status?: SubagentStatus; tool_call_id?: string | null; subtitle?: string | null }) => void;
+  markContinuationSettled: (sessionId: string) => void;
   appendEvent: (sessionId: string, subagentId: string, event: Record<string, unknown>, eventId?: string) => void;
   replaceSession: (sessionId: string, payload: { subagents: Array<Record<string, unknown>>; timelines: Record<string, Array<Record<string, unknown>>> }) => void;
   clearSession: (sessionId: string) => void;
@@ -54,6 +62,13 @@ function isTerminalSubagentStatus(status: SubagentStatus): boolean {
 
 export const useSubagentStore = create<SubagentState>((set, get) => ({
   sessions: {},
+  continuationPending: {},
+
+  markContinuationSettled: (sessionId) => {
+    set((state) => state.continuationPending[sessionId]
+      ? { continuationPending: { ...state.continuationPending, [sessionId]: false } }
+      : state);
+  },
 
   applyUpsert: (sessionId, event) => {
     if (!sessionId || !event.subagent_id) return;
@@ -77,17 +92,29 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
         subtitle: event.subtitle !== undefined ? event.subtitle : existing?.subtitle ?? null,
         updatedAt: Date.now(),
       };
+      const nextDescriptors = { ...current.descriptors, [event.subagent_id]: descriptor };
+      // Arm the continuation wait when the last running child goes terminal:
+      // the parent is about to be woken for its summary turn. A new (or still
+      // running) child disarms it.
+      const hadRunning = Object.values(current.descriptors).some((entry) => entry?.status === 'running');
+      const hasRunning = Object.values(nextDescriptors).some((entry) => entry?.status === 'running');
+      const continuationPending = hasRunning
+        ? false
+        : hadRunning
+          ? true
+          : state.continuationPending[sessionId] ?? false;
       return {
         sessions: {
           ...state.sessions,
           [sessionId]: {
             ...current,
             order: existing ? current.order : [...current.order, event.subagent_id],
-            descriptors: { ...current.descriptors, [event.subagent_id]: descriptor },
+            descriptors: nextDescriptors,
             events: current.events,
             seenEventIds: current.seenEventIds,
           },
         },
+        continuationPending: { ...state.continuationPending, [sessionId]: continuationPending },
       };
     });
   },
@@ -167,15 +194,24 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
           seenEventIds,
         },
       },
+      // Hydrated history is settled by definition — only live upserts may arm
+      // the continuation wait.
+      continuationPending: { ...state.continuationPending, [sessionId]: false },
     }));
   },
 
   clearSession: (sessionId) => {
     set((state) => {
-      if (!state.sessions[sessionId]) return state;
+      const nextPending = { ...state.continuationPending };
+      delete nextPending[sessionId];
+      if (!state.sessions[sessionId]) {
+        return Object.keys(nextPending).length === Object.keys(state.continuationPending).length
+          ? state
+          : { continuationPending: nextPending };
+      }
       const sessions = { ...state.sessions };
       delete sessions[sessionId];
-      return { sessions };
+      return { sessions, continuationPending: nextPending };
     });
   },
 

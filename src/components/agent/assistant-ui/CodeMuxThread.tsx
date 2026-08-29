@@ -49,7 +49,7 @@ import {
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
-import { buildAssistantResultTargetMap } from './assistantResultTargets';
+import { buildAssistantResultTargetMap, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
@@ -213,20 +213,40 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   // them — the streaming buffers cover that window.
   const streamingText = useAgentStore((state) => state.streamingText[sessionId] ?? '');
   const streamingThinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
+  // Children all terminal but the parent's summary turn has not settled yet:
+  // the flow is still running from the user's point of view.
+  const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
   const subagentFlowPending = sessionHasSubagents
-    && (hasRunningSubagents || isRunning || streamingText.length > 0 || streamingThinking.length > 0);
+    && (hasRunningSubagents || isRunning || continuationPending || streamingText.length > 0 || streamingThinking.length > 0);
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
     [events],
   );
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
-  const collapseInfoByEventIndex = useMemo(
-    () => buildAssistantCollapseInfoMap(events, eventTimestamps, {
+  const collapseInfoByEventIndex = useMemo(() => {
+    const map = buildAssistantCollapseInfoMap(events, eventTimestamps, {
       allowImplicitResult: !isRunning && !stopped,
-    }),
-    [events, eventTimestamps, isRunning, stopped],
-  );
+    });
+    // While the async subagent flow is unsettled the latest turn must keep
+    // looking alive — collapsing it into "已处理 32s" reads as finished even
+    // though background children are still running.
+    if (!subagentFlowPending) {
+      return map;
+    }
+    const lastUserIndex = findLastVisibleUserEventIndex(events);
+    if (lastUserIndex == null) {
+      return map;
+    }
+    const lastTurnKeyPrefix = `${lastUserIndex}-`;
+    const filtered = new Map<number, AssistantCollapseInfo>();
+    for (const [eventIndex, info] of map) {
+      if (!info.turnKey.startsWith(lastTurnKeyPrefix)) {
+        filtered.set(eventIndex, info);
+      }
+    }
+    return filtered;
+  }, [events, eventTimestamps, isRunning, stopped, subagentFlowPending]);
 
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
@@ -1477,16 +1497,42 @@ function SubagentRunningRow({ sessionId }: { sessionId: string }) {
     if (!session) return 0;
     return session.order.filter((id) => session.descriptors[id]?.status === 'running').length;
   });
+  // Children all terminal but the parent's summary turn has not settled yet —
+  // the flow is still alive from the user's point of view.
+  const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
+  // The overall async flow started with the latest user message; keep a live
+  // count-up so the wait does not read as a frozen, finished conversation.
+  const startedAt = useAgentStore((state) => {
+    const sessionEvents = state.events[sessionId];
+    const stamps = state.eventTimestamps[sessionId];
+    if (!sessionEvents) return undefined;
+    for (let index = sessionEvents.length - 1; index >= 0; index -= 1) {
+      if (sessionEvents[index].kind === 'user') {
+        return stamps?.[index];
+      }
+    }
+    return undefined;
+  });
 
-  if (isRunning || runningCount === 0) {
+  if (isRunning || (runningCount === 0 && !continuationPending)) {
     return null;
   }
+
+  const label = runningCount > 0
+    ? `子智能体仍在后台运行 ×${runningCount}`
+    : '子智能体已完成，主智能体继续输出中';
 
   return (
     <div className="mb-5 flex w-full justify-start" data-testid="subagent-running-row">
       <div className="flex items-center gap-2 pl-1 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-        <span>子智能体仍在后台运行 ×{runningCount}，完成后会自动继续</span>
+        <span>
+          <RunningElapsedTimer
+            label={label}
+            startTime={startedAt}
+          />
+          ，完成后会自动继续
+        </span>
       </div>
     </div>
   );
@@ -1667,6 +1713,16 @@ function getMessageText(message: MessageState) {
     .map((part) => (part.type === 'text' ? part.text : ''))
     .join('')
     .trim();
+}
+
+function findLastVisibleUserEventIndex(events: AgentMessage[]): number | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind === 'user' && !isHiddenAssistantThreadUserEvent(event)) {
+      return index;
+    }
+  }
+  return null;
 }
 
 function buildAssistantCollapseInfoMap(

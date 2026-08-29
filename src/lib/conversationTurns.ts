@@ -215,14 +215,23 @@ function appendEvent(
   }
 
   if (event.kind === 'result') {
-    if (event.data.is_error) {
-      turn.failureReason = typeof event.data.result === 'string' && event.data.result.trim()
-        ? event.data.result.trim()
-        : event.data.subtype || 'Agent execution failed.';
-    } else {
-      turn.completionReason = event.data.subtype || 'result';
+    const synthetic = isSyntheticResult(event.data as unknown as Record<string, unknown>);
+    // A synthesized continuation boundary belongs to the previous turn. When
+    // it lands before the freshly started turn has any content it is that
+    // stale boundary (the sidecar emits it right after sendInput) and must
+    // not mark this turn completed/failed. After content it is the turn's
+    // own settlement marker (e.g. reloaded history without a real result).
+    const staleBoundary = synthetic && turn.assistantEventIndices.length === 0;
+    if (!staleBoundary) {
+      if (event.data.is_error) {
+        turn.failureReason = typeof event.data.result === 'string' && event.data.result.trim()
+          ? event.data.result.trim()
+          : event.data.subtype || 'Agent execution failed.';
+      } else if (!synthetic || turn.completionReason === undefined) {
+        turn.completionReason = event.data.subtype || 'result';
+      }
     }
-    turn.durationMs = isSyntheticResult(event.data as unknown as Record<string, unknown>)
+    turn.durationMs = synthetic
       ? undefined
       : finiteNumber(event.data.duration_ms);
     turn.numTurns = finiteNumber(event.data.num_turns);

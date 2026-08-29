@@ -15,8 +15,62 @@ vi.mock('../lib/tauri', () => ({
 
 describe('subagentStore', () => {
   beforeEach(() => {
-    useSubagentStore.setState({ sessions: {} });
+    useSubagentStore.setState({ sessions: {}, continuationPending: {} });
     useSidePanelStore.getState().reset();
+  });
+
+  it('arms continuationPending when the last running child goes terminal and settles explicitly', () => {
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'running',
+    });
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_2',
+      status: 'running',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBeFalsy();
+
+    // First child finishes: the second is still running, so no wait yet.
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'completed',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(false);
+
+    // Last child finishes: the parent summary turn is about to start.
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_2',
+      status: 'completed',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(true);
+
+    // The flow's terminal event (real or synthesized) settles it.
+    useSubagentStore.getState().markContinuationSettled('session-1');
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(false);
+  });
+
+  it('disarms continuationPending when a new child starts or the session is hydrated', () => {
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'running',
+    });
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'completed',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(true);
+
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_2',
+      status: 'running',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(false);
+
+    useSubagentStore.getState().replaceSession('session-1', {
+      subagents: [{ subagentId: 'toolu_1', status: 'completed' }],
+      timelines: {},
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBe(false);
   });
 
   it('applyUpsert creates then sticky-merges descriptors', () => {
