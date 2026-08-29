@@ -100,13 +100,18 @@ function timelineEvents(
   const events: CodeMuxSubagentEvent[] = [];
   for (const sourceEvent of sourceEvents.events) {
     for (const normalized of entry.normalizer.accept(sourceEvent)) {
+      const at = timestamp();
+      // The wire format carries transport timestamps on parent-path events
+      // (the batcher stamps them); the protocol union simply doesn't declare
+      // the optional field, so widen it here for the persisted row.
+      const withTimestamp = { ...normalized, timestamp: at } as CodeMuxRuntimeEvent & { timestamp: string };
       events.push({
         type: 'subagent_timeline',
         ...(sessionId ? { session_id: sessionId } : {}),
         subagent_id: entry.subagentId,
-        event: normalized,
+        event: withTimestamp,
         event_id: newEventId(),
-        timestamp: timestamp(),
+        timestamp: at,
       });
     }
   }

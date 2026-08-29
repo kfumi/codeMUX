@@ -285,6 +285,13 @@ export class SessionRuntime {
   private warmPromise: Promise<WarmQuery | null> | null = null;
   private turnActive = false;
   private turnEventNormalizer: TurnEventNormalizer | null = null;
+  /**
+   * Async-agent continuation turns: task notifications can wake the model
+   * after the parent result, streaming an extra turn while `turnActive` is
+   * false. Content of that turn is projected through this normalizer instead
+   * of being dropped.
+   */
+  private continuationNormalizer: TurnEventNormalizer | null = null;
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
@@ -395,7 +402,8 @@ export class SessionRuntime {
       this.clearQueryIdleTimer();
       this.turnActive = true;
       this.generation += 1;
-      this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
+      this.continuationNormalizer = null;
+    this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
       writeLog('[claude-task]', `sendInput START (stream reuse) model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
       if (this.promptStream.push(prompt, inputPayload)) {
         return;
@@ -412,6 +420,7 @@ export class SessionRuntime {
 
     this.turnActive = true;
     this.generation += 1;
+    this.continuationNormalizer = null;
     this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
 
     writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
@@ -816,6 +825,7 @@ export class SessionRuntime {
 
   private closeQueryHandle(reason: string): void {
     this.clearQueryIdleTimer();
+    this.continuationNormalizer = null;
     if (!this.queryHandle) return;
     process.stderr.write(`[sidecar] Closing persistent query (${reason})\n`);
     this.promptStream?.close();
@@ -1296,14 +1306,14 @@ export class SessionRuntime {
             }
           }
           for (const sourceEvent of projection.toolEvents) {
-            for (const normalizedEvent of this.turnEventNormalizer?.accept(sourceEvent) ?? []) {
+            for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(sourceEvent)) {
               emit(normalizedEvent);
             }
           }
           if (projection.remainingEvent) {
             const remainingMessage = toClaudeAssistantMessageEvent(projection.remainingEvent);
             if (remainingMessage) {
-              for (const normalizedEvent of this.turnEventNormalizer?.accept(remainingMessage) ?? []) {
+              for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(remainingMessage)) {
                 emit(normalizedEvent);
               }
             } else {
@@ -1338,8 +1348,14 @@ export class SessionRuntime {
 
         if (msg.type === 'result') {
           sawResult = true;
-          writeLog('[claude-task]', 'sendInput COMPLETE');
-          this.finishTurn();
+          if (this.turnActive) {
+            writeLog('[claude-task]', 'sendInput COMPLETE');
+            this.finishTurn();
+          } else if (this.continuationNormalizer) {
+            writeLog('[claude-task]', 'continuation turn COMPLETE');
+            this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
+            this.continuationNormalizer = null;
+          }
           // Keep the persistent query open — closing it would kill subagents
           // that outlive the parent turn. Cancel explicitly-foreground
           // children instead; the next turn reuses this query.
@@ -1455,14 +1471,28 @@ export class SessionRuntime {
     this.turnEventNormalizer = null;
   }
 
+  /**
+   * Normalizer for projected turn content. Falls back to a lazily-created
+   * continuation normalizer when messages arrive between turns (notification
+   * wake-up after the parent result).
+   */
+  private projectionNormalizer(appSessionId?: string): TurnEventNormalizer {
+    if (this.turnEventNormalizer) return this.turnEventNormalizer;
+    if (!this.continuationNormalizer) {
+      this.continuationNormalizer = new TurnEventNormalizer(appSessionId ?? this.config?.sessionId ?? '');
+      writeLog('[claude-task]', 'continuation turn START (between turns)');
+    }
+    return this.continuationNormalizer;
+  }
+
   private emitTurnError(message: string, subtype = 'runtime'): void {
-    for (const event of this.turnEventNormalizer?.accept({ kind: 'error', subtype, message }) ?? []) {
+    for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.accept({ kind: 'error', subtype, message }) ?? []) {
       emit(event);
     }
   }
 
   private emitTurnSource(source: TurnSourceEvent): void {
-    for (const event of this.turnEventNormalizer?.accept(source) ?? []) {
+    for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.accept(source) ?? []) {
       emit(event);
     }
   }
@@ -1491,7 +1521,7 @@ export class SessionRuntime {
   }
 
   private emitTurnOutcome(outcome: TurnOutcome): void {
-    for (const event of this.turnEventNormalizer?.finish(outcome) ?? []) {
+    for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.finish(outcome) ?? []) {
       emit(event);
     }
   }

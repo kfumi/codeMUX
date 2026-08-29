@@ -155,7 +155,7 @@ function FooterItem({ children }: { children: React.ReactNode }) {
   );
 }
 
-function formatTime(timestamp: number) {
+export function formatTime(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
   const hh = date.getHours().toString().padStart(2, '0');

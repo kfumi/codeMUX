@@ -263,6 +263,33 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime.shutdown();
   });
 
+  it('projects a notification-woken continuation turn arriving between parent turns', async () => {
+    await runtime.sendInput('launch agent');
+    await flush();
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'launched' });
+    await flush();
+    const emittedAfterFirstTurn = harness.emitted.length;
+
+    // A task notification wakes the model: assistant content + a result arrive
+    // while the parent turn is already over.
+    query.pushMessage({
+      type: 'assistant',
+      uuid: 'assistant-continuation',
+      session_id: 'native-1',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'All three subagents completed, here is the summary' }] },
+    });
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'summary done' });
+    await flush();
+
+    const kinds = harness.emitted.slice(emittedAfterFirstTurn).map((event) => event.type);
+    expect(kinds).toContain('assistant_message');
+    expect(kinds).toContain('turn_finished');
+    const summary = harness.emitted.find((event) => event.type === 'assistant_message') as { content?: Array<{ text?: string }> } | undefined;
+    expect(JSON.stringify(summary?.content)).toContain('summary');
+
+    runtime.shutdown();
+  });
+
   it('pins CLI model-alias env vars to the session model for gateway sessions', async () => {
     runtime = new SessionRuntime();
     await ensure({ model: 'glm-5.3-flash', baseUrl: 'https://gateway.example/anthropic', apiKey: 'k' });
