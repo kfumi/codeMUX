@@ -33,10 +33,22 @@ export type TurnOutcome = {
   usage?: TurnUsage;
 };
 
+export type TurnEventNormalizerOptions = {
+  /**
+   * When true, a repeated `tool_started` for an already-started tool_use_id
+   * refreshes the stored input (merged over the previous one) and re-emits the
+   * event instead of being dropped. OpenCode tool parts arrive with an empty
+   * `state.input` at `pending` and stream the real input in later part
+   * updates; the subagent timeline must persist the refreshed input.
+   */
+  refreshToolInput?: boolean;
+};
+
 export class TurnEventNormalizer {
   private sequence = 0;
   private finished = false;
   private readonly startedToolIds = new Set<string>();
+  private readonly startedToolInputs = new Map<string, Record<string, unknown>>();
   private readonly finishedToolIds = new Set<string>();
   private readonly requestedInputIds = new Set<string>();
   private readonly requestedPermissionIds = new Set<string>();
@@ -45,6 +57,7 @@ export class TurnEventNormalizer {
   constructor(
     private readonly sessionId: string,
     private readonly eventIdFactory: () => string = () => crypto.randomUUID(),
+    private readonly options: TurnEventNormalizerOptions = {},
   ) {}
 
   accept(source: TurnSourceEvent): CodeMuxRuntimeEvent[] {
@@ -105,8 +118,19 @@ export class TurnEventNormalizer {
       })];
     }
     if (source.kind === 'tool_started') {
-      if (this.startedToolIds.has(source.toolUseId)) return [];
+      const previousInput = this.startedToolInputs.get(source.toolUseId);
+      if (previousInput) {
+        if (!this.options.refreshToolInput) return [];
+        const merged = mergeToolInputs(previousInput, source.input);
+        if (sameToolInputs(previousInput, merged)) return [];
+        this.startedToolInputs.set(source.toolUseId, merged);
+        return [this.withSequence({
+          type: 'tool_started', session_id: this.sessionId, tool_use_id: source.toolUseId,
+          name: source.name, input: merged, event_id: this.eventIdFactory(), sequence: 0,
+        })];
+      }
       this.startedToolIds.add(source.toolUseId);
+      this.startedToolInputs.set(source.toolUseId, source.input);
       return [this.withSequence({
         type: 'tool_started', session_id: this.sessionId, tool_use_id: source.toolUseId,
         name: source.name, input: source.input, event_id: this.eventIdFactory(), sequence: 0,
@@ -151,4 +175,21 @@ export class TurnEventNormalizer {
   private withSequence<T extends CodeMuxRuntimeEvent>(event: T): T {
     return { ...event, sequence: this.sequence++ } as T;
   }
+}
+
+function mergeToolInputs(
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...previous };
+  for (const [key, value] of Object.entries(next)) {
+    merged[key] = value;
+  }
+  return merged;
+}
+
+function sameToolInputs(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
 }

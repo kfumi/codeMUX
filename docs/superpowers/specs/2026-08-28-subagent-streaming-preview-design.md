@@ -329,6 +329,29 @@ Sidecar 生命周期：`result` 之后 handle 非 null；存在 running 子智�
 ## Further Notes
 
 - 二期若接 OpenCode：只新增适配器，把 OpenCode 子会话事件折成同一套 Observation。不要给 SidePanel 加 `opencode_subagent` kind。
+
+### OpenCode 适配器（二期，已实现）
+
+OpenCode 与 Claude 的差异：子代理跑在带独立 `sessionID` 的子 session 里，所有子 session 事件与父 session 走同一条 SSE 事件总线；没有 task_started/sidechain 协议，声明信号是父 session 上的两种 part。Rust 表、前端 store、SidePanel 零改动（`provider` 一直是普通字符串）。
+
+| OpenCode 信号 | 适配器行为 |
+|---|---|
+| 父 session `message.part.updated`，`part.type === 'subtask'` | 发出 `declared`：规范 id = `part.id`（无 id 用 `callID`），`title = part.agent`，`description = part.description`，`prompt = part.prompt` 写成时间线第一条 `user_message`。同一 part 重复发布走 sticky 合并，不重复宣布。 |
+| 父 session `message.part.updated`，`part.type === 'tool'`、工具名 `task`/`agent`（忽略大小写）、`state.metadata.sessionId` 指向子 session | 绑定 `childSessionId → 规范 id`。若 `callID` 已是别名或规范 id 则只绑定；否则优先按 `messageID` 匹配本轮里尚未绑定的 subtask 声明（注册 `callID` 为别名）；都匹配不上才用 `state.input`（`subagent_type`/`agent`/`description`/`prompt`）新建声明。 |
+| 子 session 的 `message.part.updated` / `message.part.delta` / `message.updated` 等 | 复用 `toCodeMuxEvent` 投影（每个子 session 一份独立 streamingParts / nextSection / idleStreamKind / userMessageIds 状态，子 session 的用户 prompt 文本经 `userMessageIds` 抑制，避免与声明的 prompt 重复），把投影结果反折回 `TurnSourceEvent`（`assistant_message`、流事件、`tool_started/finished`、`error`；`turn_finished`/`system_event`/`diagnostic`/`permission_requested` 丢弃），包进 `subagent_timeline`。未绑定的子 session 事件丢弃（与 Claude 未宣布 sidechain 一致）。 |
+| 子 session `session.idle` | `status: completed`（投影出的 `turn_finished` 不进子时间线）。 |
+| 子 session `session.error` | 投影出的 `error` 事件进子时间线 + `status: failed`。 |
+| 子 session `session.interrupted` / `session.aborted` | `status: canceled`。 |
+| 子 session `permission.asked`/`question.asked` | 不进适配器：runtime 对任意 session 的权限/提问事件本来就在 session 过滤之前全局处理，批准 UI 只在父 Composer（与一期规则一致）。 |
+| 子 session `session.status`（`free_tier_limit`） | 维持现状：提升为父轮次失败；同时该子智能体描述符标 `failed`。 |
+| 用户 Stop / interrupt / runtime dispose | 先对子 session 尽力 `abort`，再 `failRunningTasks()`：所有 `running` 描述符变 `failed`。 |
+| `resetSession` | 适配器 `reset()`（仅会话拆除）。 |
+
+规范 id 的取法与 Claude 相同：声明信号给出的父侧工具调用 id（subtask part 的 `part.id` / Task 工具 part 的 `callID`），即父对话 Task 卡片的 `tool_use_id`；`childSessionId` 只存在适配器内部。
+
+OpenCode 没有 Claude 的「父轮次 result 掐死 query」问题：runtime 在子任务未结束时本来就忽略父 `session.idle`（等待子任务完成），因此不需要 query 保活改造；子智能体仍在跑时，turn 空闲守卫同样视为活动中（守卫挂起）。
+
+文件落点：`opencodeSubagentObservations.ts`（纯函数：声明提取、子事件投影、CodeMUX→TurnSourceEvent 反折）、`opencodeSubagentSource.ts`（有状态控制器：fold 状态、sessionToSubagent 绑定、failRunningTasks/failSession/reset）、`opencodeRuntime.ts` 接线。`claudeSubagentFold.ts` 的 `provider` 字段从 `'claude'` 字面量放宽为 `string`，fold 本体不改。
 - 二期若做面板发送：那是新的领域动作，不是把 Composer 抄进 tab。一期面板不要预留禁用输入框。
 - 二期若回填 Claude 磁盘：作为 hydration adapter 写入 Rust 表，前端仍然只读 `load_session_subagents`。
 - 与 ADR 0003、0004 相容：子轨道是领域事件的旁路存储，不是第二套父 Timeline；子智能体权限仍是父会话上的 Interactive Request，空闲守卫在等待人类时挂起的规则不变，并扩展为「有 running 子智能体时也不得因父 `result` 而关 query」。

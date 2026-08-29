@@ -289,8 +289,125 @@ describe('OpenCodeRuntime', () => {
     });
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
 
-    expect(emitted.map((event) => event.type)).toEqual(['tool_started', 'tool_finished', 'turn_finished']);
-    expect(emitted.map((event) => event.sequence)).toEqual([0, 1, 2]);
+    // The subtask part now also declares a subagent track (upsert + prompt
+    // timeline entry) alongside the parent Task card and terminal outcome.
+    expect(emitted.map((event) => event.type)).toEqual([
+      'subagent_upsert', 'subagent_timeline', 'tool_started', 'tool_finished', 'turn_finished',
+    ]);
+    // Subagent events carry event_id instead of a parent-timeline sequence;
+    // parent-path events keep their 0..n sequencing.
+    expect(emitted.filter((event) => !String(event.type).startsWith('subagent_')).map((event) => event.sequence)).toEqual([0, 1, 2]);
+    await runtime.shutdown();
+  });
+
+  it('routes subtask declarations and child-session traffic into subagent events', async () => {
+    const { port, client } = createPort();
+    const emitted: Array<Record<string, unknown>> = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+      eventIdFactory: () => 'event-1',
+    });
+
+    await runtime.start();
+    // Parent announces the task; the tool part binds the child session.
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          id: 'task-1', messageID: 'message-1', type: 'subtask',
+          prompt: '检查测试', description: '检查测试', agent: 'explore',
+        },
+      },
+    });
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          type: 'tool', tool: 'Task', callID: 'task-1', messageID: 'message-1',
+          state: { status: 'running', input: {}, metadata: { sessionId: 'child-session-1' } },
+        },
+      },
+    });
+    // Child session streams text.
+    onEvent({
+      type: 'message.part.delta',
+      properties: { sessionID: 'child-session-1', partID: 'p1', messageID: 'cm1', field: 'text', delta: '正在检查' },
+    });
+    // Child finishes; the parent turn may now complete.
+    onEvent({ type: 'session.idle', properties: { sessionID: 'child-session-1' } });
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+
+    const subagentEvents = emitted.filter((event) => String(event.type).startsWith('subagent_'));
+    const upserts = subagentEvents.filter((event) => event.type === 'subagent_upsert');
+    expect(upserts[0]).toMatchObject({
+      subagent_id: 'task-1',
+      provider: 'opencode',
+      title: 'explore',
+      status: 'running',
+      session_id: 'codemux-session-1',
+    });
+    expect(upserts[upserts.length - 1]).toMatchObject({ subagent_id: 'task-1', status: 'completed' });
+    const timelines = subagentEvents.filter((event) => event.type === 'subagent_timeline');
+    expect(timelines.length).toBeGreaterThanOrEqual(1);
+    expect(timelines.every((event) => (event as { subagent_id?: string }).subagent_id === 'task-1')).toBe(true);
+    expect(timelines.some((event) => (event as { event?: { type?: string } }).event?.type === 'reasoning_delta')).toBe(true);
+    // The parent timeline still ends with its own turn_finished; child traffic
+    // never leaks into the parent stream.
+    const parentTurnFinished = emitted.filter((event) => event.type === 'turn_finished');
+    expect(parentTurnFinished).toHaveLength(1);
+    expect(parentTurnFinished[0]).toMatchObject({ outcome: 'completed', session_id: 'codemux-session-1' });
+    await runtime.shutdown();
+  });
+
+  it('fails running subagents when the runtime is interrupted', async () => {
+    const { port, client } = createPort();
+    const emitted: Array<Record<string, unknown>> = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+      eventIdFactory: () => 'event-1',
+    });
+
+    await runtime.start();
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          id: 'task-1', messageID: 'message-1', type: 'subtask',
+          prompt: '检查测试', description: '检查测试', agent: 'explore',
+        },
+      },
+    });
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          type: 'tool', tool: 'Task', callID: 'task-1', messageID: 'message-1',
+          state: { status: 'running', input: {}, metadata: { sessionId: 'child-session-1' } },
+        },
+      },
+    });
+
+    await runtime.interrupt();
+
+    // Stop also aborts the child session itself.
+    expect(client.abort).toHaveBeenCalledWith('child-session-1');
+    const failUpserts = emitted.filter((event) => event.type === 'subagent_upsert' && (event as { status?: string }).status === 'failed');
+    expect(failUpserts).toHaveLength(1);
+    expect(failUpserts[0]).toMatchObject({ subagent_id: 'task-1' });
     await runtime.shutdown();
   });
 

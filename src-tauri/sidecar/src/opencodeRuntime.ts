@@ -15,6 +15,8 @@ import type { OpenCodeEventSubscription, OpenCodePermissionUpdate } from './open
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 import { isOpenCodeAutoApproveEnabled } from './agentPermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
+import type { CodeMuxSubagentEvent } from './codeMuxProtocol.js';
+import { OpenCodeSubagentSource } from './opencodeSubagentSource.js';
 import {
   closeOpenCodeServerWithTimeout,
   mapOpenCodeImages,
@@ -87,6 +89,7 @@ export class OpenCodeRuntime {
   private manualCompactionInFlight = false;
   private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly childTaskToolIds = new Map<string, string>();
+  private readonly subagents: OpenCodeSubagentSource;
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
   private readonly streamingParts = new Map<string, import('./opencodeEvents.js').StreamingPartState>();
@@ -127,6 +130,7 @@ export class OpenCodeRuntime {
       throw new RangeError('OpenCode server close timeout must be a positive finite number');
     }
     this.agentSessionId = config.agentSessionId;
+    this.subagents = new OpenCodeSubagentSource(this.eventIdFactory);
   }
 
   /**
@@ -603,13 +607,43 @@ export class OpenCodeRuntime {
       this.pendingQuestionIds.size > 0 || this.permissions.hasPending(this.config.sessionId);
     // Tools own their own timeouts. While any tool is executing, treat the turn as busy
     // rather than idle so the idle guard does not abort long-running commands (builds,
-    // installs, long tests). The guard stays armed for genuine streaming stalls.
-    const hasRunningTool = this.runningToolIds.size > 0;
+    // installs, long tests). The tool layer is authoritative for its own timeouts.
+    // Running subagents count the same way: their child sessions stream on the
+    // same bus, and aborting the parent turn under them would be wrong.
+    const hasRunningTool = this.runningToolIds.size > 0 || this.subagents.hasRunningTasks();
     if (hasPendingInteraction || hasRunningTool) {
       this.turnIdleGuard?.suspend();
     } else {
       this.turnIdleGuard?.resume();
     }
+  }
+
+  private subagentContext(): { sessionId: string } {
+    return { sessionId: this.config.sessionId };
+  }
+
+  private emitSubagentEvents(events: CodeMuxSubagentEvent[]): void {
+    for (const event of events) {
+      this.emitEvent(event);
+    }
+  }
+
+  /** Mirror child tool lifecycle into the running-tool set that suspends the idle guard. */
+  private trackChildSubagentToolActivity(events: CodeMuxSubagentEvent[]): void {
+    let changed = false;
+    for (const event of events) {
+      if (event.type !== 'subagent_timeline') continue;
+      const inner = event.event;
+      if (inner.type === 'tool_started' && typeof inner.tool_use_id === 'string') {
+        this.runningToolIds.add(inner.tool_use_id);
+        changed = true;
+      }
+      if (inner.type === 'tool_finished' && typeof inner.tool_use_id === 'string') {
+        this.runningToolIds.delete(inner.tool_use_id);
+        changed = true;
+      }
+    }
+    if (changed) this.syncGuardWithInteractiveState();
   }
 
   private handleSdkEvent(event: unknown): void {
@@ -701,9 +735,26 @@ export class OpenCodeRuntime {
     const toolId = getOpenCodeToolId(event);
     const toolStatus = getOpenCodeToolStatus(event);
     this.captureChildTaskSession(event, type, toolId, toolStatus);
+    if (!eventSessionId || eventSessionId === activeSessionId) {
+      // Parent-session declaration signals (subtask part, Task tool part) must
+      // be observed before the parent timeline projection renders the card.
+      this.emitSubagentEvents(this.subagents.observeParentEvent(event, this.subagentContext()));
+    }
     if (eventSessionId && eventSessionId !== activeSessionId) {
       if (eventSessionId && isFreeTierLimitRetry(event) && this.childTaskToolIds.has(eventSessionId)) {
         this.failParentTurnForChildProviderError(eventSessionId, event);
+      } else if (this.subagents.isChildSession(eventSessionId)) {
+        const subagentEvents = this.subagents.observeChildEvent(event, eventSessionId, this.subagentContext());
+        this.trackChildSubagentToolActivity(subagentEvents);
+        this.emitSubagentEvents(subagentEvents);
+        if (isChildTerminalEventType(type)) {
+          this.childTaskToolIds.delete(eventSessionId);
+        }
+        if (identity) {
+          this.rememberSeenEventId(identity);
+        } else if (payloadKey) {
+          this.rememberSeenPayloadKey(payloadKey);
+        }
       } else if (isChildTerminalEventType(type)) {
         this.childTaskToolIds.delete(eventSessionId);
       }
@@ -901,6 +952,7 @@ export class OpenCodeRuntime {
       this.pendingTaskToolCallIds.delete(toolId);
       this.emitToolFinished(toolId, message, parentSessionId, true);
     }
+    this.emitSubagentEvents(this.subagents.failSession(childSessionId, this.subagentContext()));
     this.syncGuardWithInteractiveState();
     void this.client?.abort(parentSessionId).catch(() => undefined);
     this.handleSdkEvent({
@@ -967,6 +1019,7 @@ export class OpenCodeRuntime {
     this.seenEventIds.clear();
     this.seenPayloadKeys.clear();
     this.seenPayloadKeyBytes = 0;
+    this.subagents.reset();
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.compactionBoundarySessionIds.clear();
@@ -1152,6 +1205,14 @@ export class OpenCodeRuntime {
           }
         }
         this.handleSdkEvent({ type: 'session.interrupted', properties: { sessionID: sessionId } });
+      }
+      // Stop means stop: child sessions run independently of the parent, so
+      // abort them too, then surface every running child as failed.
+      for (const childSessionId of [...this.childTaskToolIds.keys()]) {
+        void client?.abort(childSessionId).catch(() => undefined);
+      }
+      if (this.subagents.hasRunningTasks()) {
+        this.emitSubagentEvents(this.subagents.failRunningTasks(this.subagentContext()));
       }
       await this.permissions.cancelAll(this.config.sessionId);
     } finally {

@@ -18,6 +18,8 @@ export type SubagentObservation =
       /** First timeline entry content (workflow uses description). */
       prompt?: string;
       isWorkflow: boolean;
+      /** Defaults to 'claude'; OpenCode declarations set 'opencode'. */
+      provider?: string;
     }
   | { kind: 'status'; taskId: string; status: SubagentStatus }
   | { kind: 'subtitle'; taskId: string; subtitle: string }

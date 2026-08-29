@@ -5,7 +5,7 @@ import type { SubagentObservation } from './claudeSubagentObservations.js';
 const TERMINAL_STATUSES: ReadonlySet<SubagentStatus> = new Set(['completed', 'failed', 'canceled']);
 
 export type SubagentDescriptorState = {
-  provider: 'claude';
+  provider: string;
   title?: string | null;
   description?: string | null;
   status: SubagentStatus;
@@ -34,6 +34,12 @@ export type SubagentFoldContext = {
   sessionId?: string;
   newEventId?: () => string;
   timestamp?: () => string;
+  /**
+   * Emit refreshed `tool_started` events when a later observation carries more
+   * complete input for an already-started tool (OpenCode streams tool input
+   * after the first part update). Claude sidechains keep drop semantics.
+   */
+  refreshToolInput?: boolean;
 };
 
 export type SubagentFoldResult = {
@@ -200,7 +206,7 @@ export function foldSubagentObservations(
         const entry: SubagentFoldEntry = {
           subagentId,
           descriptor: {
-            provider: 'claude',
+            provider: observation.provider ?? 'claude',
             title: observation.title ?? null,
             description: observation.description ?? null,
             status: 'running',
@@ -210,7 +216,7 @@ export function foldSubagentObservations(
           isBackgrounded: undefined,
           seenBackgroundedPatch: false,
           announcedPrompt: false,
-          normalizer: new TurnEventNormalizer(sessionId ?? '', newEventId),
+          normalizer: new TurnEventNormalizer(sessionId ?? '', newEventId, { refreshToolInput: context.refreshToolInput === true }),
         };
         state.subagents[subagentId] = entry;
         for (const toolUseId of observation.toolUseIds) {

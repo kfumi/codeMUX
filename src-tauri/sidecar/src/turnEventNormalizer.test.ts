@@ -53,3 +53,44 @@ describe('TurnEventNormalizer', () => {
     })]);
   });
 });
+
+describe('TurnEventNormalizer tool input refresh', () => {
+  const initialToolStart = {
+    kind: 'tool_started' as const,
+    toolUseId: 'call-1',
+    name: 'read',
+    input: {},
+  };
+  const fullerToolStart = {
+    kind: 'tool_started' as const,
+    toolUseId: 'call-1',
+    name: 'read',
+    input: { file_path: 'D:/demo/package.json' },
+  };
+
+  it('drops repeated tool_started by default', () => {
+    const normalizer = new TurnEventNormalizer('session-1', () => 'event-1');
+    expect(normalizer.accept(initialToolStart)).toHaveLength(1);
+    expect(normalizer.accept(fullerToolStart)).toEqual([]);
+  });
+
+  it('re-emits a merged tool_started when refreshToolInput is enabled', () => {
+    let eventNumber = 0;
+    const normalizer = new TurnEventNormalizer('session-1', () => `event-${++eventNumber}`, { refreshToolInput: true });
+    expect(normalizer.accept(initialToolStart)).toHaveLength(1);
+    const refreshed = normalizer.accept(fullerToolStart);
+    expect(refreshed).toEqual([expect.objectContaining({
+      type: 'tool_started',
+      tool_use_id: 'call-1',
+      input: { file_path: 'D:/demo/package.json' },
+    })]);
+    // A repeated identical update emits nothing.
+    expect(normalizer.accept(fullerToolStart)).toEqual([]);
+    // Partial updates merge over the stored input instead of replacing it.
+    expect(normalizer.accept({ ...fullerToolStart, input: { offset: 10 } })).toEqual([
+      expect.objectContaining({
+        input: { file_path: 'D:/demo/package.json', offset: 10 },
+      }),
+    ]);
+  });
+});
