@@ -97,19 +97,26 @@ export function convertAgentEventsToAssistantMessages(
       }
 
       const seenToolCallIds = new Set<string>();
+      const batchToolCallParts = new Map<string, CodeMuxToolCallPart>();
       const parts = event.data.message.content
         .flatMap((block, blockIndex) => convertContentBlockToParts(block, index, blockIndex))
         .filter((part) => {
           if (part.type !== 'tool-call') {
             return true;
           }
-          if (
-            isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds)
-            || isDuplicateToolCall(part.toolCallId, toolCallLocationById, seenToolCallIds)
-          ) {
+          if (isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds)) {
+            return false;
+          }
+          const existing = resolveExistingToolCallPart(part.toolCallId, toolCallLocationById, messages, batchToolCallParts);
+          if (existing) {
+            // A repeated projection of the same tool call refreshes its args in
+            // place (OpenCode streams tool input after the first tool_started)
+            // instead of rendering a duplicate card.
+            existing.args = { ...existing.args, ...part.args };
             return false;
           }
           seenToolCallIds.add(part.toolCallId);
+          batchToolCallParts.set(part.toolCallId, part);
           return true;
         });
 
@@ -590,14 +597,6 @@ function createAskUserQuestionToolCallPart(
   };
 }
 
-function isDuplicateToolCall(
-  toolCallId: string,
-  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
-  seenInBatch: Set<string>,
-): boolean {
-  return toolCallLocationById.has(toolCallId) || seenInBatch.has(toolCallId);
-}
-
 function isDuplicateAskUserQuestionToolCall(
   part: CodeMuxAssistantPart,
   toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
@@ -609,6 +608,29 @@ function isDuplicateAskUserQuestionToolCall(
     askQuestionToolUseIds.has(part.toolCallId) &&
     toolCallLocationById.has(part.toolCallId)
   );
+}
+
+/**
+ * Resolve the already-rendered part for a tool call id — either committed into
+ * a previous message or created earlier within the current batch. Later
+ * projections of the same call merge their args into it.
+ */
+function resolveExistingToolCallPart(
+  toolCallId: string,
+  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
+  messages: CodeMuxAssistantMessage[],
+  batchToolCallParts: Map<string, CodeMuxToolCallPart>,
+): CodeMuxToolCallPart | undefined {
+  const batchPart = batchToolCallParts.get(toolCallId);
+  if (batchPart) {
+    return batchPart;
+  }
+  const location = toolCallLocationById.get(toolCallId);
+  if (!location) {
+    return undefined;
+  }
+  const part = messages[location.messageIndex]?.content[location.partIndex];
+  return part?.type === 'tool-call' ? part : undefined;
 }
 
 function isAskUserQuestionToolName(toolName: string): boolean {

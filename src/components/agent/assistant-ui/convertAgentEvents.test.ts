@@ -4,6 +4,59 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
 describe('convertAgentEventsToAssistantMessages', () => {
+  it('merges repeated tool_started projections into one card with refreshed args', () => {
+    // OpenCode tool parts arrive with empty input at `pending`; the real
+    // arguments stream in with the `running`/`completed` update.
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'tool-start-empty',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call-1', name: 'read', input: {} }] },
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'tool-start-full',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call-1', name: 'read', input: { file_path: 'D:/demo/package.json' } }] },
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              { type: 'tool_result', tool_use_id: 'call-1', content: 'file body' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    const toolCards = messages.flatMap((message) => message.content.filter(
+      (part) => part.type === 'tool-call' && part.toolCallId === 'call-1',
+    ));
+    expect(toolCards).toHaveLength(1);
+    expect(toolCards[0]).toMatchObject({
+      type: 'tool-call',
+      toolName: 'read',
+      args: { file_path: 'D:/demo/package.json' },
+      result: 'file body',
+    });
+  });
+
   it('renders an OpenCode assistant text event before its terminal result', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: 'hello' } },
@@ -1775,7 +1828,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
-  it('drops duplicate tool calls with the same id inside one assistant event', () => {
+  it('collapses duplicate tool calls with the same id inside one assistant event into one merged card', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -1812,7 +1865,8 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[0]?.content[0]).toMatchObject({
       type: 'tool-call',
       toolCallId: 'call-dup',
-      args: { command: 'echo first' },
+      // A later projection of the same tool call refreshes its args in place.
+      args: { command: 'echo second' },
     });
   });
 
