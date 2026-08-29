@@ -11,6 +11,7 @@ pub mod history_import;
 pub(crate) mod native_cleanup;
 pub(crate) mod native_jsonl;
 pub(crate) mod opencode_history;
+pub(crate) mod opencode_subagent_history;
 pub(crate) mod rewind;
 pub(crate) mod session_lifecycle;
 pub mod subagent_persist;

@@ -2083,10 +2083,10 @@ fn load_latest_opencode_token_usage_from_connection(
     Ok(None)
 }
 
-struct OpenCodePart {
-    id: String,
-    time_created: i64,
-    data: Value,
+pub(crate) struct OpenCodePart {
+    pub id: String,
+    pub time_created: i64,
+    pub data: Value,
 }
 
 fn opencode_part_logical_time(part: &OpenCodePart) -> i64 {
@@ -2097,7 +2097,7 @@ fn opencode_part_logical_time(part: &OpenCodePart) -> i64 {
         .unwrap_or(part.time_created)
 }
 
-fn sort_opencode_parts(parts: &mut [OpenCodePart]) {
+pub(crate) fn sort_opencode_parts(parts: &mut [OpenCodePart]) {
     parts.sort_by(|left, right| {
         opencode_part_logical_time(left)
             .cmp(&opencode_part_logical_time(right))
@@ -2105,7 +2105,7 @@ fn sort_opencode_parts(parts: &mut [OpenCodePart]) {
     });
 }
 
-fn load_opencode_parts(
+pub(crate) fn load_opencode_parts(
     connection: &Connection,
     session_id: &str,
     message_id: &str,
@@ -2174,7 +2174,7 @@ fn opencode_error_message(error: &Value) -> String {
         .unwrap_or_else(|| stringify_value(error))
 }
 
-fn stringify_value(value: &Value) -> String {
+pub(crate) fn stringify_value(value: &Value) -> String {
     value
         .as_str()
         .map(str::to_string)
@@ -2189,7 +2189,7 @@ fn read_u64_value(value: Option<&Value>) -> u64 {
     }
 }
 
-fn timestamp_string(timestamp: i64) -> String {
+pub(crate) fn timestamp_string(timestamp: i64) -> String {
     chrono::DateTime::from_timestamp_millis(timestamp)
         .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
         .unwrap_or_else(|| timestamp.to_string())

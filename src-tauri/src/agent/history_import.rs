@@ -17,6 +17,7 @@ use crate::agent::commands::{
 };
 use crate::agent::history_events::normalize_history_events;
 use crate::agent::opencode_history;
+use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 
@@ -204,15 +205,13 @@ pub async fn load_session_events(
             let mut db = state.db.lock().unwrap();
             operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
                 .map_err(|error| error.to_string())?;
-            if agent_kind == AgentKind::ClaudeCode {
-                if let Err(error) = backfill_claude_subagent_history(&mut db, &app_session_id) {
-                    log::warn!(
-                        target: "agent",
-                        "Failed to backfill subagent history for app_session_id={}: {}",
-                        app_session_id,
-                        error
-                    );
-                }
+            if let Err(error) = backfill_subagent_history(&mut db, &app_session_id, agent_kind) {
+                log::warn!(
+                    target: "agent",
+                    "Failed to backfill subagent history for app_session_id={}: {}",
+                    app_session_id,
+                    error
+                );
             }
             return Ok(native_events);
         }
@@ -260,15 +259,13 @@ pub async fn resync_session_from_native(
         let mut db = state.db.lock().unwrap();
         operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
             .map_err(|error| error.to_string())?;
-        if agent_kind == AgentKind::ClaudeCode {
-            if let Err(error) = backfill_claude_subagent_history(&mut db, &app_session_id) {
-                log::warn!(
-                    target: "agent",
-                    "Failed to backfill subagent history for app_session_id={}: {}",
-                    app_session_id,
-                    error
-                );
-            }
+        if let Err(error) = backfill_subagent_history(&mut db, &app_session_id, agent_kind) {
+            log::warn!(
+                target: "agent",
+                "Failed to backfill subagent history for app_session_id={}: {}",
+                app_session_id,
+                error
+            );
         }
         let updated_at = Utc::now().to_rfc3339();
         db.execute(
@@ -379,6 +376,179 @@ fn backfill_claude_subagent_history(
         );
     }
     Ok(restored)
+}
+
+/// Backfill subagent descriptors and timelines from the provider CLI's on-disk
+/// storage after a native history (re)sync. Existing descriptors (live sidecar
+/// captures) are always left untouched.
+fn backfill_subagent_history(
+    conn: &mut Connection,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<usize, String> {
+    match agent_kind {
+        AgentKind::ClaudeCode => backfill_claude_subagent_history(conn, app_session_id),
+        AgentKind::Opencode => backfill_opencode_subagent_history(conn, app_session_id),
+        AgentKind::Codex | AgentKind::GeminiCli => Ok(0),
+    }
+}
+
+/// Backfill subagent descriptors and timelines from OpenCode's on-disk
+/// SQLite storage. Child sessions (`session.parent_id`) become subagent
+/// tracks; the parent Task tool part's `callID` is the canonical id.
+fn backfill_opencode_subagent_history(
+    conn: &mut Connection,
+    app_session_id: &str,
+) -> Result<usize, String> {
+    let opencode_session_id =
+        operations::get_agent_session_mapping(conn, app_session_id, AgentKind::Opencode)
+            .map_err(|error| error.to_string())?
+            .map(|record| record.agent_session_id);
+    let Some(opencode_session_id) = opencode_session_id else {
+        return Ok(0);
+    };
+    let Some(db_path) = opencode_history::find_opencode_database(&home_dir()?) else {
+        return Ok(0);
+    };
+    let connection =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| format!("Failed to open OpenCode database: {}", error))?;
+    let entries =
+        load_opencode_session_subagent_history(&connection, &opencode_session_id, app_session_id);
+    drop(connection);
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let existing_ids: std::collections::HashSet<String> =
+        operations::list_session_subagents(conn, app_session_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|record| record.subagent_id)
+            .collect();
+
+    let mut restored = 0usize;
+    let mut repaired = 0usize;
+    for entry in entries {
+        if existing_ids.contains(&entry.subagent_id) {
+            // Live captures normally win. Exception: a lossy capture (older
+            // sidecar builds dropped the refreshed tool_started, so tool
+            // arguments are missing) is repaired from the disk timeline,
+            // which always carries final complete parts.
+            let existing_events =
+                operations::load_session_subagent_events(conn, app_session_id, &entry.subagent_id)
+                    .map_err(|error| error.to_string())?;
+            if !live_capture_missing_tool_args(&existing_events, &entry.timeline) {
+                continue;
+            }
+            operations::replace_session_subagent_timeline(
+                conn,
+                app_session_id,
+                &entry.subagent_id,
+                &entry.timeline,
+            )
+            .map_err(|e| e.to_string())?;
+            repaired += 1;
+            continue;
+        }
+        operations::upsert_session_subagent(conn, &entry.upsert).map_err(|e| e.to_string())?;
+        for event in &entry.timeline {
+            operations::append_session_subagent_event(conn, event).map_err(|e| e.to_string())?;
+        }
+        restored += 1;
+    }
+    if restored > 0 {
+        log::info!(
+            target: "agent",
+            "Restored {} subagent tracks from OpenCode history for app_session_id={}",
+            restored,
+            app_session_id
+        );
+    }
+    if repaired > 0 {
+        log::info!(
+            target: "agent",
+            "Repaired {} lossy subagent timelines from OpenCode history for app_session_id={}",
+            repaired,
+            app_session_id
+        );
+    }
+    Ok(restored)
+}
+
+/// True when the disk timeline carries content that the persisted
+/// (live-captured) timeline lacks — the signature of a lossy capture made by
+/// an older sidecar (missing refreshed tool arguments, or assistant text parts
+/// dropped by the per-message snapshot dedupe). Healthy captures keep winning.
+fn live_capture_missing_tool_args(existing_events: &[Value], restored_timeline: &[Value]) -> bool {
+    let has_complete_args = |event: &Value| {
+        event.get("type").and_then(Value::as_str) == Some("tool_started")
+            && event
+                .get("input")
+                .and_then(Value::as_object)
+                .is_some_and(|input| !input.is_empty())
+    };
+    let disk_tool_starts = restored_timeline
+        .iter()
+        .filter_map(|envelope| envelope.get("event"))
+        .filter(|event| has_complete_args(event));
+    for disk_event in disk_tool_starts {
+        let tool_use_id = disk_event.get("tool_use_id").and_then(Value::as_str);
+        let captured = existing_events.iter().any(|event| {
+            has_complete_args(event)
+                && event.get("tool_use_id").and_then(Value::as_str) == tool_use_id
+        });
+        if !captured {
+            return true;
+        }
+    }
+
+    // Assistant text blocks: any disk text missing from the captured
+    // assistant_message envelopes means text parts were dropped.
+    let captured_texts: std::collections::HashSet<String> = existing_events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("assistant_message"))
+        .flat_map(|event| {
+            event
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|blocks| blocks.as_slice())
+                .unwrap_or(&[])
+                .to_vec()
+        })
+        .filter_map(|block| {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_owned())
+        })
+        .filter(|text| !text.is_empty())
+        .collect();
+    let disk_texts = restored_timeline
+        .iter()
+        .filter_map(|envelope| envelope.get("event"))
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("assistant_message"))
+        .flat_map(|event| {
+            event
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|blocks| blocks.as_slice())
+                .unwrap_or(&[])
+                .to_vec()
+        });
+    for block in disk_texts {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        let Some(text) = block.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let text = text.trim();
+        if !text.is_empty() && !captured_texts.contains(text) {
+            return true;
+        }
+    }
+    false
 }
 
 #[tauri::command]
@@ -699,6 +869,66 @@ fn agent_label(kind: AgentKind) -> &'static str {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn detects_lossy_capture_missing_tool_arguments() {
+        // Old sidecar capture: only the empty-input pending tool_started.
+        let existing = vec![serde_json::json!({
+            "type": "tool_started", "tool_use_id": "t1", "input": {}
+        })];
+        let disk_timeline = vec![serde_json::json!({
+            "type": "subagent_timeline",
+            "event": { "type": "tool_started", "tool_use_id": "t1", "input": { "filePath": "a.rs" } }
+        })];
+        assert!(live_capture_missing_tool_args(&existing, &disk_timeline));
+
+        // Healthy capture: the refreshed tool_started carries full args.
+        let healthy = vec![serde_json::json!({
+            "type": "tool_started", "tool_use_id": "t1", "input": { "filePath": "a.rs" }
+        })];
+        assert!(!live_capture_missing_tool_args(&healthy, &disk_timeline));
+
+        // Disk timeline without tools never triggers a repair.
+        let text_only = vec![serde_json::json!({
+            "type": "subagent_timeline",
+            "event": { "type": "assistant_message", "content": [] }
+        })];
+        assert!(!live_capture_missing_tool_args(&existing, &text_only));
+    }
+
+    #[test]
+    fn detects_lossy_capture_missing_assistant_text() {
+        // Old sidecar capture: only the thinking envelope survived the
+        // per-message snapshot dedupe; the summary text part was dropped.
+        let existing = vec![serde_json::json!({
+            "type": "assistant_message",
+            "content": [{ "type": "thinking", "thinking": "let me summarize" }]
+        })];
+        let disk_timeline = vec![
+            serde_json::json!({
+                "type": "subagent_timeline",
+                "event": { "type": "assistant_message", "content": [{ "type": "thinking", "thinking": "let me summarize" }] }
+            }),
+            serde_json::json!({
+                "type": "subagent_timeline",
+                "event": { "type": "assistant_message", "content": [{ "type": "text", "text": "Here is a concise summary" }] }
+            }),
+        ];
+        assert!(live_capture_missing_tool_args(&existing, &disk_timeline));
+
+        // Healthy capture: the text envelope is present with identical text.
+        let healthy = vec![
+            serde_json::json!({
+                "type": "assistant_message",
+                "content": [{ "type": "thinking", "thinking": "let me summarize" }]
+            }),
+            serde_json::json!({
+                "type": "assistant_message",
+                "content": [{ "type": "text", "text": "Here is a concise summary" }]
+            }),
+        ];
+        assert!(!live_capture_missing_tool_args(&healthy, &disk_timeline));
+    }
 
     fn test_home(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

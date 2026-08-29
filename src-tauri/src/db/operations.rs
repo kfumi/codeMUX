@@ -1648,6 +1648,62 @@ pub fn append_session_subagent_event(conn: &mut Connection, event: &Value) -> Re
     tx.commit()
 }
 
+/// Replace a subagent's persisted timeline with the provided envelopes.
+/// Used only by the disk-history backfill to repair a lossy live capture
+/// (e.g. tool arguments missing because an older sidecar dropped the
+/// refreshed `tool_started`); deletes and re-appends in one transaction.
+pub fn replace_session_subagent_timeline(
+    conn: &mut Connection,
+    session_id: &str,
+    subagent_id: &str,
+    events: &[Value],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM session_subagent_events WHERE session_id = ?1 AND subagent_id = ?2",
+        params![session_id, subagent_id],
+    )?;
+    let now = Utc::now().to_rfc3339();
+    // The descriptor must exist for the FK; stub it in defensively.
+    tx.execute(
+        "INSERT OR IGNORE INTO session_subagents (session_id, subagent_id, provider, status, created_at, updated_at)
+         VALUES (?1, ?2, 'opencode', 'completed', ?3, ?3)",
+        params![session_id, subagent_id, now],
+    )?;
+    for envelope in events {
+        let inner = envelope.get("event").cloned().unwrap_or(Value::Null);
+        let event_id = inner
+            .get("event_id")
+            .and_then(Value::as_str)
+            .or_else(|| envelope.get("event_id").and_then(Value::as_str))
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let timestamp = inner
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .or_else(|| envelope.get("timestamp").and_then(Value::as_str));
+        let sequence = inner
+            .get("sequence")
+            .and_then(Value::as_i64)
+            .or_else(|| envelope.get("sequence").and_then(Value::as_i64))
+            .unwrap_or(0);
+        tx.execute(
+            "INSERT OR IGNORE INTO session_subagent_events (session_id, subagent_id, sequence, event_id, event_timestamp, event_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                session_id,
+                subagent_id,
+                sequence,
+                event_id,
+                timestamp,
+                serde_json::to_string(&inner).unwrap_or_else(|_| "{}".to_string())
+            ],
+        )?;
+    }
+    tx.commit()
+}
+
 pub fn list_session_subagents(conn: &Connection, session_id: &str) -> Result<Vec<SessionSubagent>> {
     let mut stmt = conn.prepare(
         "SELECT session_id, subagent_id, provider, title, description, status, tool_call_id, subtitle, created_at, updated_at
@@ -2654,6 +2710,54 @@ mod tests {
         assert_eq!(descriptor.description.as_deref(), Some("find entry points"));
         assert_eq!(descriptor.subtitle.as_deref(), Some("tokens up 3.2k"));
         assert_eq!(descriptor.status, "completed");
+    }
+
+    #[test]
+    fn replace_session_subagent_timeline_swaps_rows_in_sequence_order() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "opencode");
+
+        super::append_session_subagent_event(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_timeline",
+                "session_id": "session-1",
+                "subagent_id": "call_1",
+                "provider": "opencode",
+                "event": { "type": "tool_started", "event_id": "old-1", "sequence": 0, "tool_use_id": "t1", "name": "read", "input": {} },
+                "event_id": "env-old-1"
+            }),
+        )
+        .unwrap();
+
+        let replacement = vec![
+            serde_json::json!({
+                "type": "subagent_timeline",
+                "session_id": "session-1",
+                "subagent_id": "call_1",
+                "event": { "type": "tool_started", "event_id": "new-1", "sequence": 0, "tool_use_id": "t1", "name": "read", "input": { "filePath": "D:/demo/package.json" } },
+                "event_id": "env-new-1"
+            }),
+            serde_json::json!({
+                "type": "subagent_timeline",
+                "session_id": "session-1",
+                "subagent_id": "call_1",
+                "event": { "type": "tool_finished", "event_id": "new-2", "sequence": 1, "tool_use_id": "t1", "content": "body", "is_error": false },
+                "event_id": "env-new-2"
+            }),
+        ];
+        super::replace_session_subagent_timeline(&mut conn, "session-1", "call_1", &replacement)
+            .unwrap();
+
+        let events = super::load_session_subagent_events(&conn, "session-1", "call_1").unwrap();
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|event| event["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["tool_started", "tool_finished"]);
+        assert_eq!(events[0]["input"]["filePath"], "D:/demo/package.json");
+        assert_eq!(events[1]["sequence"], 1);
     }
 
     #[test]
