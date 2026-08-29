@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::agent::claude_subagent_history::load_claude_session_subagent_history;
 use crate::agent::commands::{
     convert_codex_history_values_to_events, home_dir, should_include_claude_history_event,
 };
@@ -203,6 +204,16 @@ pub async fn load_session_events(
             let mut db = state.db.lock().unwrap();
             operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
                 .map_err(|error| error.to_string())?;
+            if agent_kind == AgentKind::ClaudeCode {
+                if let Err(error) = backfill_claude_subagent_history(&mut db, &app_session_id) {
+                    log::warn!(
+                        target: "agent",
+                        "Failed to backfill subagent history for app_session_id={}: {}",
+                        app_session_id,
+                        error
+                    );
+                }
+            }
             return Ok(native_events);
         }
     }
@@ -249,6 +260,16 @@ pub async fn resync_session_from_native(
         let mut db = state.db.lock().unwrap();
         operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
             .map_err(|error| error.to_string())?;
+        if agent_kind == AgentKind::ClaudeCode {
+            if let Err(error) = backfill_claude_subagent_history(&mut db, &app_session_id) {
+                log::warn!(
+                    target: "agent",
+                    "Failed to backfill subagent history for app_session_id={}: {}",
+                    app_session_id,
+                    error
+                );
+            }
+        }
         let updated_at = Utc::now().to_rfc3339();
         db.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
@@ -307,6 +328,57 @@ async fn load_native_session_events(
         }
         AgentKind::GeminiCli => Ok(Vec::new()),
     }
+}
+
+/// Backfill subagent descriptors and timelines from the Claude CLI's on-disk
+/// `subagents/` transcripts after a native history (re)sync. Descriptors that
+/// already exist (live sidecar captures) are left untouched. `conn` is the
+/// app database connection, already locked by the caller.
+fn backfill_claude_subagent_history(
+    conn: &mut Connection,
+    app_session_id: &str,
+) -> Result<usize, String> {
+    let claude_session_id =
+        operations::get_agent_session_mapping(conn, app_session_id, AgentKind::ClaudeCode)
+            .map_err(|error| error.to_string())?
+            .map(|record| record.agent_session_id);
+    let Some(claude_session_id) = claude_session_id else {
+        return Ok(0);
+    };
+    let claude_dir = home_dir()?.join(".claude");
+    let entries =
+        load_claude_session_subagent_history(&claude_dir, &claude_session_id, app_session_id);
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let existing_ids: std::collections::HashSet<String> =
+        operations::list_session_subagents(conn, app_session_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|record| record.subagent_id)
+            .collect();
+
+    let mut restored = 0usize;
+    for entry in entries {
+        if existing_ids.contains(&entry.subagent_id) {
+            continue;
+        }
+        operations::upsert_session_subagent(conn, &entry.upsert).map_err(|e| e.to_string())?;
+        for event in &entry.timeline {
+            operations::append_session_subagent_event(conn, event).map_err(|e| e.to_string())?;
+        }
+        restored += 1;
+    }
+    if restored > 0 {
+        log::info!(
+            target: "agent",
+            "Restored {} subagent tracks from Claude CLI history for app_session_id={}",
+            restored,
+            app_session_id
+        );
+    }
+    Ok(restored)
 }
 
 #[tauri::command]

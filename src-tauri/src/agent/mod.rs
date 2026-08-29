@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod claude_history;
+pub(crate) mod claude_subagent_history;
 pub mod codex_history;
 pub mod codex_proxy;
 pub mod commands;
