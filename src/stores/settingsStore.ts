@@ -264,6 +264,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   getNeedsProxy: () => {
     const provider = get().getActiveProvider();
     if (!provider) return false;
+    // Codex dials a native Responses endpoint directly; the compat proxy only
+    // applies to the chat-completions fallback.
+    if (selectEndpoint(provider, 'openai_responses')) return false;
     const endpoint = selectEndpoint(provider, 'openai_compatible');
     return Boolean(endpoint?.codex_needs_proxy);
   },

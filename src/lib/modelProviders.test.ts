@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  codexEndpoint,
   isProviderUsable,
   providerUnusableReason,
   requiredProtocol,
@@ -43,5 +44,53 @@ describe('modelProviders helpers', () => {
     });
     expect(isProviderUsable(provider, 'codex')).toBe(false);
     expect(providerUnusableReason(provider, 'codex')).toContain('OpenAI');
+  });
+
+  it('codex prefers the responses endpoint and falls back to chat', () => {
+    const fallbackOnly = deepseek();
+    expect(codexEndpoint(fallbackOnly)?.protocol).toBe('openai_compatible');
+
+    const withResponses = deepseek({
+      endpoints: [
+        {
+          protocol: 'openai_responses',
+          base_url: 'https://open.bigmodel.cn/api/v1',
+          codex_needs_proxy: false,
+        },
+        {
+          protocol: 'openai_compatible',
+          base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+          codex_needs_proxy: true,
+        },
+      ],
+    });
+    expect(codexEndpoint(withResponses)?.protocol).toBe('openai_responses');
+    expect(isProviderUsable(withResponses, 'codex')).toBe(true);
+    expect(isProviderUsable(withResponses, 'opencode')).toBe(true);
+  });
+
+  it('ignores responses endpoints with empty base_url', () => {
+    const provider = deepseek({
+      endpoints: [
+        { protocol: 'openai_responses', base_url: '  ' },
+        { protocol: 'openai_compatible', base_url: 'https://api.deepseek.com' },
+      ],
+    });
+    expect(codexEndpoint(provider)?.protocol).toBe('openai_compatible');
+  });
+
+  it('treats a responses-only provider as usable for codex but not opencode', () => {
+    const provider = deepseek({
+      endpoints: [
+        {
+          protocol: 'openai_responses',
+          base_url: 'https://open.bigmodel.cn/api/v1',
+          codex_needs_proxy: false,
+        },
+      ],
+    });
+    expect(isProviderUsable(provider, 'codex')).toBe(true);
+    expect(isProviderUsable(provider, 'opencode')).toBe(false);
+    expect(providerUnusableReason(provider, 'opencode')).toBe('缺少 OpenAI 兼容端点');
   });
 });

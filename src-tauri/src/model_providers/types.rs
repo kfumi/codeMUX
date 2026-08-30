@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum Protocol {
     Anthropic,
     OpenaiCompatible,
+    OpenaiResponses,
 }
 
 impl Protocol {
@@ -13,6 +14,7 @@ impl Protocol {
         match self {
             Self::Anthropic => "anthropic",
             Self::OpenaiCompatible => "openai_compatible",
+            Self::OpenaiResponses => "openai_responses",
         }
     }
 }
@@ -136,6 +138,25 @@ pub fn select_endpoint(provider: &ModelProvider, protocol: Protocol) -> Option<&
         .find(|endpoint| endpoint.protocol == protocol && !endpoint.base_url.trim().is_empty())
 }
 
+/// Picks the endpoint an agent kind should dial.
+///
+/// Codex prefers a native Responses endpoint (`openai_responses`) when one is
+/// configured and falls back to the chat-completions endpoint; the other agent
+/// kinds keep their single required protocol.
+pub fn select_agent_endpoint(
+    provider: &ModelProvider,
+    agent_kind: AgentKind,
+) -> Option<&ProtocolEndpoint> {
+    match agent_kind {
+        AgentKind::Codex => select_endpoint(provider, Protocol::OpenaiResponses)
+            .or_else(|| select_endpoint(provider, Protocol::OpenaiCompatible)),
+        other => {
+            let protocol = required_protocol(other)?;
+            select_endpoint(provider, protocol)
+        }
+    }
+}
+
 pub fn effective_api_key(provider: &ModelProvider, endpoint: &ProtocolEndpoint) -> String {
     endpoint
         .api_key_override
@@ -150,10 +171,7 @@ pub fn is_provider_usable(provider: &ModelProvider, agent_kind: AgentKind) -> bo
     if !provider.enabled {
         return false;
     }
-    let Some(protocol) = required_protocol(agent_kind) else {
-        return false;
-    };
-    let Some(endpoint) = select_endpoint(provider, protocol) else {
+    let Some(endpoint) = select_agent_endpoint(provider, agent_kind) else {
         return false;
     };
     if effective_api_key(provider, endpoint).is_empty() {
@@ -347,6 +365,81 @@ mod tests {
             Some(Protocol::OpenaiCompatible)
         );
         assert_eq!(required_protocol(AgentKind::GeminiCli), None);
+    }
+
+    #[test]
+    fn openai_responses_serializes_as_snake_case() {
+        assert_eq!(Protocol::OpenaiResponses.as_str(), "openai_responses");
+        let endpoint = ProtocolEndpoint {
+            protocol: Protocol::OpenaiResponses,
+            base_url: "https://open.bigmodel.cn/api/v1".to_string(),
+            api_key_override: None,
+            codex_needs_proxy: Some(false),
+        };
+        let json = serde_json::to_value(&endpoint).unwrap();
+        assert_eq!(json["protocol"], "openai_responses");
+        let parsed: ProtocolEndpoint = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, endpoint);
+    }
+
+    #[test]
+    fn codex_prefers_responses_endpoint_and_falls_back_to_chat() {
+        let mut provider = deepseek_provider(true, true);
+        assert_eq!(
+            select_agent_endpoint(&provider, AgentKind::Codex).map(|endpoint| endpoint.protocol),
+            Some(Protocol::OpenaiCompatible)
+        );
+        provider.endpoints.insert(
+            0,
+            ProtocolEndpoint {
+                protocol: Protocol::OpenaiResponses,
+                base_url: "https://open.bigmodel.cn/api/v1".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: Some(false),
+            },
+        );
+        assert_eq!(
+            select_agent_endpoint(&provider, AgentKind::Codex).map(|endpoint| endpoint.protocol),
+            Some(Protocol::OpenaiResponses)
+        );
+        assert_eq!(
+            select_agent_endpoint(&provider, AgentKind::Opencode).map(|endpoint| endpoint.protocol),
+            Some(Protocol::OpenaiCompatible)
+        );
+        assert_eq!(
+            select_agent_endpoint(&provider, AgentKind::ClaudeCode)
+                .map(|endpoint| endpoint.protocol),
+            Some(Protocol::Anthropic)
+        );
+    }
+
+    #[test]
+    fn empty_responses_base_url_falls_back_to_chat() {
+        let mut provider = deepseek_provider(true, true);
+        provider.endpoints.push(ProtocolEndpoint {
+            protocol: Protocol::OpenaiResponses,
+            base_url: "  ".to_string(),
+            api_key_override: None,
+            codex_needs_proxy: Some(false),
+        });
+        assert_eq!(
+            select_agent_endpoint(&provider, AgentKind::Codex).map(|endpoint| endpoint.protocol),
+            Some(Protocol::OpenaiCompatible)
+        );
+    }
+
+    #[test]
+    fn responses_only_provider_is_usable_for_codex_but_not_opencode() {
+        let mut provider = deepseek_provider(false, false);
+        provider.endpoints.push(ProtocolEndpoint {
+            protocol: Protocol::OpenaiResponses,
+            base_url: "https://open.bigmodel.cn/api/v1".to_string(),
+            api_key_override: None,
+            codex_needs_proxy: Some(false),
+        });
+        assert!(is_provider_usable(&provider, AgentKind::Codex));
+        assert!(!is_provider_usable(&provider, AgentKind::Opencode));
+        assert!(!is_provider_usable(&provider, AgentKind::ClaudeCode));
     }
 
     #[test]

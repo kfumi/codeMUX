@@ -160,11 +160,19 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
         BuiltinProviderTemplate {
             id: "zhipu".to_string(),
             name: "智谱".to_string(),
-            endpoints: vec![endpoint(
-                Protocol::OpenaiCompatible,
-                "https://open.bigmodel.cn/api/paas/v4",
-                Some(true),
-            )],
+            endpoints: vec![
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://open.bigmodel.cn/api/paas/v4",
+                    Some(true),
+                ),
+                // Native Responses endpoint: Codex dials it directly, no proxy.
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://open.bigmodel.cn/api/v1",
+                    Some(false),
+                ),
+            ],
             models: vec![
                 model("glm-4.7", "GLM-4.7", Some(vec!["text"])),
                 model("glm-4.7-flash", "GLM-4.7-Flash", Some(vec!["text"])),
@@ -348,5 +356,41 @@ mod tests {
         let provider = instantiate_template("opencode-go", "id-go".to_string()).unwrap();
         assert_eq!(provider.builtin_template_id.as_deref(), Some("opencode-go"));
         assert_eq!(provider.name, "OpenCode Go");
+    }
+
+    #[test]
+    fn zhipu_template_offers_native_responses_endpoint_for_codex() {
+        let template = builtin_templates()
+            .into_iter()
+            .find(|item| item.id == "zhipu")
+            .unwrap();
+
+        let responses = template
+            .endpoints
+            .iter()
+            .find(|item| item.protocol == Protocol::OpenaiResponses)
+            .expect("zhipu template should expose an OpenAI Responses endpoint");
+        assert_eq!(responses.base_url, "https://open.bigmodel.cn/api/v1");
+        assert_eq!(responses.codex_needs_proxy, Some(false));
+
+        let chat = template
+            .endpoints
+            .iter()
+            .find(|item| item.protocol == Protocol::OpenaiCompatible)
+            .unwrap();
+        assert_eq!(chat.base_url, "https://open.bigmodel.cn/api/paas/v4");
+
+        let provider = instantiate_template("zhipu", "id-zhipu".to_string()).unwrap();
+        assert!(is_provider_usable(
+            &{
+                let mut enabled = provider;
+                enabled.enabled = true;
+                enabled.api_key = "sk-test".to_string();
+                enabled.models = template.models;
+                enabled.default_model = template.default_model;
+                enabled
+            },
+            AgentKind::Codex
+        ));
     }
 }

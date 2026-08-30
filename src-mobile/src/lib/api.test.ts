@@ -39,6 +39,15 @@ const bootstrap: MobileBootstrap = {
       models: [{ id: 'gpt-5' }],
       protocols: ['openai_compatible'],
     },
+    {
+      id: 'provider-3',
+      name: 'Zhipu Responses',
+      enabled: true,
+      configured: true,
+      defaultModel: 'glm-5.3-flash',
+      models: [{ id: 'glm-5.3-flash' }],
+      protocols: ['openai_responses'],
+    },
   ],
   agentDefaults: {
     claude_code: { providerId: 'provider-1', model: 'sonnet' },
@@ -57,6 +66,12 @@ describe('providerSupportsAgent', () => {
   it('matches protocol to agent kind', () => {
     expect(providerSupportsAgent(bootstrap.providers[0], 'claude_code')).toBe(true);
     expect(providerSupportsAgent(bootstrap.providers[0], 'codex')).toBe(false);
+  });
+
+  it('treats a responses-only provider as supporting codex but not opencode', () => {
+    const responsesProvider = bootstrap.providers[2];
+    expect(providerSupportsAgent(responsesProvider, 'codex')).toBe(true);
+    expect(providerSupportsAgent(responsesProvider, 'opencode')).toBe(false);
   });
 });
 

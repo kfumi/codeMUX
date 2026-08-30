@@ -582,8 +582,15 @@ export function isConnectivityError(error: unknown): boolean {
 }
 
 export function providerSupportsAgent(provider: MobileProvider, agentKind: string): boolean {
-  const required = agentKind === 'claude_code' ? 'anthropic' : 'openai_compatible';
-  return provider.enabled && provider.configured && provider.protocols.includes(required);
+  const required =
+    agentKind === 'claude_code'
+      ? ['anthropic']
+      : agentKind === 'codex'
+        ? ['openai_responses', 'openai_compatible']
+        : ['openai_compatible'];
+  return (
+    provider.enabled && provider.configured && required.some((p) => provider.protocols.includes(p))
+  );
 }
 
 export function resolveDefaultProvider(

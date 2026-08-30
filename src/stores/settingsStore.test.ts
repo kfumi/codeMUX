@@ -157,6 +157,48 @@ describe('settings store agent config actions', () => {
     expect(useSettingsStore.getState().getNeedsProxy()).toBe(false);
   });
 
+  it('reports no proxy needed when a responses endpoint exists on the active provider', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    const provider = sampleProvider('provider-1');
+    provider.endpoints.push({
+      protocol: 'openai_responses',
+      base_url: 'https://open.bigmodel.cn/api/v1',
+      api_key_override: null,
+      codex_needs_proxy: false,
+    });
+    provider.endpoints[0].codex_needs_proxy = true;
+
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            model_providers: [provider],
+            active_provider_id: 'provider-1',
+          }
+        : null,
+    }));
+
+    expect(useSettingsStore.getState().getNeedsProxy()).toBe(false);
+  });
+
+  it('still reports proxy needed for chat-only providers that request it', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    const provider = sampleProvider('provider-1');
+    provider.endpoints[0].codex_needs_proxy = true;
+
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            model_providers: [provider],
+            active_provider_id: 'provider-1',
+          }
+        : null,
+    }));
+
+    expect(useSettingsStore.getState().getNeedsProxy()).toBe(true);
+  });
+
   it('persists notification settings updates', async () => {
     const { useSettingsStore } = await import('./settingsStore');
 

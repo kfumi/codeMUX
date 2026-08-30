@@ -50,6 +50,12 @@ const {
             api_key_override: null,
             codex_needs_proxy: true,
           },
+          {
+            protocol: 'openai_responses',
+            base_url: 'https://open.bigmodel.cn/api/v1',
+            api_key_override: null,
+            codex_needs_proxy: false,
+          },
         ],
         models: [{ id: 'glm-4.7', name: 'GLM-4.7' }],
         default_model: 'glm-4.7',
@@ -184,6 +190,30 @@ describe('ProviderConfigPanel', () => {
 
     expect(screen.queryByText(/Claude Code：/)).toBeNull();
     expect(screen.getByLabelText('显示密钥')).toBeTruthy();
+  });
+
+  it('saves the openai responses endpoint with direct codex routing', async () => {
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('https://api.deepseek.com')).toBeTruthy();
+    });
+    const responsesInput = screen
+      .getAllByPlaceholderText('https://api.example.com/v1')
+      .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement;
+    expect(responsesInput).toBeTruthy();
+    fireEvent.change(responsesInput, { target: { value: 'https://open.bigmodel.cn/api/v1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => {
+      expect(upsertModelProvider).toHaveBeenCalled();
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        endpoints: Array<{ protocol: string; base_url: string; codex_needs_proxy: boolean | null }>;
+      };
+      const responses = saved.endpoints.find((endpoint) => endpoint.protocol === 'openai_responses');
+      expect(responses?.base_url).toBe('https://open.bigmodel.cn/api/v1');
+      expect(responses?.codex_needs_proxy).toBe(false);
+    });
   });
 
   it('fills default OpenAI model limits when adding a model', async () => {

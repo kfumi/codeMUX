@@ -204,7 +204,8 @@ function ensureEndpoint(
       protocol,
       base_url: baseUrl,
       api_key_override: null,
-      codex_needs_proxy: protocol === 'openai_compatible' ? true : null,
+      codex_needs_proxy:
+        protocol === 'openai_compatible' ? true : protocol === 'openai_responses' ? false : null,
     },
   ];
 }
@@ -395,8 +396,10 @@ export function ProviderConfigPanel() {
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'anthropic')?.base_url ?? '';
   const openaiUrl =
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'openai_compatible')?.base_url ?? '';
+  const responsesUrl =
+    draft?.endpoints.find((endpoint) => endpoint.protocol === 'openai_responses')?.base_url ?? '';
   const showClaudeContext1m = anthropicUrl.trim().length > 0;
-  const showOpenAiModelLimits = openaiUrl.trim().length > 0;
+  const showOpenAiModelLimits = openaiUrl.trim().length > 0 || responsesUrl.trim().length > 0;
   const showModelMoreSettings = showClaudeContext1m || showOpenAiModelLimits;
   const editingModel =
     draft && editingModelIndex != null ? draft.models[editingModelIndex] ?? null : null;
@@ -585,6 +588,10 @@ export function ProviderConfigPanel() {
         endpoint.protocol === 'openai_compatible' && endpoint.base_url.trim().length > 0,
     )?.base_url;
     if (openai) return openai.trim();
+    const responses = provider.endpoints.find(
+      (endpoint) => endpoint.protocol === 'openai_responses' && endpoint.base_url.trim().length > 0,
+    )?.base_url;
+    if (responses) return responses.trim();
     return (
       provider.endpoints.find(
         (endpoint) => endpoint.protocol === 'anthropic' && endpoint.base_url.trim().length > 0,
@@ -827,7 +834,7 @@ export function ProviderConfigPanel() {
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">API 地址</label>
                 <span className="text-xs text-muted-foreground">
-                  可同时配置 Anthropic / OpenAI 兼容端点
+                  可同时配置 Anthropic / OpenAI 兼容 / OpenAI Responses 端点
                 </span>
               </div>
               <div className="grid gap-2">
@@ -860,11 +867,33 @@ export function ProviderConfigPanel() {
                   placeholder="https://api.example.com/v1"
                 />
               </div>
+              <div className="grid gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  OpenAI Responses
+                </label>
+                <Input
+                  value={responsesUrl}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      endpoints: ensureEndpoint(
+                        draft.endpoints,
+                        'openai_responses',
+                        event.target.value,
+                      ),
+                    })
+                  }
+                  placeholder="https://api.example.com/v1"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Codex 直连 Responses 接口（如智谱 /api/v1）；配置后 Codex 不再使用兼容代理
+                </span>
+              </div>
               <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
                 <div>
                   <div className="text-sm font-medium">Codex 需要兼容代理</div>
                   <div className="text-xs text-muted-foreground">
-                    非原生 Responses 接口时开启（如 DeepSeek）
+                    仅对 OpenAI 兼容端点生效；已配置 Responses 端点时 Codex 优先直连
                   </div>
                 </div>
                 <Switch

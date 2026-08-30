@@ -55,7 +55,7 @@ export type AgentConfigUpdateMap = {
   opencode: Partial<AgentConfigMap['opencode']>;
 };
 
-export type Protocol = 'anthropic' | 'openai_compatible';
+export type Protocol = 'anthropic' | 'openai_compatible' | 'openai_responses';
 
 export type InputModality = 'text' | 'image' | 'audio' | 'video';
 

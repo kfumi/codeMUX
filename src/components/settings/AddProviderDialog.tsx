@@ -24,6 +24,7 @@ export function buildCustomProvider(input: {
   name: string;
   apiKey: string;
   openaiUrl: string;
+  responsesUrl?: string;
   anthropicUrl: string;
 }): ModelProvider {
   const endpoints = [];
@@ -41,6 +42,14 @@ export function buildCustomProvider(input: {
       base_url: input.openaiUrl.trim(),
       api_key_override: null,
       codex_needs_proxy: true,
+    });
+  }
+  if (input.responsesUrl?.trim()) {
+    endpoints.push({
+      protocol: 'openai_responses' as const,
+      base_url: input.responsesUrl.trim(),
+      api_key_override: null,
+      codex_needs_proxy: false,
     });
   }
 
@@ -62,6 +71,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [openaiUrl, setOpenaiUrl] = useState('');
+  const [responsesUrl, setResponsesUrl] = useState('');
   const [anthropicUrl, setAnthropicUrl] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +80,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
     setName('');
     setApiKey('');
     setOpenaiUrl('');
+    setResponsesUrl('');
     setAnthropicUrl('');
     setShowApiKey(false);
     setSubmitting(false);
@@ -80,7 +91,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
       toast.error('请填写提供商名称');
       return;
     }
-    if (!openaiUrl.trim() && !anthropicUrl.trim()) {
+    if (!openaiUrl.trim() && !anthropicUrl.trim() && !responsesUrl.trim()) {
       toast.error('至少填写一个 API 地址');
       return;
     }
@@ -92,6 +103,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
           name,
           apiKey,
           openaiUrl,
+          responsesUrl,
           anthropicUrl,
         }),
       );
@@ -170,6 +182,17 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
               />
               <p className="text-[11px] text-muted-foreground">
                 填写根地址即可，请求时会自动拼接 /v1/...
+              </p>
+            </div>
+            <div className="grid gap-2 rounded-lg border border-border/60 p-3">
+              <div className="text-xs font-medium text-muted-foreground">OpenAI Responses</div>
+              <Input
+                value={responsesUrl}
+                onChange={(event) => setResponsesUrl(event.target.value)}
+                placeholder="https://example.com/v1"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                可选；Codex 直连 Responses 接口，配置后不再使用兼容代理
               </p>
             </div>
             <div className="grid gap-2 rounded-lg border border-border/60 p-3">

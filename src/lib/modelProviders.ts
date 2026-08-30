@@ -24,6 +24,22 @@ export function selectEndpoint(
   );
 }
 
+/** Codex 优先直连原生 Responses 端点，未配置时回退 OpenAI 兼容端点。 */
+export function codexEndpoint(provider: ModelProvider): ProtocolEndpoint | null {
+  return (
+    selectEndpoint(provider, 'openai_responses') ?? selectEndpoint(provider, 'openai_compatible')
+  );
+}
+
+export function agentEndpoint(
+  provider: ModelProvider,
+  agentKind: AgentKind,
+): ProtocolEndpoint | null {
+  if (agentKind === 'codex') return codexEndpoint(provider);
+  const protocol = requiredProtocol(agentKind);
+  return protocol ? selectEndpoint(provider, protocol) : null;
+}
+
 export function effectiveApiKey(provider: ModelProvider, endpoint: ProtocolEndpoint): string {
   const override = endpoint.api_key_override?.trim();
   if (override) return override;
@@ -32,9 +48,7 @@ export function effectiveApiKey(provider: ModelProvider, endpoint: ProtocolEndpo
 
 export function isProviderUsable(provider: ModelProvider, agentKind: AgentKind): boolean {
   if (!provider.enabled) return false;
-  const protocol = requiredProtocol(agentKind);
-  if (!protocol) return false;
-  const endpoint = selectEndpoint(provider, protocol);
+  const endpoint = agentEndpoint(provider, agentKind);
   if (!endpoint) return false;
   if (!effectiveApiKey(provider, endpoint)) return false;
   const defaultModel = provider.default_model.trim();
@@ -47,12 +61,13 @@ export function providerUnusableReason(
   agentKind: AgentKind,
 ): string | null {
   if (!provider.enabled) return '已禁用';
-  const protocol = requiredProtocol(agentKind);
-  if (!protocol) return '当前智能体不支持模型供应商';
-  if (!selectEndpoint(provider, protocol)) {
-    return protocol === 'anthropic' ? '缺少 Anthropic 端点' : '缺少 OpenAI 兼容端点';
+  if (!requiredProtocol(agentKind)) return '当前智能体不支持模型供应商';
+  const endpoint = agentEndpoint(provider, agentKind);
+  if (!endpoint) {
+    if (agentKind === 'claude_code') return '缺少 Anthropic 端点';
+    if (agentKind === 'opencode') return '缺少 OpenAI 兼容端点';
+    return '缺少 OpenAI Responses 或 OpenAI 兼容端点';
   }
-  const endpoint = selectEndpoint(provider, protocol)!;
   if (!effectiveApiKey(provider, endpoint)) return '未配置 API Key';
   if (!provider.default_model.trim()) return '未设置默认模型';
   if (!provider.models.some((model) => model.id.trim() === provider.default_model.trim())) {

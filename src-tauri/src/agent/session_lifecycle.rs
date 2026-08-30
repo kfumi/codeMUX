@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::model_providers::{
-    effective_api_key, is_provider_usable, required_protocol, select_endpoint,
+    effective_api_key, is_provider_usable, required_protocol, select_agent_endpoint,
     strip_context_1m_suffix, with_context_1m_suffix, Protocol, ProviderModel,
 };
 use crate::provider_profiles::types::AgentTimeouts;
@@ -145,12 +145,12 @@ fn resolve_active_runtime_config(
         .parse::<AgentKind>()
         .map_err(|error| format!("无法解析会话智能体类型: {}", error))?;
 
-    let protocol = required_protocol(agent_kind).ok_or_else(|| {
-        format!(
+    if required_protocol(agent_kind).is_none() {
+        return Err(format!(
             "智能体 {} 暂不支持 Model Provider 运行时注入",
             agent_kind.as_str()
-        )
-    })?;
+        ));
+    }
 
     let config = state.config.lock().unwrap();
     let (persisted_provider_id, persisted_model): (Option<String>, Option<String>) = {
@@ -184,9 +184,13 @@ fn resolve_active_runtime_config(
         .ok_or_else(|| format!("会话绑定的供应商不存在，请重新选择供应商（id={provider_id}）"))?;
 
     if !is_provider_usable(provider, agent_kind) {
-        let hint = match protocol {
-            Protocol::Anthropic => "缺少可用的 Anthropic 端点或 API Key / 默认模型",
-            Protocol::OpenaiCompatible => "缺少可用的 OpenAI 兼容端点或 API Key / 默认模型",
+        let hint = match agent_kind {
+            AgentKind::ClaudeCode => "缺少可用的 Anthropic 端点或 API Key / 默认模型",
+            AgentKind::Opencode => "缺少可用的 OpenAI 兼容端点或 API Key / 默认模型",
+            AgentKind::Codex => {
+                "缺少可用的 OpenAI Responses 或 OpenAI 兼容端点 / API Key / 默认模型"
+            }
+            AgentKind::GeminiCli => "暂不支持 Model Provider 运行时注入",
         };
         return Err(format!(
             "供应商「{}」对 {} 不可用：{}（或已禁用）",
@@ -196,11 +200,11 @@ fn resolve_active_runtime_config(
         ));
     }
 
-    let endpoint = select_endpoint(provider, protocol).ok_or_else(|| {
+    let endpoint = select_agent_endpoint(provider, agent_kind).ok_or_else(|| {
         format!(
-            "供应商「{}」缺少 {} 协议端点",
+            "供应商「{}」缺少 {} 可用端点",
             provider.name,
-            protocol.as_str()
+            agent_kind.as_str()
         )
     })?;
 
@@ -292,12 +296,19 @@ fn resolve_active_runtime_config(
         _ => (None, None),
     };
 
+    // Native Responses endpoints are dialed directly by Codex; never route
+    // them through the chat-completions compat proxy.
+    let codex_needs_proxy = match endpoint.protocol {
+        Protocol::OpenaiResponses => Some(false),
+        _ => endpoint.codex_needs_proxy,
+    };
+
     let resolved = ResolvedRuntimeConfig {
         profile_id: provider.id.clone(),
         api_key: Some(api_key),
         base_url: Some(endpoint.base_url.clone()),
         model: Some(model),
-        codex_needs_proxy: endpoint.codex_needs_proxy,
+        codex_needs_proxy,
         provider: opencode_provider,
         credential_source,
         timeouts: agent_timeouts(&config, agent_kind),
@@ -1882,6 +1893,101 @@ mod tests {
             )
             .unwrap();
         assert_eq!(snapshot, "codex-provider");
+    }
+
+    #[test]
+    fn codex_prefers_responses_endpoint_and_dials_direct() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-codex-responses", "Codex", "codex", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let mut config = crate::config::types::AppConfig::default();
+        let mut provider = test_model_provider(
+            "responses-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-test",
+            &["gpt-test"],
+            Some(true),
+        );
+        provider
+            .endpoints
+            .push(crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::OpenaiResponses,
+                base_url: "https://provider.example/api/v1".to_string(),
+                api_key_override: None,
+                // Even a stray true flag must not route a native Responses
+                // endpoint through the chat-completions compat proxy.
+                codex_needs_proxy: Some(true),
+            });
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("responses-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-codex-responses").unwrap();
+
+        assert_eq!(
+            resolved.base_url.as_deref(),
+            Some("https://provider.example/api/v1")
+        );
+        assert_eq!(resolved.codex_needs_proxy, Some(false));
+    }
+
+    #[test]
+    fn opencode_still_resolves_chat_completions_endpoint() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-opencode-responses", "OpenCode", "opencode", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let mut config = crate::config::types::AppConfig::default();
+        let mut provider = test_model_provider(
+            "responses-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-test",
+            &["gpt-test"],
+            Some(true),
+        );
+        provider
+            .endpoints
+            .push(crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::OpenaiResponses,
+                base_url: "https://provider.example/api/v1".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: Some(false),
+            });
+        provider.opencode_provider_key = Some("codemux-openai".to_string());
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("responses-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-opencode-responses").unwrap();
+
+        assert_eq!(
+            resolved.base_url.as_deref(),
+            Some("https://provider.example/v1")
+        );
+        assert_eq!(resolved.codex_needs_proxy, Some(true));
+        assert_eq!(resolved.provider.as_deref(), Some("codemux-openai"));
+        assert_eq!(resolved.credential_source.as_deref(), Some("codemux"));
     }
 
     #[test]

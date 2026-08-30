@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { AddProviderDialog, buildCustomProvider } from './AddProviderDialog';
+
+afterEach(cleanup);
 
 describe('AddProviderDialog', () => {
   it('builds a disabled custom provider from basic fields', () => {
@@ -48,5 +50,45 @@ describe('AddProviderDialog', () => {
     expect(provider.enabled).toBe(false);
     expect(provider.name).toBe('Custom');
     expect(provider.api_key).toBe('');
+  });
+
+  it('includes the openai responses endpoint when provided', () => {
+    const provider = buildCustomProvider({
+      name: 'Zhipu',
+      apiKey: '',
+      openaiUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      responsesUrl: 'https://open.bigmodel.cn/api/v1',
+      anthropicUrl: '',
+    });
+
+    const responses = provider.endpoints.find(
+      (endpoint) => endpoint.protocol === 'openai_responses',
+    );
+    expect(responses?.base_url).toBe('https://open.bigmodel.cn/api/v1');
+    expect(responses?.codex_needs_proxy).toBe(false);
+  });
+
+  it('accepts a responses-only custom provider', async () => {
+    const onSubmit = vi.fn(() => Promise.resolve());
+    const onOpenChange = vi.fn();
+
+    render(
+      <AddProviderDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('例如 OpenAI'), {
+      target: { value: 'Responses Only' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('https://example.com/v1'), {
+      target: { value: 'https://api.example.com/v1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '添加' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalled();
+      const provider = onSubmit.mock.calls[0]?.[0];
+      expect(provider.endpoints).toHaveLength(1);
+      expect(provider.endpoints[0]?.protocol).toBe('openai_responses');
+    });
   });
 });
