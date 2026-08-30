@@ -3,6 +3,7 @@ pub mod claude_history;
 pub(crate) mod claude_subagent_history;
 pub mod codex_history;
 pub mod codex_proxy;
+pub(crate) mod codex_subagent_history;
 pub mod commands;
 pub mod context_usage;
 pub(crate) mod fork;

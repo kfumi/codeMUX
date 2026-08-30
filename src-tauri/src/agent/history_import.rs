@@ -12,6 +12,7 @@ use std::str::FromStr;
 use tauri::State;
 
 use crate::agent::claude_subagent_history::load_claude_session_subagent_history;
+use crate::agent::codex_subagent_history::load_codex_session_subagent_history;
 use crate::agent::commands::{
     convert_codex_history_values_to_events, home_dir, should_include_claude_history_event,
 };
@@ -388,9 +389,60 @@ fn backfill_subagent_history(
 ) -> Result<usize, String> {
     match agent_kind {
         AgentKind::ClaudeCode => backfill_claude_subagent_history(conn, app_session_id),
+        AgentKind::Codex => backfill_codex_subagent_history(conn, app_session_id),
         AgentKind::Opencode => backfill_opencode_subagent_history(conn, app_session_id),
-        AgentKind::Codex | AgentKind::GeminiCli => Ok(0),
+        AgentKind::GeminiCli => Ok(0),
     }
+}
+
+/// Backfill subagent descriptors and timelines from Codex's on-disk rollout
+/// files. Each collab child thread has its own rollout; the parent rollout's
+/// successful `spawn_agent` output (`{"agent_id", "nickname"}`) binds the
+/// parent-side `call_id` — the canonical subagent id — to the child rollout.
+fn backfill_codex_subagent_history(
+    conn: &mut Connection,
+    app_session_id: &str,
+) -> Result<usize, String> {
+    let codex_session_id =
+        operations::get_agent_session_mapping(conn, app_session_id, AgentKind::Codex)
+            .map_err(|error| error.to_string())?
+            .map(|record| record.agent_session_id);
+    let Some(codex_session_id) = codex_session_id else {
+        return Ok(0);
+    };
+    let entries =
+        load_codex_session_subagent_history(&home_dir()?, &codex_session_id, app_session_id);
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let existing_ids: std::collections::HashSet<String> =
+        operations::list_session_subagents(conn, app_session_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|record| record.subagent_id)
+            .collect();
+
+    let mut restored = 0usize;
+    for entry in entries {
+        if existing_ids.contains(&entry.subagent_id) {
+            continue;
+        }
+        operations::upsert_session_subagent(conn, &entry.upsert).map_err(|e| e.to_string())?;
+        for event in &entry.timeline {
+            operations::append_session_subagent_event(conn, event).map_err(|e| e.to_string())?;
+        }
+        restored += 1;
+    }
+    if restored > 0 {
+        log::info!(
+            target: "agent",
+            "Restored {} subagent tracks from Codex rollout history for app_session_id={}",
+            restored,
+            app_session_id
+        );
+    }
+    Ok(restored)
 }
 
 /// Backfill subagent descriptors and timelines from OpenCode's on-disk

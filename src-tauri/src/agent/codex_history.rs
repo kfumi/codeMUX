@@ -1,7 +1,7 @@
 //! Codex native history: JSONL location, Codex → CodeMUX Event conversion,
 //! interactive-event replay, loading and deletion of `~/.codex` artifacts.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use log::{debug, info};
@@ -15,7 +15,7 @@ use super::native_jsonl::{
 };
 use super::session_lifecycle::{get_agent_session_id, home_dir};
 
-fn read_codex_session_meta_id(path: &Path) -> Option<String> {
+pub(crate) fn read_codex_session_meta_id(path: &Path) -> Option<String> {
     let line = first_non_empty_line(path)?;
     let value = serde_json::from_str::<serde_json::Value>(&line).ok()?;
     if value.get("type").and_then(|entry| entry.as_str()) != Some("session_meta") {
@@ -362,6 +362,54 @@ fn convert_codex_tool_to_codemux(
     }
 }
 
+/// Collab (multi-agent) tool classification for the CLI-history projection.
+pub(crate) enum CodexCollabToolKind {
+    /// Not a collab tool — fall through to the generic tool conversion.
+    None,
+    /// `spawn_agent`: a track launch; the card is decided by its output.
+    Spawn,
+    /// `wait_agent` / `close_agent` / `send_input` / `resume_agent`:
+    /// orchestration noise, same suppression rule as the live adapter.
+    Orchestration,
+}
+
+pub(crate) fn codex_collab_tool_kind(name: &str) -> CodexCollabToolKind {
+    // Rollout names may carry a `multi_agent_v<N>_` namespace prefix.
+    let stripped = match name.strip_prefix("multi_agent_v") {
+        Some(rest) => match rest.split_once('_') {
+            Some((_, tail)) if !tail.is_empty() => tail,
+            _ => name,
+        },
+        None => name,
+    };
+    match stripped {
+        "spawn_agent" => CodexCollabToolKind::Spawn,
+        "wait_agent" | "close_agent" | "send_input" | "resume_agent" => {
+            CodexCollabToolKind::Orchestration
+        }
+        _ => CodexCollabToolKind::None,
+    }
+}
+
+/// Successful `spawn_agent` outputs carry `{"agent_id": "<child thread id>",
+/// "nickname": ...}`; failed retries carry plain error text.
+pub(crate) fn spawn_output_agent_id(payload: &serde_json::Value) -> Option<String> {
+    let output = payload.get("output")?;
+    let text = match output.as_str() {
+        Some(text) => text,
+        None => return output.get("agent_id").and_then(agent_id_string),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(text).ok()?;
+    parsed.get("agent_id").and_then(agent_id_string)
+}
+
+fn agent_id_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
 fn parse_codex_tool_input(value: Option<&serde_json::Value>) -> serde_json::Value {
     let Some(value) = value else {
         return serde_json::json!({});
@@ -626,6 +674,12 @@ pub(crate) fn convert_codex_history_values_to_events(
     let mut msg_idx: usize = 0;
     let mut emitted_tool_started = HashSet::new();
     let mut emitted_tool_finished = HashSet::new();
+    // Collab (multi-agent) projection state — keeps the CLI-history timeline
+    // aligned with the live sidecar adapter: one `subagent` card per launched
+    // track, no orchestration cards, failed spawn retries dropped.
+    let mut suppressed_collab_calls: HashSet<String> = HashSet::new();
+    let mut pending_spawn_cards: HashMap<String, serde_json::Value> = HashMap::new();
+    let mut emitted_spawn_prompts: HashSet<String> = HashSet::new();
 
     for val in raw_events {
         let item_type = val.get("type").and_then(|t| t.as_str());
@@ -652,6 +706,88 @@ pub(crate) fn convert_codex_history_values_to_events(
             messages.push(converted);
             msg_idx += 1;
             continue;
+        }
+
+        // Collab (multi-agent) layer: spawn cards are held until their output
+        // proves a child thread launched; orchestration calls and failed spawn
+        // retries never reach the parent timeline.
+        if item_type == Some("response_item") {
+            if let Some(payload) = val.get("payload") {
+                let payload_type = payload.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                let call_id = payload
+                    .get("call_id")
+                    .and_then(|c| c.as_str())
+                    .map(str::to_string);
+                match payload_type {
+                    "function_call" | "custom_tool_call" => {
+                        match codex_collab_tool_kind(
+                            payload.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+                        ) {
+                            CodexCollabToolKind::None => {}
+                            CodexCollabToolKind::Orchestration => {
+                                if let Some(id) = call_id {
+                                    suppressed_collab_calls.insert(id);
+                                }
+                                continue;
+                            }
+                            CodexCollabToolKind::Spawn => {
+                                if let (Some(id), Some((_, _, converted))) = (
+                                    call_id.clone(),
+                                    convert_codex_tool_to_codemux(val, app_session_id),
+                                ) {
+                                    pending_spawn_cards.insert(id, converted);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    "function_call_output" | "custom_tool_call_output" => {
+                        if call_id
+                            .as_ref()
+                            .map(|id| suppressed_collab_calls.contains(id))
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        if let Some(id) = &call_id {
+                            if let Some(mut started) = pending_spawn_cards.remove(id) {
+                                let prompt = started
+                                    .pointer("/input/message")
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let duplicate =
+                                    !prompt.is_empty() && emitted_spawn_prompts.contains(&prompt);
+                                if spawn_output_agent_id(payload).is_some() && !duplicate {
+                                    // Claim the prompt only when a card is actually
+                                    // emitted — a failed retry shares its message
+                                    // with the successful re-spawn and must not
+                                    // burn the dedup slot.
+                                    emitted_spawn_prompts.insert(prompt.clone());
+                                    started["name"] = serde_json::json!("subagent");
+                                    started["input"] = serde_json::json!({ "prompt": prompt });
+                                    if let Some((_, tool_use_id, finished)) =
+                                        convert_codex_tool_to_codemux(val, app_session_id)
+                                    {
+                                        emitted_tool_started.insert(tool_use_id.clone());
+                                        current_turn.last_event_idx = Some(msg_idx);
+                                        messages.push(started);
+                                        msg_idx += 1;
+                                        emitted_tool_finished.insert(tool_use_id);
+                                        current_turn.last_event_idx = Some(msg_idx);
+                                        messages.push(finished);
+                                        msg_idx += 1;
+                                        continue;
+                                    }
+                                }
+                                // Failed retry or duplicate prompt: no track card.
+                                continue;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         if let Some((event_type, tool_use_id, converted)) =
@@ -1126,6 +1262,128 @@ mod tests {
         assert_eq!(
             converted["content"],
             serde_json::json!([{ "type": "text", "text": "hello" }])
+        );
+    }
+
+    #[test]
+    fn codex_history_projects_collab_calls_like_the_live_adapter() {
+        let raw_events = vec![
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "spawn_agent", "call_id": "call_fail",
+                    "arguments": "{\"message\":\"探索前端技术栈\",\"reasoning_effort\":\"low\"}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "call_fail",
+                    "output": "Reasoning effort `low` is not supported"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "spawn_agent", "call_id": "call_ok",
+                    "arguments": "{\"message\":\"探索前端技术栈\"}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "wait_agent", "call_id": "call_wait",
+                    "arguments": "{}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "call_wait",
+                    "output": "{\"status\":{\"child-1\":{\"completed\":\"done\"}}}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "call_ok",
+                    "output": "{\"agent_id\":\"child-1\",\"nickname\":\"Feynman\"}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "close_agent", "call_id": "call_close",
+                    "arguments": "{}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "call_close",
+                    "output": "{\"status\":\"completed\"}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "shell", "call_id": "call_shell",
+                    "arguments": "{\"command\":[\"ls\"]}"
+                }
+            }),
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "call_shell",
+                    "output": "files"
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-1");
+        let summaries: Vec<(String, String, String)> = converted
+            .iter()
+            .filter_map(|event| {
+                let kind = event.get("type").and_then(|t| t.as_str())?;
+                if kind != "tool_started" && kind != "tool_finished" {
+                    return None;
+                }
+                Some((
+                    kind.to_string(),
+                    event
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    event
+                        .get("tool_use_id")
+                        .and_then(|id| id.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                ))
+            })
+            .collect();
+
+        // Exactly one track card (the successful spawn), one orchestration-free
+        // timeline, and the generic tool untouched. The failed retry, wait and
+        // close calls never appear — not even as orphan outputs.
+        assert_eq!(
+            summaries,
+            vec![
+                ("tool_started".into(), "subagent".into(), "call_ok".into()),
+                ("tool_finished".into(), "".into(), "call_ok".into()),
+                ("tool_started".into(), "shell".into(), "call_shell".into()),
+                ("tool_finished".into(), "".into(), "call_shell".into()),
+            ]
+        );
+
+        let spawn_card = converted
+            .iter()
+            .find(|event| event.get("tool_use_id").and_then(|id| id.as_str()) == Some("call_ok"))
+            .unwrap();
+        assert_eq!(
+            spawn_card["input"],
+            serde_json::json!({ "prompt": "探索前端技术栈" })
         );
     }
 

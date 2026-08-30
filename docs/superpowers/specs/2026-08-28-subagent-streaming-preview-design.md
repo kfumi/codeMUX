@@ -326,6 +326,30 @@ Rust：`schema.rs` 建表、`operations` 增删改查、`timeline_persist` / `se
 
 Sidecar 生命周期：`result` 之后 handle 非 null；存在 running 子智能体时 `sendInput` 不走 `closeQueryHandle('new_turn')`。
 
+### Codex 适配器(三期,已实现)
+
+Codex 走 app-server 协议(ADR 0010),collab 子代理是同进程里的真实 thread。与 OpenCode 的关键差异:声明信号是父线程上的 `collabAgentToolCall` item(而非 message part),子线程通知与父线程走**同一条 JSON-RPC 连接**(按通知里的 `threadId` 归属),父 turn 会阻塞在 `wait` 工具上直到子代理收尾,因此不存在 Claude「父 result 掐死 query」问题,不需要 query 保活改造。`turn/start` 不需要额外参数——collab 在 codex 0.146+ 默认可用(参考 Paseo,未传 `multiAgentMode` 也工作)。
+
+| Codex 信号 | 适配器行为 |
+|---|---|
+| 父线程 `item/started`+`item/completed`,`item.type === 'collabAgentToolCall'` | 发出 `declared`:规范 id = item id(父对话子智能体卡片 id),`prompt` 写成时间线第一条 `user_message`;`tool === 'spawnAgent'` 的 item 投影为父时间线卡片(`tool_started`/`tool_finished`,工具名 `subagent`,必须与前端 `isSubAgentTool` 白名单一致才有预览 chip 与点击);`wait`/`sendInput`/`closeAgent` 等编排调用不出父卡片。`receiverThreadIds` 逐个注册进 `childThreadId → 规范 id` 路由表;`agentsStates` 聚合为描述符状态。 |
+| 父线程 item `subAgentActivity`(`kind: started/interacted/interrupted`) | `agentThreadId` 注册进路由表(若尚未注册);`started`/`interacted` 只补状态,`interrupted` → `canceled`。 |
+| 子线程 `item/started` / `item/completed` / `item/agentMessage/delta` / `item/reasoning/*` / `turn/completed` 等 | 复用与父线程相同的投影逻辑(`adaptAppServerItem` + 流式 delta),折回 `TurnSourceEvent` 包进 `subagent_timeline`;流式状态(`streamingParts`、去重集)按子线程各一份。 |
+| 子线程 `turn/completed` | `status: completed`(interrupted → canceled,failed → failed)。 |
+| 竞态:子线程通知早于声明到达 | pending 缓冲(每线程上限 128 条,线程数上限 32,溢出丢弃最旧),声明注册后按序重放。 |
+| codex 对同一 spawn 发两次 `item/started`(首次无 `receiverThreadIds`,子线程创建后带 id 重新宣布) | 二次宣布按 prompt 合并进首次轨道(unresolved-spawn 表;多个候选时 prompt 唯一匹配,唯一候选免匹配);别名 item 不渲染父卡片,其完成结果重定向为规范卡片的 `tool_finished`。真机实证(2026-08-30):不合并会产生永远 `running` 的幽灵描述符,子时间线挂错轨道。 |
+| 用户 Stop / `turn/interrupt` / runtime teardown | `failRunningTasks()`:所有 `running` 描述符变 `failed`。 |
+
+状态映射(Paseo 验证过的坑):`running/pendingInit/inProgress` → `running`;`errored` → `running`(turn 可能重试,不得提前判死);`shutdown` → `canceled`;`notFound` → `failed`;`completed` → `completed`;item 级 `failed` → `failed`。
+
+权限:子线程审批请求与父线程同通道(approval bridge 按 `params.threadId` 记录但决策统一),批准 UI 只在父 Composer,与一期规则一致,无额外改造。
+
+回放:live 捕获写入 `session_subagent_events` 之外,CLI 历史同步(`import_sessions` / `resync_session_from_native`)也会从磁盘回填:codex 每个 collab 子代理有独立 rollout 文件(`thread_source=subagent`,`parent_thread_id` 指向父线程),父 rollout 里成功的 `spawn_agent` 输出携带 `{"agent_id","nickname"}` 把 `call_id` 与子 rollout 绑定(`codex_subagent_history.rs`)。失败的重试尝试(纯文本错误输出)不产生轨道。
+
+CLI 历史投影与 live 对齐(`codex_history.rs`):`spawn_agent` 只在输出确认启动了子线程时出卡片(改名 `subagent`,input 收敛为 `{prompt}`);`wait_agent`/`close_agent`/`send_input`/`resume_agent` 编排调用与失败重试一律不出父卡片——同一 spawn 被模型重复调用(真机实证:参数错误重试会产生第二个 call_id)时按 prompt 去重,先成功者得卡片。
+
+文件落点:`codexSubagentObservations.ts`(纯函数:collab item 观察、子线程通知→TurnSourceEvent 投影)、`codexSubagentSource.ts`(路由表、pending 缓冲、per-thread 流式状态、failRunningTasks/reset)、`codexAppServerRuntime.ts` 接线(`handleNotification` 按 threadId 分流 + collab item 分支)。`claudeSubagentFold` 原样复用(`provider: 'codex'`)。Rust 表、前端 store、SidePanel 零改动。
+
 ## Further Notes
 
 - 二期若接 OpenCode：只新增适配器，把 OpenCode 子会话事件折成同一套 Observation。不要给 SidePanel 加 `opencode_subagent` kind。
