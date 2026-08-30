@@ -407,6 +407,146 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   );
 
   it(
+    'routes collab subagent threads: declares the track, replays the race, and keeps the parent timeline clean',
+    async () => {
+      // Child traffic (delta) arrives before the collab item claims the
+      // thread — the adapter must buffer and replay it in order.
+      const collabStarted = {
+        type: 'collabAgentToolCall',
+        id: 'call_1',
+        tool: 'spawnAgent',
+        status: 'inProgress',
+        prompt: 'list the tests',
+        receiverThreadIds: ['child_1'],
+        agentsStates: { child_1: { status: 'running', message: null } },
+      };
+      const collabCompleted = {
+        ...collabStarted,
+        status: 'completed',
+        agentsStates: { child_1: { status: 'completed', message: null } },
+      };
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_1' } } },
+              {
+                delayMs: 3,
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'child_1', itemId: 'cmsg_1', delta: 'child hi' },
+              },
+              { delayMs: 6, method: 'item/started', params: { threadId: 'thread_1', turnId: 'turn_1', item: collabStarted } },
+              {
+                delayMs: 9,
+                method: 'item/completed',
+                params: { threadId: 'child_1', item: { type: 'agentMessage', id: 'cmsg_1', text: 'child hi' } },
+              },
+              {
+                delayMs: 12,
+                method: 'turn/completed',
+                params: { threadId: 'child_1', turn: { status: 'completed' } },
+              },
+              {
+                delayMs: 15,
+                method: 'item/completed',
+                params: { threadId: 'thread_1', turnId: 'turn_1', item: collabCompleted },
+              },
+              {
+                // Codex re-announces the spawn with thread ids once the child
+                // exists — must not render a second parent card.
+                delayMs: 16,
+                method: 'item/started',
+                params: { threadId: 'thread_1', turnId: 'turn_1', item: collabStarted },
+              },
+              {
+                delayMs: 17,
+                method: 'item/started',
+                params: {
+                  threadId: 'thread_1',
+                  turnId: 'turn_1',
+                  item: { type: 'collabAgentToolCall', id: 'call_2', tool: 'wait', status: 'inProgress', receiverThreadIds: ['child_1'] },
+                },
+              },
+              {
+                delayMs: 18,
+                method: 'turn/completed',
+                params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } },
+              },
+            ],
+          },
+        },
+      };
+      const { runtime, events, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+        await runtime.sendInput('spawn a helper');
+
+        const upserts = events.filter((event) => event.type === 'subagent_upsert');
+        expect(upserts).toEqual([
+          expect.objectContaining({
+            type: 'subagent_upsert',
+            session_id: 'sess_1',
+            subagent_id: 'call_1',
+            provider: 'codex',
+            status: 'running',
+          }),
+          expect.objectContaining({
+            type: 'subagent_upsert',
+            subagent_id: 'call_1',
+            status: 'completed',
+          }),
+        ]);
+
+        const timelines = events.filter((event) => event.type === 'subagent_timeline');
+        const innerTypes = timelines.map((event) => (event.event as Record<string, unknown>).type);
+        expect(innerTypes[0]).toBe('user_message');
+        expect(innerTypes).toEqual([
+          'user_message',
+          'content_started',
+          'text_delta',
+          'content_finished',
+          'assistant_message',
+        ]);
+        const childMessage = timelines.find(
+          (event) => (event.event as Record<string, unknown>).type === 'assistant_message',
+        );
+        expect(childMessage?.event).toMatchObject({
+          content: [{ type: 'text', text: 'child hi' }],
+        });
+        // Every subagent timeline event binds to the canonical collab item id.
+        expect(timelines.every((event) => event.subagent_id === 'call_1')).toBe(true);
+
+        // The parent timeline sees one Sub-agent card (spawn only — the wait
+        // orchestration call renders nothing) and none of the child traffic
+        // leaks in as parent assistant messages — subagent events are
+        // interleaved in the same stream and routed by type downstream.
+        expect(eventTypes(events)).toEqual([
+          'system_event',
+          'subagent_upsert',
+          'subagent_timeline',
+          'subagent_timeline',
+          'subagent_timeline',
+          'tool_started',
+          'subagent_timeline',
+          'subagent_timeline',
+          'subagent_upsert',
+          'tool_finished',
+          'turn_finished',
+          'sidecar_query_done',
+        ]);
+        const parentCard = events.find((event) => event.type === 'tool_started');
+        expect(parentCard).toMatchObject({ name: 'subagent', tool_use_id: 'call_1' });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
     'maps the codex permission snapshot onto turn/start approval/sandbox params',
     async () => {
       const { runtime, events, readLog, ensureCommand, cwd } = await createHarness(DEFAULT_SCENARIO);

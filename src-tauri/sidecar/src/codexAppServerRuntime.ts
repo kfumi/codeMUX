@@ -59,6 +59,7 @@ import {
   type AgentInputPayload,
 } from './agentInputPayload.js';
 import {
+  adaptAppServerItem,
   buildCodexToolResultContent,
   buildCodexToolUseContent,
   isCodexToolResultError,
@@ -81,6 +82,8 @@ import {
   ensureCodexModelCatalog,
   resolveCodexModelCatalogPath,
 } from './codexModelCatalog.js';
+import type { CodeMuxSubagentEvent } from './codeMuxProtocol.js';
+import { CodexSubagentSource, type CodexSubagentContext } from './codexSubagentSource.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -201,6 +204,8 @@ export class CodexAppServerRuntime {
   /** ADR 0004 inputs: outstanding approval-bridge requests and the plan hold. */
   private bridgePendingRequests = 0;
   private planApprovalPending = false;
+  /** Codex collab subagent adapter: child-thread routes and timelines. */
+  private readonly subagents = new CodexSubagentSource();
 
   private readonly connectTransport: (options: AppServerTransportOptions) => Promise<AppServerTransport>;
   private readonly emitEvent: (event: unknown) => void;
@@ -724,6 +729,7 @@ export class CodexAppServerRuntime {
     this.approvalBridge?.cancelAll();
     this.dismissPendingPlanApproval();
     await this.interruptActiveTurn(turn, 'Interrupted by user');
+    this.failRunningSubagents();
     await this.cleanupTurn(turn);
   }
 
@@ -896,11 +902,26 @@ export class CodexAppServerRuntime {
     if (turn) {
       turn.idleGuard.reset();
     }
+    const threadId = typeof params.threadId === 'string' ? params.threadId : undefined;
     setLogCtx({
       ...(turn?.sessionId ? { sessionId: turn.sessionId } : {}),
-      ...(typeof params.threadId === 'string' ? { threadId: params.threadId } : {}),
+      ...(threadId ? { threadId } : {}),
       ...(typeof params.turnId === 'string' ? { turnId: params.turnId } : {}),
     });
+
+    // Collab subagent threads stream on the same connection, tagged with the
+    // child threadId. Route them into the subagent track before any
+    // parent-turn projection can misattribute them.
+    const route = this.subagents.routeThreadId(threadId, this.threadId);
+    if (route === 'child') {
+      this.emitSubagentEvents(this.subagents.observeChildNotification(method, params, this.subagentContext()));
+      return;
+    }
+    if (route === 'pending') {
+      // Unclaimed child thread: buffer until a collabAgentToolCall declares it.
+      this.subagents.bufferPendingNotification(threadId!, method, params);
+      return;
+    }
 
     switch (method) {
       case 'turn/started': {
@@ -937,13 +958,19 @@ export class CodexAppServerRuntime {
         }
       }
       case 'item/started': {
+        // Collab items declare subagent tracks before the card is projected.
+        this.emitSubagentEvents(this.subagents.observeParentItem(params.item, 'started', this.subagentContext()));
         if (!turn) return;
+        // A re-announced spawn (codex repeats the item with thread ids once
+        // the children exist) must not render a duplicate parent card.
+        if (isAliasCollabItem(params.item, this.subagents)) return;
         this.handleItemStarted(turn, params.item);
         return;
       }
       case 'item/completed': {
+        this.emitSubagentEvents(this.subagents.observeParentItem(params.item, 'completed', this.subagentContext()));
         if (!turn) return;
-        this.handleItemCompleted(turn, params.item);
+        this.handleItemCompleted(turn, retargetAliasCollabItem(params.item, this.subagents));
         return;
       }
       case 'item/agentMessage/delta': {
@@ -1154,6 +1181,24 @@ export class CodexAppServerRuntime {
     }
   }
 
+  private subagentContext(): CodexSubagentContext {
+    return {
+      ...(this.config?.sessionId ? { sessionId: this.config.sessionId } : {}),
+      ...(this.config?.cwd ? { workdir: this.config.cwd } : {}),
+    };
+  }
+
+  private emitSubagentEvents(events: CodeMuxSubagentEvent[]): void {
+    for (const event of events) {
+      this.emitEvent(event);
+    }
+  }
+
+  /** User Stop / transport loss: no surviving children outlive the connection. */
+  private failRunningSubagents(): void {
+    this.emitSubagentEvents(this.subagents.failRunningTasks(this.subagentContext()));
+  }
+
   /**
    * Issue 08: emit a compact boundary event for a contextCompaction item.
    * `compacting` marks the timeline loading state; `completed` is the terminal
@@ -1235,6 +1280,7 @@ export class CodexAppServerRuntime {
     const message = `Codex app-server 连接中断: ${error.message}`;
     this.emitTurnEvent(turn, { kind: 'error', subtype: 'runtime', message });
     turn.settle({ outcome: 'failed', reason: message });
+    this.failRunningSubagents();
     this.abortPendingPlanApproval();
   }
 
@@ -1256,6 +1302,7 @@ export class CodexAppServerRuntime {
     const message = `Codex app-server 进程退出 (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
     this.emitTurnEvent(turn, { kind: 'error', subtype: 'runtime', message });
     turn.settle({ outcome: 'failed', reason: message });
+    this.failRunningSubagents();
     this.abortPendingPlanApproval();
   }
 
@@ -1546,6 +1593,7 @@ export class CodexAppServerRuntime {
       return;
     }
     turn.settle({ outcome, reason });
+    this.failRunningSubagents();
     // Give the pending sendInput await a chance to run its finally cleanup.
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -1598,6 +1646,8 @@ export class CodexAppServerRuntime {
     // A live Plan Approval must not dangle past the connection — aborting
     // lets the awaiting sendInput settle instead of hanging forever.
     this.abortPendingPlanApproval();
+    // Session teardown (or reconfigure): subagent tracks die with the query.
+    this.subagents.reset();
     const transport = this.transport;
     this.transport = null;
     this.threadId = null;
@@ -1625,6 +1675,29 @@ function normalizeCodexPlanMode(value: unknown): AgentPlanMode | undefined {
     return value;
   }
   return undefined;
+}
+
+function collabCallId(item: unknown): string | null {
+  if (!isRecord(item) || item.type !== 'collabAgentToolCall') {
+    return null;
+  }
+  return typeof item.id === 'string' ? item.id : null;
+}
+
+/** Re-announced spawn items are aliases: no duplicate parent card. */
+function isAliasCollabItem(item: unknown, subagents: CodexSubagentSource): boolean {
+  const callId = collabCallId(item);
+  return callId !== null && !subagents.isCanonicalDeclaration(callId);
+}
+
+/** Alias completion results are reported against the canonical parent card. */
+function retargetAliasCollabItem(item: unknown, subagents: CodexSubagentSource): unknown {
+  const callId = collabCallId(item);
+  const canonical = callId ? subagents.canonicalCallIdFor(callId) : undefined;
+  if (!canonical || !isRecord(item)) {
+    return item;
+  }
+  return { ...item, id: canonical };
 }
 
 function buildAppServerEnv(config: CodexSessionBootstrap): Record<string, string | undefined> {
@@ -1725,90 +1798,6 @@ function buildAppServerUserInput(entries: Array<Record<string, unknown>>): Array
 }
 
 type AdaptedItem = CodexThreadItem;
-
-/**
- * Adapts an app-server ThreadItem (camelCase) to the snake_case shape consumed
- * by the shared runtimeEvents tool-use/result builders.
- */
-function adaptAppServerItem(item: Record<string, unknown>): AdaptedItem | null {
-  const id = readString(item.id);
-  if (id === null) {
-    return null;
-  }
-  switch (item.type) {
-    case 'agentMessage':
-      return { type: 'agent_message', id, text: readString(item.text) ?? '' };
-    case 'plan':
-      // Issue 07: EXPERIMENTAL plan item — authoritative proposed plan text.
-      return { type: 'plan', id, text: readString(item.text) ?? '' };
-    case 'reasoning': {
-      const summary = Array.isArray(item.summary) ? item.summary : [];
-      const content = Array.isArray(item.content) ? item.content : [];
-      const text = [...summary, ...content]
-        .filter((part): part is string => typeof part === 'string')
-        .join('\n\n');
-      return { type: 'reasoning', id, text };
-    }
-    case 'commandExecution':
-      return {
-        type: 'command_execution',
-        id,
-        command: readString(item.command) ?? '',
-        cwd: readString(item.cwd) ?? '',
-        aggregated_output: readString(item.aggregatedOutput) ?? '',
-        exit_code: typeof item.exitCode === 'number' ? item.exitCode : null,
-        status: adaptItemStatus(item.status),
-      };
-    case 'fileChange':
-      return {
-        type: 'file_change',
-        id,
-        changes: Array.isArray(item.changes)
-          ? item.changes.filter(isRecord).map((change) => ({
-            kind: readString(change.kind) ?? '',
-            path: readString(change.path) ?? '',
-          }))
-          : [],
-        status: adaptItemStatus(item.status),
-      };
-    case 'mcpToolCall':
-      return {
-        type: 'mcp_tool_call',
-        id,
-        server: readString(item.server) ?? '',
-        tool: readString(item.tool) ?? '',
-        arguments: item.arguments ?? {},
-        status: adaptItemStatus(item.status),
-        error: isRecord(item.error) ? { message: readString(item.error.message) ?? undefined } : null,
-        result: isRecord(item.result)
-          ? {
-            structured_content: item.result.structuredContent,
-            content: item.result.content,
-          }
-          : null,
-      };
-    case 'webSearch':
-      return { type: 'web_search', id, query: readString(item.query) ?? '' };
-    case 'contextCompaction':
-      // Issue 08: manual/auto context compaction item.
-      return { type: 'context_compaction', id };
-    default:
-      return null;
-  }
-}
-
-function adaptItemStatus(value: unknown): string {
-  switch (value) {
-    case 'inProgress':
-      return 'in_progress';
-    case 'completed':
-    case 'failed':
-    case 'declined':
-      return value;
-    default:
-      return 'in_progress';
-  }
-}
 
 function parseTokenUsage(value: unknown): CodexTurnUsage | null {
   if (!isRecord(value)) {
