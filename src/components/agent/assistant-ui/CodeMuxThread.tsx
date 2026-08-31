@@ -20,6 +20,7 @@ import { ToolGroup } from '@/components/assistant-ui/tool-group';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
+import { DotMatrix } from '@/components/ui/dot-matrix';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -1621,11 +1622,10 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
         {isRunning ? (
           <div
             className={cn(
-              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-              'text-muted-foreground',
+              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
             )}
           >
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
+            <DotMatrix state="loading" className="size-5" label="正在执行" />
             <RunningElapsedTimer startTime={queryStartTime} label="正在执行" />
           </div>
         ) : null}
