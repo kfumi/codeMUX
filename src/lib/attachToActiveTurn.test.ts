@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AgentMessage } from '../stores/agentStore';
-import { shouldAttachLiveTurn, shouldFollowBackgroundStream, shouldKeepLiveEventsOnHistoryLoad } from './attachToActiveTurn';
+import { shouldAttachLiveTurn, shouldFollowBackgroundStream, shouldKeepLiveEventsOnHistoryLoad, shouldPreferLocalEventsOnHistoryLoad } from './attachToActiveTurn';
 
 const user = (content: string): AgentMessage => ({
   kind: 'user',
@@ -36,5 +36,14 @@ describe('background stream follow', () => {
   it('does not keep stale in-memory events for scheduled live turns', () => {
     expect(shouldKeepLiveEventsOnHistoryLoad(true, true)).toBe(false);
     expect(shouldKeepLiveEventsOnHistoryLoad(true, false)).toBe(true);
+  });
+
+  it('prefers richer local history over a partial DB snapshot after rewind', () => {
+    const local = [user('first'), user('second'), user('third')];
+    const loaded = [user('third')];
+    expect(shouldPreferLocalEventsOnHistoryLoad(local, loaded, false, false)).toBe(true);
+    expect(shouldPreferLocalEventsOnHistoryLoad(local, loaded, true, false)).toBe(false);
+    expect(shouldPreferLocalEventsOnHistoryLoad(local, loaded, false, true)).toBe(false);
+    expect(shouldPreferLocalEventsOnHistoryLoad(local, local, false, false)).toBe(false);
   });
 });

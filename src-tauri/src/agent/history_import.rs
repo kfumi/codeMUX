@@ -306,6 +306,25 @@ pub(crate) fn should_hydrate_timeline_from_native(
     timeline.as_ref().is_none_or(Vec::is_empty) && session.origin == "native" && has_mapping
 }
 
+/// Rebuild the persisted session timeline from the provider's on-disk history
+/// after a conversation rewind truncates native JSONL.
+pub(crate) async fn reload_session_timeline_from_native(
+    state: State<'_, crate::AppState>,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<(), String> {
+    let native_events = load_native_session_events(state.clone(), app_session_id, agent_kind).await?;
+    let mut db = state.db.lock().unwrap();
+    if native_events.is_empty() {
+        operations::clear_session_timeline(&db, app_session_id)
+            .map_err(|error| error.to_string())?;
+    } else {
+        operations::replace_session_timeline(&mut db, app_session_id, &native_events)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 async fn load_native_session_events(
     state: State<'_, crate::AppState>,
     app_session_id: &str,

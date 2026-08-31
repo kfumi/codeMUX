@@ -3526,4 +3526,47 @@ describe('agent store Codex history loading', () => {
       { kind: 'user', data: { content: prompt } },
     ]);
   });
+
+  it('does not replace richer local history with a partial timeline after rewind and stop', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    const firstPrompt = '分析企宽工单 micro 竣工环节';
+    const continuePrompt = '继续';
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: firstPrompt } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-before-continue',
+              session_id: session.id,
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: '我先梳理相关组件' }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: continuePrompt } },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3] },
+      isRunning: { [session.id]: false },
+      forceStopped: { [session.id]: true },
+    });
+
+    loadSessionEventsMock.mockResolvedValueOnce([
+      { type: 'user_message', session_id: session.id, content: continuePrompt, event_id: '4d6268c5-b87a-4ea9-8e97-2230c43f2d32' },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toEqual([
+      { kind: 'user', data: { content: firstPrompt } },
+      { kind: 'user', data: { content: continuePrompt } },
+    ]);
+  });
 });

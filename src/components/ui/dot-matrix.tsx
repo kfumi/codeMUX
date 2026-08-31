@@ -224,9 +224,7 @@ function DotMatrix({
     >
       <span className="sr-only">{label ?? state}</span>
       {/* Hoisted and deduplicated across instances by React; must live in HTML scope, inside the SVG it would be an SVG-namespace element React does not hoist. */}
-      <style href="aui-dot-matrix" precedence="low">
-        {DOT_MATRIX_CSS}
-      </style>
+      <style>{DOT_MATRIX_CSS}</style>
       <svg
         aria-hidden
         viewBox="0 0 20 20"

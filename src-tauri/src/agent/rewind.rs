@@ -687,10 +687,18 @@ pub async fn rewind_agent_session(
         (outcome, history_path.display().to_string())
     };
 
-    {
+    if rewind_outcome.truncated_to_empty {
         let db = state.db.lock().unwrap();
         operations::clear_session_timeline(&db, &app_session_id)
             .map_err(|err| format!("Failed to clear rewound session timeline: {}", err))?;
+    } else {
+        super::history_import::reload_session_timeline_from_native(
+            state.clone(),
+            &app_session_id,
+            agent_kind,
+        )
+        .await
+        .map_err(|err| format!("Failed to rebuild rewound session timeline: {}", err))?;
     }
 
     if rewind_outcome.truncated_to_empty && !is_imported_session(&state, &app_session_id)? {

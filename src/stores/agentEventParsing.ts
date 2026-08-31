@@ -520,31 +520,32 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-type CompactMarkerLike = {
-  kind: string;
-  data?: {
-    compact_metadata?: {
-      status?: string;
-    };
-  };
-};
+type EventWithKind = { kind: string; data?: unknown };
+
+function readCompactMarkerStatus(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object' || !('compact_metadata' in data)) {
+    return undefined;
+  }
+  const metadata = (data as { compact_metadata?: { status?: string } }).compact_metadata;
+  return typeof metadata?.status === 'string' ? metadata.status : undefined;
+}
 
 /**
  * Live turns replace a compacting placeholder with its completed boundary.
  * Persisted timelines keep both events, so reload must collapse the pair.
  */
-export function collapsePersistedCompactMarkers<T extends CompactMarkerLike>(events: T[]): T[] {
+export function collapsePersistedCompactMarkers<T extends EventWithKind>(events: T[]): T[] {
   const result: T[] = [];
   for (const event of events) {
     if (
       event.kind === 'compact'
-      && event.data?.compact_metadata?.status === 'completed'
+      && readCompactMarkerStatus(event.data) === 'completed'
     ) {
       for (let i = result.length - 1; i >= 0; i -= 1) {
         const entry = result[i];
         if (
           entry.kind === 'compact'
-          && entry.data?.compact_metadata?.status === 'compacting'
+          && readCompactMarkerStatus(entry.data) === 'compacting'
         ) {
           result.splice(i, 1);
           break;
@@ -557,20 +558,20 @@ export function collapsePersistedCompactMarkers<T extends CompactMarkerLike>(eve
 }
 
 /** Timeline loader variant: compact markers live on `entry.event`. */
-export function collapsePersistedCompactTimeline<T extends { event: CompactMarkerLike }>(
+export function collapsePersistedCompactTimeline<T extends { event: EventWithKind }>(
   timeline: T[],
 ): T[] {
   const result: T[] = [];
   for (const entry of timeline) {
     if (
       entry.event.kind === 'compact'
-      && entry.event.data?.compact_metadata?.status === 'completed'
+      && readCompactMarkerStatus(entry.event.data) === 'completed'
     ) {
       for (let i = result.length - 1; i >= 0; i -= 1) {
         const prior = result[i];
         if (
           prior.event.kind === 'compact'
-          && prior.event.data?.compact_metadata?.status === 'compacting'
+          && readCompactMarkerStatus(prior.event.data) === 'compacting'
         ) {
           result.splice(i, 1);
           break;

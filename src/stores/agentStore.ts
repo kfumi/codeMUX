@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import { shouldAttachLiveTurn, shouldKeepLiveEventsOnHistoryLoad } from '../lib/attachToActiveTurn';
+import {
+  shouldAttachLiveTurn,
+  shouldKeepLiveEventsOnHistoryLoad,
+  shouldPreferLocalEventsOnHistoryLoad,
+} from '../lib/attachToActiveTurn';
 import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
@@ -15,7 +19,6 @@ import {
   isAgentInjectedUserMessage,
   isInterruptMarker,
   isTerminalAgentEvent,
-  collapsePersistedCompactMarkers,
   collapsePersistedCompactTimeline,
   mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
@@ -2962,15 +2965,24 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
         set((state) => {
           const currentEvents = state.events[sessionId];
+          const isSessionRunning = Boolean(state.isRunning[sessionId]);
+          const isBackgroundLive = Boolean(state.backgroundLive[sessionId]);
           const keepLiveEvents = Boolean(
             currentEvents?.length
-            && shouldKeepLiveEventsOnHistoryLoad(
-              Boolean(state.isRunning[sessionId]),
-              Boolean(state.backgroundLive[sessionId]),
+            && shouldKeepLiveEventsOnHistoryLoad(isSessionRunning, isBackgroundLive)
+          );
+          const preferLocalEvents = Boolean(
+            currentEvents?.length
+            && shouldPreferLocalEventsOnHistoryLoad(
+              currentEvents,
+              events,
+              isSessionRunning,
+              isBackgroundLive,
             )
           );
-          const nextEvents = keepLiveEvents ? currentEvents! : events;
-          const nextTimestamps = keepLiveEvents
+          const keepCurrentEvents = keepLiveEvents || preferLocalEvents;
+          const nextEvents = keepCurrentEvents ? currentEvents! : events;
+          const nextTimestamps = keepCurrentEvents
             ? state.eventTimestamps[sessionId] ?? timestamps
             : timestamps;
 
