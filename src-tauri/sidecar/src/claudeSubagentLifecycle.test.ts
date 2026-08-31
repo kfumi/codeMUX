@@ -405,7 +405,13 @@ describe('SessionRuntime subagent query lifecycle', () => {
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-5.3-flash');
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.3-flash');
     expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5.3-flash');
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe('glm-5.3-flash');
     expect(env.ANTHROPIC_SMALL_FAST_MODEL).toBe('glm-5.3-flash');
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe('glm-5.3-flash');
+
+    const settingsEnv = (harness2.lastQueryOptions.current?.settings as { env?: Record<string, string> } | undefined)?.env;
+    expect(settingsEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.3-flash');
+    expect(settingsEnv?.CLAUDE_CODE_SUBAGENT_MODEL).toBe('glm-5.3-flash');
 
     runtime.shutdown();
   });

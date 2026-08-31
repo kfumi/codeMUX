@@ -520,6 +520,68 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+type CompactMarkerLike = {
+  kind: string;
+  data?: {
+    compact_metadata?: {
+      status?: string;
+    };
+  };
+};
+
+/**
+ * Live turns replace a compacting placeholder with its completed boundary.
+ * Persisted timelines keep both events, so reload must collapse the pair.
+ */
+export function collapsePersistedCompactMarkers<T extends CompactMarkerLike>(events: T[]): T[] {
+  const result: T[] = [];
+  for (const event of events) {
+    if (
+      event.kind === 'compact'
+      && event.data?.compact_metadata?.status === 'completed'
+    ) {
+      for (let i = result.length - 1; i >= 0; i -= 1) {
+        const entry = result[i];
+        if (
+          entry.kind === 'compact'
+          && entry.data?.compact_metadata?.status === 'compacting'
+        ) {
+          result.splice(i, 1);
+          break;
+        }
+      }
+    }
+    result.push(event);
+  }
+  return result;
+}
+
+/** Timeline loader variant: compact markers live on `entry.event`. */
+export function collapsePersistedCompactTimeline<T extends { event: CompactMarkerLike }>(
+  timeline: T[],
+): T[] {
+  const result: T[] = [];
+  for (const entry of timeline) {
+    if (
+      entry.event.kind === 'compact'
+      && entry.event.data?.compact_metadata?.status === 'completed'
+    ) {
+      for (let i = result.length - 1; i >= 0; i -= 1) {
+        const prior = result[i];
+        if (
+          prior.event.kind === 'compact'
+          && prior.event.data?.compact_metadata?.status === 'compacting'
+        ) {
+          result.splice(i, 1);
+          break;
+        }
+      }
+    }
+    result.push(entry);
+  }
+  return result;
+}
+
 export function mapPersistedClaudeMessage(
   raw: Record<string, unknown>,
   agentKind: AgentKind = 'claude_code',

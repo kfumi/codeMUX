@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   INTERRUPT_MARKER,
+  collapsePersistedCompactMarkers,
+  collapsePersistedCompactTimeline,
   isTerminalAgentEvent,
   isInterruptMarker,
   mapPersistedClaudeMessage,
@@ -17,6 +19,66 @@ describe('interrupt marker detection', () => {
     expect(isInterruptMarker(INTERRUPT_MARKER)).toBe(true);
     expect(isInterruptMarker(' [Request interrupted by user] ')).toBe(true);
     expect(isInterruptMarker('request interrupted by user')).toBe(false);
+  });
+});
+
+describe('collapsePersistedCompactMarkers', () => {
+  const compacting = {
+    kind: 'compact',
+    data: { compact_metadata: { status: 'compacting', trigger: 'manual', pre_tokens: 0 } },
+  };
+  const completed = {
+    kind: 'compact',
+    data: { compact_metadata: { status: 'completed', trigger: 'manual', pre_tokens: 313156 } },
+  };
+
+  it('drops the compacting placeholder when a completed boundary follows', () => {
+    expect(collapsePersistedCompactMarkers([
+      { kind: 'user', data: { content: '/compact' } },
+      compacting,
+      completed,
+      { kind: 'assistant', data: {} },
+    ])).toEqual([
+      { kind: 'user', data: { content: '/compact' } },
+      completed,
+      { kind: 'assistant', data: {} },
+    ]);
+  });
+
+  it('keeps unrelated compact markers across multiple compaction cycles', () => {
+    const firstCompleted = {
+      kind: 'compact',
+      data: { compact_metadata: { status: 'completed', trigger: 'auto', pre_tokens: 1000 } },
+    };
+    const secondCompacting = {
+      kind: 'compact',
+      data: { compact_metadata: { status: 'compacting', trigger: 'manual', pre_tokens: 0 } },
+    };
+    const secondCompleted = {
+      kind: 'compact',
+      data: { compact_metadata: { status: 'completed', trigger: 'manual', pre_tokens: 2000 } },
+    };
+
+    expect(collapsePersistedCompactMarkers([
+      compacting,
+      firstCompleted,
+      secondCompacting,
+      secondCompleted,
+    ])).toEqual([
+      firstCompleted,
+      secondCompleted,
+    ]);
+  });
+
+  it('collapses timeline entries where compact markers are nested under event', () => {
+    expect(collapsePersistedCompactTimeline([
+      { event: { kind: 'user', data: { content: '/compact' } }, ts: 1 },
+      { event: compacting, ts: 2 },
+      { event: completed, ts: 3 },
+    ])).toEqual([
+      { event: { kind: 'user', data: { content: '/compact' } }, ts: 1 },
+      { event: completed, ts: 3 },
+    ]);
   });
 });
 

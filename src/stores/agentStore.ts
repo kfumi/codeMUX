@@ -15,6 +15,8 @@ import {
   isAgentInjectedUserMessage,
   isInterruptMarker,
   isTerminalAgentEvent,
+  collapsePersistedCompactMarkers,
+  collapsePersistedCompactTimeline,
   mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
   normalizeClaudeUserEvent,
@@ -2914,8 +2916,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           return;
         }
 
-        const events: AgentMessage[] = [];
-        const timestamps: number[] = [];
+        const loadedTimeline: Array<{ event: AgentMessage; ts: number }> = [];
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
@@ -2924,8 +2925,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
             : typeof rawMsg.timestamp === 'number'
               ? rawMsg.timestamp
               : 0;
-          if (ts === 0 && timestamps.length > 0) {
-            ts = timestamps[timestamps.length - 1] ?? 0;
+          if (ts === 0 && loadedTimeline.length > 0) {
+            ts = loadedTimeline[loadedTimeline.length - 1]?.ts ?? 0;
           }
 
           const event = isCodeMuxToolEvent(rawMsg)
@@ -2936,10 +2937,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
             ? parseAgentEvent(JSON.stringify(rawMsg))
             : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
           if (event) {
-            events.push(event as AgentMessage);
-            timestamps.push(ts);
+            loadedTimeline.push({ event: event as AgentMessage, ts });
           }
         }
+
+        const collapsedTimeline = collapsePersistedCompactTimeline(loadedTimeline);
+        const events = collapsedTimeline.map((entry) => entry.event);
+        const timestamps = collapsedTimeline.map((entry) => entry.ts);
 
         if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
           logger.info('Discarding stale session history load after rewind', {

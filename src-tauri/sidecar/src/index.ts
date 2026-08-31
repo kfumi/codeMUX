@@ -50,7 +50,11 @@ import {
 import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
-import { applyClaudeModelAliasEnv } from './claudeModelAliasEnv.js';
+import {
+  applyClaudeModelAliasEnv,
+  buildClaudeModelAliasEnv,
+  wipeClaudeModelAliasEnv,
+} from './claudeModelAliasEnv.js';
 import { ClaudeTaskProtocolSource } from './claudeTaskProtocolSource.js';
 import { ClaudePromptStream } from './claudePromptStream.js';
 import { nextWithTimeout } from './claudeQueryTimeout.js';
@@ -932,11 +936,7 @@ export class SessionRuntime {
     if (config.baseUrl) subprocessEnv.ANTHROPIC_BASE_URL = config.baseUrl;
     subprocessEnv.ANTHROPIC_AUTH_TOKEN = '';
     subprocessEnv.ANTHROPIC_COOKIE = '';
-    for (const key of Object.keys(subprocessEnv)) {
-      if (key.startsWith('ANTHROPIC_DEFAULT_')) {
-        subprocessEnv[key] = '';
-      }
-    }
+    wipeClaudeModelAliasEnv(subprocessEnv);
     // Subagents resolve fast-model aliases internally; on a custom gateway
     // those alias codes do not exist, so pin every alias to the session model.
     if (config.baseUrl) {
@@ -951,6 +951,7 @@ export class SessionRuntime {
         ANTHROPIC_AUTH_TOKEN: '',
         ANTHROPIC_COOKIE: '',
         DISABLE_AUTOUPDATER: '1',
+        ...(config.baseUrl ? buildClaudeModelAliasEnv(config.model) : {}),
       };
     }
 
