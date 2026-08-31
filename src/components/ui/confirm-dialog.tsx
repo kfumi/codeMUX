@@ -55,24 +55,24 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={cn('z-[240]', overlayClassName)}
-        className="z-[240] gap-0 overflow-hidden p-0 sm:max-w-95"
+        className="z-[240] flex max-h-[min(85dvh,28rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-95"
       >
-        <DialogHeader className="px-6 pb-4 pt-6">
+        <DialogHeader className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-6">
           <div className="flex items-start gap-3">
             {variant === 'destructive' && (
               <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--destructive)/0.1)]">
                 <AlertTriangle className="h-4.5 w-4.5 text-[hsl(var(--destructive))]" />
               </div>
             )}
-            <div className="space-y-1.5">
+            <div className="min-w-0 flex-1 space-y-1.5">
               <DialogTitle className="text-base leading-tight">{title}</DialogTitle>
-              <DialogDescription className="text-ui-compact leading-relaxed text-muted-foreground">
+              <DialogDescription className="text-ui-compact leading-relaxed break-words text-muted-foreground [overflow-wrap:anywhere]">
                 {description}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        <DialogFooter className="gap-2 border-t border-border/40 bg-muted/30 px-6 py-4">
+        <DialogFooter className="shrink-0 gap-2 border-t border-border/40 bg-muted/30 px-6 py-4">
           <Button
             variant="ghost"
             size="sm"

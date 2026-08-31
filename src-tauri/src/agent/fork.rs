@@ -191,6 +191,66 @@ fn stage_claude_history_fork(
     Ok(staged_session_id)
 }
 
+/// Copies the staged fork history into the child Claude session JSONL.
+///
+/// Claude SDK fork only materializes the active branch in the child file; the
+/// staged JSONL already contains the truncated history CodeMUX needs for display.
+fn install_claude_fork_child_history(
+    staged_path: &Path,
+    staged_session_id: &str,
+    child_session_id: &str,
+) -> Result<(), String> {
+    use std::fs;
+
+    let parent = staged_path
+        .parent()
+        .ok_or_else(|| "Claude session history has no parent directory".to_string())?;
+    let child_path = parent.join(format!("{}.jsonl", child_session_id));
+
+    let content = fs::read_to_string(staged_path).map_err(|error| {
+        format!(
+            "Failed to read staged Claude fork history {}: {}",
+            staged_path.display(),
+            error
+        )
+    })?;
+    let lines = split_jsonl_preserving_newlines(&content);
+    let mut child_content = String::new();
+
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut value = serde_json::from_str::<serde_json::Value>(trimmed)
+            .map_err(|error| format!("Invalid JSON in staged Claude fork history: {}", error))?;
+        replace_claude_session_id(&mut value, staged_session_id, child_session_id);
+        child_content
+            .push_str(&serde_json::to_string(&value).map_err(|error| {
+                format!("Failed to serialize child Claude fork history: {}", error)
+            })?);
+        child_content.push('\n');
+    }
+
+    let temporary_path = parent.join(format!(
+        "{}.jsonl.tmp.{}",
+        child_session_id,
+        uuid::Uuid::new_v4()
+    ));
+    if let Err(error) = fs::write(&temporary_path, child_content)
+        .and_then(|_| fs::rename(&temporary_path, &child_path))
+    {
+        let _ = fs::remove_file(&temporary_path);
+        let _ = fs::remove_file(&child_path);
+        return Err(format!(
+            "Failed to install child Claude fork history: {}",
+            error
+        ));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn fork_claude_session(
     state: State<'_, crate::AppState>,
@@ -276,12 +336,29 @@ pub async fn fork_claude_session(
                 Err("Timed out waiting for Claude session fork".to_string())
             }
         };
-    let _ = cleanup_claude_session_files_by_id(&staged_session_id);
+    if child_result.is_err() {
+        let _ = cleanup_claude_session_files_by_id(&staged_session_id);
+    }
     let child_agent_session_id = child_result?;
+    let staged_path = source_history_path
+        .parent()
+        .ok_or_else(|| "Claude session history has no parent directory".to_string())?
+        .join(format!("{}.jsonl", staged_session_id));
+    install_claude_fork_child_history(
+        &staged_path,
+        &staged_session_id,
+        &child_agent_session_id,
+    )
+    .map_err(|error| {
+        let _ = cleanup_claude_session_files_by_id(&staged_session_id);
+        let _ = cleanup_claude_session_files_by_id(&child_agent_session_id);
+        error
+    })?;
+    let _ = cleanup_claude_session_files_by_id(&staged_session_id);
 
     let child_title = title
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| format!("{} · 分支", source.title));
+        .unwrap_or_else(|| format!("分支 · {}", source.title));
     let mut db = state.db.lock().unwrap();
     operations::create_forked_session(
         &mut db,
@@ -381,7 +458,7 @@ pub async fn fork_codex_session(
 
     let child_title = title
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| format!("{} · 分支", source.title));
+        .unwrap_or_else(|| format!("分支 · {}", source.title));
     let mut db = state.db.lock().unwrap();
     operations::create_forked_session(
         &mut db,
@@ -488,7 +565,7 @@ pub async fn fork_opencode_session(
 
     let child_title = title
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| format!("{} · 分支", source.title));
+        .unwrap_or_else(|| format!("分支 · {}", source.title));
     let mut db = state.db.lock().unwrap();
     operations::create_forked_session(
         &mut db,
@@ -504,7 +581,53 @@ pub async fn fork_opencode_session(
 
 #[cfg(test)]
 mod tests {
-    use super::stage_claude_history_fork;
+    use super::{install_claude_fork_child_history, stage_claude_history_fork};
+
+    #[test]
+    fn installs_staged_claude_history_into_child_session_file() {
+        use std::fs;
+
+        let base =
+            std::env::temp_dir().join(format!("codemux-claude-fork-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&base).unwrap();
+        let source_path = base.join("source-session.jsonl");
+        fs::write(
+            &source_path,
+            concat!(
+                "{\"sessionId\":\"source-session\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"sessionId\":\"source-session\",\"type\":\"assistant\",\"uuid\":\"assistant-1\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"sessionId\":\"source-session\",\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}\n",
+                "{\"sessionId\":\"source-session\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"later\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let staged_id =
+            stage_claude_history_fork(&source_path, "source-session", "assistant-1", None).unwrap();
+        let staged_path = base.join(format!("{}.jsonl", staged_id));
+        let child_id = "child-session".to_string();
+
+        install_claude_fork_child_history(&staged_path, &staged_id, &child_id).unwrap();
+
+        let child_path = base.join(format!("{}.jsonl", child_id));
+        let child_lines = fs::read_to_string(&child_path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(child_lines.len(), 3);
+        assert!(child_lines.iter().all(|line| line
+            .get("sessionId")
+            .and_then(|value| value.as_str())
+            == Some(child_id.as_str())));
+        assert_eq!(
+            child_lines[1].get("uuid").and_then(|value| value.as_str()),
+            Some("assistant-1")
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn stages_claude_history_through_the_selected_completed_turn() {

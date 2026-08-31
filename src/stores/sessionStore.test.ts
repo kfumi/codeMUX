@@ -101,7 +101,7 @@ describe('session store createSession', () => {
     const child: Session = {
       ...parent,
       id: 'child',
-      title: 'Parent · 分支',
+      title: '分支 · Parent',
       parent_session_id: 'parent',
     };
     forkMock.mockResolvedValue(child);
@@ -132,7 +132,7 @@ describe('session store createSession', () => {
     const child: Session = {
       ...parent,
       id: 'codex-child',
-      title: 'Codex Parent · 分支',
+      title: '分支 · Codex Parent',
       parent_session_id: parent.id,
     };
     forkMock.mockResolvedValue(child);
@@ -160,7 +160,7 @@ describe('session store createSession', () => {
     const child: Session = {
       ...parent,
       id: 'opencode-child',
-      title: 'OpenCode Parent · 分支',
+      title: '分支 · OpenCode Parent',
       parent_session_id: parent.id,
     };
     forkMock.mockResolvedValue(child);
