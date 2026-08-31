@@ -358,7 +358,6 @@ describe('agentApi', () => {
       appSessionId: 'session-1',
       agentKind: 'codex',
       target: undefined,
-      rewindUserIndex: null,
       mode: null,
     });
   });

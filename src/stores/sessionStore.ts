@@ -56,22 +56,6 @@ function resolveDefaultAgentKind(): AgentKind {
   return useSettingsStore.getState().config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
 }
 
-function getForkUserMessageCount(sessionId: string, forkEventId: string): number | undefined {
-  const events = useAgentStore.getState().events[sessionId] ?? [];
-  let userMessageCount = 0;
-
-  for (const event of events) {
-    if (event.kind === 'user') {
-      userMessageCount += 1;
-    }
-    if (event.kind === 'assistant' && event.data.uuid === forkEventId) {
-      return userMessageCount;
-    }
-  }
-
-  return undefined;
-}
-
 function normalizeCreateSessionArgs(
   title: string,
   agentKindOrMode?: AgentKind | SessionMode,
@@ -196,7 +180,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const sourceSession = get().sessions.find((entry) => entry.id === sessionId)
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
-      const forkUserMessageCount = getForkUserMessageCount(sessionId, forkEventId);
       const session = sourceSession?.agent_kind === 'codex'
         ? await sessionApi.forkCodex(
           sessionId,
@@ -204,12 +187,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           forkProviderMessageId,
           forkProviderTurnId,
           forkProviderTurnOrdinal,
-          undefined,
-          forkUserMessageCount,
         )
         : sourceSession?.agent_kind === 'opencode'
-          ? await sessionApi.forkOpenCode(sessionId, forkEventId, forkProviderMessageId, undefined, forkUserMessageCount)
-        : await sessionApi.forkClaude(sessionId, forkEventId, forkProviderMessageId, undefined, forkUserMessageCount);
+          ? await sessionApi.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
+        : await sessionApi.forkClaude(sessionId, forkEventId, forkProviderMessageId);
       useAgentStore.getState().clearEvents(session.id);
       set((state) => ({
         sessions: [session, ...state.sessions.filter((entry) => entry.id !== session.id)],

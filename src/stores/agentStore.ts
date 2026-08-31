@@ -73,7 +73,6 @@ import type { QueuedAgentQuery } from '../types/agentQueue';
 import { markModelVisionUnsupported, resolveVisionCapability, findProviderModelMetadata, isImageRecognitionConfigured } from '../lib/modelVisionCapabilities';
 import { getPayloadAttachments, getPayloadImageAttachments, payloadHasAttachments } from '../types/agentInput';
 import { countEnrichmentFailures, filterSuccessfulEnrichmentBlocks, firstEnrichmentFailureSummary, mergeEnrichedContext } from '../lib/attachmentEnrichment';
-import { mergeSessionMessageAttachments, parseSessionMessageAttachmentsMap } from '../lib/sessionMessageAttachments';
 import {
   normalizeThreadTokenUsage,
   type ThreadTokenUsage,
@@ -261,17 +260,6 @@ function bumpSessionHistoryEpoch(sessionId: string): number {
 
 function getSessionHistoryEpoch(sessionId: string): number {
   return sessionHistoryEpoch.get(sessionId) ?? 0;
-}
-
-async function hydrateSessionMessageAttachments(sessionId: string, events: AgentMessage[]): Promise<AgentMessage[]> {
-  try {
-    const raw = await sessionApi.getMessageAttachments(sessionId);
-    const attachmentsByUserIndex = parseSessionMessageAttachmentsMap(raw);
-    return mergeSessionMessageAttachments(events, attachmentsByUserIndex);
-  } catch (error) {
-    logger.warn('Failed to hydrate session message attachments', { sessionId }, serializeError(error));
-    return events;
-  }
 }
 
 const sessionsWithLiveTextStream = new Set<string>();
@@ -1733,7 +1721,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // Git baseline is no longer needed since we use HEAD comparison directly
 
     // 添加用户消息到事件列表
-    const userMessageIndex = (state.events[sessionId] || []).filter((event) => event.kind === 'user').length;
     const userMsg: AgentMessage = {
       kind: 'user',
       data: {
@@ -1758,11 +1745,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }));
     // A new prompt supersedes the "waiting for the parent summary" wait.
     useSubagentStore.getState().markContinuationSettled(sessionId);
-    if (userAttachments.length > 0) {
-      void sessionApi.saveMessageAttachments(sessionId, userMessageIndex, userAttachments).catch((error) => {
-        logger.warn('Failed to persist session message attachments', { sessionId, userMessageIndex }, serializeError(error));
-      });
-    }
 
     try {
       if (attachments.length > 0 && !supportsVision && enrichmentEnabled) {
@@ -2959,7 +2941,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
           }
         }
 
-        const hydratedEvents = await hydrateSessionMessageAttachments(sessionId, events);
         if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
           logger.info('Discarding stale session history load after rewind', {
             sessionId,
@@ -2972,7 +2953,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const projectPath = session?.project_id
           ? useProjectStore.getState().projects.find((entry) => entry.id === session.project_id)?.path?.trim() ?? null
           : null;
-        const rememberedCwd = extractSessionWorkingPathFromEvents(hydratedEvents);
+        const rememberedCwd = extractSessionWorkingPathFromEvents(events);
         const existingWorkingPath = get().sessionWorkingPaths[sessionId] ?? session?.working_path ?? null;
 
         set((state) => {
@@ -2984,7 +2965,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               Boolean(state.backgroundLive[sessionId]),
             )
           );
-          const nextEvents = keepLiveEvents ? currentEvents! : hydratedEvents;
+          const nextEvents = keepLiveEvents ? currentEvents! : events;
           const nextTimestamps = keepLiveEvents
             ? state.eventTimestamps[sessionId] ?? timestamps
             : timestamps;
@@ -3133,10 +3114,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const latestRewindableIndex = getRewindableUserIndex(events);
     const hasStrongLocator = hasStrongRewindLocator(userEvent.data.locator);
     const payload = buildInputPayloadFromUserEvent(userEvent);
-    const rewindUserIndex = events
-      .slice(0, userEventIndex + 1)
-      .filter((event) => event.kind === 'user')
-      .length - 1;
     const turnOrdinal = events
       .slice(0, userEventIndex + 1)
       .filter(isRewindableUserEvent)
@@ -3166,7 +3143,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const invokeRewind = async (
       rewindTarget: AgentUserMessageLocator | undefined,
     ) => {
-      const result = await agentApi.rewindSession(sessionId, agentKind, rewindTarget, rewindUserIndex, mode);
+      const result = await agentApi.rewindSession(sessionId, agentKind, rewindTarget, mode);
       if (result && typeof result.filesChanged === 'number') {
         filesChanged = result.filesChanged;
       }

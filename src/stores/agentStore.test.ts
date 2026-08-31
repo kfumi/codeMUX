@@ -25,7 +25,7 @@ const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Recor
 const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const resyncSessionFromNativeMock = vi.fn<(appSessionId: string) => Promise<{ eventCount: number }>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number, mode?: string) => Promise<{ filesChanged?: number }>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, mode?: string) => Promise<{ filesChanged?: number }>>();
 const respondToAgentPermissionMock = vi.fn();
 
 vi.mock('sonner', () => ({
@@ -69,9 +69,7 @@ vi.mock('../lib/tauri', () => ({
     updatePermissions: vi.fn(() => Promise.resolve()),
     updateWorkingPath: vi.fn(() => Promise.resolve()),
     touch: vi.fn(() => Promise.resolve()),
-    saveMessageAttachments: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
-    getMessageAttachments: vi.fn(() => Promise.resolve([])),
   },
   configApi: {
     get: vi.fn(),
@@ -2900,7 +2898,7 @@ describe('agent store Codex history loading', () => {
       role: 'user',
       textFingerprint: 'inspect image',
       turnOrdinal: 2,
-    }, 1, 'conversation');
+    }, 'conversation');
     expect(payload).toEqual({
       text: 'inspect image',
       images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
@@ -2941,7 +2939,7 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().rewindLastTurn(session.id);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 0, 'conversation');
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 'conversation');
   });
 
   it('marks an inactive session unread after a rewound turn completes', async () => {
@@ -3047,7 +3045,7 @@ describe('agent store Codex history loading', () => {
 
     const payload = await useAgentStore.getState().rewindToMessage(session.id, 0);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', firstLocator, 0, 'conversation');
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', firstLocator, 'conversation');
     expect(payload).toEqual({ text: 'first turn' });
     expect(useAgentStore.getState().events[session.id]).toEqual([]);
     expect(useAgentStore.getState().eventTimestamps[session.id]).toEqual([]);
@@ -3095,7 +3093,7 @@ describe('agent store Codex history loading', () => {
       role: 'user',
       textFingerprint: 'first turn',
       turnOrdinal: 1,
-    }, 0, 'conversation');
+    }, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toEqual([]);
   });
 
@@ -3126,7 +3124,7 @@ describe('agent store Codex history loading', () => {
     const payload = await useAgentStore.getState().rewindToMessage(session.id, 2);
 
     expect(payload).toEqual({ text: 'second turn' });
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 1, 'conversation');
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 
@@ -3169,12 +3167,12 @@ describe('agent store Codex history loading', () => {
     expect(rewindSessionMock).toHaveBeenNthCalledWith(1, session.id, 'claude_code', {
       ...staleLocator,
       turnOrdinal: 2,
-    }, 1, 'conversation');
+    }, 'conversation');
     expect(rewindSessionMock).toHaveBeenNthCalledWith(2, session.id, 'claude_code', {
       role: 'user',
       textFingerprint: 'second turn',
       turnOrdinal: 2,
-    }, 1, 'conversation');
+    }, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 
@@ -3296,7 +3294,7 @@ describe('agent store Codex history loading', () => {
       role: 'user',
       textFingerprint: 'first turn',
       turnOrdinal: 1,
-    }, 0, 'files');
+    }, 'files');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(3);
   });
 
@@ -3354,7 +3352,7 @@ describe('agent store Codex history loading', () => {
     const payload = await useAgentStore.getState().rewindLastTurn(session.id);
 
     expect(payload).toEqual({ text: 'second turn' });
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', undefined, 1, 'conversation');
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', undefined, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 

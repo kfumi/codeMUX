@@ -48,9 +48,7 @@ vi.mock('../lib/tauri', () => ({
     updatePermissions: vi.fn(() => Promise.resolve()),
     updateWorkingPath: vi.fn(() => Promise.resolve()),
     touch: vi.fn(() => Promise.resolve()),
-    saveMessageAttachments: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
-    getMessageAttachments: vi.fn(() => Promise.resolve([])),
   },
   configApi: {
     get: vi.fn(),

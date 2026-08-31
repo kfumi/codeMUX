@@ -80,14 +80,6 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS session_message_attachments (
-            session_id TEXT NOT NULL,
-            user_index INTEGER NOT NULL,
-            attachments_json TEXT NOT NULL,
-            PRIMARY KEY (session_id, user_index),
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-
         CREATE TABLE IF NOT EXISTS session_subagents (
             session_id TEXT NOT NULL,
             subagent_id TEXT NOT NULL,
@@ -394,23 +386,11 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
         CREATE INDEX IF NOT EXISTS idx_session_sources_app_session_id ON session_sources(app_session_id);
         CREATE INDEX IF NOT EXISTS idx_session_event_snapshots_session_id ON session_event_snapshots(session_id);
-        CREATE INDEX IF NOT EXISTS idx_session_message_attachments_session_id ON session_message_attachments(session_id);
         "
     )?;
 
-    let _ = conn.execute(
-        "CREATE TABLE IF NOT EXISTS session_message_attachments (
-            session_id TEXT NOT NULL,
-            user_index INTEGER NOT NULL,
-            attachments_json TEXT NOT NULL,
-            PRIMARY KEY (session_id, user_index),
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        )",
-        [],
-    );
-    let _ = conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_session_message_attachments_session_id ON session_message_attachments(session_id)",
-        [],
+    let _ = conn.execute_batch(
+        "DROP TABLE IF EXISTS session_message_attachments;",
     );
 
     conn.execute_batch(

@@ -2,7 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { ImportCandidate, ImportSessionsRequest, ImportSessionsResult } from '../types/historyImport';
 import type { AgentUserMessageLocator } from '../types/agent';
-import type { AgentInputPayload, AgentInputAttachment, EnrichmentBlockResult, UserAttachmentPreview } from '../types/agentInput';
+import type { AgentInputPayload, AgentInputAttachment, EnrichmentBlockResult } from '../types/agentInput';
 import type {
   AgentConfigUpdateMap,
   ImageRecognitionConfig,
@@ -304,14 +304,12 @@ export const sessionApi = {
     forkEventId: string,
     forkProviderMessageId?: string,
     title?: string,
-    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_claude_session', {
       sessionId,
       forkEventId,
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
-      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
   forkCodex: (
     sessionId: string,
@@ -320,7 +318,6 @@ export const sessionApi = {
     forkProviderTurnId?: string,
     forkProviderTurnOrdinal?: number,
     title?: string,
-    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_codex_session', {
       sessionId,
@@ -329,30 +326,19 @@ export const sessionApi = {
       forkProviderTurnId: forkProviderTurnId ?? null,
       forkProviderTurnOrdinal: forkProviderTurnOrdinal ?? null,
       title: title ?? null,
-      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
   forkOpenCode: (
     sessionId: string,
     forkEventId: string,
     forkProviderMessageId?: string,
     title?: string,
-    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_opencode_session', {
       sessionId,
       forkEventId,
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
-      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
-  saveMessageAttachments: (
-    sessionId: string,
-    userIndex: number,
-    attachments: UserAttachmentPreview[],
-  ): Promise<void> =>
-    invokeLogged('save_session_message_attachments', { sessionId, userIndex, attachments }),
-  getMessageAttachments: (sessionId: string): Promise<Record<number, UserAttachmentPreview[]>> =>
-    invokeLogged('get_session_message_attachments', { sessionId }),
 };
 
 export const agentApi = {
@@ -434,14 +420,12 @@ export const agentApi = {
     appSessionId: string,
     agentKind: AgentKind,
     target?: AgentUserMessageLocator,
-    rewindUserIndex?: number,
     mode?: 'conversation' | 'files' | 'both',
   ): Promise<{ filesChanged?: number }> =>
     invokeLogged('rewind_agent_session', {
       appSessionId,
       agentKind,
       target,
-      rewindUserIndex: rewindUserIndex ?? null,
       mode: mode ?? null,
     }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>

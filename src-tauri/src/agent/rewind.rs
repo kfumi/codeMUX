@@ -565,7 +565,6 @@ pub async fn rewind_agent_session(
     app_session_id: String,
     agent_kind: String,
     target: Option<RewindTarget>,
-    rewind_user_index: Option<i64>,
     mode: Option<String>,
 ) -> Result<RewindSessionResult, String> {
     reject_read_only_session(&state, &app_session_id)?;
@@ -692,12 +691,6 @@ pub async fn rewind_agent_session(
         let db = state.db.lock().unwrap();
         operations::clear_session_timeline(&db, &app_session_id)
             .map_err(|err| format!("Failed to clear rewound session timeline: {}", err))?;
-    }
-
-    if let Some(user_index) = rewind_user_index {
-        let db = state.db.lock().unwrap();
-        operations::delete_session_message_attachments_from_index(&db, &app_session_id, user_index)
-            .map_err(|err| format!("Failed to clear rewound message attachments: {}", err))?;
     }
 
     if rewind_outcome.truncated_to_empty && !is_imported_session(&state, &app_session_id)? {

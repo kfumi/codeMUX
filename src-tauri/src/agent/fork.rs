@@ -259,7 +259,6 @@ pub async fn fork_claude_session(
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
     title: Option<String>,
-    fork_user_message_count: Option<i64>,
 ) -> Result<operations::Session, String> {
     reject_read_only_session(&state, &session_id)?;
 
@@ -367,7 +366,6 @@ pub async fn fork_claude_session(
         &fork_event_id,
         fork_provider_message_id.as_deref(),
         &child_title,
-        fork_user_message_count,
     )
     .map_err(|error| {
         let _ = cleanup_claude_session_files_by_id(&child_agent_session_id);
@@ -386,7 +384,6 @@ pub async fn fork_codex_session(
     fork_provider_turn_id: Option<String>,
     fork_provider_turn_ordinal: Option<usize>,
     title: Option<String>,
-    fork_user_message_count: Option<i64>,
 ) -> Result<operations::Session, String> {
     reject_read_only_session(&state, &session_id)?;
 
@@ -467,7 +464,6 @@ pub async fn fork_codex_session(
         &fork_event_id,
         fork_provider_message_id.as_deref(),
         &child_title,
-        fork_user_message_count,
     )
     .map_err(|error| error.to_string())
 }
@@ -480,7 +476,6 @@ pub async fn fork_opencode_session(
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
     title: Option<String>,
-    fork_user_message_count: Option<i64>,
 ) -> Result<operations::Session, String> {
     reject_read_only_session(&state, &session_id)?;
 
@@ -574,7 +569,6 @@ pub async fn fork_opencode_session(
         &fork_event_id,
         fork_provider_message_id.as_deref(),
         &child_title,
-        fork_user_message_count,
     )
     .map_err(|error| error.to_string())
 }
