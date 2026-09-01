@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fileApi, type FileTreeNode } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
+import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
@@ -183,6 +184,8 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
   const [error, setError] = useState<string | null>(null);
   const openFileTab = useSidePanelStore((state) => state.openFileTab);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const isDraftOpen = useNewSessionStore((state) => state.isDraftOpen);
+  const composerSessionId = activeSessionId ?? (isDraftOpen ? NEW_SESSION_DRAFT_SESSION_ID : null);
 
   const loadTree = useCallback(async () => {
     setIsLoading(true);
@@ -285,7 +288,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
               level={0}
               query={query}
               projectPath={project.path}
-              sessionId={activeSessionId}
+              sessionId={composerSessionId}
               onOpenFile={handleOpenFile}
             />
           ))

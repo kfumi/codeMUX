@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fileApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
+import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
 import { ProjectExplorer } from './ProjectExplorer';
@@ -32,6 +33,7 @@ describe('ProjectExplorer', () => {
   beforeEach(() => {
     invokeMock.mockReset();
     useSessionStore.setState({ activeSessionId: 'session-1' });
+    useNewSessionStore.setState({ isDraftOpen: false });
     useAgentStore.setState({ pendingComposerReferenceInsert: {} });
     Object.assign(navigator, {
       clipboard: {
@@ -151,6 +153,25 @@ describe('ProjectExplorer', () => {
     fireEvent.click(screen.getByText('添加到聊天'));
 
     expect(useAgentStore.getState().pendingComposerReferenceInsert['session-1']).toEqual({
+      reference: 'docs',
+      isDirectory: true,
+    });
+  });
+
+  it('queues a file reference for the new-session draft when no active session exists', async () => {
+    useSessionStore.setState({ activeSessionId: null });
+    useNewSessionStore.setState({ isDraftOpen: true });
+
+    render(<ProjectExplorer project={project} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeTruthy();
+    });
+
+    fireEvent.contextMenu(screen.getByText('docs'));
+    fireEvent.click(screen.getByText('添加到聊天'));
+
+    expect(useAgentStore.getState().pendingComposerReferenceInsert[NEW_SESSION_DRAFT_SESSION_ID]).toEqual({
       reference: 'docs',
       isDirectory: true,
     });
