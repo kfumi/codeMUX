@@ -13,6 +13,8 @@ export type MessageFooterStats = {
   durationMs?: number;
 };
 
+export type MessageFooterVariant = 'full' | 'minimal';
+
 type MessageFooterProps = {
   timestamp?: number;
   stats?: MessageFooterStats;
@@ -23,6 +25,10 @@ type MessageFooterProps = {
   canFork?: boolean;
   isForking?: boolean;
   onFork?: () => void | Promise<void>;
+  /** `minimal` keeps copy + time only. Extra full-variant props are ignored. */
+  variant?: MessageFooterVariant;
+  /** When set, copy writes this string instead of using the chat runtime action bar. */
+  copyText?: string;
 };
 
 export function MessageFooter({
@@ -35,11 +41,30 @@ export function MessageFooter({
   canFork = false,
   isForking = false,
   onFork,
+  variant = 'full',
+  copyText,
 }: MessageFooterProps) {
-  const hasStats = stats?.durationMs != null;
+  const isMinimal = variant === 'minimal';
+  const hasStats = !isMinimal && stats?.durationMs != null;
   const revealClass = revealOnHover
     ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
     : undefined;
+  const showDebug = !isMinimal && Boolean(sessionId);
+  const showFork = !isMinimal && Boolean(canFork && onFork);
+  const useRuntimeCopy = copyText == null;
+  const actions = useRuntimeCopy
+    ? (
+      <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
+        <MessageCopyButton />
+        {showDebug && sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
+        {showFork && onFork ? <ForkButton isForking={isForking} onFork={onFork} /> : null}
+      </ActionBarPrimitive.Root>
+    )
+    : (
+      <div className="flex items-center gap-1">
+        {copyText.length > 0 ? <ExplicitCopyButton text={copyText} /> : null}
+      </div>
+    );
 
   if (!timestamp && !hasStats) {
     return (
@@ -47,11 +72,7 @@ export function MessageFooter({
         data-message-footer
         className={cn('mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/68', revealClass, className)}
       >
-        <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
-          <MessageCopyButton />
-          {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
-          {canFork && onFork ? <ForkButton isForking={isForking} onFork={onFork} /> : null}
-        </ActionBarPrimitive.Root>
+        {actions}
       </div>
     );
   }
@@ -60,19 +81,16 @@ export function MessageFooter({
     <div
       data-message-footer
       className={cn(
-        'mt-4 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
+        isMinimal
+          ? 'mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/68'
+          : 'mt-4 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
         revealClass,
         className,
       )}
     >
-      <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
-        <MessageCopyButton />
-        {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
-        {canFork && onFork ? <ForkButton isForking={isForking} onFork={onFork} /> : null}
-      </ActionBarPrimitive.Root>
-
+      {actions}
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
-      {stats?.durationMs != null ? (
+      {hasStats && stats?.durationMs != null ? (
         <FooterItem>耗时 {formatElapsed(stats.durationMs)}</FooterItem>
       ) : null}
     </div>
@@ -103,6 +121,34 @@ function DebugCopyButton({ sessionId, sourceUuid }: { sessionId: string; sourceU
         aria-label="复制排查问题提示词"
       >
         {isCopied ? <Check className="h-3 w-3" /> : <Bug className="h-3 w-3" />}
+      </button>
+    </TooltipHint>
+  );
+}
+
+function ExplicitCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <TooltipHint content={copied ? '已复制' : '复制'}>
+      <button
+        type="button"
+        aria-label="复制"
+        onClick={() => {
+          void navigator.clipboard?.writeText(text).then(
+            () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            },
+            () => undefined,
+          );
+        }}
+        className={cn(
+          'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+          'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
+        )}
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       </button>
     </TooltipHint>
   );

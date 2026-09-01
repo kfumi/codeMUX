@@ -17,6 +17,7 @@ import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,7 @@ import {
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
+import { shouldShowTranscriptFooter } from './CodeMuxTranscriptMessage';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
@@ -335,110 +337,23 @@ function UnifiedThreadViewport({
   children: (scrollToBottomButton: ReactNode) => ReactNode;
 }) {
   const streamingVersion = useAgentStore((state) => state.streamingVersion[sessionId] ?? 0);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const followLatestRef = useRef(true);
-  const lastScrollTopRef = useRef(0);
-  const lastScrollHeightRef = useRef(0);
-  const scrollFrameRef = useRef<number | null>(null);
   // 首次非空渲染可能来自已缓存历史，也需要等 assistant-ui 提交消息树。
   const previousEventCountRef = useRef(0);
   const previousUserMessageCountRef = useRef(0);
-
-  const updateScrollState = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    const atBottom = viewport.scrollHeight <= viewport.clientHeight
-      || Math.abs(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight) <= 1;
-    if (atBottom) {
-      followLatestRef.current = true;
-    } else if (
-      viewport.scrollTop < lastScrollTopRef.current
-      && viewport.scrollHeight === lastScrollHeightRef.current
-    ) {
-      followLatestRef.current = false;
-    }
-
-    lastScrollTopRef.current = viewport.scrollTop;
-    lastScrollHeightRef.current = viewport.scrollHeight;
-    setIsAtBottom(atBottom);
-  }, [viewportRef]);
+  const isHistoryHydration = previousEventCountRef.current === 0 && eventCount > 0;
+  const hasNewUserMessage = userMessageCount > previousUserMessageCountRef.current;
+  const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
+    viewportRef,
+    followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${streamingVersion}:${userMessageCount}`,
+    extraFrames: isHistoryHydration || hasNewUserMessage ? 2 : 1,
+    forceFollow: hasNewUserMessage,
+    behavior: 'smooth',
+  });
 
   useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    updateScrollState();
-    viewport.addEventListener('scroll', updateScrollState, { passive: true });
-    return () => viewport.removeEventListener('scroll', updateScrollState);
-  }, [updateScrollState, viewportRef]);
-
-  useEffect(() => {
-    const isHistoryHydration = previousEventCountRef.current === 0 && eventCount > 0;
-    const hasNewUserMessage = userMessageCount > previousUserMessageCountRef.current;
     previousEventCountRef.current = eventCount;
     previousUserMessageCountRef.current = userMessageCount;
-
-    // 用户主动发送消息后，即使之前在查看旧历史，也应将新消息带入视口。
-    if (hasNewUserMessage) {
-      followLatestRef.current = true;
-    }
-
-    if (!followLatestRef.current) {
-      return;
-    }
-
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-    }
-
-    // 历史消息会先更新 runtime，再由 assistant-ui 完成消息树提交。
-    // 多等一帧只发生在首次填充历史时，避免流式更新重新引入同步布局。
-    const scrollAfterFrames = (remainingFrames: number) => {
-      scrollFrameRef.current = window.requestAnimationFrame(() => {
-        if (remainingFrames > 1) {
-          scrollAfterFrames(remainingFrames - 1);
-          return;
-        }
-
-        scrollFrameRef.current = null;
-        const viewport = viewportRef.current;
-        if (!viewport || !followLatestRef.current) {
-          return;
-        }
-
-        const nextScrollHeight = viewport.scrollHeight;
-        viewport.scrollTop = nextScrollHeight;
-        lastScrollTopRef.current = viewport.scrollTop;
-        lastScrollHeightRef.current = nextScrollHeight;
-        setIsAtBottom(true);
-      });
-    };
-
-    scrollAfterFrames(isHistoryHydration || hasNewUserMessage ? 2 : 1);
-
-    return () => {
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
-      }
-    };
-  }, [eventCount, isRunning, sessionId, streamingVersion, userMessageCount, viewportRef]);
-
-  const scrollToBottom = useCallback(() => {
-    followLatestRef.current = true;
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    if (typeof viewport.scrollTo === 'function') {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-    } else {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-  }, [viewportRef]);
+  }, [eventCount, userMessageCount]);
 
   const scrollToBottomButton = (
     <ScrollToBottomButton
@@ -1238,17 +1153,24 @@ function AssistantLikeMessage({
 
   const sourceTimestamp = getSourceTimestamp(message);
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
+  const sourceRole = message.metadata.custom?.sourceRole === 'system' ? 'system' : 'assistant';
   const turn = getSourceEventIndices(message)
     .map((eventIndex) => turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
   const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
-  // While the async subagent flow has not settled (children still running, or
-  // the parent streaming around them), no assistant message carries a footer —
-  // a footer would read as "this conversation is finished".
+  // Public footer rule first; main thread then requires a completed turn,
+  // a non-system row, and a settled async subagent flow. `isTimelineRunning`
+  // stays false here because parent completion is turn-scoped, not "tail of
+  // this message list". Grouping / plan cards / data parts stay on this
+  // runtime path instead of CodeMuxTranscriptMessage.
   const shouldRenderFooter =
-    isFinal
+    shouldShowTranscriptFooter({
+      role: sourceRole,
+      isFinalAssistantMessage: isFinal,
+      isTimelineRunning: false,
+    })
     && turn?.status === 'completed'
-    && message.metadata.custom?.sourceRole !== 'system'
+    && sourceRole !== 'system'
     && !subagentFlowPending
     && turn !== undefined;
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;

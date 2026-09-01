@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageFooter } from './message-footer';
 
@@ -15,6 +15,10 @@ vi.mock('@assistant-ui/react', () => ({
 }));
 
 describe('MessageFooter', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it('can stay hidden until the message row is hovered', () => {
     render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} revealOnHover />);
 
@@ -31,5 +35,33 @@ describe('MessageFooter', () => {
     expect(screen.queryByText(/token/)).toBeNull();
     expect(screen.queryByText('Failed')).toBeNull();
     expect(screen.queryByText('Interrupted')).toBeNull();
+  });
+
+  it('minimal variant copies explicit text and omits duration, fork, and debug', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(
+      <MessageFooter
+        variant="minimal"
+        timestamp={Date.parse('2026-06-12T21:40:00+08:00')}
+        copyText="子智能体结论"
+        revealOnHover
+        sessionId="session-1"
+        canFork
+        onFork={() => undefined}
+        stats={{ durationMs: 1200 }}
+      />,
+    );
+
+    expect(screen.getByText(/21:40/)).toBeTruthy();
+    expect(screen.queryByText(/耗时/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '从此回复创建分支' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '复制排查问题提示词' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('子智能体结论');
+    });
   });
 });

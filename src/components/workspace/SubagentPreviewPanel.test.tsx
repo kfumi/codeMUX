@@ -216,4 +216,147 @@ describe('SubagentPreviewPanel', () => {
       expect(writeText).toHaveBeenCalledWith('汇总内容');
     });
   });
+
+  it('节减 footer 不含耗时、分叉和排查', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '汇总内容' }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+      ],
+    });
+
+    renderPanel();
+
+    expect(screen.queryByText(/耗时/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '从此回复创建分支' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '复制排查问题提示词' })).toBeNull();
+    expect(screen.getByRole('button', { name: '复制' })).toBeTruthy();
+  });
+
+  it('助手正文走 Markdown 而不是纯文本', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{
+            type: 'text',
+            text: '结论见 **package.json** 与 `src/App.tsx`\n\n```ts\nconst ready = true;\n```',
+          }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+
+    expect(container.querySelector('.aui-md')).toBeTruthy();
+    expect(screen.getByText('package.json')).toBeTruthy();
+    expect(container.textContent).not.toContain('**package.json**');
+    expect(container.textContent).not.toContain('```ts');
+    expect(container.querySelector('pre, code')).toBeTruthy();
+  });
+
+  it('工具调用使用主会话同一套工具卡片', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'tool_started',
+          tool_use_id: 'c1',
+          name: 'Grep',
+          input: { pattern: 'AgentPanel' },
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:21.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '已搜索' }],
+          event_id: 'e2',
+          timestamp: '2026-08-29T05:47:22.000Z',
+        },
+      ],
+    });
+
+    renderPanel();
+
+    expect(screen.getByRole('button', { name: /搜索文本/ })).toBeTruthy();
+  });
+
+  it('上翻后显示回到底部按钮', async () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '汇总内容' }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+    const viewport = container.querySelector('[data-testid="subagent-viewport"]') as HTMLElement;
+    expect(viewport).toBeTruthy();
+
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 0;
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '滚动到底部' })).toBeTruthy();
+    });
+  });
+
+  it('内容增高且未上翻时贴底', async () => {
+    seedStore({
+      status: 'running',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '第一段' }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+    const viewport = container.querySelector('[data-testid="subagent-viewport"]') as HTMLElement;
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 144;
+    fireEvent.scroll(viewport);
+
+    seedStore({
+      status: 'running',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '第一段' }],
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:20.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '第二段' }],
+          event_id: 'e2',
+          timestamp: '2026-08-29T05:47:21.000Z',
+        },
+      ],
+    });
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 800 });
+
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(800);
+    });
+  });
 });
