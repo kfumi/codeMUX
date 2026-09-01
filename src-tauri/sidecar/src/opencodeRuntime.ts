@@ -31,6 +31,9 @@ import {
 import { setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
+import { isMutationTool, isArtifactPathInWorkspace, TurnArtifactAggregator } from './turnArtifactSummary.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
@@ -102,6 +105,7 @@ export class OpenCodeRuntime {
   private permissionClosing = false;
   private permissionConfig: SidecarPermissionConfig | undefined;
   private planMode: AgentPlanMode = 'off';
+  private readonly turnArtifactAggregator: TurnArtifactAggregator;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -131,6 +135,7 @@ export class OpenCodeRuntime {
     }
     this.agentSessionId = config.agentSessionId;
     this.subagents = new OpenCodeSubagentSource(this.eventIdFactory);
+    this.turnArtifactAggregator = new TurnArtifactAggregator(config.cwd);
   }
 
   /**
@@ -856,9 +861,7 @@ export class OpenCodeRuntime {
       const toEmit = normalizedEvent.type === 'stream_event'
         ? { ...normalizedEvent, session_id: this.config.sessionId }
         : normalizedEvent;
-      const emitJson = (() => { try { return JSON.stringify(toEmit).slice(0, 1000) } catch { return String(toEmit).slice(0, 1000) } })();
-      process.stderr.write(`[opencode-debug] EMIT to frontend type=${toEmit.type ?? '(no type)'} preview=${emitJson}\n`);
-      this.emitEvent(toEmit);
+      this.emitTimelineEvent(toEmit as Record<string, unknown>);
     }
     this.eventSequence += events.length;
 
@@ -971,8 +974,86 @@ export class OpenCodeRuntime {
     });
   }
 
+  private buildMutationFileSnapshot(
+    toolUseId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const normalized = toolName.toLowerCase();
+    if (normalized !== 'write' && normalized !== 'edit') return null;
+    if (!isMutationTool(toolName)) return null;
+
+    const filePath = typeof input.file_path === 'string'
+      ? input.file_path
+      : typeof input.filePath === 'string'
+        ? input.filePath
+        : null;
+    if (!filePath) return null;
+
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(this.config.cwd, filePath);
+    const normalizedPath = absolutePath.replace(/\\/g, '/');
+    if (!isArtifactPathInWorkspace(this.config.cwd, normalizedPath)) return null;
+
+    try {
+      const original = fs.readFileSync(absolutePath, 'utf-8');
+      return {
+        type: 'file_snapshot',
+        session_id: this.config.sessionId,
+        file_path: normalizedPath,
+        original_content: original,
+        is_new: false,
+        tool_use_id: toolUseId,
+        event_id: this.eventIdFactory(),
+      };
+    } catch {
+      return {
+        type: 'file_snapshot',
+        session_id: this.config.sessionId,
+        file_path: normalizedPath,
+        original_content: '',
+        is_new: true,
+        tool_use_id: toolUseId,
+        event_id: this.eventIdFactory(),
+      };
+    }
+  }
+
+  private emitTimelineEvent(event: Record<string, unknown>): void {
+    const eventsToEmit: Record<string, unknown>[] = [];
+
+    if (event.type === 'tool_started' && typeof event.tool_use_id === 'string' && typeof event.name === 'string') {
+      const input = event.input && typeof event.input === 'object' && !Array.isArray(event.input)
+        ? event.input as Record<string, unknown>
+        : {};
+      const snapshot = this.buildMutationFileSnapshot(event.tool_use_id, event.name, input);
+      if (snapshot) {
+        eventsToEmit.push(snapshot);
+        this.turnArtifactAggregator.observe(snapshot);
+      }
+      this.turnArtifactAggregator.observe(event);
+    } else if (event.type === 'turn_finished') {
+      const summary = this.turnArtifactAggregator.flushSummary(this.config.sessionId);
+      if (summary) {
+        eventsToEmit.push(summary as Record<string, unknown>);
+      }
+      this.turnArtifactAggregator.reset();
+    } else if (event.type === 'tool_finished') {
+      this.turnArtifactAggregator.observe(event);
+    }
+
+    eventsToEmit.push(event);
+    for (const timelineEvent of eventsToEmit) {
+      const emitJson = (() => { try { return JSON.stringify(timelineEvent).slice(0, 1000) } catch { return String(timelineEvent).slice(0, 1000) } })();
+      process.stderr.write(`[opencode-debug] EMIT to frontend type=${timelineEvent.type ?? '(no type)'} preview=${emitJson}\n`);
+      this.emitEvent(timelineEvent);
+    }
+  }
+
   private beginTurnEventState(): void {
     this.turnId += 1;
+    this.turnArtifactAggregator.reset();
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.compactionBoundarySessionIds.clear();
@@ -1016,6 +1097,7 @@ export class OpenCodeRuntime {
       clearTimeout(timer);
     }
     this.questionTimeouts.clear();
+    this.turnArtifactAggregator.reset();
     this.seenEventIds.clear();
     this.seenPayloadKeys.clear();
     this.seenPayloadKeyBytes = 0;

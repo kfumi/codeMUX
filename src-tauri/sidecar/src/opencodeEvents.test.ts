@@ -84,7 +84,7 @@ describe('OpenCode event normalization', () => {
       content: 'permission denied', is_error: true, event_id: 'test-event-id', sequence: 9,
     });
   });
-  it('converts OpenCode file summaries into a renderable session summary', () => {
+  it('ignores OpenCode git summary messages during live event conversion', () => {
     const events = toCodeMuxEvent({
       type: 'message.updated',
       properties: {
@@ -103,14 +103,10 @@ describe('OpenCode event normalization', () => {
       },
     }, context());
 
-    expect(events).toEqual([expect.objectContaining({
-      type: 'system_event',
-      subtype: 'session_summary',
-      diffs: [{ file: 'index.html', additions: 1, deletions: 1, patch: expect.stringContaining('+new') }],
-    })]);
+    expect(events).toEqual([]);
   });
 
-  it('converts a non-empty session.diff into a session summary and ignores empty file notifications', () => {
+  it('ignores session.diff git summaries and empty file notifications', () => {
     const diff = toCodeMuxEvent({
       type: 'session.diff',
       properties: {
@@ -120,7 +116,7 @@ describe('OpenCode event normalization', () => {
     }, context());
     const edited = toCodeMuxEvent({ type: 'file.edited', properties: { file: 'index.html' } }, context());
 
-    expect(diff[0]).toMatchObject({ type: 'system_event', subtype: 'session_summary', diffs: [{ file: 'index.html', before: 'old\n', after: 'new\n' }] });
+    expect(diff).toEqual([]);
     expect(edited).toEqual([]);
   });
   it('builds one unified turn outcome on session completion', () => {

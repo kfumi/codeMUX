@@ -54,6 +54,7 @@ tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter
 tracing-log = { version = "0.2", optional = true }
 console-subscriber = { version = "0.5", optional = true }
 keyring = { version = "4.1.6", features = ["windows-native-keyring-store"] }
+similar = "2.7"
 
 [target.'cfg(windows)'.dependencies]
 junction = "1"

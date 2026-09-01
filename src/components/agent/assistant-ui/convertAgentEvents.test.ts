@@ -2008,6 +2008,55 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('attaches session_summary to interrupted turns', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: 'modify file' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'partial work' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'src/app.ts', additions: 2, deletions: 0 }],
+          uuid: 'summary-interrupted-1',
+          session_id: 'session-1',
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'interrupted',
+          is_error: true,
+          uuid: 'result-interrupted-1',
+          session_id: 'session-1',
+          duration_ms: 10,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: 'Interrupted by user',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const assistantMessage = messages.find((message) => message.role === 'assistant');
+    expect(assistantMessage?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'data-codemux-event', eventKind: 'session_summary' }),
+    ]));
+  });
+
   it('does not render a summary while the turn is still running', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: '请修改文件' } },

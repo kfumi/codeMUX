@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::turn_artifact_summary::inject_turn_artifact_summaries;
+
 /// Converts provider history records into the CodeMUX Event interface.
 ///
 /// Provider-specific loaders may keep their native parsing logic and fixtures;
@@ -13,6 +15,7 @@ pub(crate) fn normalize_history_events(raw_events: Vec<Value>, app_session_id: &
     for (sequence, event) in events.iter_mut().enumerate() {
         normalize_envelope(event, app_session_id, sequence as u64);
     }
+    inject_turn_artifact_summaries(&mut events);
     events
 }
 

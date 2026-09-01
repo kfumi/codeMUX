@@ -1627,4 +1627,80 @@ describe('OpenCodeRuntime', () => {
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     await runtime.shutdown();
   });
+
+  it('emits session_summary from write tool events at turn completion', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig({ cwd: 'D:/project/demo' }), port, {
+      emitEvent: (event) => emitted.push(event),
+    });
+    await runtime.start();
+
+    const send = runtime.sendInput('write sql file');
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          id: 'write-part',
+          messageID: 'assistant-1',
+          sessionID: 'opencode-new',
+          type: 'tool',
+          tool: 'write',
+          callID: 'call-write-1',
+          state: {
+            status: 'running',
+            input: {
+              filePath: 'D:/project/demo/query.sql',
+              content: 'SELECT 1;\n',
+            },
+          },
+        },
+      },
+    });
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          id: 'write-part',
+          messageID: 'assistant-1',
+          sessionID: 'opencode-new',
+          type: 'tool',
+          tool: 'write',
+          callID: 'call-write-1',
+          state: {
+            status: 'completed',
+            input: {
+              filePath: 'D:/project/demo/query.sql',
+              content: 'SELECT 1;\n',
+            },
+            output: 'Wrote file successfully.',
+          },
+        },
+      },
+    });
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    await send;
+
+    const summaryIndex = emitted.findIndex((event) => (event as { type?: string; subtype?: string }).subtype === 'session_summary');
+    const turnFinishedIndex = emitted.findIndex((event) => (event as { type?: string }).type === 'turn_finished');
+    expect(summaryIndex).toBeGreaterThanOrEqual(0);
+    expect(turnFinishedIndex).toBeGreaterThan(summaryIndex);
+    expect(emitted[summaryIndex]).toMatchObject({
+      type: 'system_event',
+      subtype: 'session_summary',
+      diffs: [expect.objectContaining({
+        file: 'D:/project/demo/query.sql',
+        additions: 1,
+      })],
+    });
+
+    await runtime.shutdown();
+  });
 });

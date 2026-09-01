@@ -29,6 +29,7 @@ import {
 } from './runtimeEvents.js';
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
 import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './turnEventNormalizer.js';
+import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { proxyManager } from './proxyManager.js';
 import { emit, resetStreamEventSequences, syncStreamSessionContext } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
@@ -291,6 +292,7 @@ export class SessionRuntime {
   private warmPromise: Promise<WarmQuery | null> | null = null;
   private turnActive = false;
   private turnEventNormalizer: TurnEventNormalizer | null = null;
+  private turnArtifactAggregator: TurnArtifactAggregator | null = null;
   /**
    * Async-agent continuation turns: task notifications can wake the model
    * after the parent result, streaming an extra turn while `turnActive` is
@@ -420,6 +422,7 @@ export class SessionRuntime {
       // its boundary lands in the timeline before the new prompt's content.
       this.finishPendingContinuation('new_prompt', 'completed');
       this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
+      this.turnArtifactAggregator = new TurnArtifactAggregator(this.config.cwd);
       writeLog('[claude-task]', `sendInput START (stream reuse) model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
       if (this.promptStream.push(prompt, inputPayload)) {
         return;
@@ -438,6 +441,7 @@ export class SessionRuntime {
     this.generation += 1;
     this.finishPendingContinuation('new_prompt', 'completed');
     this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
+    this.turnArtifactAggregator = new TurnArtifactAggregator(this.config.cwd);
 
     writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
 
@@ -996,9 +1000,23 @@ export class SessionRuntime {
                     is_new: false,
                     tool_use_id: toolUseID || '',
                   });
+                  this.turnArtifactAggregator?.observe({
+                    type: 'file_snapshot',
+                    file_path: absolutePath,
+                    original_content: original,
+                    is_new: false,
+                    tool_use_id: toolUseID || '',
+                  });
                 } catch {
                   const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(config.cwd, filePath);
                   emit({
+                    type: 'file_snapshot',
+                    file_path: absolutePath,
+                    original_content: '',
+                    is_new: true,
+                    tool_use_id: toolUseID || '',
+                  });
+                  this.turnArtifactAggregator?.observe({
                     type: 'file_snapshot',
                     file_path: absolutePath,
                     original_content: '',
@@ -1552,8 +1570,13 @@ export class SessionRuntime {
 
   private emitTurnSource(source: TurnSourceEvent): void {
     for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.accept(source) ?? []) {
+      this.trackArtifactWireEvent(event);
       emit(event);
     }
+  }
+
+  private trackArtifactWireEvent(event: Record<string, unknown>): void {
+    this.turnArtifactAggregator?.observe(event);
   }
 
   private emitClaudeInteractionTimeout(toolUseId: string): void {
@@ -1580,6 +1603,12 @@ export class SessionRuntime {
   }
 
   private emitTurnOutcome(outcome: TurnOutcome, flags?: { synthetic?: boolean }): void {
+    const sessionId = this.config?.sessionId ?? '';
+    const summary = this.turnArtifactAggregator?.flushSummary(sessionId);
+    if (summary) {
+      emit(summary);
+    }
+    this.turnArtifactAggregator?.reset();
     for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.finish(outcome, flags) ?? []) {
       emit(event);
     }

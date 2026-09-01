@@ -22,7 +22,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/componen
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { useSubagentStore } from '../../../stores/subagentStore';
 import { cn } from '../../../lib/utils';
-import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
+import { countDiffLines, parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 import { getAgentDefinition } from '@/types/agentRegistry';
@@ -833,12 +833,34 @@ function getSummaryFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function getSummaryDiffStats(diff: {
+  file: string;
+  patch?: string;
+  before?: string;
+  after?: string;
+  additions?: number;
+  deletions?: number;
+}): { additions: number; deletions: number } {
+  if (typeof diff.before === 'string' && typeof diff.after === 'string') {
+    return countDiffLines(diff.before, diff.after);
+  }
+  if (diff.patch) {
+    const parsed = parseUnifiedDiffPatch(diff.patch);
+    if (parsed) {
+      return countDiffLines(parsed.oldContent, parsed.newContent);
+    }
+  }
+  return { additions: diff.additions ?? 0, deletions: diff.deletions ?? 0 };
+}
+
 function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 'session_summary' }> }) {
   const [expanded, setExpanded] = useState(false);
   const openDiffTab = useSidePanelStore((state) => state.openDiffTab);
-  const diffs = event.data.diffs;
-  const totalAdditions = diffs.reduce((sum, d) => sum + (d.additions ?? 0), 0);
-  const totalDeletions = diffs.reduce((sum, d) => sum + (d.deletions ?? 0), 0);
+  const diffs = event.data.diffs
+    .map((diff) => ({ diff, stats: getSummaryDiffStats(diff) }))
+    .filter(({ stats }) => stats.additions > 0 || stats.deletions > 0);
+  const totalAdditions = diffs.reduce((sum, entry) => sum + entry.stats.additions, 0);
+  const totalDeletions = diffs.reduce((sum, entry) => sum + entry.stats.deletions, 0);
 
   const handleFileClick = (diff: { file: string; patch?: string; before?: string; after?: string }) => {
     const patch = diff.patch;
@@ -882,7 +904,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
       </button>
       {expanded && (
         <div className="divide-y divide-border/35 border-t border-border/45 bg-[hsl(var(--surface-1))]/38">
-          {diffs.map((diff, i) => (
+          {diffs.map(({ diff, stats }, i) => (
             <div
               key={`${diff.file}-${i}`}
               role="button"
@@ -906,8 +928,8 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
                 </span>
               </TooltipHint>
               <span className="inline-flex w-18 shrink-0 justify-end gap-1.5 tabular-nums">
-                <span className="rounded bg-[hsl(var(--success)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--success))]">+{diff.additions ?? 0}</span>
-                <span className="rounded bg-[hsl(var(--destructive)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--destructive))]">−{diff.deletions ?? 0}</span>
+                <span className="rounded bg-[hsl(var(--success)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--success))]">+{stats.additions}</span>
+                <span className="rounded bg-[hsl(var(--destructive)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--destructive))]">−{stats.deletions}</span>
               </span>
             </div>
           ))}

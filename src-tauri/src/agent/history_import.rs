@@ -17,6 +17,9 @@ use crate::agent::commands::{
     convert_codex_history_values_to_events, home_dir, should_include_claude_history_event,
 };
 use crate::agent::history_events::normalize_history_events;
+use crate::agent::turn_artifact_summary::{
+    backfill_turn_artifact_summaries, supports_turn_artifact_summary_backfill,
+};
 use crate::agent::opencode_history;
 use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
 use crate::config::types::AgentKind;
@@ -187,7 +190,23 @@ pub async fn load_session_events(
     };
 
     if timeline.as_ref().is_some_and(|events| !events.is_empty()) {
-        return Ok(timeline.unwrap_or_default());
+        let mut events = timeline.unwrap_or_default();
+        if supports_turn_artifact_summary_backfill(agent_kind)
+            && backfill_turn_artifact_summaries(&mut events)
+        {
+            let mut db = state.db.lock().unwrap();
+            if let Err(error) =
+                operations::replace_session_timeline(&mut db, &app_session_id, &events)
+            {
+                log::warn!(
+                    target: "agent",
+                    "Failed to persist turn artifact summaries for app_session_id={}: {}",
+                    app_session_id,
+                    error
+                );
+            }
+        }
+        return Ok(events);
     }
 
     let has_mapping = {

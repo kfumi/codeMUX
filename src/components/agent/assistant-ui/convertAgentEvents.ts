@@ -364,7 +364,10 @@ function attachSessionSummariesToFinalAssistants(
   for (const turn of turns) {
     const turnSummaries = summariesByTurnId.get(turn.id);
     const finalAssistantEventIndex = turn.footerAnchorEventIndex;
-    if (!turnSummaries || turn.status !== 'completed' || finalAssistantEventIndex == null) {
+    if (!turnSummaries || finalAssistantEventIndex == null) {
+      continue;
+    }
+    if (turn.status !== 'completed' && turn.status !== 'interrupted' && turn.status !== 'failed') {
       continue;
     }
 

@@ -34,6 +34,7 @@ import {
   type CodexTurnSourceEvent,
   type CodexTurnUsage,
 } from './codexTurnEventNormalizer.js';
+import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import {
@@ -172,6 +173,7 @@ type ActiveTurnState = {
   lastAssistantText: string;
   /** Issue 07: authoritative plan text from a completed `plan` item, if any. */
   planText: string;
+  artifactAggregator: TurnArtifactAggregator;
   settle: (outcome: CodexTurnOutcome) => void;
   settled: boolean;
   cleanedUp: boolean;
@@ -497,6 +499,7 @@ export class CodexAppServerRuntime {
       startedAt,
       turnId: null,
       normalizer: new CodexTurnEventNormalizer(sessionId),
+      artifactAggregator: new TurnArtifactAggregator(config.cwd),
       usage: null,
       idleGuard: createTurnIdleGuard({
         idleTimeoutMs: this.timeouts.idle_timeout_ms,
@@ -657,6 +660,7 @@ export class CodexAppServerRuntime {
       startedAt,
       turnId: null,
       normalizer: new CodexTurnEventNormalizer(sessionId),
+      artifactAggregator: new TurnArtifactAggregator(config.cwd),
       usage: null,
       idleGuard: createTurnIdleGuard({
         idleTimeoutMs: this.timeouts.idle_timeout_ms,
@@ -1133,6 +1137,9 @@ export class CodexAppServerRuntime {
     }
     const result = buildCodexToolResultContent(item);
     if (result !== null) {
+      if (item.type === 'file_change' && !isCodexToolResultError(item) && item.changes?.length) {
+        turn.artifactAggregator.recordApplyPatchCompletion(item.id, item.changes);
+      }
       this.emitTurnEvent(turn, {
         kind: 'tool_finished',
         toolUseId: item.id,
@@ -1171,11 +1178,17 @@ export class CodexAppServerRuntime {
 
   private emitTurnEvent(turn: ActiveTurnState, source: CodexTurnSourceEvent): void {
     for (const event of turn.normalizer.accept(source)) {
+      turn.artifactAggregator.observe(event as Record<string, unknown>);
       this.emitEvent(event);
     }
   }
 
   private emitTurnOutcome(turn: ActiveTurnState, outcome: CodexTurnOutcome): void {
+    const summary = turn.artifactAggregator.flushSummary(turn.sessionId);
+    if (summary) {
+      this.emitEvent(summary);
+    }
+    turn.artifactAggregator.reset();
     for (const event of turn.normalizer.finish(outcome)) {
       this.emitEvent(event);
     }

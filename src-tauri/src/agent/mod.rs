@@ -17,6 +17,7 @@ pub(crate) mod rewind;
 pub(crate) mod session_lifecycle;
 pub mod subagent_persist;
 pub(crate) mod timeline_persist;
+pub(crate) mod turn_artifact_summary;
 
 use log::{debug, info, warn};
 use std::io;

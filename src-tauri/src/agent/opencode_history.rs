@@ -980,13 +980,12 @@ mod tests {
     }
 
     #[test]
-    fn emits_session_summary_event_from_opencode_summary_message() {
+    fn ignores_opencode_git_summary_messages() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
         ).unwrap();
-        // user message
         connection
             .execute(
                 "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
@@ -1010,7 +1009,6 @@ mod tests {
                 ],
             )
             .unwrap();
-        // assistant message with text
         connection
             .execute(
                 "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
@@ -1034,7 +1032,6 @@ mod tests {
                 ],
             )
             .unwrap();
-        // summary message (role: user, summary with diffs)
         connection
             .execute(
                 "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
@@ -1048,28 +1045,14 @@ mod tests {
             .unwrap();
 
         let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        assert!(
+            !events.iter().any(|event| {
+                event.get("type").and_then(Value::as_str) == Some("system")
+                    && event.get("subtype").and_then(Value::as_str) == Some("session_summary")
+            }),
+            "git summary messages should not emit session_summary"
+        );
 
-        // user, assistant, result (from assistant), session_summary
-        let summary_event = events
-            .iter()
-            .find(|e| {
-                e.get("type").and_then(Value::as_str) == Some("system")
-                    && e.get("subtype").and_then(Value::as_str) == Some("session_summary")
-            })
-            .expect("expected a session_summary system event");
-
-        assert_eq!(summary_event["uuid"], "summary-1-summary");
-        assert_eq!(summary_event["session_id"], "session-1");
-        let diffs = summary_event["diffs"]
-            .as_array()
-            .expect("diffs should be an array");
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0]["file"], "src/foo.ts");
-        assert_eq!(diffs[0]["additions"], 3);
-        assert_eq!(diffs[0]["deletions"], 1);
-        assert_eq!(diffs[0]["status"], "modified");
-
-        // The summary message should NOT produce an empty user event
         let user_events: Vec<&Value> = events
             .iter()
             .filter(|e| e.get("type").and_then(Value::as_str) == Some("user"))
@@ -1108,13 +1091,14 @@ mod tests {
     }
 
     #[test]
-    fn emits_session_summary_after_assistant_when_user_msg_has_both_text_and_diffs() {
+    fn synthesizes_session_summary_from_opencode_edit_tool_history() {
+        use super::super::history_events::normalize_history_events;
+
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
         ).unwrap();
-        // user message WITH both text part AND summary.diffs (real OpenCode format)
         connection
             .execute(
                 "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
@@ -1122,7 +1106,7 @@ mod tests {
                     "user-1",
                     "session-1",
                     1000_i64,
-                    r#"{"role":"user","agent":"build","summary":{"diffs":[{"file":"src/foo.ts","additions":3,"deletions":1,"status":"modified"}]},"time":{"created":1000}}"#
+                    r#"{"role":"user","time":{"created":1000}}"#
                 ],
             )
             .unwrap();
@@ -1138,14 +1122,14 @@ mod tests {
                 ],
             )
             .unwrap();
-        // assistant message
         connection
             .execute(
-                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![
                     "assistant-1",
                     "session-1",
                     2000_i64,
+                    2600_i64,
                     r#"{"role":"assistant","modelID":"test","time":{"created":2000}}"#
                 ],
             )
@@ -1154,55 +1138,40 @@ mod tests {
             .execute(
                 "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
                 rusqlite::params![
-                    "part-assistant",
+                    "part-edit",
                     "assistant-1",
                     "session-1",
-                    2001_i64,
-                    r#"{"type":"text","text":"done"}"#
+                    2002_i64,
+                    r#"{"type":"tool","callID":"call-1","tool":"edit","state":{"status":"completed","input":{"filePath":"src/foo.ts","oldString":"old\n","newString":"new\n"},"output":"ok"}}"#
                 ],
             )
             .unwrap();
 
-        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
-
-        // Find positions
-        let user_pos = events
-            .iter()
-            .position(|e| e.get("type").and_then(Value::as_str) == Some("user"));
-        let assistant_pos = events
-            .iter()
-            .position(|e| e.get("type").and_then(Value::as_str) == Some("assistant"));
-        let summary_pos = events.iter().position(|e| {
-            e.get("type").and_then(Value::as_str) == Some("system")
-                && e.get("subtype").and_then(Value::as_str) == Some("session_summary")
+        let raw = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let normalized = normalize_history_events(raw, "app-session-1");
+        let summary_pos = normalized.iter().position(|event| {
+            event.get("type").and_then(Value::as_str) == Some("system_event")
+                && event.get("subtype").and_then(Value::as_str) == Some("session_summary")
         });
+        let turn_finished_pos = normalized
+            .iter()
+            .position(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished"));
 
-        // All three should be present
-        assert!(user_pos.is_some(), "user event should be present");
-        assert!(assistant_pos.is_some(), "assistant event should be present");
+        assert!(summary_pos.is_some(), "expected synthesized session_summary");
+        assert!(turn_finished_pos.is_some(), "expected turn_finished");
         assert!(
-            summary_pos.is_some(),
-            "session_summary event should be present"
+            summary_pos.unwrap() < turn_finished_pos.unwrap(),
+            "session_summary should come before turn_finished"
         );
 
-        // session_summary should come AFTER assistant
-        assert!(
-            summary_pos.unwrap() > assistant_pos.unwrap(),
-            "session_summary should come after assistant message, got summary at {} and assistant at {}",
-            summary_pos.unwrap(),
-            assistant_pos.unwrap()
-        );
-
-        // User message should contain the original text
-        let user_event = &events[user_pos.unwrap()];
-        let user_text = user_event["message"]["content"][0]["text"]
-            .as_str()
-            .unwrap();
-        assert_eq!(user_text, "fix the bug");
-
-        // Summary should have correct diffs
-        let summary_event = &events[summary_pos.unwrap()];
-        assert_eq!(summary_event["diffs"][0]["file"], "src/foo.ts");
+        let summary_event = &normalized[summary_pos.unwrap()];
+        let diffs = summary_event["diffs"]
+            .as_array()
+            .expect("diffs should be an array");
+        assert_eq!(diffs.len(), 1);
+        assert!(diffs[0]["file"].as_str().unwrap_or_default().ends_with("src/foo.ts"));
+        assert_eq!(diffs[0]["additions"], 1);
+        assert_eq!(diffs[0]["deletions"], 1);
     }
 
     fn rewind_fixture_connection() -> Connection {
@@ -1624,7 +1593,6 @@ fn load_opencode_events_from_connection(
 
     let mut events = Vec::new();
     let mut pending_success_result: Option<Value> = None;
-    let mut pending_session_summary: Option<Value> = None;
     let mut turn_start_time: Option<i64> = None;
 
     for row in message_rows {
@@ -1827,29 +1795,11 @@ fn load_opencode_events_from_connection(
         }
 
         if content.is_empty() && role == "user" {
-            // Even if content is empty, check for summary.diffs on this user message.
-            if let Some(summary_obj) = message.get("summary").filter(|v| v.is_object()) {
-                if let Some(diffs) = summary_obj
-                    .get("diffs")
-                    .and_then(Value::as_array)
-                    .filter(|d| !d.is_empty())
-                {
-                    pending_session_summary = Some(serde_json::json!({
-                        "type": "system",
-                        "subtype": "session_summary",
-                        "diffs": diffs,
-                        "uuid": format!("{}-summary", message_id),
-                        "session_id": session_id,
-                        "timestamp": timestamp_string(time_created),
-                    }));
-                }
-            }
             continue;
         }
         let timestamp = timestamp_string(time_created);
         if role == "user" {
             flush_pending_opencode_result(&mut events, &mut pending_success_result);
-            flush_pending_session_summary(&mut events, &mut pending_session_summary);
             turn_start_time = Some(time_created);
             events.push(serde_json::json!({
                 "type": "user",
@@ -1859,23 +1809,6 @@ fn load_opencode_events_from_connection(
                 "parent_tool_use_id": Value::Null,
                 "timestamp": timestamp,
             }));
-            // Save summary.diffs for emission after this turn's assistant messages.
-            if let Some(summary_obj) = message.get("summary").filter(|v| v.is_object()) {
-                if let Some(diffs) = summary_obj
-                    .get("diffs")
-                    .and_then(Value::as_array)
-                    .filter(|d| !d.is_empty())
-                {
-                    pending_session_summary = Some(serde_json::json!({
-                        "type": "system",
-                        "subtype": "session_summary",
-                        "diffs": diffs,
-                        "uuid": format!("{}-summary", message_id),
-                        "session_id": session_id,
-                        "timestamp": timestamp,
-                    }));
-                }
-            }
         } else {
             if let Some(error) = message.get("error") {
                 pending_success_result = None;
@@ -1969,19 +1902,12 @@ fn load_opencode_events_from_connection(
         }
     }
     flush_pending_opencode_result(&mut events, &mut pending_success_result);
-    flush_pending_session_summary(&mut events, &mut pending_session_summary);
     Ok(events)
 }
 
 fn flush_pending_opencode_result(events: &mut Vec<Value>, pending: &mut Option<Value>) {
     if let Some(result) = pending.take() {
         events.push(result);
-    }
-}
-
-fn flush_pending_session_summary(events: &mut Vec<Value>, pending: &mut Option<Value>) {
-    if let Some(summary) = pending.take() {
-        events.push(summary);
     }
 }
 

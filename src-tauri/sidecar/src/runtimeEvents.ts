@@ -19,7 +19,7 @@ export type CodexThreadItem = {
   arguments?: unknown;
   query?: string;
   text?: string;
-  changes?: Array<{ kind: string; path: string }>;
+  changes?: Array<{ kind: string; path: string; diff?: string }>;
   error?: { message?: string } | null;
   result?: { structured_content?: unknown; content?: unknown } | null;
   items?: Array<{ text: string; completed: boolean }>;
@@ -249,6 +249,7 @@ export function adaptAppServerItem(item: Record<string, unknown> | null | undefi
           ? item.changes.filter(isRecordValue).map((change) => ({
             kind: readStringField(change.kind) ?? '',
             path: readStringField(change.path) ?? '',
+            ...(readStringField(change.diff) ? { diff: readStringField(change.diff)! } : {}),
           }))
           : [],
         status: adaptItemStatus(item.status),

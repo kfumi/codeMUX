@@ -26,6 +26,14 @@ CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScr
 - `cd src-tauri && cargo check --all-targets --all-features` checks Rust compilation.
 - `npx vitest run` runs root TypeScript/React tests; run the same command in `src-tauri/sidecar/` for sidecar tests and in `src-mobile/` for mobile tests.
 
+### Sidecar packaging
+
+Sidecar uses plain `tsc`; the installer ships **only** `sidecar/dist/`, not `node_modules` (`src-tauri/tauri.conf.json`).
+
+- Do **not** add runtime packages to `src-tauri/sidecar/package.json` `dependencies` — dev works, release fails with `ERR_MODULE_NOT_FOUND`.
+- Reuse frontend logic by inlining in sidecar; do not import from `src/`. Provider SDKs load from managed Runtime (`%LOCALAPPDATA%/CodeMUX/runtimes/`), not sidecar deps.
+- Need a real npm dep? Bundle it (e.g. esbuild) and update packaging config — or verify with a release build; `tauri dev` won't catch this.
+
 ## Coding Style & Naming Conventions
 
 Follow `.editorconfig`: spaces, LF endings, UTF-8, final newline, 2-space indentation for TypeScript/JSON/TOML/YAML, and 4-space indentation for Rust. Use strict TypeScript and the `@/*` import alias. Prefer functional React components, hooks, Zustand state, and Tailwind/CSS variables. Use `PascalCase` for components, `camelCase` for functions and variables, and `snake_case` for Rust modules.

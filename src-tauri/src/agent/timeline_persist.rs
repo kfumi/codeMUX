@@ -9,6 +9,7 @@ const CODE_MUX_DOMAIN_EVENT_TYPES: &[&str] = &[
     "reasoning_delta",
     "tool_input_delta",
     "content_finished",
+    "file_snapshot",
     "user_message",
     "assistant_message",
     "tool_started",
@@ -136,6 +137,17 @@ mod tests {
         });
         assert!(is_code_mux_domain_event(&event));
         assert!(!should_persist_domain_event(&event));
+    }
+
+    #[test]
+    fn persists_file_snapshot_events() {
+        let event = serde_json::json!({
+            "type": "file_snapshot",
+            "file_path": "README.md",
+            "original_content": "before",
+        });
+        assert!(is_code_mux_domain_event(&event));
+        assert!(should_persist_domain_event(&event));
     }
 
     #[test]
