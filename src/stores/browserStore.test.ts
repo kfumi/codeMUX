@@ -1,0 +1,154 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const browserApiMock = vi.hoisted(() => ({
+  create: vi.fn(),
+  destroy: vi.fn(),
+  navigate: vi.fn(),
+  back: vi.fn(),
+  forward: vi.fn(),
+  reload: vi.fn(),
+  setBounds: vi.fn(),
+  show: vi.fn(),
+  hide: vi.fn(),
+  evaluate: vi.fn(),
+  openDevtools: vi.fn(),
+  clearData: vi.fn(),
+}));
+
+vi.mock('../lib/tauri', () => ({
+  browserApi: browserApiMock,
+}));
+
+import { useBrowserStore } from './browserStore';
+
+const PANEL_BOUNDS = { x: 10, y: 20, width: 400, height: 600 };
+
+async function attachPage(panelTabId: string, url = 'https://example.com/') {
+  const pageId = useBrowserStore.getState().ensureBlankPage(panelTabId);
+  await useBrowserStore.getState().setPanelBounds(panelTabId, PANEL_BOUNDS);
+  await useBrowserStore.getState().navigate(pageId, url);
+  return pageId;
+}
+
+describe('browser store', () => {
+  beforeEach(() => {
+    useBrowserStore.getState().reset();
+    for (const fn of Object.values(browserApiMock)) {
+      fn.mockReset();
+      fn.mockResolvedValue(undefined);
+    }
+  });
+
+  it('creates a blank page without contacting the host', () => {
+    const pageId = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    const page = useBrowserStore.getState().pages[pageId];
+
+    expect(page).toMatchObject({
+      url: '',
+      addressDraft: '',
+      hostAttached: false,
+      lastError: null,
+    });
+    expect(browserApiMock.create).not.toHaveBeenCalled();
+  });
+
+  it('reuses the existing blank page for the same panel', () => {
+    const first = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    const second = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    expect(second).toBe(first);
+  });
+
+  it('navigates through the host after adding https', async () => {
+    const pageId = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    await useBrowserStore.getState().setPanelBounds('scope:browser', PANEL_BOUNDS);
+    await useBrowserStore.getState().navigate(pageId, 'example.com/docs');
+
+    expect(browserApiMock.create).toHaveBeenCalledWith(
+      pageId,
+      'https://example.com/docs',
+      PANEL_BOUNDS,
+    );
+    expect(useBrowserStore.getState().pages[pageId].hostAttached).toBe(true);
+    expect(useBrowserStore.getState().pages[pageId].lastError).toBeNull();
+  });
+
+  it('waits for usable panel bounds before creating a host page', async () => {
+    const pageId = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    await useBrowserStore.getState().navigate(pageId, 'https://example.com/docs');
+
+    expect(browserApiMock.create).not.toHaveBeenCalled();
+    expect(useBrowserStore.getState().pages[pageId].hostAttached).toBe(false);
+
+    await useBrowserStore.getState().setPanelBounds('scope:browser', PANEL_BOUNDS);
+
+    expect(browserApiMock.create).toHaveBeenCalledWith(
+      pageId,
+      'https://example.com/docs',
+      PANEL_BOUNDS,
+    );
+    expect(useBrowserStore.getState().pages[pageId].hostAttached).toBe(true);
+  });
+
+  it('records lastError for non-http schemes without calling the host', async () => {
+    const pageId = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    await useBrowserStore.getState().navigate(pageId, 'file:///tmp/index.html');
+
+    expect(browserApiMock.create).not.toHaveBeenCalled();
+    expect(useBrowserStore.getState().pages[pageId].lastError).toBe('只允许 http 或 https 地址');
+    expect(useBrowserStore.getState().pages[pageId].hostAttached).toBe(false);
+  });
+
+  it('destroys an attached page and reports an empty panel when closing the last page', async () => {
+    const pageId = await attachPage('scope:browser');
+    const result = await useBrowserStore.getState().closePage(pageId);
+
+    expect(browserApiMock.destroy).toHaveBeenCalledWith(pageId);
+    expect(result).toEqual({ panelEmpty: true, panelTabId: 'scope:browser' });
+    expect(useBrowserStore.getState().pageIdsByPanel['scope:browser']).toEqual([]);
+  });
+
+  it('applies host patches onto the page title and navigation flags', () => {
+    const pageId = useBrowserStore.getState().ensureBlankPage('scope:browser');
+    useBrowserStore.getState().applyHostPatch({
+      browserId: pageId,
+      title: 'Example',
+      url: 'https://example.com/',
+      canGoBack: true,
+      isLoading: false,
+    });
+
+    expect(useBrowserStore.getState().pages[pageId]).toMatchObject({
+      title: 'Example',
+      url: 'https://example.com/',
+      addressDraft: 'https://example.com/',
+      canGoBack: true,
+      isLoading: false,
+    });
+  });
+
+  it('hides attached pages that are not the visible page', async () => {
+    const pageId = await attachPage('scope:browser');
+    browserApiMock.show.mockClear();
+    await useBrowserStore.getState().syncVisibility('scope:browser', null);
+
+    expect(browserApiMock.hide).toHaveBeenCalledWith(pageId);
+    expect(browserApiMock.show).not.toHaveBeenCalled();
+  });
+
+  it('ends inspect mode when the page starts navigating', async () => {
+    const pageId = await attachPage('scope:browser');
+    useBrowserStore.getState().startInspect(pageId);
+    await useBrowserStore.getState().navigate(pageId, 'https://example.com/docs');
+
+    expect(useBrowserStore.getState().inspectingPageId).toBeNull();
+    expect(browserApiMock.navigate).toHaveBeenCalledWith(pageId, 'https://example.com/docs');
+  });
+
+  it('ends inspect mode when the inspecting page is hidden', async () => {
+    const pageId = await attachPage('scope:browser');
+    useBrowserStore.getState().startInspect(pageId);
+    await useBrowserStore.getState().syncVisibility('scope:browser', null);
+
+    expect(useBrowserStore.getState().inspectingPageId).toBeNull();
+  });
+});

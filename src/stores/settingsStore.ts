@@ -8,6 +8,7 @@ import type {
   ModelProvider,
   NotificationSettings,
   Theme,
+  BrowserControlSettings,
 } from '../types/provider';
 import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
@@ -15,6 +16,7 @@ import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
 import { normalizeGitSettings } from '../lib/gitSettings';
+import { normalizeBrowserControl } from '../lib/browserControl';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
 
@@ -55,6 +57,7 @@ interface SettingsState {
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setGitSettings: (settings: GitSettings) => Promise<void>;
+  setBrowserControl: (settings: BrowserControlSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   upsertModelProvider: (provider: ModelProvider) => Promise<void>;
   deleteModelProvider: (providerId: string) => Promise<void>;
@@ -88,6 +91,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         default_open_target: normalizeOpenTarget(rawConfig.default_open_target),
         notifications: normalizeNotificationSettings(rawConfig.notifications),
         git: normalizeGitSettings(rawConfig.git),
+        browser: normalizeBrowserControl(rawConfig.browser),
       };
       useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
       set({ config, isLoading: false });
@@ -197,6 +201,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set((state) => ({
         config: state.config && previousGit
           ? { ...state.config, git: previousGit }
+          : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setBrowserControl: async (settings: BrowserControlSettings) => {
+    const previous = get().config?.browser;
+    const nextSettings = normalizeBrowserControl(settings);
+    set((state) => ({
+      config: state.config ? { ...state.config, browser: nextSettings } : state.config,
+      error: null,
+    }));
+    try {
+      await configApi.setBrowserControl(nextSettings);
+    } catch (error) {
+      set((state) => ({
+        config: state.config
+          ? { ...state.config, browser: previous }
           : state.config,
         error: String(error),
       }));

@@ -122,6 +122,23 @@ fn default_listen_address() -> String {
     "0.0.0.0".to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserControlConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_false")]
+    pub ignore_certificate_errors: bool,
+}
+
+impl Default for BrowserControlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ignore_certificate_errors: false,
+        }
+    }
+}
+
 impl Default for CompanionConfig {
     fn default() -> Self {
         Self {
@@ -391,6 +408,8 @@ pub struct AppConfig {
     pub attachment_enrichment: AttachmentEnrichmentConfig,
     #[serde(default)]
     pub companion: CompanionConfig,
+    #[serde(default)]
+    pub browser: BrowserControlConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,6 +437,7 @@ impl Default for AppConfig {
             theme: Theme::System,
             attachment_enrichment: AttachmentEnrichmentConfig::default(),
             companion: CompanionConfig::default(),
+            browser: BrowserControlConfig::default(),
         }
     }
 }
@@ -487,6 +507,20 @@ mod tests {
         assert_eq!(config.git.pull_request_instructions, "");
         assert_eq!(config.git.provider_id, None);
         assert_eq!(config.git.model, "");
+    }
+
+    #[test]
+    fn old_config_json_deserializes_with_browser_control_defaults() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert!(!config.browser.enabled);
+        assert!(!config.browser.ignore_certificate_errors);
     }
 
     #[test]

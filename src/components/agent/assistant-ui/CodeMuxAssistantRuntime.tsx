@@ -7,8 +7,8 @@ import { findCommand } from '../../../lib/slashCommands';
 import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
 
-import type { AgentInputPayload } from '../../../types/agentInput';
-import { payloadHasAttachments } from '../../../types/agentInput';
+import { consumeBrowserElementsForSend, useBrowserElementStore } from '../../../stores/browserElementStore';
+import { payloadHasAttachments, type AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
 import type { ProjectSkill } from '../../../types/skill';
 import type { ConversationTurn } from '../../../types/conversationTurn';
@@ -88,7 +88,8 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      if (payload.text.length === 0 && !payloadHasAttachments(payload)) {
+      const hasPendingElements = (useBrowserElementStore.getState().elementsBySession[sessionId] ?? []).length > 0;
+      if (payload.text.length === 0 && !payloadHasAttachments(payload) && !hasPendingElements) {
         return;
       }
 
@@ -115,9 +116,9 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      await onSend(payload);
+      await onSend(consumeBrowserElementsForSend(sessionId, payload));
     },
-    [onCommand, onSend, agentKind, projectSkills, sendDisabled],
+    [onCommand, onSend, agentKind, projectSkills, sendDisabled, sessionId],
   );
 
   const handleNew = useCallback(

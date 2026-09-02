@@ -42,6 +42,7 @@ const sidePanelState = vi.hoisted(() => ({
   toggleExpanded: vi.fn(),
   openReviewTab: vi.fn(),
   openTerminalTab: vi.fn(),
+  openBrowserTab: vi.fn(),
   setScope: vi.fn(),
 }));
 
@@ -58,8 +59,8 @@ vi.mock('./terminal/TerminalPanel', () => ({
   TerminalPanel: (props: { terminalId?: string }) => terminalPanelMock(props),
 }));
 
-vi.mock('./review/ReviewPanel', () => ({
-  ReviewPanel: () => null,
+vi.mock('../browser/BrowserPanel', () => ({
+  BrowserPanel: () => null,
 }));
 
 vi.mock('./plan/PlanPreviewPanel', () => ({
@@ -116,5 +117,22 @@ describe('SidePanel', () => {
       expect.objectContaining({ terminalId: 'terminal-a', isActive: false }),
     );
     expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
+  });
+
+  it('allows opening the browser empty-state entry without a project', () => {
+    const previousTabs = sidePanelState.tabs;
+    const previousActiveTabId = sidePanelState.activeTabId;
+    sidePanelState.tabs = [];
+    sidePanelState.activeTabId = null;
+
+    try {
+      render(<SidePanel projectPath={null} scopeId="session-a" />);
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '浏览器' }).disabled).toBe(false);
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '审查' }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '终端' }).disabled).toBe(true);
+    } finally {
+      sidePanelState.tabs = previousTabs;
+      sidePanelState.activeTabId = previousActiveTabId;
+    }
   });
 });

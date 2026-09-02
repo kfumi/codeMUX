@@ -1,5 +1,6 @@
 pub mod agent_runtime_check;
 pub mod app;
+pub mod browser;
 pub mod companion;
 pub mod file;
 pub mod forge;

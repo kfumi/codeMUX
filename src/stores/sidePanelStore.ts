@@ -4,7 +4,7 @@ import { fileApi } from '../lib/tauri';
 import type { SubagentStatus } from '../lib/codeMuxProtocol';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
-export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file' | 'subagent';
+export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file' | 'subagent' | 'browser';
 
 export interface SidePanelTab {
   id: string;
@@ -50,6 +50,7 @@ interface SidePanelState {
   openPanel: () => void;
   openReviewTab: (projectPath: string) => void;
   openTerminalTab: (projectPath: string) => void;
+  openBrowserTab: () => void;
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
   openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SubagentStatus) => void;
@@ -105,8 +106,16 @@ function createTab(scopeId: string, kind: SidePanelTabKind, projectPath: string)
   return {
     id: tabId(scopeId, kind, projectPath),
     kind,
-    title: kind === 'review' ? '审查' : kind === 'terminal' ? '终端' : '计划',
+    title: kind === 'review' ? '审查' : kind === 'terminal' ? '终端' : kind === 'browser' ? '浏览器' : '计划',
     projectPath,
+  };
+}
+
+function createBrowserTab(scopeId: string): SidePanelTab {
+  return {
+    id: `${scopeId}:browser`,
+    kind: 'browser',
+    title: '浏览器',
   };
 }
 
@@ -238,6 +247,19 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set((state) => {
       const existingTab = state.tabs.find((tab) => tab.kind === 'terminal' && tab.projectPath === projectPath);
       const tab = existingTab ?? createTerminalTab(state.activeScopeId, projectPath);
+      return {
+        isOpen: true,
+        tabs: existingTab ? state.tabs : [...state.tabs, tab],
+        activeTabId: tab.id,
+      };
+    });
+    recordNavigation(get());
+  },
+
+  openBrowserTab: () => {
+    set((state) => {
+      const existingTab = state.tabs.find((tab) => tab.kind === 'browser');
+      const tab = existingTab ?? createBrowserTab(state.activeScopeId);
       return {
         isOpen: true,
         tabs: existingTab ? state.tabs : [...state.tabs, tab],

@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, FileSearch, FileCode, FileText, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
+import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
@@ -15,6 +15,8 @@ import { TerminalPanel } from './terminal/TerminalPanel';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { FileEditorPanel } from './FileEditorPanel';
 import { SubagentPreviewPanel } from './SubagentPreviewPanel';
+import { BrowserPanel } from '../browser/BrowserPanel';
+import { NEW_SESSION_DRAFT_SESSION_ID } from '../../stores/newSessionStore';
 
 interface SidePanelProps {
   projectPath?: string | null;
@@ -40,6 +42,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const toggleExpanded = useSidePanelStore((state) => state.toggleExpanded);
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
   const openTerminalTab = useSidePanelStore((state) => state.openTerminalTab);
+  const openBrowserTab = useSidePanelStore((state) => state.openBrowserTab);
   const setScope = useSidePanelStore((state) => state.setScope);
   const draggingRef = useRef(false);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -89,6 +92,19 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
     });
   }, [scopes, tabs]);
 
+  const browserTabs = useMemo(() => {
+    const allTabs = [
+      ...tabs,
+      ...Object.values(scopes).flatMap((snapshot) => snapshot.tabs),
+    ];
+    const seen = new Set<string>();
+    return allTabs.filter((tab) => {
+      if (tab.kind !== 'browser' || seen.has(tab.id)) return false;
+      seen.add(tab.id);
+      return true;
+    });
+  }, [scopes, tabs]);
+
   const openReview = useCallback(() => {
     if (projectPath) openReviewTab(projectPath);
   }, [openReviewTab, projectPath]);
@@ -96,6 +112,10 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const openTerminal = useCallback(() => {
     if (projectPath) openTerminalTab(projectPath);
   }, [openTerminalTab, projectPath]);
+
+  const openBrowser = useCallback(() => {
+    openBrowserTab();
+  }, [openBrowserTab]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
@@ -178,46 +198,35 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
           </div>
 
           <div className="flex shrink-0 items-center gap-0.5">
-            {projectPath ? (
-              <DropdownMenu>
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="打开标签"
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>打开标签</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <DropdownMenuContent align="end" className="z-190 min-w-32">
-                  <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
-                    审查
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
-                    终端
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <TooltipHint content="请先选择项目">
-                <span aria-label="请先选择项目">
-                  <button
-                    type="button"
-                    className="flex h-7 w-7 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-45"
-                    disabled
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </span>
-              </TooltipHint>
-            )}
+            <DropdownMenu>
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="打开标签"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>打开标签</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <DropdownMenuContent align="end" className="z-190 min-w-32">
+                <DropdownMenuItem disabled={!projectPath} onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
+                  审查
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={!projectPath} onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
+                  终端
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={openBrowser} icon={<Globe className="h-3.5 w-3.5" />}>
+                  浏览器
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <TooltipHint content={isExpanded ? '恢复面宽' : '展开预览'}>
               <button
                 type="button"
@@ -253,6 +262,25 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               </div>
             );
           })}
+          {browserTabs.map((tab) => {
+            const isActive = isVisible && isOpen && activeTab?.id === tab.id;
+            return (
+              <div
+                key={tab.id}
+                className={cn(
+                  'absolute inset-0',
+                  isActive ? 'pointer-events-auto visible z-10' : 'pointer-events-none invisible z-0',
+                )}
+                aria-hidden={!isActive}
+              >
+                <BrowserPanel
+                  tabId={tab.id}
+                  sessionId={composerSessionIdForPanel(tab.id)}
+                  isActive={isActive}
+                />
+              </div>
+            );
+          })}
           {activeTab ? (
             activeTab.kind === 'review' ? (
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
@@ -276,12 +304,25 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               />
             ) : null
           ) : (
-            <SidePanelEmpty projectPath={projectPath} onOpenReview={openReview} onOpenTerminal={openTerminal} />
+            <SidePanelEmpty
+              projectPath={projectPath}
+              onOpenReview={openReview}
+              onOpenTerminal={openTerminal}
+              onOpenBrowser={openBrowser}
+            />
           )}
         </div>
       </div>
     </aside>
   );
+}
+
+function composerSessionIdForPanel(panelTabId: string): string {
+  const scopeId = panelTabId.replace(/:browser$/, '');
+  if (scopeId === 'home' || scopeId === 'global' || scopeId.startsWith('draft:')) {
+    return NEW_SESSION_DRAFT_SESSION_ID;
+  }
+  return scopeId;
 }
 
 function TabButton({
@@ -307,6 +348,8 @@ function TabButton({
         ? FileCode
         : tab.kind === 'subagent'
           ? Bot
+          : tab.kind === 'browser'
+            ? Globe
           : FileText;
 
   return (
@@ -371,16 +414,18 @@ function SidePanelEmpty({
   projectPath,
   onOpenReview,
   onOpenTerminal,
+  onOpenBrowser,
 }: {
   projectPath?: string | null;
   onOpenReview: () => void;
   onOpenTerminal: () => void;
+  onOpenBrowser: () => void;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
       <h2 className="text-2xl font-semibold tracking-normal text-foreground/88">打开标签页</h2>
       <p className="mt-3 text-sm text-muted-foreground">
-        {projectPath ? '选择要在侧边面板中打开的标签。' : '请先选择一个项目。'}
+        选择要在侧边面板中打开的标签。
       </p>
       <div className="mt-7 grid w-full max-w-105 grid-cols-2 gap-3">
         <button
@@ -398,6 +443,13 @@ function SidePanelEmpty({
         >
           <Terminal className="h-5 w-5" />
           <span className="text-sm">终端</span>
+        </button>
+        <button
+          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70"
+          onClick={onOpenBrowser}
+        >
+          <Globe className="h-5 w-5" />
+          <span className="text-sm">浏览器</span>
         </button>
       </div>
     </div>

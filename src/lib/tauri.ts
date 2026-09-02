@@ -13,6 +13,7 @@ import type {
   NotificationSettings,
   Provider,
   Theme,
+  BrowserControlSettings,
 } from '../types/provider';
 import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
@@ -22,6 +23,7 @@ import type { ImportableSkill, ProjectSkill, Skill } from '../types/skill';
 import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage';
 import type { CompanionStatus } from '../types/companion';
 import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../types/scheduledTask';
+import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from './browserHost';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
 
@@ -478,6 +480,8 @@ export const configApi = {
     invokeLogged('set_git_settings', { settings }),
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
     invokeLogged('set_default_open_target', { target }),
+  setBrowserControl: (settings: BrowserControlSettings): Promise<void> =>
+    invokeLogged('set_browser_control', { settings }),
   testProvider: (apiKey: string, baseUrl: string): Promise<string> =>
     invokeLogged('test_model_provider', { apiKey, baseUrl }),
   fetchProviderModels: (
@@ -619,6 +623,33 @@ export const terminalApi = {
       invokeLogged('close_terminal_session', { terminalId }),
     );
   },
+};
+
+export const browserApi: BrowserHost = {
+  create: (browserId: string, url: string, bounds: BrowserPageBounds): Promise<void> =>
+    invokeLogged('browser_create', { browserId, url, bounds }),
+  destroy: (browserId: string): Promise<void> =>
+    invokeLogged('browser_destroy', { browserId }),
+  navigate: (browserId: string, url: string): Promise<void> =>
+    invokeLogged('browser_navigate', { browserId, url }),
+  back: (browserId: string): Promise<void> =>
+    invokeLogged('browser_back', { browserId }),
+  forward: (browserId: string): Promise<void> =>
+    invokeLogged('browser_forward', { browserId }),
+  reload: (browserId: string): Promise<void> =>
+    invokeLogged('browser_reload', { browserId }),
+  setBounds: (browserId: string, bounds: BrowserPageBounds): Promise<void> =>
+    invokeLogged('browser_set_bounds', { browserId, bounds }),
+  show: (browserId: string): Promise<void> =>
+    invokeLogged('browser_show', { browserId }),
+  hide: (browserId: string): Promise<void> =>
+    invokeLogged('browser_hide', { browserId }),
+  evaluate: (browserId: string, script: string): Promise<string> =>
+    invokeLogged('browser_evaluate', { browserId, script }),
+  openDevtools: (browserId: string): Promise<void> =>
+    invokeLogged('browser_open_devtools', { browserId }),
+  clearData: (scope: BrowserDataScope): Promise<void> =>
+    invokeLogged('browser_clear_data', { scope }),
 };
 
 export const mcpApi = {

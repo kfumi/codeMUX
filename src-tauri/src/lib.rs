@@ -1,5 +1,6 @@
 mod agent;
 mod agent_runtime;
+mod browser;
 mod commands;
 mod companion;
 mod config;
@@ -435,6 +436,7 @@ pub fn run() {
             });
             app.manage(agent::commands::AgentState::default());
             app.manage(commands::terminal::TerminalState::default());
+            app.manage(crate::browser::manager::BrowserState::default());
             app.manage(companion::CompanionState::default());
 
             let config_for_companion = {
@@ -502,6 +504,19 @@ pub fn run() {
             commands::provider::set_notification_settings,
             commands::provider::set_default_open_target,
             commands::provider::set_git_settings,
+            commands::browser::set_browser_control,
+            commands::browser::browser_create,
+            commands::browser::browser_destroy,
+            commands::browser::browser_navigate,
+            commands::browser::browser_back,
+            commands::browser::browser_forward,
+            commands::browser::browser_reload,
+            commands::browser::browser_set_bounds,
+            commands::browser::browser_show,
+            commands::browser::browser_hide,
+            commands::browser::browser_evaluate,
+            commands::browser::browser_open_devtools,
+            commands::browser::browser_clear_data,
             commands::model_provider::list_builtin_provider_templates,
             commands::model_provider::instantiate_builtin_provider_template,
             commands::model_provider::upsert_model_provider,

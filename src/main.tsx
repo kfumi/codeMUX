@@ -5,6 +5,7 @@ import App from "./App";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
 import { initScheduledTasksBridge } from "./lib/scheduledTasksBridge";
+import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
 import "./styles/globals.css";
@@ -14,6 +15,7 @@ initLogging();
 initCompanionStreamBridge();
 initSessionsChangeBridge();
 initScheduledTasksBridge();
+initBrowserHostBridge();
 void initializeOpenCodeFreeModels();
 
 // In production, block the native browser context menu (refresh, save-as, print, inspect, etc.)

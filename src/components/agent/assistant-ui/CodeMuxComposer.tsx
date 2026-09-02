@@ -40,6 +40,8 @@ import { cn } from '../../../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../../ui/tooltip';
 import { useAgentStore } from '../../../stores/agentStore';
+import { useBrowserElementStore } from '../../../stores/browserElementStore';
+import { BrowserElementPills } from '../../browser/BrowserElementPills';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
@@ -203,6 +205,7 @@ export function CodeMuxComposer({
   const [composerText, setComposerText] = useState('');
   const cursorOffsetRef = useRef<number>(0);
   const attachmentCount = useAuiState((state) => state.composer.attachments.length);
+  const browserElementCount = useBrowserElementStore((state) => state.elementsBySession[sessionId]?.length ?? 0);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
@@ -307,7 +310,7 @@ export function CodeMuxComposer({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [activeTrigger, menuVisible]);
 
-  const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
+  const hasInput = composerText.trim().length > 0 || attachmentCount > 0 || browserElementCount > 0;
 
   const handleEditQueuedQuery = useCallback(async (query: QueuedAgentQuery) => {
     removeQueuedQuery(sessionId, query.id);
@@ -541,6 +544,7 @@ export function CodeMuxComposer({
                 {() => <ComposerAttachmentPreview />}
               </ComposerPrimitive.Attachments>
             </div>
+            <BrowserElementPills sessionId={sessionId} />
             {hasPendingPermissions ? (
               pendingPermissions.length === 1 ? (
                 <PermissionApprovalCard

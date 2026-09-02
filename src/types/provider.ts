@@ -150,6 +150,11 @@ export interface Provider {
   codex_needs_proxy?: boolean;
 }
 
+export interface BrowserControlSettings {
+  enabled: boolean;
+  ignore_certificate_errors: boolean;
+}
+
 export interface AppConfig {
   model_providers: ModelProvider[];
   active_provider_id: string | null;
@@ -159,6 +164,7 @@ export interface AppConfig {
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
   git?: GitSettings;
+  browser?: BrowserControlSettings;
   theme: Theme;
   attachment_enrichment?: AttachmentEnrichmentConfig;
   /** Cleared on load; kept optional for transitional UI code. */

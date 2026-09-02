@@ -8,6 +8,7 @@ const deleteModelProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
 const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const setDefaultOpenTargetMock = vi.fn<(target: string) => Promise<void>>();
+const setBrowserControlMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const getConfigMock = vi.fn(async () => structuredClone(baseConfig));
 
 vi.mock('../lib/tauri', () => ({
@@ -26,6 +27,7 @@ vi.mock('../lib/tauri', () => ({
     setCompactAiOutput: setCompactAiOutputMock,
     setNotificationSettings: setNotificationSettingsMock,
     setDefaultOpenTarget: setDefaultOpenTargetMock,
+    setBrowserControl: setBrowserControlMock,
   },
   agentApi: {
     stopProxy: vi.fn(),
@@ -256,6 +258,39 @@ describe('settings store agent config actions', () => {
       system_enabled: true,
       sound_enabled: true,
       sound: 'ding',
+    });
+  });
+
+  it('persists reserved browser control settings', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setBrowserControl({
+      enabled: true,
+      ignore_certificate_errors: true,
+    });
+
+    expect(setBrowserControlMock).toHaveBeenCalledWith({
+      enabled: true,
+      ignore_certificate_errors: true,
+    });
+    expect(useSettingsStore.getState().config?.browser).toEqual({
+      enabled: true,
+      ignore_certificate_errors: true,
+    });
+  });
+
+  it('fills browser control defaults when the saved config omitted the field', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    getConfigMock.mockResolvedValueOnce({
+      ...structuredClone(baseConfig),
+      browser: undefined,
+    });
+
+    await useSettingsStore.getState().fetchConfig();
+
+    expect(useSettingsStore.getState().config?.browser).toEqual({
+      enabled: false,
+      ignore_certificate_errors: false,
     });
   });
 });

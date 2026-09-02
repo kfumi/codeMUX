@@ -286,4 +286,43 @@ describe('side panel store', () => {
       activeTabId: terminalTabId,
     });
   });
+
+  it('opens a reusable browser panel without requiring a project path', () => {
+    const store = useSidePanelStore.getState();
+
+    store.openBrowserTab();
+    store.openBrowserTab();
+
+    const state = useSidePanelStore.getState();
+    expect(state.isOpen).toBe(true);
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]).toMatchObject({
+      kind: 'browser',
+      title: '浏览器',
+      id: 'global:browser',
+    });
+    expect(state.activeTabId).toBe('global:browser');
+  });
+
+  it('keeps browser panels isolated by session scope', () => {
+    const store = useSidePanelStore.getState();
+
+    store.setScope('session-a');
+    store.openBrowserTab();
+    store.setScope('session-b');
+
+    expect(useSidePanelStore.getState().tabs).toEqual([]);
+
+    store.openBrowserTab();
+    expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
+      kind: 'browser',
+      id: 'session-b:browser',
+    });
+
+    store.setScope('session-a');
+    expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
+      kind: 'browser',
+      id: 'session-a:browser',
+    });
+  });
 });
