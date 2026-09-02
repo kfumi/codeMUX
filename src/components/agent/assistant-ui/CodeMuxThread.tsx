@@ -9,7 +9,7 @@ import {
   type MessageState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
-import { ArrowDown, ChevronRight, ChevronDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
+import { ArrowDown, ChevronRight, ChevronUp, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
@@ -50,23 +50,27 @@ import {
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
-import { shouldShowTranscriptFooter } from './CodeMuxTranscriptMessage';
-import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
-import { buildAssistantResultTargetMap, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
-import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
+import {
+  AssistantCollapseToggle,
+  buildAssistantCollapseInfoMap,
+  getCollapseInfoForSourceIndices,
+  isToolResultOnlyUserEvent,
+  omitLatestTurnCollapse,
+  type AssistantCollapseInfo,
+} from './assistantCollapse';
+import {
+  isLongTranscriptUserMessage,
+  shouldShowTranscriptFooter,
+  TranscriptUserMessageBubble,
+  TranscriptUserMessageExpandButton,
+} from './CodeMuxTranscriptMessage';
+import { RunningElapsedTimer } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 
 type CodeMuxThreadProps = {
   sessionId: string;
   footer?: ReactNode;
-};
-
-type AssistantCollapseInfo = {
-  turnKey: string;
-  isToggleMessage: boolean;
-  durationMs?: number;
-  hideReasoningOnly?: boolean;
 };
 
 type UserNavItem = {
@@ -96,7 +100,6 @@ const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TURNS: ConversationTurn<AgentMessage>[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
-const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
 const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-3';
@@ -237,18 +240,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     if (!subagentFlowPending) {
       return map;
     }
-    const lastUserIndex = findLastVisibleUserEventIndex(events);
-    if (lastUserIndex == null) {
-      return map;
-    }
-    const lastTurnKeyPrefix = `${lastUserIndex}-`;
-    const filtered = new Map<number, AssistantCollapseInfo>();
-    for (const [eventIndex, info] of map) {
-      if (!info.turnKey.startsWith(lastTurnKeyPrefix)) {
-        filtered.set(eventIndex, info);
-      }
-    }
-    return filtered;
+    return omitLatestTurnCollapse(map, events);
   }, [events, eventTimestamps, isRunning, stopped, subagentFlowPending]);
 
   const threadRenderContextValue = useMemo(() => ({
@@ -557,7 +549,7 @@ function UserMessage({
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
   const [expanded, setExpanded] = useState(false);
-  const canCollapse = isLongUserMessage(text);
+  const canCollapse = isLongTranscriptUserMessage(text);
   const imageAttachments = getImageAttachmentItems(message);
   const rewindTooltip = '回退到此消息';
   const handleRewindSelect = (mode: RewindMode) => {
@@ -601,27 +593,13 @@ function UserMessage({
           </div>
         ) : null}
         {text ? (
-          <div
-            data-user-message-bubble="true"
-            className={cn(
-              'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground',
-              canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
-            )}
-          >
-            <CodeMuxDirectiveText text={text} tone="inverted" />
-          </div>
+          <TranscriptUserMessageBubble text={text} expanded={expanded} canCollapse={canCollapse} />
         ) : null}
         {canCollapse ? (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={expanded ? '收起' : '查看更多'}
-            onClick={() => setExpanded((value) => !value)}
-            className="mt-1.5 inline-flex items-center gap-1 self-start rounded-md border border-border/40 bg-muted/28 px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          >
-            <span>{expanded ? '收起' : '查看更多'}</span>
-            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          </button>
+          <TranscriptUserMessageExpandButton
+            expanded={expanded}
+            onToggle={() => setExpanded((value) => !value)}
+          />
         ) : null}
         <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
           <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
@@ -780,10 +758,6 @@ function getImageAttachmentItems(message: MessageState): Array<{ id: string; nam
         src: imagePart.image,
       }];
     });
-}
-
-function isLongUserMessage(text: string): boolean {
-  return text.length > 900 || text.split(/\r?\n/).length > 12;
 }
 
 export function buildUserNavItems(events: AgentMessage[]): UserNavItem[] {
@@ -1308,35 +1282,6 @@ function AssistantLikeMessage({
   );
 }
 
-function AssistantCollapseToggle({
-  expanded,
-  durationMs,
-  onClick,
-}: {
-  expanded: boolean;
-  durationMs?: number;
-  onClick: () => void;
-}) {
-  return (
-    <div className={expanded ? 'pb-2' : 'pb-1'}>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        aria-expanded={expanded}
-        aria-label={expanded ? '收起AI过程' : '展开AI过程'}
-        onClick={onClick}
-        className="h-auto gap-1.5 px-0 py-0 pl-1 text-sm font-medium text-muted-foreground/80 hover:bg-transparent hover:text-muted-foreground/80"
-      >
-        <span>已处理</span>
-        {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
-        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-      </Button>
-      {expanded ? <div className="mt-1.5 border-b border-border/40" /> : null}
-    </div>
-  );
-}
-
 function CodeMuxReasoningGroup({
   children,
   startIndex,
@@ -1637,211 +1582,18 @@ function getMessageText(message: MessageState) {
     .trim();
 }
 
-function findLastVisibleUserEventIndex(events: AgentMessage[]): number | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind === 'user' && !isHiddenAssistantThreadUserEvent(event)) {
-      return index;
-    }
-  }
-  return null;
-}
-
-function buildAssistantCollapseInfoMap(
-  events: AgentMessage[],
-  timestamps: number[],
-  options: { allowImplicitResult: boolean },
-): Map<number, AssistantCollapseInfo> {
-  const resultTargets = buildAssistantResultTargetMap(events, options);
-  const collapseInfoByEventIndex = new Map<number, AssistantCollapseInfo>();
-
-  for (const [finalAssistantIndex, resultIndex] of resultTargets) {
-    const userIndex = findTurnUserIndex(events, finalAssistantIndex, resultIndex);
-    if (userIndex == null) {
-      continue;
-    }
-
-    const collapsibleEventIndices: number[] = [];
-    for (let index = userIndex + 1; index < finalAssistantIndex; index++) {
-      if (isCollapsibleProcessEvent(events[index])) {
-        collapsibleEventIndices.push(index);
-      }
-    }
-
-    // OpenCode can finish a turn with only a tool call and no narration.
-    // Treat that final tool message as the collapsed process in that case.
-    if (collapsibleEventIndices.length === 0 && isOpenCodeToolOnlyAssistantEvent(events[finalAssistantIndex])) {
-      collapsibleEventIndices.push(finalAssistantIndex);
-    }
-
-    const finalAssistantHasReasoningAndText = hasAssistantReasoningAndText(events[finalAssistantIndex]);
-    if (finalAssistantHasReasoningAndText) {
-      collapsibleEventIndices.push(finalAssistantIndex);
-    }
-
-    if (collapsibleEventIndices.length === 0) {
-      continue;
-    }
-
-    const turnKey = `${userIndex}-${finalAssistantIndex}-${resultIndex}`;
-    const firstCollapsibleIndex = collapsibleEventIndices[0];
-    const durationMs = getTurnDurationMs(events, timestamps, userIndex, finalAssistantIndex, resultIndex);
-
-    for (const eventIndex of collapsibleEventIndices) {
-      collapseInfoByEventIndex.set(eventIndex, {
-        turnKey,
-        isToggleMessage: eventIndex === firstCollapsibleIndex,
-        durationMs,
-        hideReasoningOnly: eventIndex === finalAssistantIndex && finalAssistantHasReasoningAndText,
-      });
-    }
-  }
-
-  return collapseInfoByEventIndex;
-}
-
-function isToolResultOnlyUserEvent(event: AgentMessage): boolean {
-  if (event.kind !== 'user') return false;
-  const data = event.data as Record<string, unknown>;
-  const message = data.message;
-  if (!isRecord(message) || !Array.isArray(message.content) || message.content.length === 0) {
-    return false;
-  }
-
-  return message.content.every((block) => isRecord(block) && block.type === 'tool_result');
-}
-
-function findTurnUserIndex(
-  events: AgentMessage[],
-  finalAssistantIndex: number,
-  resultIndex: number,
-): number | undefined {
-  const searchStartIndex = Math.min(finalAssistantIndex, resultIndex) - 1;
-  for (let index = searchStartIndex; index >= 0; index--) {
-    const event = events[index];
-    if (event.kind === 'user') {
-      if (isToolResultOnlyUserEvent(event)) continue;
-      return index;
-    }
-  }
-
-  return undefined;
-}
-
-function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
-  if (!event) {
-    return false;
-  }
-
-  if (event.kind === 'assistant') {
-    // 空 thinking 不会转换成 assistant-ui 消息，不能作为折叠入口。
-    return hasRenderableAssistantContent(event);
-  }
-
-  return event.kind === 'ask_user_question'
-    || event.kind === 'api_retry'
-    || event.kind === 'compact'
-    || event.kind === 'error'
-    || event.kind === 'native_session_rebuilt'
-    || event.kind === 'stream_status';
-}
-
-function hasRenderableAssistantContent(
-  event: Extract<AgentMessage, { kind: 'assistant' }>,
-): boolean {
-  return event.data.message.content.some((block) => {
-    if (block?.type === 'tool_use') {
-      return true;
-    }
-
-    if (block?.type === 'text' || block?.type === 'thinking') {
-      return typeof block.text === 'string'
-        ? block.text.length > 0
-        : typeof block.thinking === 'string' && block.thinking.length > 0;
-    }
-
-    return false;
-  });
-}
-
-function isOpenCodeToolOnlyAssistantEvent(event: AgentMessage | undefined): boolean {
-  if (event?.kind !== 'assistant') {
-    return false;
-  }
-
-  const data = event.data as unknown as Record<string, unknown>;
-  if (typeof data.opencode_session_id !== 'string' && typeof data.opencodeSessionId !== 'string') {
-    return false;
-  }
-
-  const content = event.data.message?.content;
-  return Array.isArray(content)
-    && content.length > 0
-    && content.every((block) => block?.type === 'tool_use');
-}
-
-function hasAssistantReasoningAndText(event: AgentMessage | undefined): boolean {
-  if (event?.kind !== 'assistant') {
-    return false;
-  }
-
-  const content = event.data.message?.content;
-  return Array.isArray(content)
-    && content.some((block) => block?.type === 'thinking')
-    && content.some((block) => block?.type === 'text');
-}
-
-function getTurnDurationMs(
-  events: AgentMessage[],
-  timestamps: number[],
-  userIndex: number,
-  finalAssistantIndex: number,
-  resultIndex: number,
-): number | undefined {
-  const result = events[resultIndex];
-  if (result?.kind === 'result' && typeof result.data.duration_ms === 'number' && result.data.duration_ms > 0) {
-    return result.data.duration_ms;
-  }
-
-  const startTime = timestamps[userIndex];
-  const endTime = timestamps[resultIndex] || timestamps[finalAssistantIndex];
-  if (typeof startTime === 'number' && startTime > 0 && typeof endTime === 'number' && endTime > startTime) {
-    return endTime - startTime;
-  }
-
-  return undefined;
-}
-
 function getMessageCollapseInfo(
   message: MessageState,
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>,
 ): AssistantCollapseInfo | undefined {
-  const sourceEventIndices = getSourceEventIndices(message);
-  let firstInfo: AssistantCollapseInfo | undefined;
-  let hasToggleMessage = false;
-
-  for (const sourceEventIndex of sourceEventIndices) {
-    const info = collapseInfoByEventIndex.get(sourceEventIndex);
-    if (!info) {
-      continue;
-    }
-
-    firstInfo ??= info;
-    hasToggleMessage = hasToggleMessage || info.isToggleMessage;
-  }
-
-  if (!firstInfo) {
-    return undefined;
-  }
-
-  if (firstInfo.hideReasoningOnly && !message.content.some((part) => part.type === 'reasoning')) {
-    return undefined;
-  }
-
-  return {
-    ...firstInfo,
-    isToggleMessage: Boolean(hasToggleMessage && message.metadata.custom?.isSplitHead !== false),
-  };
+  return getCollapseInfoForSourceIndices(
+    getSourceEventIndices(message),
+    collapseInfoByEventIndex,
+    {
+      hasReasoning: message.content.some((part) => part.type === 'reasoning'),
+      isSplitHead: message.metadata.custom?.isSplitHead === false ? false : undefined,
+    },
+  );
 }
 
 function getSourceEventIndices(message: MessageState): number[] {
@@ -1852,10 +1604,6 @@ function getSourceEventIndices(message: MessageState): number[] {
 
   const sourceEventIndex = getSourceEventIndex(message);
   return sourceEventIndex != null ? [sourceEventIndex] : [];
-}
-
-function formatCompactDuration(ms: number): string {
-  return formatElapsed(Math.max(0, ms));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

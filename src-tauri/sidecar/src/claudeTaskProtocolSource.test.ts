@@ -201,6 +201,51 @@ describe('ClaudeTaskProtocolSource.observe', () => {
     expect(timeline[0].event).toMatchObject({ type: 'user_message', content: 'multi-step refactor' });
   });
 
+  it('routes final sidechain summaries that only carry parentUuid', () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted(), {});
+
+    source.observe({
+      type: 'assistant',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: 'a.ts' } }],
+      },
+    }, {});
+
+    source.observe({
+      type: 'user',
+      uuid: 'tool-result-1',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_read', content: 'ok' }],
+      },
+    }, {});
+
+    const events = source.observe({
+      type: 'assistant',
+      isSidechain: true,
+      parentUuid: 'tool-result-1',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '- Status: DONE\n- Commit: 1d585333' }],
+      },
+    }, {});
+
+    const summaries = events
+      .filter(isTimeline)
+      .filter((event) => event.event.type === 'assistant_message');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].subagent_id).toBe('toolu_1');
+    expect(summaries[0].event).toMatchObject({
+      content: [{ type: 'text', text: '- Status: DONE\n- Commit: 1d585333' }],
+    });
+  });
+
   it('ignores non-task and non-sidechain messages', () => {
     const source = new ClaudeTaskProtocolSource();
     expect(source.observe({ type: 'assistant', message: { role: 'assistant', content: [] } }, {})).toHaveLength(0);

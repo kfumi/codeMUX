@@ -28,6 +28,8 @@ export type SubagentFoldState = {
   taskToSubagent: Record<string, string>;
   aliasToSubagent: Record<string, string>;
   subagents: Record<string, SubagentFoldEntry>;
+  /** Maps a sidechain frame uuid to parent_tool_use_id for parentUuid resolution. */
+  sidechainUuidToParentToolUseId: Record<string, string>;
 };
 
 export type SubagentFoldContext = {
@@ -48,7 +50,7 @@ export type SubagentFoldResult = {
 };
 
 export function createEmptySubagentFoldState(): SubagentFoldState {
-  return { taskToSubagent: {}, aliasToSubagent: {}, subagents: {} };
+  return { taskToSubagent: {}, aliasToSubagent: {}, subagents: {}, sidechainUuidToParentToolUseId: {} };
 }
 
 function defaultEventId(): string {
@@ -63,10 +65,27 @@ function cloneState(state: SubagentFoldState): SubagentFoldState {
   return {
     taskToSubagent: { ...state.taskToSubagent },
     aliasToSubagent: { ...state.aliasToSubagent },
+    sidechainUuidToParentToolUseId: { ...state.sidechainUuidToParentToolUseId },
     subagents: Object.fromEntries(
       Object.entries(state.subagents).map(([id, entry]) => [id, { ...entry, descriptor: { ...entry.descriptor } }]),
     ),
   };
+}
+
+function resolveTimelineParentToolUseId(
+  state: SubagentFoldState,
+  observation: Extract<SubagentObservation, { kind: 'timeline' }>,
+): string | undefined {
+  if (observation.sidechainMessageUuid && observation.parentToolUseId) {
+    state.sidechainUuidToParentToolUseId[observation.sidechainMessageUuid] = observation.parentToolUseId;
+  }
+  if (observation.parentToolUseId) {
+    return observation.parentToolUseId;
+  }
+  if (observation.parentUuid) {
+    return state.sidechainUuidToParentToolUseId[observation.parentUuid];
+  }
+  return undefined;
 }
 
 function cloneForWrite(state: SubagentFoldState, subagentId: string): { state: SubagentFoldState; entry: SubagentFoldEntry } {
@@ -272,8 +291,9 @@ export function foldSubagentObservations(
         break;
       }
       case 'timeline': {
-        const subagentId = observation.parentToolUseId
-          ? state.aliasToSubagent[observation.parentToolUseId]
+        const parentToolUseId = resolveTimelineParentToolUseId(state, observation);
+        const subagentId = parentToolUseId
+          ? state.aliasToSubagent[parentToolUseId]
           : undefined;
         const entry = subagentId ? state.subagents[subagentId] : undefined;
         if (!entry) break;

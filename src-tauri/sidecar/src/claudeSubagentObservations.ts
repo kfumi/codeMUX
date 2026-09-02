@@ -28,6 +28,10 @@ export type SubagentObservation =
       kind: 'timeline';
       /** Parent-side tool_use_id naming the subagent; unresolved ids are dropped by the fold. */
       parentToolUseId?: string;
+      /** Sidechain frame uuid of the parent user/tool_result message (final summaries). */
+      parentUuid?: string;
+      /** This sidechain frame's uuid — registered for later parentUuid lookups. */
+      sidechainMessageUuid?: string;
       events: TurnSourceEvent[];
     };
 
@@ -212,9 +216,17 @@ function projectSidechainSafely(message: Record<string, unknown>): TurnSourceEve
 export function observeClaudeSdkMessage(message: Record<string, unknown>): SubagentObservation[] {
   if (isClaudeSidechainMessage(message)) {
     const parentToolUseId = asString(message.parent_tool_use_id);
+    const parentUuid = asString(message.parentUuid) ?? asString(message.parent_uuid);
+    const sidechainMessageUuid = asString(message.uuid);
     const events = projectSidechainSafely(message);
     if (events.length === 0) return [];
-    return [{ kind: 'timeline', ...(parentToolUseId ? { parentToolUseId } : {}), events }];
+    return [{
+      kind: 'timeline',
+      ...(parentToolUseId ? { parentToolUseId } : {}),
+      ...(parentUuid ? { parentUuid } : {}),
+      ...(sidechainMessageUuid ? { sidechainMessageUuid } : {}),
+      events,
+    }];
   }
   if (isClaudeTaskNotification(message)) {
     return observeTaskNotification(message);

@@ -396,8 +396,23 @@ fn backfill_claude_subagent_history(
             .collect();
 
     let mut restored = 0usize;
+    let mut repaired = 0usize;
     for entry in entries {
         if existing_ids.contains(&entry.subagent_id) {
+            let existing_events =
+                operations::load_session_subagent_events(conn, app_session_id, &entry.subagent_id)
+                    .map_err(|error| error.to_string())?;
+            if !live_capture_missing_tool_args(&existing_events, &entry.timeline) {
+                continue;
+            }
+            operations::replace_session_subagent_timeline(
+                conn,
+                app_session_id,
+                &entry.subagent_id,
+                &entry.timeline,
+            )
+            .map_err(|e| e.to_string())?;
+            repaired += 1;
             continue;
         }
         operations::upsert_session_subagent(conn, &entry.upsert).map_err(|e| e.to_string())?;
@@ -414,7 +429,15 @@ fn backfill_claude_subagent_history(
             app_session_id
         );
     }
-    Ok(restored)
+    if repaired > 0 {
+        log::info!(
+            target: "agent",
+            "Repaired {} lossy subagent timelines from Claude CLI history for app_session_id={}",
+            repaired,
+            app_session_id
+        );
+    }
+    Ok(restored + repaired)
 }
 
 /// Backfill subagent descriptors and timelines from the provider CLI's on-disk
@@ -462,8 +485,23 @@ fn backfill_codex_subagent_history(
             .collect();
 
     let mut restored = 0usize;
+    let mut repaired = 0usize;
     for entry in entries {
         if existing_ids.contains(&entry.subagent_id) {
+            let existing_events =
+                operations::load_session_subagent_events(conn, app_session_id, &entry.subagent_id)
+                    .map_err(|error| error.to_string())?;
+            if !live_capture_missing_tool_args(&existing_events, &entry.timeline) {
+                continue;
+            }
+            operations::replace_session_subagent_timeline(
+                conn,
+                app_session_id,
+                &entry.subagent_id,
+                &entry.timeline,
+            )
+            .map_err(|e| e.to_string())?;
+            repaired += 1;
             continue;
         }
         operations::upsert_session_subagent(conn, &entry.upsert).map_err(|e| e.to_string())?;
@@ -480,7 +518,15 @@ fn backfill_codex_subagent_history(
             app_session_id
         );
     }
-    Ok(restored)
+    if repaired > 0 {
+        log::info!(
+            target: "agent",
+            "Repaired {} lossy subagent timelines from Codex rollout history for app_session_id={}",
+            repaired,
+            app_session_id
+        );
+    }
+    Ok(restored + repaired)
 }
 
 /// Backfill subagent descriptors and timelines from OpenCode's on-disk

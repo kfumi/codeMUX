@@ -931,3 +931,21 @@ function cloneJsonValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/** Parent Task/Agent tool results — used when subagent timeline lost the final summary. */
+export function extractAgentToolResultText(
+  events: AgentMessage[],
+  toolCallId: string,
+): string | undefined {
+  for (const event of events) {
+    if (event.kind !== 'tool_result') {
+      continue;
+    }
+    for (const result of getToolResults(event)) {
+      if (result.toolUseId === toolCallId && result.content.trim().length > 0) {
+        return stripAgentToolResultMetadata(result.content);
+      }
+    }
+  }
+  return undefined;
+}
+

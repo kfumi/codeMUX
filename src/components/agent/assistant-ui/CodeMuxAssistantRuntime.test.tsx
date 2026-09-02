@@ -2522,7 +2522,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const showMore = screen.getByRole('button', { name: '查看更多' });
     fireEvent.click(showMore);
 
-    expect(screen.getByRole('button', { name: '收起' })).toBeTruthy();
+    const collapse = screen.getByRole('button', { name: '收起' });
+    expect(collapse.querySelector('.lucide-chevron-up')).toBeTruthy();
     expect(bubble?.className).not.toContain('max-h-80');
   });
 

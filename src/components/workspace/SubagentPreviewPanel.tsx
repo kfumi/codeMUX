@@ -1,6 +1,11 @@
 import { ArrowDown, Bot, Loader2 } from 'lucide-react';
-import { useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  buildAssistantCollapseInfoMap,
+  getCollapseInfoForSourceIndices,
+  omitLatestTurnCollapse,
+} from '@/components/agent/assistant-ui/assistantCollapse';
 import {
   CodeMuxTranscriptMessage,
   shouldShowTranscriptFooter,
@@ -11,13 +16,17 @@ import {
 } from '@/components/agent/assistant-ui/convertAgentEvents';
 import { TooltipHint } from '@/components/ui/tooltip';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
-import { parseAgentEvent } from '@/stores/agentStore';
+import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
+import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
 
 interface SubagentPreviewPanelProps {
   sessionId: string;
   subagentId: string;
 }
+
+const EMPTY_PARENT_EVENTS: AgentMessage[] = [];
 
 /**
  * Read-only real-time preview of one subagent's timeline. There is no
@@ -27,24 +36,71 @@ interface SubagentPreviewPanelProps {
 export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewPanelProps) {
   const descriptor = useSubagentStore((state) => state.sessions[sessionId]?.descriptors[subagentId]);
   const rawEvents = useSubagentStore((state) => state.sessions[sessionId]?.events[subagentId]);
+  const parentEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_PARENT_EVENTS);
+  const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
+  const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
 
   const isRunning = descriptor?.status === 'running';
   const eventCount = rawEvents?.length ?? 0;
 
-  const { messages, timestampsByMessage } = useMemo(() => {
+  useEffect(() => {
+    setExpandedTurnKeys(new Set());
+  }, [sessionId, subagentId, compactAiOutput]);
+
+  const toggleExpandedTurn = useCallback((turnKey: string) => {
+    setExpandedTurnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(turnKey)) {
+        next.delete(turnKey);
+      } else {
+        next.add(turnKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const { messages, timestampsByMessage, parsedEvents, timestamps } = useMemo(() => {
     const parsed = (rawEvents ?? []).map((event) => parseAgentEvent(JSON.stringify(event)));
-    const timestamps = parsed.map((_message, index) => {
+    const parsedTimestamps = parsed.map((_message, index) => {
       const raw = (rawEvents ?? [])[index] as { timestamp?: unknown } | undefined;
       const ts = typeof raw?.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN;
-      return Number.isFinite(ts) ? ts : undefined;
+      return Number.isFinite(ts) ? ts : 0;
     });
     const byMessage = new Map<CodeMuxAssistantMessage, number | undefined>();
     const converted = convertAgentEventsToAssistantMessages(parsed);
     for (const message of converted) {
-      byMessage.set(message, timestamps[message.metadata.sourceEventIndex]);
+      const ts = parsedTimestamps[message.metadata.sourceEventIndex];
+      byMessage.set(message, ts > 0 ? ts : undefined);
     }
-    return { messages: converted, timestampsByMessage: byMessage };
+    return {
+      messages: converted,
+      timestampsByMessage: byMessage,
+      parsedEvents: parsed,
+      timestamps: parsedTimestamps,
+    };
   }, [rawEvents]);
+
+  const displayMessages = useMemo(
+    () => supplementSubagentMessagesWithParentSummary(
+      messages,
+      parentEvents,
+      descriptor?.toolCallId ?? subagentId,
+      { isRunning },
+    ),
+    [messages, parentEvents, descriptor?.toolCallId, subagentId, isRunning],
+  );
+
+  const collapseInfoByEventIndex = useMemo(() => {
+    if (!compactAiOutput) {
+      return new Map();
+    }
+    const map = buildAssistantCollapseInfoMap(parsedEvents, timestamps, {
+      allowImplicitResult: !isRunning,
+    });
+    // The live turn must keep looking alive — collapsing it into "已处理"
+    // reads as finished even though this subagent is still running.
+    return isRunning ? omitLatestTurnCollapse(map, parsedEvents) : map;
+  }, [compactAiOutput, parsedEvents, timestamps, isRunning]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
@@ -53,7 +109,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
   });
 
   const subtitle = descriptor?.subtitle;
-  const isEmpty = messages.length === 0;
+  const isEmpty = displayMessages.length === 0;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -85,21 +141,38 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
           </div>
         ) : (
           <div className="space-y-4">
-            {messages.map((message, messageIndex) => (
-              <CodeMuxTranscriptMessage
-                key={message.id}
-                message={message}
-                sessionId={sessionId}
-                timestamp={timestampsByMessage.get(message)}
-                showFooter={shouldShowTranscriptFooter({
-                  role: message.role,
-                  isFinalAssistantMessage: message.metadata.isFinalAssistantMessage,
-                  isTimelineRunning: isRunning && messageIndex === messages.length - 1,
-                })}
-                footerVariant="minimal"
-                userMode="prompt"
-              />
-            ))}
+            {displayMessages.map((message, messageIndex) => {
+              const collapseInfo = compactAiOutput
+                ? getCollapseInfoForSourceIndices(
+                  message.metadata.sourceEventIndices,
+                  collapseInfoByEventIndex,
+                  {
+                    hasReasoning: message.content.some((part) => part.type === 'reasoning'),
+                    isSplitHead: message.metadata.isSplitHead,
+                  },
+                )
+                : undefined;
+              return (
+                <CodeMuxTranscriptMessage
+                  key={message.id}
+                  message={message}
+                  sessionId={sessionId}
+                  timestamp={timestampsByMessage.get(message)}
+                  showFooter={shouldShowTranscriptFooter({
+                    role: message.role,
+                    isFinalAssistantMessage: message.metadata.isFinalAssistantMessage,
+                    isTimelineRunning: isRunning && messageIndex === displayMessages.length - 1,
+                  })}
+                  footerVariant="minimal"
+                  userMode="prompt"
+                  collapseInfo={collapseInfo}
+                  collapseExpanded={collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false}
+                  onToggleCollapse={collapseInfo
+                    ? () => toggleExpandedTurn(collapseInfo.turnKey)
+                    : undefined}
+                />
+              );
+            })}
             {isRunning ? (
               <div className="flex items-center gap-2 pl-1 text-ui-meta text-muted-foreground/72">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
