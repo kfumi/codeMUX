@@ -1157,7 +1157,10 @@ mod tests {
             .iter()
             .position(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished"));
 
-        assert!(summary_pos.is_some(), "expected synthesized session_summary");
+        assert!(
+            summary_pos.is_some(),
+            "expected synthesized session_summary"
+        );
         assert!(turn_finished_pos.is_some(), "expected turn_finished");
         assert!(
             summary_pos.unwrap() < turn_finished_pos.unwrap(),
@@ -1169,7 +1172,10 @@ mod tests {
             .as_array()
             .expect("diffs should be an array");
         assert_eq!(diffs.len(), 1);
-        assert!(diffs[0]["file"].as_str().unwrap_or_default().ends_with("src/foo.ts"));
+        assert!(diffs[0]["file"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("src/foo.ts"));
         assert_eq!(diffs[0]["additions"], 1);
         assert_eq!(diffs[0]["deletions"], 1);
     }

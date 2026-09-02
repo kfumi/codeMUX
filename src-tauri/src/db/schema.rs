@@ -389,9 +389,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         "
     )?;
 
-    let _ = conn.execute_batch(
-        "DROP TABLE IF EXISTS session_message_attachments;",
-    );
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS session_message_attachments;");
 
     conn.execute_batch(
         "

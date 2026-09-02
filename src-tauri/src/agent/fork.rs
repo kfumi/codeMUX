@@ -225,10 +225,9 @@ fn install_claude_fork_child_history(
         let mut value = serde_json::from_str::<serde_json::Value>(trimmed)
             .map_err(|error| format!("Invalid JSON in staged Claude fork history: {}", error))?;
         replace_claude_session_id(&mut value, staged_session_id, child_session_id);
-        child_content
-            .push_str(&serde_json::to_string(&value).map_err(|error| {
-                format!("Failed to serialize child Claude fork history: {}", error)
-            })?);
+        child_content.push_str(&serde_json::to_string(&value).map_err(|error| {
+            format!("Failed to serialize child Claude fork history: {}", error)
+        })?);
         child_content.push('\n');
     }
 
@@ -343,16 +342,12 @@ pub async fn fork_claude_session(
         .parent()
         .ok_or_else(|| "Claude session history has no parent directory".to_string())?
         .join(format!("{}.jsonl", staged_session_id));
-    install_claude_fork_child_history(
-        &staged_path,
-        &staged_session_id,
-        &child_agent_session_id,
-    )
-    .map_err(|error| {
-        let _ = cleanup_claude_session_files_by_id(&staged_session_id);
-        let _ = cleanup_claude_session_files_by_id(&child_agent_session_id);
-        error
-    })?;
+    install_claude_fork_child_history(&staged_path, &staged_session_id, &child_agent_session_id)
+        .map_err(|error| {
+            let _ = cleanup_claude_session_files_by_id(&staged_session_id);
+            let _ = cleanup_claude_session_files_by_id(&child_agent_session_id);
+            error
+        })?;
     let _ = cleanup_claude_session_files_by_id(&staged_session_id);
 
     let child_title = title

@@ -30,6 +30,7 @@ export interface BrowserHost {
   hide: (browserId: string) => Promise<void>;
   evaluate: (browserId: string, script: string) => Promise<string>;
   openDevtools: (browserId: string) => Promise<void>;
+  setZoom: (browserId: string, factor: number) => Promise<void>;
   clearData: (scope: BrowserDataScope) => Promise<void>;
 }
 

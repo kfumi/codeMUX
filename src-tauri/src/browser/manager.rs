@@ -391,6 +391,15 @@ pub fn open_devtools(app: &AppHandle, browser_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_page_zoom(app: &AppHandle, browser_id: &str, factor: f64) -> Result<(), String> {
+    let webview = app
+        .get_webview(&webview_label(browser_id))
+        .ok_or_else(|| format!("浏览器页不存在: {browser_id}"))?;
+    webview
+        .set_zoom(factor.max(0.1))
+        .map_err(|error| format!("无法调整页面缩放: {error}"))
+}
+
 fn eval_script(app: &AppHandle, browser_id: &str, script: &str) -> Result<(), String> {
     let webview = app
         .get_webview(&webview_label(browser_id))

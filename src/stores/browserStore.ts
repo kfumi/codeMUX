@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { browserApi } from '../lib/tauri';
 import { normalizeBrowserUrl } from '../lib/browserUrl';
 import { createBrowserId } from '../lib/browserPage';
+import { browserViewportBounds, hostBoundsForViewportTransition, type BrowserViewportMode } from '../lib/browserViewport';
 import type { BrowserPageBounds, BrowserPagePatch } from '../lib/browserHost';
 import { createLogger, serializeError } from '../lib/logger';
 
@@ -32,6 +33,8 @@ interface BrowserState {
   pageIdsByPanel: Record<string, string[]>;
   activePageIdByPanel: Record<string, string | null>;
   boundsByPanel: Record<string, BrowserPageBounds>;
+  viewportModeByPanel: Record<string, BrowserViewportMode>;
+  previewByPanel: Record<string, boolean>;
   inspectingPageId: string | null;
   inspectError: string | null;
   ensureBlankPage: (panelTabId: string) => string;
@@ -44,6 +47,8 @@ interface BrowserState {
   forward: (pageId: string) => Promise<void>;
   reload: (pageId: string) => Promise<void>;
   setPanelBounds: (panelTabId: string, bounds: BrowserPageBounds) => Promise<void>;
+  setViewportMode: (panelTabId: string, mode: BrowserViewportMode) => Promise<void>;
+  setViewportPreview: (panelTabId: string, preview: boolean) => Promise<void>;
   syncVisibility: (panelTabId: string, visiblePageId: string | null) => Promise<void>;
   applyHostPatch: (patch: BrowserPagePatch) => void;
   startInspect: (pageId: string) => void;
@@ -78,11 +83,25 @@ async function hidePage(page: BrowserPage | undefined): Promise<void> {
   }
 }
 
+function viewportBoundsForPanel(
+  boundsByPanel: Record<string, BrowserPageBounds>,
+  viewportModeByPanel: Record<string, BrowserViewportMode>,
+  previewByPanel: Record<string, boolean>,
+  panelTabId: string,
+): BrowserPageBounds {
+  const host = boundsByPanel[panelTabId] ?? FALLBACK_BOUNDS;
+  const mode = viewportModeByPanel[panelTabId] ?? 'fit';
+  const previewActive = previewByPanel[panelTabId] ?? false;
+  return browserViewportBounds(host, mode, previewActive);
+}
+
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   pages: {},
   pageIdsByPanel: {},
   activePageIdByPanel: {},
   boundsByPanel: {},
+  viewportModeByPanel: {},
+  previewByPanel: {},
   inspectingPageId: null,
   inspectError: null,
 
@@ -202,7 +221,13 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return;
     }
 
-    const bounds = get().boundsByPanel[page.panelTabId] ?? FALLBACK_BOUNDS;
+    const hostBounds = get().boundsByPanel[page.panelTabId] ?? FALLBACK_BOUNDS;
+    const viewportBounds = viewportBoundsForPanel(
+      get().boundsByPanel,
+      get().viewportModeByPanel,
+      get().previewByPanel,
+      page.panelTabId,
+    );
     set((state) => ({
       pages: {
         ...state.pages,
@@ -219,10 +244,10 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
     try {
       if (!get().pages[pageId].hostAttached) {
-        if (!hasUsableBounds(bounds)) {
+        if (!hasUsableBounds(hostBounds)) {
           return;
         }
-        await browserApi.create(pageId, result.url, bounds);
+        await browserApi.create(pageId, result.url, viewportBounds);
         set((state) => ({
           pages: state.pages[pageId]
             ? { ...state.pages, [pageId]: { ...state.pages[pageId], hostAttached: true } }
@@ -284,8 +309,14 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     if (!page) return;
     if (!page.hostAttached) {
       if (!page.url || !hasUsableBounds(bounds)) return;
+      const viewportBounds = viewportBoundsForPanel(
+        { ...get().boundsByPanel, [panelTabId]: bounds },
+        get().viewportModeByPanel,
+        get().previewByPanel,
+        panelTabId,
+      );
       try {
-        await browserApi.create(page.id, page.url, bounds);
+        await browserApi.create(page.id, page.url, viewportBounds);
         set((state) => ({
           pages: state.pages[page.id]
             ? { ...state.pages, [page.id]: { ...state.pages[page.id], hostAttached: true } }
@@ -303,9 +334,64 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return;
     }
     try {
-      await browserApi.setBounds(page.id, bounds);
+      const viewportBounds = viewportBoundsForPanel(
+        get().boundsByPanel,
+        get().viewportModeByPanel,
+        get().previewByPanel,
+        panelTabId,
+      );
+      await browserApi.setBounds(page.id, viewportBounds);
     } catch (error) {
       logger.warn('Failed to set browser bounds', { browserId: page.id }, serializeError(error));
+    }
+  },
+
+  setViewportMode: async (panelTabId, mode) => {
+    set((state) => ({
+      viewportModeByPanel: { ...state.viewportModeByPanel, [panelTabId]: mode },
+    }));
+
+    const previewActive = get().previewByPanel[panelTabId] ?? false;
+    if (!previewActive) return;
+
+    const storedBounds = get().boundsByPanel[panelTabId];
+    const activeId = get().activePageIdByPanel[panelTabId];
+    const page = activeId ? get().pages[activeId] : undefined;
+    if (!page?.hostAttached || !storedBounds || !hasUsableBounds(storedBounds)) return;
+
+    const viewportBounds = viewportBoundsForPanel(
+      get().boundsByPanel,
+      get().viewportModeByPanel,
+      get().previewByPanel,
+      panelTabId,
+    );
+    try {
+      await browserApi.setBounds(page.id, viewportBounds);
+    } catch (error) {
+      logger.warn('Failed to apply viewport bounds', { browserId: page.id }, serializeError(error));
+    }
+  },
+
+  setViewportPreview: async (panelTabId, preview) => {
+    const previousPreview = get().previewByPanel[panelTabId] ?? false;
+    if (previousPreview === preview) return;
+
+    set((state) => ({
+      previewByPanel: { ...state.previewByPanel, [panelTabId]: preview },
+    }));
+
+    const storedBounds = get().boundsByPanel[panelTabId];
+    const activeId = get().activePageIdByPanel[panelTabId];
+    const page = activeId ? get().pages[activeId] : undefined;
+    if (!page?.hostAttached || !storedBounds || !hasUsableBounds(storedBounds)) return;
+
+    const host = hostBoundsForViewportTransition(storedBounds, previousPreview, preview);
+    const mode = get().viewportModeByPanel[panelTabId] ?? 'fit';
+    const viewportBounds = browserViewportBounds(host, mode, preview);
+    try {
+      await browserApi.setBounds(page.id, viewportBounds);
+    } catch (error) {
+      logger.warn('Failed to apply viewport bounds', { browserId: page.id }, serializeError(error));
     }
   },
 
@@ -384,14 +470,20 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       const pageIdsByPanel = { ...state.pageIdsByPanel };
       const activePageIdByPanel = { ...state.activePageIdByPanel };
       const boundsByPanel = { ...state.boundsByPanel };
+      const viewportModeByPanel = { ...state.viewportModeByPanel };
+      const previewByPanel = { ...state.previewByPanel };
       delete pageIdsByPanel[panelTabId];
       delete activePageIdByPanel[panelTabId];
       delete boundsByPanel[panelTabId];
+      delete viewportModeByPanel[panelTabId];
+      delete previewByPanel[panelTabId];
       return {
         pages,
         pageIdsByPanel,
         activePageIdByPanel,
         boundsByPanel,
+        viewportModeByPanel,
+        previewByPanel,
         inspectingPageId: ids.includes(state.inspectingPageId ?? '') ? null : state.inspectingPageId,
       };
     });
@@ -402,6 +494,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     pageIdsByPanel: {},
     activePageIdByPanel: {},
     boundsByPanel: {},
+    viewportModeByPanel: {},
+    previewByPanel: {},
     inspectingPageId: null,
     inspectError: null,
   }),

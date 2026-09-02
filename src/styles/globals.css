@@ -513,6 +513,12 @@ input[type='password']::-ms-reveal {
   -webkit-backdrop-filter: blur(12px) saturate(1.02);
 }
 
+/* Address bars and other URLs must not collapse `://` via JetBrains Mono ligatures. */
+.font-liga-none {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
 .code-lang-badge {
   position: absolute;
   top: 0;

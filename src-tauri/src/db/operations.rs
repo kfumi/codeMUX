@@ -1690,14 +1690,14 @@ pub fn reconcile_running_session_subagents(conn: &Connection, session_id: &str) 
 mod tests {
     use super::{
         append_timeline_events, archive_session, clear_session_timeline, create_forked_session,
-        delete_agent_session_mapping,
-        fetch_session_timeline, get_agent_distribution, get_agent_session_mapping,
-        get_all_archived_sessions, get_all_sessions, get_model_distribution, get_session,
-        get_session_events_after, get_session_timeline, get_usage_heatmap, get_usage_overview,
-        import_session_snapshot, list_native_sessions_for_cleanup,
-        resolve_app_session_id_for_timeline, set_session_pinned, set_session_read_only,
-        unarchive_session, update_session_provider, update_session_reasoning_effort,
-        update_session_settings, upsert_agent_session_mapping, ImportedSessionSnapshot,
+        delete_agent_session_mapping, fetch_session_timeline, get_agent_distribution,
+        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
+        get_model_distribution, get_session, get_session_events_after, get_session_timeline,
+        get_usage_heatmap, get_usage_overview, import_session_snapshot,
+        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline, set_session_pinned,
+        set_session_read_only, unarchive_session, update_session_provider,
+        update_session_reasoning_effort, update_session_settings, upsert_agent_session_mapping,
+        ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;

@@ -648,6 +648,8 @@ export const browserApi: BrowserHost = {
     invokeLogged('browser_evaluate', { browserId, script }),
   openDevtools: (browserId: string): Promise<void> =>
     invokeLogged('browser_open_devtools', { browserId }),
+  setZoom: (browserId: string, factor: number): Promise<void> =>
+    invokeLogged('browser_set_zoom', { browserId, factor }),
   clearData: (scope: BrowserDataScope): Promise<void> =>
     invokeLogged('browser_clear_data', { scope }),
 };

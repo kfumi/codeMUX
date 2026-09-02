@@ -13,6 +13,7 @@ const browserApiMock = vi.hoisted(() => ({
   evaluate: vi.fn(),
   openDevtools: vi.fn(),
   clearData: vi.fn(),
+  setZoom: vi.fn(),
 }));
 
 vi.mock('../lib/tauri', () => ({
@@ -21,7 +22,7 @@ vi.mock('../lib/tauri', () => ({
 
 import { useBrowserStore } from './browserStore';
 
-const PANEL_BOUNDS = { x: 10, y: 20, width: 400, height: 600 };
+const PANEL_BOUNDS = { x: 10, y: 20, width: 800, height: 900 };
 
 async function attachPage(panelTabId: string, url = 'https://example.com/') {
   const pageId = useBrowserStore.getState().ensureBlankPage(panelTabId);
@@ -150,5 +151,58 @@ describe('browser store', () => {
     await useBrowserStore.getState().syncVisibility('scope:browser', null);
 
     expect(useBrowserStore.getState().inspectingPageId).toBeNull();
+  });
+
+  it('applies viewport bounds immediately when the mode changes', async () => {
+    const pageId = await attachPage('scope:browser');
+    browserApiMock.setBounds.mockClear();
+
+    await useBrowserStore.getState().setViewportPreview('scope:browser', true);
+    await useBrowserStore.getState().setViewportMode('scope:browser', 100);
+
+    expect(browserApiMock.setBounds).toHaveBeenCalledWith(
+      pageId,
+      expect.objectContaining({ width: 393, height: 852 }),
+    );
+    expect(useBrowserStore.getState().viewportModeByPanel['scope:browser']).toBe(100);
+  });
+
+  it('applies the reference viewport when free-size preview is enabled', async () => {
+    const pageId = await attachPage('scope:browser');
+    browserApiMock.setBounds.mockClear();
+
+    await useBrowserStore.getState().setViewportPreview('scope:browser', true);
+
+    expect(useBrowserStore.getState().previewByPanel['scope:browser']).toBe(true);
+    expect(browserApiMock.setBounds).toHaveBeenCalledWith(
+      pageId,
+      expect.objectContaining({ width: 393, height: 852 }),
+    );
+  });
+
+  it('scales the reference viewport when a percentage is selected', async () => {
+    const pageId = await attachPage('scope:browser');
+    await useBrowserStore.getState().setViewportPreview('scope:browser', true);
+    browserApiMock.setBounds.mockClear();
+
+    await useBrowserStore.getState().setViewportMode('scope:browser', 50);
+
+    expect(browserApiMock.setBounds).toHaveBeenCalledWith(
+      pageId,
+      expect.objectContaining({ width: 197, height: 426 }),
+    );
+  });
+
+  it('re-applies viewport bounds after layout updates', async () => {
+    const pageId = await attachPage('scope:browser');
+    await useBrowserStore.getState().setViewportPreview('scope:browser', true);
+    await useBrowserStore.getState().setViewportMode('scope:browser', 100);
+    await useBrowserStore.getState().setPanelBounds('scope:browser', PANEL_BOUNDS);
+
+    expect(browserApiMock.setBounds).toHaveBeenCalledWith(
+      pageId,
+      expect.objectContaining({ width: 393, height: 852 }),
+    );
+    expect(useBrowserStore.getState().viewportModeByPanel['scope:browser']).toBe(100);
   });
 });

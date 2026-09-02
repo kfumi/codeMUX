@@ -51,7 +51,10 @@ fn is_session_summary_event(event: &Value) -> bool {
 
 #[cfg(test)]
 fn count_session_summaries(events: &[Value]) -> usize {
-    events.iter().filter(|event| is_session_summary_event(event)).count()
+    events
+        .iter()
+        .filter(|event| is_session_summary_event(event))
+        .count()
 }
 
 pub(crate) fn inject_turn_artifact_summaries(events: &mut Vec<Value>) {
@@ -64,35 +67,38 @@ pub(crate) fn inject_turn_artifact_summaries(events: &mut Vec<Value>) {
     let mut turn_events: Vec<Value> = Vec::new();
     let mut turn_has_summary = false;
 
-    let flush_turn = |output: &mut Vec<Value>, turn_events: &mut Vec<Value>, turn_has_summary: &mut bool| {
-        if turn_events.is_empty() {
-            return;
-        }
-
-        if !*turn_has_summary {
-            if let Some(summary) = build_turn_summary(&turn_events, &cwd) {
-                let turn_finished_index = turn_events
-                    .iter()
-                    .position(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished"));
-                if let Some(index) = turn_finished_index {
-                    output.extend(turn_events.drain(..index));
-                    output.push(summary);
-                    output.extend(turn_events.drain(..));
-                } else {
-                    output.extend(turn_events.drain(..));
-                    output.push(summary);
-                }
-                *turn_has_summary = false;
+    let flush_turn =
+        |output: &mut Vec<Value>, turn_events: &mut Vec<Value>, turn_has_summary: &mut bool| {
+            if turn_events.is_empty() {
                 return;
             }
-        }
 
-        output.extend(turn_events.drain(..));
-        *turn_has_summary = false;
-    };
+            if !*turn_has_summary {
+                if let Some(summary) = build_turn_summary(&turn_events, &cwd) {
+                    let turn_finished_index = turn_events.iter().position(|event| {
+                        event.get("type").and_then(Value::as_str) == Some("turn_finished")
+                    });
+                    if let Some(index) = turn_finished_index {
+                        output.extend(turn_events.drain(..index));
+                        output.push(summary);
+                        output.extend(turn_events.drain(..));
+                    } else {
+                        output.extend(turn_events.drain(..));
+                        output.push(summary);
+                    }
+                    *turn_has_summary = false;
+                    return;
+                }
+            }
+
+            output.extend(turn_events.drain(..));
+            *turn_has_summary = false;
+        };
 
     for event in events.drain(..) {
-        if event.get("type").and_then(Value::as_str) == Some("user_message") && !turn_events.is_empty() {
+        if event.get("type").and_then(Value::as_str) == Some("user_message")
+            && !turn_events.is_empty()
+        {
             flush_turn(&mut output, &mut turn_events, &mut turn_has_summary);
         }
 
@@ -126,18 +132,17 @@ fn extract_working_directory(events: &[Value]) -> Option<String> {
         if event.get("subtype").and_then(Value::as_str) != Some("init") {
             return None;
         }
-        event
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(str::to_string)
+        event.get("cwd").and_then(Value::as_str).map(str::to_string)
     })
 }
 
 fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
     let mut files: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
     let mut snapshots: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-    let mut snapshots_by_tool: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-    let mut pending: std::collections::HashMap<String, PendingTool> = std::collections::HashMap::new();
+    let mut snapshots_by_tool: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
+    let mut pending: std::collections::HashMap<String, PendingTool> =
+        std::collections::HashMap::new();
 
     for event in events {
         match event.get("type").and_then(Value::as_str) {
@@ -148,7 +153,9 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                     "is_new": event.get("is_new").and_then(Value::as_bool).unwrap_or(false),
                 });
                 let normalized = resolve_path(cwd, &file_path);
-                snapshots.entry(normalized.clone()).or_insert(snapshot.clone());
+                snapshots
+                    .entry(normalized.clone())
+                    .or_insert(snapshot.clone());
                 if let Some(tool_use_id) = read_string(event, "tool_use_id") {
                     snapshots_by_tool.insert(tool_use_id, snapshot);
                 }
@@ -168,10 +175,7 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                 } else if name == "write" {
                     let file_path = read_file_path(&input)?;
                     let content = read_string(&input, "content")?;
-                    pending.insert(
-                        tool_use_id,
-                        PendingTool::Write { file_path, content },
-                    );
+                    pending.insert(tool_use_id, PendingTool::Write { file_path, content });
                 } else if name == "edit" {
                     pending.insert(
                         tool_use_id,
@@ -186,7 +190,11 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                 }
             }
             Some("tool_finished") => {
-                if event.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                if event
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 let tool_use_id = read_string(event, "tool_use_id")?;
@@ -194,7 +202,10 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                     continue;
                 };
                 match pending_tool {
-                    PendingTool::ApplyPatch { patch_text, changes } => {
+                    PendingTool::ApplyPatch {
+                        patch_text,
+                        changes,
+                    } => {
                         if let Some(change_entries) = changes {
                             for change in change_entries {
                                 if let Some(entry) = diff_from_change(cwd, &change) {
@@ -206,14 +217,22 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                             }
                         } else if let Some(patch_text) = patch_text {
                             for entry in diffs_from_freeform_patch(cwd, &patch_text) {
-                                files.insert(read_string(&entry, "file").unwrap_or_default(), entry);
+                                files
+                                    .insert(read_string(&entry, "file").unwrap_or_default(), entry);
                             }
                         }
                     }
                     PendingTool::Write { file_path, content } => {
                         let resolved = resolve_path(cwd, &file_path);
-                        let before = snapshot_content(&snapshots, &snapshots_by_tool, &file_path, Some(&tool_use_id));
-                        if let Some(entry) = finalize_diff_entry(resolved.clone(), before, content, None) {
+                        let before = snapshot_content(
+                            &snapshots,
+                            &snapshots_by_tool,
+                            &file_path,
+                            Some(&tool_use_id),
+                        );
+                        if let Some(entry) =
+                            finalize_diff_entry(resolved.clone(), before, content, None)
+                        {
                             files.insert(resolved, entry);
                         }
                     }
@@ -237,7 +256,10 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                         let mut after = normalized_snapshot;
                         let mut applied = false;
                         if let Some(index) = after.find(&normalized_old) {
-                            after.replace_range(index..index + normalized_old.len(), &normalized_new);
+                            after.replace_range(
+                                index..index + normalized_old.len(),
+                                &normalized_new,
+                            );
                             applied = true;
                         } else if snapshot_is_empty {
                             before = normalized_old;
@@ -245,7 +267,9 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                             applied = true;
                         }
                         if applied {
-                            if let Some(entry) = finalize_diff_entry(resolved.clone(), before, after, None) {
+                            if let Some(entry) =
+                                finalize_diff_entry(resolved.clone(), before, after, None)
+                            {
                                 files.insert(resolved, entry);
                             }
                         }
@@ -274,7 +298,10 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
 }
 
 enum PendingTool {
-    Write { file_path: String, content: String },
+    Write {
+        file_path: String,
+        content: String,
+    },
     Edit {
         file_path: String,
         old_string: String,
@@ -308,8 +335,7 @@ fn resolve_path(cwd: &str, raw_path: &str) -> String {
         return trimmed.to_string();
     }
     if trimmed.starts_with('/')
-        || trimmed.chars().nth(1) == Some(':')
-            && trimmed.as_bytes().get(2).copied() == Some(b'\\')
+        || trimmed.chars().nth(1) == Some(':') && trimmed.as_bytes().get(2).copied() == Some(b'\\')
     {
         return trimmed.replace('\\', "/");
     }
@@ -414,7 +440,9 @@ fn diff_from_change(cwd: &str, change: &Value) -> Option<Value> {
     if diff.is_empty() {
         return None;
     }
-    let kind = read_string(change, "kind").unwrap_or_default().to_ascii_lowercase();
+    let kind = read_string(change, "kind")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if kind == "add" {
         let stats = count_diff_lines("", &diff);
         return Some(json!({
@@ -562,11 +590,15 @@ mod tests {
 
         let summary_index = events
             .iter()
-            .position(|event| event.get("subtype").and_then(|value| value.as_str()) == Some("session_summary"))
+            .position(|event| {
+                event.get("subtype").and_then(|value| value.as_str()) == Some("session_summary")
+            })
             .expect("summary should be injected");
         let turn_finished_index = events
             .iter()
-            .position(|event| event.get("type").and_then(|value| value.as_str()) == Some("turn_finished"))
+            .position(|event| {
+                event.get("type").and_then(|value| value.as_str()) == Some("turn_finished")
+            })
             .expect("turn finished should remain");
         assert!(summary_index < turn_finished_index);
     }
@@ -691,9 +723,14 @@ mod tests {
         inject_turn_artifact_summaries(&mut events);
         let summary = events
             .iter()
-            .find(|event| event.get("subtype").and_then(|value| value.as_str()) == Some("session_summary"))
+            .find(|event| {
+                event.get("subtype").and_then(|value| value.as_str()) == Some("session_summary")
+            })
             .expect("summary should be injected");
-        let diffs = summary.get("diffs").and_then(Value::as_array).expect("diffs array");
+        let diffs = summary
+            .get("diffs")
+            .and_then(Value::as_array)
+            .expect("diffs array");
         assert_eq!(diffs.len(), 1);
         assert_eq!(
             diffs[0].get("file").and_then(Value::as_str),

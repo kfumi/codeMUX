@@ -17,11 +17,11 @@ use crate::agent::commands::{
     convert_codex_history_values_to_events, home_dir, should_include_claude_history_event,
 };
 use crate::agent::history_events::normalize_history_events;
+use crate::agent::opencode_history;
+use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
 use crate::agent::turn_artifact_summary::{
     backfill_turn_artifact_summaries, supports_turn_artifact_summary_backfill,
 };
-use crate::agent::opencode_history;
-use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 
@@ -332,7 +332,8 @@ pub(crate) async fn reload_session_timeline_from_native(
     app_session_id: &str,
     agent_kind: AgentKind,
 ) -> Result<(), String> {
-    let native_events = load_native_session_events(state.clone(), app_session_id, agent_kind).await?;
+    let native_events =
+        load_native_session_events(state.clone(), app_session_id, agent_kind).await?;
     let mut db = state.db.lock().unwrap();
     if native_events.is_empty() {
         operations::clear_session_timeline(&db, app_session_id)

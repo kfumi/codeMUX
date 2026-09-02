@@ -5,8 +5,13 @@ use crate::config;
 use crate::config::types::BrowserControlConfig;
 use crate::AppState;
 
+// Child WebView create/mutate must be async. On Windows, WebviewBuilder / add_child
+// deadlocks inside a synchronous command because WebView2 needs the UI thread to
+// pump while the command is still running on that same thread (wry#583).
+
 #[tauri::command]
-pub fn browser_create(
+#[allow(clippy::unused_async)]
+pub async fn browser_create(
     app: AppHandle,
     state: State<'_, BrowserState>,
     config_state: State<'_, AppState>,
@@ -19,7 +24,8 @@ pub fn browser_create(
 }
 
 #[tauri::command]
-pub fn browser_destroy(
+#[allow(clippy::unused_async)]
+pub async fn browser_destroy(
     app: AppHandle,
     state: State<'_, BrowserState>,
     browser_id: String,
@@ -28,7 +34,8 @@ pub fn browser_destroy(
 }
 
 #[tauri::command]
-pub fn browser_navigate(
+#[allow(clippy::unused_async)]
+pub async fn browser_navigate(
     app: AppHandle,
     state: State<'_, BrowserState>,
     browser_id: String,
@@ -38,22 +45,26 @@ pub fn browser_navigate(
 }
 
 #[tauri::command]
-pub fn browser_back(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_back(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::back_page(&app, &browser_id)
 }
 
 #[tauri::command]
-pub fn browser_forward(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_forward(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::forward_page(&app, &browser_id)
 }
 
 #[tauri::command]
-pub fn browser_reload(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_reload(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::reload_page(&app, &browser_id)
 }
 
 #[tauri::command]
-pub fn browser_set_bounds(
+#[allow(clippy::unused_async)]
+pub async fn browser_set_bounds(
     app: AppHandle,
     browser_id: String,
     bounds: BrowserPageBounds,
@@ -62,12 +73,14 @@ pub fn browser_set_bounds(
 }
 
 #[tauri::command]
-pub fn browser_show(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_show(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::show_page(&app, &browser_id)
 }
 
 #[tauri::command]
-pub fn browser_hide(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_hide(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::hide_page(&app, &browser_id)
 }
 
@@ -81,12 +94,24 @@ pub async fn browser_evaluate(
 }
 
 #[tauri::command]
-pub fn browser_open_devtools(app: AppHandle, browser_id: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_open_devtools(app: AppHandle, browser_id: String) -> Result<(), String> {
     manager::open_devtools(&app, &browser_id)
 }
 
 #[tauri::command]
-pub fn browser_clear_data(app: AppHandle, scope: String) -> Result<(), String> {
+#[allow(clippy::unused_async)]
+pub async fn browser_set_zoom(
+    app: AppHandle,
+    browser_id: String,
+    factor: f64,
+) -> Result<(), String> {
+    manager::set_page_zoom(&app, &browser_id, factor)
+}
+
+#[tauri::command]
+#[allow(clippy::unused_async)]
+pub async fn browser_clear_data(app: AppHandle, scope: String) -> Result<(), String> {
     manager::clear_data(&app, &scope)
 }
 

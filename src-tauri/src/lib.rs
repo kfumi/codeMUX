@@ -516,6 +516,7 @@ pub fn run() {
             commands::browser::browser_hide,
             commands::browser::browser_evaluate,
             commands::browser::browser_open_devtools,
+            commands::browser::browser_set_zoom,
             commands::browser::browser_clear_data,
             commands::model_provider::list_builtin_provider_templates,
             commands::model_provider::instantiate_builtin_provider_template,

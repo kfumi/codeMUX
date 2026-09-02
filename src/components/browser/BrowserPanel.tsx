@@ -1,15 +1,19 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Copy,
+  Bug,
   Globe,
-  MoreVertical,
+  ChevronDown,
+  MonitorSmartphone,
+  MoreHorizontal,
+  MousePointer2,
   Plus,
   RotateCw,
-  WandSparkles,
+  SquareArrowOutUpRight,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { open } from '@tauri-apps/plugin-shell';
 import { toast } from 'sonner';
 
 import {
@@ -18,6 +22,14 @@ import {
   ELEMENT_SELECTOR_STOP_SCRIPT,
 } from '../../lib/elementSelector';
 import { browserPageTitle } from '../../lib/browserPage';
+import {
+  BROWSER_REFERENCE_VIEWPORT,
+  BROWSER_VIEWPORT_CHROME_HEIGHT,
+  browserViewportScaleLabel,
+  formatViewportSize,
+  type BrowserViewportMode,
+} from '../../lib/browserViewport';
+import { popupViewportMenu } from '../../lib/browserViewportMenu';
 import { browserApi } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
 import { useBrowserElementStore } from '../../stores/browserElementStore';
@@ -49,12 +61,17 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
   const forward = useBrowserStore((state) => state.forward);
   const reload = useBrowserStore((state) => state.reload);
   const setPanelBounds = useBrowserStore((state) => state.setPanelBounds);
+  const setViewportMode = useBrowserStore((state) => state.setViewportMode);
+  const setViewportPreview = useBrowserStore((state) => state.setViewportPreview);
+  const viewportMode = useBrowserStore((state) => state.viewportModeByPanel[tabId] ?? 'fit');
+  const previewActive = useBrowserStore((state) => state.previewByPanel[tabId] ?? false);
   const syncVisibility = useBrowserStore((state) => state.syncVisibility);
   const startInspect = useBrowserStore((state) => state.startInspect);
   const stopInspect = useBrowserStore((state) => state.stopInspect);
   const destroyPanel = useBrowserStore((state) => state.destroyPanel);
   const closeTab = useSidePanelStore((state) => state.closeTab);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   useEffect(() => {
     ensureBlankPage(tabId);
@@ -99,7 +116,7 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
       observer.disconnect();
       window.removeEventListener('resize', updateBounds);
     };
-  }, [isActive, setPanelBounds, tabId]);
+  }, [isActive, setPanelBounds, tabId, viewportMode, previewActive]);
 
   const activePage = activePageId ? pages[activePageId] : undefined;
   const inspecting = inspectingPageId === activePageId;
@@ -158,6 +175,8 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
             color: result.captured.color,
             font: result.captured.font,
           });
+          stopInspect();
+          return;
         }
       } catch (error) {
         stopInspect();
@@ -221,12 +240,16 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
       <BrowserToolbar
         page={activePage}
         inspecting={inspecting}
+        previewActive={previewActive}
         onAddressChange={(value) => activePage && setAddressDraft(activePage.id, value)}
         onSubmit={() => activePage && void navigate(activePage.id)}
         onBack={() => activePage && void back(activePage.id)}
         onForward={() => activePage && void forward(activePage.id)}
         onReload={() => activePage && void reload(activePage.id)}
         onInspect={() => void handleInspectToggle()}
+        onTogglePreview={() => void setViewportPreview(tabId, !previewActive)}
+        moreMenuOpen={moreMenuOpen}
+        onMoreMenuOpenChange={setMoreMenuOpen}
       />
 
       {activePage?.lastError ? (
@@ -235,13 +258,80 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
         </div>
       ) : null}
 
-      <div ref={hostRef} className="relative min-h-0 flex-1 bg-background">
-        {!activePage?.hostAttached && (
-          <div className="flex h-full items-center justify-center text-ui-body text-muted-foreground">
-            在地址栏输入网址并回车
-          </div>
+      <div
+        className={cn(
+          'relative flex min-h-0 flex-1 flex-col',
+          previewActive ? 'bg-muted/45' : 'bg-background',
         )}
+      >
+        {previewActive ? (
+          <BrowserViewportChrome
+            viewportMode={viewportMode}
+            onSelectMode={(mode) => void setViewportMode(tabId, mode)}
+          />
+        ) : null}
+
+        <div ref={hostRef} className="relative min-h-0 flex-1">
+          {!activePage?.hostAttached && (
+            <div className="flex h-full items-center justify-center text-ui-body text-muted-foreground">
+              在地址栏输入网址并回车
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function BrowserViewportChrome({
+  viewportMode,
+  onSelectMode,
+}: {
+  viewportMode: BrowserViewportMode;
+  onSelectMode: (mode: BrowserViewportMode) => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const openMenu = async () => {
+    const trigger = triggerRef.current;
+    if (!trigger || menuOpen) return;
+
+    const rect = trigger.getBoundingClientRect();
+    setMenuOpen(true);
+    try {
+      const selected = await popupViewportMenu(viewportMode, {
+        x: rect.left,
+        y: rect.bottom,
+      });
+      if (selected != null) onSelectMode(selected);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '无法打开尺寸菜单');
+    } finally {
+      setMenuOpen(false);
+    }
+  };
+
+  return (
+    <div
+      className="relative z-10 flex shrink-0 items-center justify-center gap-2 px-10"
+      style={{ height: BROWSER_VIEWPORT_CHROME_HEIGHT }}
+    >
+      <span className="text-ui-meta text-muted-foreground">
+        {formatViewportSize(BROWSER_REFERENCE_VIEWPORT.width, BROWSER_REFERENCE_VIEWPORT.height)}
+      </span>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="调整预览尺寸"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        className="inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent py-0.5 text-ui-meta text-muted-foreground outline-none hover:text-foreground"
+        onClick={() => void openMenu()}
+      >
+        {browserViewportScaleLabel(viewportMode)}
+        <ChevronDown className="h-3 w-3" />
+      </button>
     </div>
   );
 }
@@ -296,33 +386,39 @@ function BrowserPageTab({
 function BrowserToolbar({
   page,
   inspecting,
+  previewActive,
   onAddressChange,
   onSubmit,
   onBack,
   onForward,
   onReload,
   onInspect,
+  onTogglePreview,
+  moreMenuOpen,
+  onMoreMenuOpenChange,
 }: {
   page?: BrowserPage;
   inspecting: boolean;
+  previewActive: boolean;
   onAddressChange: (value: string) => void;
   onSubmit: () => void;
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
   onInspect: () => void;
+  onTogglePreview: () => void;
+  moreMenuOpen: boolean;
+  onMoreMenuOpenChange: (open: boolean) => void;
 }) {
-  const [copying, setCopying] = useState(false);
   const canInspect = Boolean(page?.hostAttached) && !page?.isLoading;
+  const pageUrl = page?.url || page?.addressDraft || '';
 
-  const copyUrl = async () => {
-    if (!page?.url) return;
+  const openInDefaultBrowser = async () => {
+    if (!pageUrl) return;
     try {
-      await navigator.clipboard.writeText(page.url);
-      setCopying(true);
-      window.setTimeout(() => setCopying(false), 1200);
+      await open(pageUrl);
     } catch {
-      toast.error('复制链接失败');
+      toast.error('无法在默认浏览器中打开');
     }
   };
 
@@ -372,25 +468,34 @@ function BrowserToolbar({
           aria-label="网址"
           value={page?.addressDraft ?? ''}
           placeholder="输入网址"
-          className="h-7 w-full rounded-md border border-border/55 bg-muted/35 px-2.5 font-mono text-code text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
+          autoCapitalize="off"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="font-liga-none h-7 w-full rounded-md border border-border/55 bg-muted/35 px-2.5 text-ui-compact text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
           onChange={(event) => onAddressChange(event.target.value)}
         />
       </form>
-      <TooltipHint content={copying ? '已复制' : '复制链接'}>
+      <TooltipHint content="自由尺寸">
         <button
           type="button"
-          aria-label="复制链接"
-          disabled={!page?.url}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
-          onClick={() => void copyUrl()}
+          aria-label="自由尺寸"
+          aria-pressed={previewActive}
+          className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-lg transition-colors',
+            previewActive
+              ? 'bg-primary/15 text-primary'
+              : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground',
+          )}
+          onClick={onTogglePreview}
         >
-          <Copy className="h-3.5 w-3.5" />
+          <MonitorSmartphone className="h-3.5 w-3.5" />
         </button>
       </TooltipHint>
-      <TooltipHint content={inspecting ? '退出元素检查' : '元素检查'}>
+      <TooltipHint content={inspecting ? '退出元素检查' : '选择网页元素加入聊天'}>
         <button
           type="button"
-          aria-label="元素检查"
+          aria-label="选择网页元素加入聊天"
           aria-pressed={inspecting}
           disabled={!canInspect}
           className={cn(
@@ -401,22 +506,34 @@ function BrowserToolbar({
           )}
           onClick={onInspect}
         >
-          <WandSparkles className="h-3.5 w-3.5" />
+          <MousePointer2 className="h-3.5 w-3.5" />
         </button>
       </TooltipHint>
-      <DropdownMenu>
+      <DropdownMenu open={moreMenuOpen} onOpenChange={onMoreMenuOpenChange}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label="浏览器菜单"
+            aria-label="更多浏览器操作"
+            title="更多浏览器操作"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
           >
-            <MoreVertical className="h-3.5 w-3.5" />
+            <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="z-190 min-w-36">
-          <DropdownMenuItem disabled={!page?.hostAttached} onClick={() => page && void browserApi.openDevtools(page.id)}>
-            开发者工具
+        <DropdownMenuContent align="end" side="left" className="z-190 min-w-44">
+          <DropdownMenuItem
+            disabled={!pageUrl}
+            icon={<SquareArrowOutUpRight className="h-3.5 w-3.5" />}
+            onClick={() => void openInDefaultBrowser()}
+          >
+            在默认浏览器中打开
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!page?.hostAttached}
+            icon={<Bug className="h-3.5 w-3.5" />}
+            onClick={() => page && void browserApi.openDevtools(page.id)}
+          >
+            打开调试工具
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
