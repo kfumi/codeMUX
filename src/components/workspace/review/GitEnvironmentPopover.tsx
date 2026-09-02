@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -9,9 +10,12 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 
+import type { SubagentStatus } from '../../../lib/codeMuxProtocol';
 import { gitApi, type GitRepositoryState, type GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
+import { useSessionStore } from '../../../stores/sessionStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
+import { subagentTabTitle, useSubagentStore } from '../../../stores/subagentStore';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
@@ -45,8 +49,8 @@ function getTodoStatusIcon(status: TodoItem['status']) {
   }
 }
 
-/** 超过该数量时折叠前面的任务，仅展示最后 N 条 */
-const MAX_VISIBLE_TODOS = 5;
+/** 超过该数量时折叠前面的条目，仅展示最后 N 条 */
+const MAX_VISIBLE_LIST_ITEMS = 3;
 
 function TodoSection({ todos }: { todos: TodoItem[] }) {
   const [collapsed, setCollapsed] = useState(true);
@@ -55,9 +59,9 @@ function TodoSection({ todos }: { todos: TodoItem[] }) {
 
   const completed = todos.filter((todo) => todo.status === 'completed').length;
   const total = todos.length;
-  const hiddenCount = todos.length - MAX_VISIBLE_TODOS;
+  const hiddenCount = todos.length - MAX_VISIBLE_LIST_ITEMS;
   const hasOverflow = hiddenCount > 0;
-  const visibleTodos = hasOverflow && collapsed ? todos.slice(-MAX_VISIBLE_TODOS) : todos;
+  const visibleTodos = hasOverflow && collapsed ? todos.slice(-MAX_VISIBLE_LIST_ITEMS) : todos;
 
   return (
     <div className="mt-1.5 border-t border-border/45 pt-1.5" data-testid="git-environment-todos">
@@ -102,6 +106,124 @@ function TodoSection({ todos }: { todos: TodoItem[] }) {
           >
             <ChevronDown className="h-3 w-3 rotate-[-90deg] transition-transform" />
             收起前面 {hiddenCount} 条
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getSubagentStatusIcon(status: SubagentStatus) {
+  switch (status) {
+    case 'running':
+      return (
+        <span className="relative flex h-4 w-4 items-center justify-center">
+          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning)/0.4)]" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning))]" />
+        </span>
+      );
+    case 'completed':
+      return (
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="2 5.5 4 7.5 8 3" />
+          </svg>
+        </span>
+      );
+    case 'failed':
+      return (
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3L7 7M7 3L3 7" />
+          </svg>
+        </span>
+      );
+    case 'canceled':
+      return (
+        <span className="flex h-4 w-4 items-center justify-center">
+          <span className="h-2 w-2 rounded-full bg-muted-foreground/35" />
+        </span>
+      );
+  }
+}
+
+function SubagentSection({ sessionId, onOpenSubagent }: { sessionId: string | null; onOpenSubagent: () => void }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const sessionSubagents = useSubagentStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
+  const openInSidePanel = useSubagentStore((state) => state.openInSidePanel);
+
+  const subagents = useMemo(() => {
+    if (!sessionSubagents) return [];
+    return sessionSubagents.order
+      .map((id) => sessionSubagents.descriptors[id])
+      .filter((descriptor): descriptor is NonNullable<typeof descriptor> => Boolean(descriptor));
+  }, [sessionSubagents]);
+
+  if (subagents.length === 0) return null;
+
+  const completed = subagents.filter((subagent) => subagent.status === 'completed').length;
+  const total = subagents.length;
+  const hiddenCount = subagents.length - MAX_VISIBLE_LIST_ITEMS;
+  const hasOverflow = hiddenCount > 0;
+  const visibleSubagents = hasOverflow && collapsed ? subagents.slice(-MAX_VISIBLE_LIST_ITEMS) : subagents;
+
+  return (
+    <div className="mt-1.5 border-t border-border/45 pt-1.5" data-testid="git-environment-subagents">
+      <div className="flex items-center justify-between px-1.5 py-1">
+        <span className="text-xs font-medium text-muted-foreground">子智能体</span>
+        <span className="text-ui-meta text-muted-foreground/50 tabular-nums">{completed}/{total}</span>
+      </div>
+      {hasOverflow && collapsed && (
+        <button
+          type="button"
+          data-testid="git-environment-subagents-expand"
+          onClick={() => setCollapsed(false)}
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 -rotate-90 transition-transform" />
+          展示前面 {hiddenCount} 个更早的子智能体
+        </button>
+      )}
+      <div className="space-y-0.5 px-1.5 pb-1">
+        {visibleSubagents.map((subagent) => (
+          <button
+            key={subagent.subagentId}
+            type="button"
+            data-testid={`git-environment-subagent-${subagent.subagentId}`}
+            onClick={() => {
+              if (!sessionId) return;
+              openInSidePanel(sessionId, subagent.subagentId);
+              onOpenSubagent();
+            }}
+            className="flex w-full items-start gap-2.5 rounded-md px-1 py-1 text-left text-xs leading-relaxed transition-colors hover:bg-muted/45"
+          >
+            <span className="mt-0.5 shrink-0">{getSubagentStatusIcon(subagent.status)}</span>
+            <span className="min-w-0 flex-1">
+              <span className={cn(
+                'block truncate',
+                subagent.status === 'running'
+                  ? 'font-medium text-foreground/90'
+                  : subagent.status === 'failed'
+                    ? 'text-destructive/85'
+                    : subagent.status === 'canceled'
+                      ? 'text-muted-foreground/45 line-through'
+                      : 'text-foreground/70',
+              )}>
+                {subagentTabTitle(subagent)}
+              </span>
+            </span>
+            <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/45" />
+          </button>
+        ))}
+        {hasOverflow && !collapsed && (
+          <button
+            type="button"
+            data-testid="git-environment-subagents-collapse"
+            onClick={() => setCollapsed(true)}
+            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          >
+            <ChevronDown className="h-3 w-3 -rotate-90 transition-transform" />
+            收起前面 {hiddenCount} 个
           </button>
         )}
       </div>
@@ -281,6 +403,7 @@ function EnvironmentSection({
 }
 
 export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath: string; todos?: TodoItem[] }) {
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
   const [open, setOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
@@ -417,6 +540,8 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
           />
 
           <TodoSection todos={todos} />
+
+          <SubagentSection sessionId={activeSessionId} onOpenSubagent={() => setOpen(false)} />
         </PopoverContent>
       </Popover>
       <GitBranchDialog

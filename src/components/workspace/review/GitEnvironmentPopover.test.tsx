@@ -8,6 +8,7 @@ const gitApiMock = vi.hoisted(() => ({
   getStatusChanges: vi.fn(),
 }));
 const openReviewTabMock = vi.hoisted(() => vi.fn());
+const openInSidePanelMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../lib/tauri', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/tauri')>('../../../lib/tauri');
@@ -22,17 +23,28 @@ vi.mock('../../../stores/sidePanelStore', () => ({
     selector({ openReviewTab: openReviewTabMock }),
 }));
 
+vi.mock('../../../stores/sessionStore', () => ({
+  useSessionStore: (selector: (state: { activeSessionId: string | null }) => unknown) =>
+    selector({ activeSessionId: 'session-1' }),
+}));
+
 vi.mock('./GitBranchDialog', () => ({
   GitBranchDialog: () => null,
 }));
 
 import { GitEnvironmentPopover } from './GitEnvironmentPopover';
+import { useSubagentStore } from '../../../stores/subagentStore';
 
 describe('GitEnvironmentPopover', () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
     vi.clearAllMocks();
+    useSubagentStore.setState({
+      sessions: {},
+      continuationPending: {},
+      openInSidePanel: openInSidePanelMock,
+    });
     gitApiMock.getRepositoryState.mockResolvedValue({
       currentBranch: 'feat/mobile-companion',
       branches: [
@@ -143,10 +155,10 @@ describe('GitEnvironmentPopover', () => {
 
     const section = screen.getByTestId('git-environment-todos');
     expect(screen.getByText('8/8')).toBeTruthy();
-    // 折叠态：仅展示最后 5 条，前面的默认隐藏
+    // 折叠态：仅展示最后 3 条，前面的默认隐藏
     expect(section.textContent).not.toContain('任务1');
-    expect(section.textContent).not.toContain('任务3');
-    expect(section.textContent).toContain('任务4');
+    expect(section.textContent).not.toContain('任务5');
+    expect(section.textContent).toContain('任务6');
     expect(section.textContent).toContain('任务8');
 
     fireEvent.click(screen.getByTestId('git-environment-todos-expand'));
@@ -184,5 +196,97 @@ describe('GitEnvironmentPopover', () => {
     expect(screen.queryByTestId('git-environment-changes')).toBeNull();
     expect(screen.queryByTestId('git-environment-branch')).toBeNull();
     expect(screen.getByText('任务一')).toBeTruthy();
+  });
+
+  it('renders session subagents below the todo section and opens them in the side panel', async () => {
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: ['toolu_1', 'toolu_2'],
+          descriptors: {
+            toolu_1: {
+              subagentId: 'toolu_1',
+              provider: 'claude',
+              description: '探索代码库结构',
+              status: 'completed',
+              updatedAt: Date.now(),
+            },
+            toolu_2: {
+              subagentId: 'toolu_2',
+              provider: 'claude',
+              description: '编写实现计划',
+              status: 'running',
+              updatedAt: Date.now(),
+            },
+          },
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    });
+
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+
+    const section = screen.getByTestId('git-environment-subagents');
+    expect(screen.getByText('1/2')).toBeTruthy();
+    expect(section.textContent).toContain('探索代码库结构');
+    expect(section.textContent).toContain('编写实现计划');
+
+    fireEvent.click(screen.getByTestId('git-environment-subagent-toolu_1'));
+    expect(openInSidePanelMock).toHaveBeenCalledWith('session-1', 'toolu_1');
+  });
+
+  it('collapses older subagents when the list overflows and can expand them', async () => {
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: ['toolu_1', 'toolu_2', 'toolu_3', 'toolu_4', 'toolu_5'],
+          descriptors: Object.fromEntries(
+            Array.from({ length: 5 }, (_, index) => {
+              const id = `toolu_${index + 1}`;
+              return [id, {
+                subagentId: id,
+                provider: 'claude',
+                description: `子智能体${index + 1}`,
+                status: 'completed' as const,
+                updatedAt: Date.now(),
+              }];
+            }),
+          ),
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    });
+
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+
+    const section = screen.getByTestId('git-environment-subagents');
+    expect(section.textContent).not.toContain('子智能体1');
+    expect(section.textContent).not.toContain('子智能体2');
+    expect(section.textContent).toContain('子智能体3');
+    expect(section.textContent).toContain('子智能体5');
+
+    fireEvent.click(screen.getByTestId('git-environment-subagents-expand'));
+    expect(section.textContent).toContain('子智能体1');
+    expect(section.textContent).toContain('子智能体2');
+
+    fireEvent.click(screen.getByTestId('git-environment-subagents-collapse'));
+    expect(section.textContent).not.toContain('子智能体1');
+  });
+
+  it('hides the subagent section when the active session has no subagents', async () => {
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+
+    expect(screen.queryByTestId('git-environment-subagents')).toBeNull();
   });
 });

@@ -9,7 +9,7 @@ import {
   type MessageState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
-import { ArrowDown, ChevronRight, ChevronUp, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
+import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
