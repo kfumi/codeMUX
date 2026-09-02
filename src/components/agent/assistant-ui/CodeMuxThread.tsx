@@ -1150,6 +1150,7 @@ function AssistantLikeMessage({
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
   const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;
   const sourceProviderTurnOrdinal = turn ? turnOrdinalById.get(turn.id) : undefined;
+  const messageText = getMessageText(message);
   const isForkable = shouldRenderFooter
     && !isRunning
     && sourceUuid != null;
@@ -1257,7 +1258,7 @@ function AssistantLikeMessage({
                   );
 
                 case 'data':
-                  return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} />;
+                  return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} messageText={messageText} />;
 
                 default:
                   return null;

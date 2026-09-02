@@ -27,6 +27,8 @@ import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from 
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 import { getAgentDefinition } from '@/types/agentRegistry';
 import type { AgentKind } from '@/types/session';
+import { ReferencedMarkdownFilesList } from '../ReferencedMarkdownFilesList';
+import { extractReferencedMarkdownFiles } from '@/lib/referencedMarkdownFiles';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -44,6 +46,7 @@ type CodeMuxDataPartProps = {
   name: string;
   data: unknown;
   sessionId?: string;
+  messageText?: string;
 };
 
 type StreamStatusDisplayInput = Extract<AgentMessage, { kind: 'stream_status' }>['data'];
@@ -393,7 +396,7 @@ function AskUserQuestionPreview() {
   return <div className="px-1 py-1 text-xs text-muted-foreground/65">等待用户回答</div>;
 }
 
-export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPartProps) {
+export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: CodeMuxDataPartProps) {
   if (name !== 'codemux-event') {
     return null;
   }
@@ -495,7 +498,14 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
   }
 
   if (isSessionSummaryData(data)) {
-    return <SessionSummaryCard event={data.event} />;
+    const markdownFiles = extractReferencedMarkdownFiles(messageText ?? '');
+
+    return (
+      <div className="space-y-3">
+        <ReferencedMarkdownFilesList files={markdownFiles} />
+        <SessionSummaryCard event={data.event} />
+      </div>
+    );
   }
 
   if (!isAskUserQuestionData(data) || !sessionId) {

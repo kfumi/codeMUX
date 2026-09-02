@@ -297,6 +297,54 @@ const PLAIN_FILE_REFERENCE_RE =
 const FILE_REFERENCE_SUFFIX_RE =
   /^(?::\d+(?::\d+)?(?:-\d+(?:\.\d+)?)?|#L?\d+(?:-L?\d+)?|\s+\(line\s+\d+\)|\s+\(\d+(?:,\s*\d+)?\)|\s+on\s+line\s+\d+)/i;
 
+export function extractLinkableFileReferences(
+  text: string,
+  options: CodemuxLocalFileLinkPluginOptions = { linkRelativeFilePaths: true },
+): PlainFileReference[] {
+  const seen = new Set<string>();
+  const results: PlainFileReference[] = [];
+
+  const addReference = (reference: PlainFileReference) => {
+    const resolved = resolveLinkablePlainFileReference(reference, options);
+    if (!resolved) {
+      return;
+    }
+
+    const key = normalizePathForCompare(stripLocalFileLineSuffix(resolved.path));
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    results.push(resolved);
+  };
+
+  for (const reference of parsePlainFileReferences(text)) {
+    addReference(reference);
+  }
+
+  for (const match of text.matchAll(/\[([^\]]*)\]\(([^)]+)\)/g)) {
+    const href = match[2]?.trim();
+    if (!href) {
+      continue;
+    }
+
+    const path = normalizeLocalMarkdownHref(href);
+    if (!path) {
+      continue;
+    }
+
+    addReference({
+      start: 0,
+      end: 0,
+      label: match[1] || getFileName(path),
+      path,
+    });
+  }
+
+  return results;
+}
+
 export function parsePlainFileReferences(text: string): PlainFileReference[] {
   const references: PlainFileReference[] = [];
 

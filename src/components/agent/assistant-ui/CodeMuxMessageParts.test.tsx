@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { useSubagentStore } from '../../../stores/subagentStore';
+import { usePreviewStore } from '../../../stores/previewStore';
 import { getKnownSidecarErrorDisplay, getStreamStatusDisplay } from './CodeMuxMessageParts';
 import { CodeMuxDataMessagePart, CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
 
@@ -407,6 +408,73 @@ describe('CodeMuxToolCallMessagePart', () => {
 describe('CodeMuxDataMessagePart', () => {
   beforeEach(() => {
     cleanup();
+    usePreviewStore.setState({
+      treeRoot: [{
+        name: 'docs',
+        path: 'D:/project/ai-code/codeMUX/docs',
+        isDir: true,
+        children: [
+          {
+            name: 'feature.md',
+            path: 'D:/project/ai-code/codeMUX/docs/feature.md',
+            isDir: false,
+          },
+        ],
+      }],
+      treeRootPath: 'D:/project/ai-code/codeMUX',
+      projectPath: 'D:/project/ai-code/codeMUX',
+    });
+  });
+
+  it('在产物卡片上方仅列出正文里提到的 Markdown 文件', () => {
+    renderWithTooltip(
+      <CodeMuxDataMessagePart
+        name="codemux-event"
+        messageText="已写入 `docs/feature.md`"
+        data={{
+          eventKind: 'session_summary',
+          event: {
+            kind: 'session_summary',
+            data: {
+              type: 'system',
+              subtype: 'session_summary',
+              diffs: [{ file: 'src/App.tsx', additions: 1, deletions: 0 }],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('referenced-markdown-files')).toBeTruthy();
+    expect(screen.getByText('feature.md')).toBeTruthy();
+    expect(screen.getByText('文档 · MD')).toBeTruthy();
+    expect(screen.getByText('1 个文件已更改')).toBeTruthy();
+  });
+
+  it('正文未提到 md 文件时不展示 Markdown 列表，即使改动产物里有 md', () => {
+    renderWithTooltip(
+      <CodeMuxDataMessagePart
+        name="codemux-event"
+        messageText="已按 spec 完成修订。"
+        data={{
+          eventKind: 'session_summary',
+          event: {
+            kind: 'session_summary',
+            data: {
+              type: 'system',
+              subtype: 'session_summary',
+              diffs: [
+                { file: 'MEMORY.md', additions: 1, deletions: 0 },
+                { file: 'docs/design.md', additions: 2, deletions: 1 },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('referenced-markdown-files')).toBeNull();
+    expect(screen.getByText('2 个文件已更改')).toBeTruthy();
   });
 
   it('把 Claude 空闲超时的 sidecar 错误展示成中文提示', () => {
