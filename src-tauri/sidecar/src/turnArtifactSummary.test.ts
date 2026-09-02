@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   TurnArtifactAggregator,
-  isArtifactPathInWorkspace,
   synthesizeTurnArtifactSummaries,
 } from './turnArtifactSummary.js';
 
@@ -315,42 +314,6 @@ describe('TurnArtifactAggregator', () => {
     })]);
   });
 
-  it('ignores writes outside the workspace cwd', () => {
-    const aggregator = new TurnArtifactAggregator(CWD);
-    aggregator.observe({
-      type: 'tool_started',
-      tool_use_id: 'write-1',
-      name: 'Write',
-      input: { file_path: 'D:/other/project/outside.ts', content: 'export {}\n' },
-    });
-    aggregator.observe({
-      type: 'tool_finished',
-      tool_use_id: 'write-1',
-      is_error: false,
-      content: 'ok',
-    });
-
-    expect(aggregator.flushSummary('session-1')).toBeNull();
-  });
-
-  it('ignores relative paths that escape the workspace cwd', () => {
-    const aggregator = new TurnArtifactAggregator(CWD);
-    aggregator.observe({
-      type: 'tool_started',
-      tool_use_id: 'write-1',
-      name: 'Write',
-      input: { file_path: '../outside.ts', content: 'export {}\n' },
-    });
-    aggregator.observe({
-      type: 'tool_finished',
-      tool_use_id: 'write-1',
-      is_error: false,
-      content: 'ok',
-    });
-
-    expect(aggregator.buildDiffs()).toEqual([]);
-  });
-
   it('ignores non-mutation tools', () => {
     const aggregator = new TurnArtifactAggregator(CWD);
     aggregator.observe({
@@ -403,17 +366,5 @@ describe('synthesizeTurnArtifactSummaries', () => {
     const turnFinishedIndex = events.findIndex((event) => event.type === 'turn_finished');
     expect(summaryIndex).toBeGreaterThanOrEqual(0);
     expect(summaryIndex).toBeLessThan(turnFinishedIndex);
-  });
-});
-
-describe('isArtifactPathInWorkspace', () => {
-  it('accepts relative paths inside the cwd', () => {
-    expect(isArtifactPathInWorkspace(CWD, 'src/app.ts')).toBe(true);
-    expect(isArtifactPathInWorkspace(CWD, `${CWD}/src/app.ts`)).toBe(true);
-  });
-
-  it('rejects paths outside the cwd', () => {
-    expect(isArtifactPathInWorkspace(CWD, 'D:/other/project/outside.ts')).toBe(false);
-    expect(isArtifactPathInWorkspace(CWD, '../outside.ts')).toBe(false);
   });
 });

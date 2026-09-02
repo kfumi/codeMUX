@@ -31,7 +31,7 @@ import {
 import { setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
-import { isMutationTool, isArtifactPathInWorkspace, TurnArtifactAggregator } from './turnArtifactSummary.js';
+import { isMutationTool, TurnArtifactAggregator } from './turnArtifactSummary.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -994,7 +994,6 @@ export class OpenCodeRuntime {
       ? filePath
       : path.join(this.config.cwd, filePath);
     const normalizedPath = absolutePath.replace(/\\/g, '/');
-    if (!isArtifactPathInWorkspace(this.config.cwd, normalizedPath)) return null;
 
     try {
       const original = fs.readFileSync(absolutePath, 'utf-8');

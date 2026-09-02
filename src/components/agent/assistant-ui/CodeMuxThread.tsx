@@ -102,7 +102,7 @@ const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
-const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-3';
+const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
 const ASK_USER_QUESTION_TOOL_NAMES = new Set([
   'AskUserQuestion',
   'askUserQuestion',

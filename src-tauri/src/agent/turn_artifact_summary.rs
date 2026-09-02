@@ -213,7 +213,7 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                     PendingTool::Write { file_path, content } => {
                         let resolved = resolve_path(cwd, &file_path);
                         let before = snapshot_content(&snapshots, &snapshots_by_tool, &file_path, Some(&tool_use_id));
-                        if let Some(entry) = finalize_diff_entry(cwd, resolved.clone(), before, content, None) {
+                        if let Some(entry) = finalize_diff_entry(resolved.clone(), before, content, None) {
                             files.insert(resolved, entry);
                         }
                     }
@@ -245,7 +245,7 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                             applied = true;
                         }
                         if applied {
-                            if let Some(entry) = finalize_diff_entry(cwd, resolved.clone(), before, after, None) {
+                            if let Some(entry) = finalize_diff_entry(resolved.clone(), before, after, None) {
                                 files.insert(resolved, entry);
                             }
                         }
@@ -320,31 +320,6 @@ fn resolve_path(cwd: &str, raw_path: &str) -> String {
     )
 }
 
-fn normalize_path_key(path: &str) -> String {
-    let mut normalized = path.replace('\\', "/");
-    while normalized.ends_with('/') && normalized.len() > 1 {
-        normalized.pop();
-    }
-    #[cfg(windows)]
-    {
-        normalized = normalized.to_ascii_lowercase();
-    }
-    normalized
-}
-
-fn is_path_in_workspace(cwd: &str, file_path: &str) -> bool {
-    if cwd.trim().is_empty() || file_path.trim().is_empty() {
-        return false;
-    }
-    let resolved = resolve_path(cwd, file_path);
-    let cwd_key = normalize_path_key(cwd);
-    let file_key = normalize_path_key(&resolved);
-    if file_key == cwd_key {
-        return true;
-    }
-    file_key.starts_with(&format!("{}/", cwd_key))
-}
-
 fn count_diff_lines(old_content: &str, new_content: &str) -> (u64, u64) {
     let diff = TextDiff::from_lines(old_content, new_content);
     let mut additions = 0;
@@ -360,15 +335,11 @@ fn count_diff_lines(old_content: &str, new_content: &str) -> (u64, u64) {
 }
 
 fn finalize_diff_entry(
-    cwd: &str,
     file: String,
     before: String,
     after: String,
     patch: Option<String>,
 ) -> Option<Value> {
-    if !is_path_in_workspace(cwd, &file) {
-        return None;
-    }
     let (additions, deletions) = count_diff_lines(&before, &after);
     if additions == 0 && deletions == 0 {
         return None;
@@ -439,9 +410,6 @@ fn extract_patch_changes(input: &Value) -> Option<Vec<Value>> {
 fn diff_from_change(cwd: &str, change: &Value) -> Option<Value> {
     let path = read_string(change, "path")?;
     let file = resolve_path(cwd, &path);
-    if !is_path_in_workspace(cwd, &file) {
-        return None;
-    }
     let diff = read_string(change, "diff").unwrap_or_default();
     if diff.is_empty() {
         return None;
@@ -510,10 +478,6 @@ fn diffs_from_freeform_patch(cwd: &str, patch_text: &str) -> Vec<Value> {
             return;
         };
         let file = resolve_path(cwd, &path);
-        if !is_path_in_workspace(cwd, &file) {
-            lines.clear();
-            return;
-        }
         let mut before_lines = Vec::new();
         let mut after_lines = Vec::new();
         for line in lines.iter() {
@@ -737,47 +701,5 @@ mod tests {
         );
         assert_eq!(diffs[0].get("additions").and_then(Value::as_u64), Some(1));
         assert_eq!(diffs[0].get("deletions").and_then(Value::as_u64), Some(1));
-    }
-
-    #[test]
-    fn ignores_files_outside_workspace_cwd() {
-        let mut events = vec![
-            json!({
-                "type": "system_event",
-                "subtype": "init",
-                "session_id": "session-1",
-                "cwd": "D:/project/demo",
-            }),
-            json!({
-                "type": "user_message",
-                "session_id": "session-1",
-                "content": "write outside file",
-            }),
-            json!({
-                "type": "tool_started",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "name": "Write",
-                "input": {
-                    "file_path": "D:/other/project/outside.ts",
-                    "content": "export {}\n",
-                },
-            }),
-            json!({
-                "type": "tool_finished",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "is_error": false,
-                "content": "Success",
-            }),
-            json!({
-                "type": "turn_finished",
-                "session_id": "session-1",
-                "outcome": "completed",
-            }),
-        ];
-
-        inject_turn_artifact_summaries(&mut events);
-        assert_eq!(super::count_session_summaries(&events), 0);
     }
 }

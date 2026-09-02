@@ -29,7 +29,6 @@ type PendingApplyPatch = {
 };
 
 import { countDiffLines } from './diffStats.js';
-import path from 'node:path';
 
 const MUTATION_TOOLS = new Set(['write', 'edit', 'apply_patch']);
 
@@ -130,16 +129,6 @@ export function resolveArtifactPath(cwd: string, rawPath: string): string {
   }
   const base = cwd.replace(/\\/g, '/').replace(/\/$/, '');
   return `${base}/${trimmed.replace(/\\/g, '/')}`;
-}
-
-export function isArtifactPathInWorkspace(cwd: string, filePath: string): boolean {
-  if (!cwd.trim() || !filePath.trim()) return false;
-  const resolvedCwd = path.resolve(cwd);
-  const resolvedFile = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(resolvedCwd, filePath);
-  const relative = path.relative(resolvedCwd, resolvedFile);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function readString(value: unknown): string | undefined {
@@ -345,11 +334,6 @@ export class TurnArtifactAggregator {
 
   constructor(private readonly cwd: string) {}
 
-  private trackDiffEntry(entry: SessionSummaryDiff | null): void {
-    if (!entry || !isArtifactPathInWorkspace(this.cwd, entry.file)) return;
-    this.files.set(entry.file, entry);
-  }
-
   observe(event: Record<string, unknown>): void {
     switch (event.type) {
       case 'file_snapshot':
@@ -373,7 +357,9 @@ export class TurnArtifactAggregator {
     for (const change of changes) {
       const entry = diffEntryFromChange(this.cwd, change);
       const finalized = entry ? finalizeDiffEntry(entry) : null;
-      this.trackDiffEntry(finalized);
+      if (finalized) {
+        this.files.set(finalized.file, finalized);
+      }
     }
     this.pendingApplyPatch.delete(toolUseId);
   }
@@ -411,7 +397,6 @@ export class TurnArtifactAggregator {
       toolUseId: readString(event.tool_use_id),
     };
     const normalized = resolveArtifactPath(this.cwd, filePath);
-    if (!isArtifactPathInWorkspace(this.cwd, normalized)) return;
     if (!this.snapshots.has(normalized)) {
       this.snapshots.set(normalized, snapshot);
     }
@@ -441,7 +426,7 @@ export class TurnArtifactAggregator {
     }
 
     const filePath = readFilePath(input);
-    if (!filePath || !isArtifactPathInWorkspace(this.cwd, resolveArtifactPath(this.cwd, filePath))) return;
+    if (!filePath) return;
 
     if (normalized === 'write') {
       const content = readString(input.content);
@@ -478,7 +463,9 @@ export class TurnArtifactAggregator {
       if (pendingPatch.patchText) {
         for (const entry of diffEntryFromFreeformPatch(this.cwd, pendingPatch.patchText)) {
           const finalized = finalizeDiffEntry(entry);
-          this.trackDiffEntry(finalized);
+          if (finalized) {
+            this.files.set(finalized.file, finalized);
+          }
         }
         this.pendingApplyPatch.delete(toolUseId);
       }
@@ -495,7 +482,9 @@ export class TurnArtifactAggregator {
       const after = pending.content ?? '';
       const before = snapshot?.content ?? '';
       const entry = finalizeDiffEntry({ file: resolvedPath, before, after });
-      this.trackDiffEntry(entry);
+      if (entry) {
+        this.files.set(resolvedPath, entry);
+      }
     } else {
       const snapshotContent = snapshot?.content ?? '';
       let before = snapshotContent;
@@ -521,7 +510,9 @@ export class TurnArtifactAggregator {
         return;
       }
       const entry = finalizeDiffEntry({ file: resolvedPath, before, after });
-      this.trackDiffEntry(entry);
+      if (entry) {
+        this.files.set(resolvedPath, entry);
+      }
     }
 
     this.pendingWriteEdit.delete(toolUseId);
