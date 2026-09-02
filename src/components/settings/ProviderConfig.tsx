@@ -885,9 +885,6 @@ export function ProviderConfigPanel() {
                   }
                   placeholder="https://api.example.com/v1"
                 />
-                <span className="text-xs text-muted-foreground">
-                  Codex 直连 Responses 接口（如智谱 /api/v1）；配置后 Codex 不再使用兼容代理
-                </span>
               </div>
               <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
                 <div>
