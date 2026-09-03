@@ -19,6 +19,7 @@ use crate::agent::commands::{
 use crate::agent::history_events::normalize_history_events;
 use crate::agent::opencode_history;
 use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
+use crate::agent::pi_history::{convert_pi_history_values_to_events, pi_native_sessions_root};
 use crate::agent::turn_artifact_summary::{
     backfill_turn_artifact_summaries, supports_turn_artifact_summary_backfill,
 };
@@ -728,6 +729,9 @@ fn discover_all(
     if agent_kind.is_none() || agent_kind == Some(AgentKind::Opencode) {
         snapshots.extend(discover_opencode(home));
     }
+    if agent_kind.is_none() || agent_kind == Some(AgentKind::Pi) {
+        snapshots.extend(discover_pi(home));
+    }
     snapshots.sort_by(|left, right| right.candidate.updated_at.cmp(&left.candidate.updated_at));
     Ok(snapshots)
 }
@@ -835,6 +839,52 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
                 path.clone(),
                 events,
                 None,
+            ))
+        })
+        .collect()
+}
+
+fn discover_pi(home: &Path) -> Vec<DiscoveredSnapshot> {
+    discover_pi_in_root(&pi_native_sessions_root(home))
+}
+
+/// pi 存量会话发现：扫描用户原生 pi CLI 的会话目录（`~/.pi/agent/sessions/`，
+/// 路径解析对齐 pi 自身规则，见 `pi_native_sessions_root`）。严格校验
+/// `type:"session"` 头，非会话 JSONL 直接跳过（宁漏勿错）；树形会话只取活动
+/// 分支链（`convert_pi_history_values_to_events` 内处理）。pi 的 native
+/// mapping 是会话文件绝对路径（`--session <file>` 恢复语义）。
+fn discover_pi_in_root(root: &Path) -> Vec<DiscoveredSnapshot> {
+    let mut files = Vec::new();
+    collect_jsonl_files(root, &mut files);
+    files
+        .into_iter()
+        .filter_map(|path| {
+            let (raw, malformed) = read_jsonl_values(&path).ok()?;
+            let header = raw
+                .iter()
+                .find(|value| value.get("type").and_then(Value::as_str) == Some("session"))?;
+            let pi_session_id = header.get("id").and_then(Value::as_str)?;
+            let cwd = header
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let mut events = convert_pi_history_values_to_events(&raw, pi_session_id);
+            if let Some(cwd) = cwd {
+                for event in &mut events {
+                    if let Some(object) = event.as_object_mut() {
+                        object.insert("cwd".to_string(), Value::String(cwd.clone()));
+                    }
+                }
+            }
+            if events.is_empty() {
+                return None;
+            }
+            Some(build_snapshot(
+                AgentKind::Pi,
+                path.display().to_string(),
+                path,
+                events,
+                malformed.then(|| "部分 JSONL 记录无法解析".to_string()),
             ))
         })
         .collect()
@@ -1140,6 +1190,48 @@ mod tests {
             .events
             .iter()
             .any(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished")));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn discovers_pi_native_sessions_and_skips_foreign_jsonl() {
+        let home = test_home("pi");
+        let pi_dir = home.join(".pi/agent/sessions/--C--demo--");
+        fs::create_dir_all(&pi_dir).unwrap();
+        let session_file = pi_dir.join("20260903_ab12cd34.jsonl");
+        fs::write(
+            &session_file,
+            concat!(
+                "{\"type\":\"session\",\"version\":3,\"id\":\"pi-uuid-1\",\"timestamp\":\"2026-09-03T08:00:00.000Z\",\"cwd\":\"C:/demo\"}\n",
+                "{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-09-03T08:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"帮我导入会话\"}]}}\n",
+                "{\"type\":\"message\",\"id\":\"a1\",\"parentId\":\"u1\",\"timestamp\":\"2026-09-03T08:00:06.000Z\",\"message\":{\"role\":\"assistant\",\"stopReason\":\"stop\",\"content\":[{\"type\":\"text\",\"text\":\"好的\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        // 非 pi 会话 JSONL（无 session 头）：跳过，宁漏勿错。
+        fs::write(pi_dir.join("notes.jsonl"), "{\"type\":\"log\",\"x\":1}\n").unwrap();
+
+        let snapshots = discover_pi_in_root(&home.join(".pi/agent/sessions"));
+        assert_eq!(snapshots.len(), 1);
+        let candidate = &snapshots[0].candidate;
+        assert_eq!(candidate.agent_kind.as_str(), "pi");
+        assert_eq!(
+            Path::new(&candidate.agent_session_id),
+            session_file,
+            "pi mapping 是会话文件绝对路径"
+        );
+        assert_eq!(candidate.cwd.as_deref(), Some("C:/demo"));
+        assert!(candidate.title.contains("帮我导入会话"));
+        assert!(candidate.warnings.is_empty());
+        assert!(snapshots[0]
+            .events
+            .iter()
+            .any(|event| event.get("type").and_then(Value::as_str) == Some("user_message")));
+        assert!(snapshots[0]
+            .events
+            .iter()
+            .all(|event| event.get("cwd").and_then(Value::as_str) == Some("C:/demo")));
 
         let _ = fs::remove_dir_all(home);
     }

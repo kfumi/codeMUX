@@ -111,7 +111,7 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
 
 ## Out of Scope
 
-- **`~/.pi` 存量会话导入**（二期）：格式已调研（JSONL，首行 `type:"session"` 头，`message`/`model_change`/`thinking_level_change` 条目；路径受 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 及 settings.json `sessionDir` 影响），实施时按现有按 kind 历史导入模式追加。
+- **`~/.pi` 存量会话导入**（二期，已完成 2026-09-03：见 issues/08）：格式已调研（JSONL，首行 `type:"session"` 头，`message`/`model_change`/`thinking_level_change` 条目；路径受 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 及 settings.json `sessionDir` 影响），实施时按现有按 kind 历史导入模式追加。
 - **审批 / ask-user**：不实现 `extension_ui_request` 桥接；pi 会话无 Interactive Request。
 - **自研 pi 扩展**：不生成临时扩展（system prompt 注入、会话树条目捕获、自定义扩展命令均不做）。
 - **会话树 rewind / fork-to-entry**：不接 `fork`/`get_tree`/`navigateTree`；文件快照 rewind 本就不支持。

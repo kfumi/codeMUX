@@ -1,6 +1,7 @@
-//! pi native history: load CodeMUX-managed session JSONL and convert to timeline events.
+//! pi native history: load pi session JSONL and convert to timeline events.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use log::{debug, info};
 use serde_json::{json, Value};
@@ -18,7 +19,7 @@ pub(crate) fn convert_pi_history_values_to_events(
 ) -> Vec<Value> {
     let mut intermediate = Vec::new();
 
-    for raw in raw_events {
+    for raw in select_pi_active_chain(raw_events) {
         let Some(entry_type) = raw.get("type").and_then(Value::as_str) else {
             continue;
         };
@@ -28,6 +29,20 @@ pub(crate) fn convert_pi_history_values_to_events(
                 if let Some(converted) = convert_pi_message_entry(raw) {
                     intermediate.push(converted);
                 }
+            }
+            "compaction" => {
+                // pi 会话文件落盘的是 compaction 树条目（SessionEntryBase，带
+                // timestamp/summary）；compaction_start/end 只是运行时事件不写文件。
+                let mut boundary = json!({
+                    "type": "system",
+                    "subtype": "compact_boundary",
+                    "content": "Conversation compacted",
+                    "compact_metadata": { "trigger": "auto" },
+                });
+                if let Some(timestamp) = raw.get("timestamp") {
+                    boundary["timestamp"] = timestamp.clone();
+                }
+                intermediate.push(boundary);
             }
             "compaction_end" if raw.get("aborted").and_then(Value::as_bool) != Some(true) => {
                 let reason = raw.get("reason").and_then(Value::as_str).unwrap_or("auto");
@@ -46,6 +61,63 @@ pub(crate) fn convert_pi_history_values_to_events(
 
     let normalized = normalize_history_events(intermediate, app_session_id);
     inject_pi_turn_boundaries(normalized)
+}
+
+/// pi 会话文件是 `id`/`parentId` 树（`/tree` 分支后文件包含所有分支的条目），
+/// 真正的"当前对话"是活动叶子到根的链。仅在条目实际使用 parentId 链接时按链
+/// 选取（返回链上条目）；线性文件（无 parentId，含 v1 旧格式）或链损坏/成环
+/// 时返回 None 走全量线性转换，宁可交错也不丢条目。
+fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
+    let uses_parent_links = raw_events.iter().any(|entry| {
+        entry
+            .get("parentId")
+            .and_then(Value::as_str)
+            .is_some_and(|parent| !parent.is_empty())
+    });
+    if !uses_parent_links {
+        return raw_events.iter().collect();
+    }
+
+    let id_to_index: HashMap<&str, usize> = raw_events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(|id| (id, index))
+        })
+        .collect();
+    let Some(mut cursor) = raw_events
+        .iter()
+        .rposition(|entry| entry.get("id").and_then(Value::as_str).is_some())
+    else {
+        return raw_events.iter().collect();
+    };
+
+    let mut chain = vec![cursor];
+    let mut visited: HashSet<usize> = HashSet::from([cursor]);
+    loop {
+        let parent = raw_events[cursor]
+            .get("parentId")
+            .and_then(Value::as_str)
+            .filter(|parent| !parent.is_empty());
+        let Some(parent) = parent else {
+            break; // 到根，链完整
+        };
+        let Some(parent_index) = id_to_index.get(parent) else {
+            return raw_events.iter().collect(); // 父条目缺失，回退线性
+        };
+        if !visited.insert(*parent_index) {
+            return raw_events.iter().collect(); // 成环，回退线性
+        }
+        chain.push(*parent_index);
+        cursor = *parent_index;
+    }
+
+    chain.reverse();
+    chain.into_iter().map(|index| &raw_events[index]).collect()
 }
 
 /// Pi JSONL records one assistant `message` per speak/tool step. A single user
@@ -401,6 +473,71 @@ pub(crate) async fn load_pi_session_events_internal(
     load_pi_session_events(state, app_session_id.to_string()).await
 }
 
+/// 用户原生 pi CLI 的会话根目录（与 CodeMUX 托管目录 `<数据根>/pi-agent` 无关），
+/// 解析顺序对齐 pi `config.js`/`main.js`：`PI_CODING_AGENT_SESSION_DIR` env →
+/// `<agentDir>/settings.json` 的 `sessionDir` → `<agentDir>/sessions`；
+/// agentDir 为 `PI_CODING_AGENT_DIR` env → `~/.pi/agent`。env/settings 里的
+/// 相对路径依赖 pi 启动时的 cwd，无法在此复现，跳过走默认（宁漏勿错）。
+pub(crate) fn pi_native_sessions_root(home: &Path) -> PathBuf {
+    let session_dir_env = std::env::var("PI_CODING_AGENT_SESSION_DIR").ok();
+    let agent_dir_env = std::env::var("PI_CODING_AGENT_DIR").ok();
+    let agent_dir = pi_native_agent_dir(home, agent_dir_env.as_deref());
+    let settings_session_dir = read_pi_native_settings_session_dir(&agent_dir);
+    resolve_pi_native_sessions_root(
+        home,
+        session_dir_env.as_deref(),
+        agent_dir_env.as_deref(),
+        settings_session_dir.as_deref(),
+    )
+}
+
+fn pi_native_agent_dir(home: &Path, agent_dir_env: Option<&str>) -> PathBuf {
+    match agent_dir_env.map(|dir| expand_tilde(home, dir)) {
+        Some(dir) => dir,
+        None => home.join(".pi").join("agent"),
+    }
+}
+
+fn resolve_pi_native_sessions_root(
+    home: &Path,
+    session_dir_env: Option<&str>,
+    agent_dir_env: Option<&str>,
+    settings_session_dir: Option<&str>,
+) -> PathBuf {
+    for candidate in [session_dir_env, settings_session_dir] {
+        if let Some(dir) = candidate.map(str::trim).filter(|dir| !dir.is_empty()) {
+            if is_discoverable_dir(dir) {
+                return expand_tilde(home, dir);
+            }
+        }
+    }
+    pi_native_agent_dir(home, agent_dir_env).join("sessions")
+}
+
+/// 仅接受绝对路径或 `~`/`~/` 前缀；相对路径依赖进程 cwd，跳过。
+fn is_discoverable_dir(value: &str) -> bool {
+    Path::new(value).is_absolute() || value == "~" || value.starts_with("~/")
+}
+
+fn expand_tilde(home: &Path, value: &str) -> PathBuf {
+    if value == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(value)
+    }
+}
+
+fn read_pi_native_settings_session_dir(agent_dir: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(agent_dir.join("settings.json")).ok()?;
+    let settings: Value = serde_json::from_str(&content).ok()?;
+    settings
+        .get("sessionDir")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,5 +838,144 @@ mod tests {
         assert_eq!(events[1]["type"], "assistant_message");
 
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn follows_active_branch_in_tree_sessions() {
+        // v3 树形会话：a1 → a2 是被放弃的分支，活动链是 a1 → b1 → b2。
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "session",
+                    "version": 3,
+                    "id": "sess-uuid",
+                    "timestamp": "2026-09-03T08:00:00.000Z",
+                    "cwd": "C:/workspace"
+                }),
+                json!({
+                    "type": "message", "id": "a1", "parentId": null,
+                    "timestamp": "2026-09-03T08:00:01.000Z",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "hello" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a2", "parentId": "a1",
+                    "timestamp": "2026-09-03T08:00:05.000Z",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "branch A answer" }] }
+                }),
+                json!({
+                    "type": "message", "id": "b1", "parentId": "a1",
+                    "timestamp": "2026-09-03T08:01:00.000Z",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "try B" }] }
+                }),
+                json!({
+                    "type": "message", "id": "b2", "parentId": "b1",
+                    "timestamp": "2026-09-03T08:01:05.000Z",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "branch B answer" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        let texts: Vec<&str> = events
+            .iter()
+            .filter(|event| event["type"] == "user_message" || event["type"] == "assistant_message")
+            .filter_map(|event| {
+                event["content"]
+                    .as_array()
+                    .and_then(|blocks| blocks.first())
+                    .and_then(|block| block["text"].as_str())
+                    .or_else(|| {
+                        event["message"]["content"]
+                            .as_array()
+                            .and_then(|blocks| blocks.first())
+                            .and_then(|block| block["text"].as_str())
+                    })
+            })
+            .collect();
+        assert_eq!(texts, vec!["hello", "try B", "branch B answer"]);
+        assert_eq!(events.last().unwrap()["type"], "turn_finished");
+    }
+
+    #[test]
+    fn falls_back_to_linear_when_parent_chain_is_broken() {
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message", "id": "a1", "parentId": null,
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "hello" }] }
+                }),
+                // parentId 指向不存在的条目：断链，回退全量线性。
+                json!({
+                    "type": "message", "id": "b1", "parentId": "missing",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "try B" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a2", "parentId": "b1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "answer" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        let serialized = serde_json::to_string(&events).unwrap();
+        assert!(serialized.contains("hello"));
+        assert!(serialized.contains("try B"));
+        assert!(serialized.contains("answer"));
+    }
+
+    #[test]
+    fn converts_persisted_compaction_entry_to_boundary() {
+        let events = convert_pi_history_values_to_events(
+            &[json!({
+                "type": "compaction",
+                "id": "c1",
+                "parentId": null,
+                "timestamp": "2026-09-03T09:00:00.000Z",
+                "summary": "earlier context",
+                "tokensBefore": 50000
+            })],
+            "app-1",
+        );
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "system_event");
+        assert_eq!(events[0]["subtype"], "compact_boundary");
+        assert_eq!(events[0]["compact_metadata"]["trigger"], "auto");
+        assert_eq!(events[0]["timestamp"], "2026-09-03T09:00:00.000Z");
+    }
+
+    #[test]
+    fn resolves_native_sessions_root_with_pi_precedence() {
+        let home = Path::new("/home/user");
+
+        // 默认：~/.pi/agent/sessions
+        assert_eq!(
+            resolve_pi_native_sessions_root(home, None, None, None),
+            home.join(".pi/agent/sessions")
+        );
+        // PI_CODING_AGENT_SESSION_DIR 优先，并展开 ~
+        assert_eq!(
+            resolve_pi_native_sessions_root(home, Some("~/sess"), Some("~/pihome"), None),
+            home.join("sess")
+        );
+        // settings.json sessionDir 次之（用 temp_dir 构造跨平台绝对路径）
+        let absolute = std::env::temp_dir().join("pi-sessions");
+        assert_eq!(
+            resolve_pi_native_sessions_root(home, None, None, Some(absolute.to_str().unwrap())),
+            absolute
+        );
+        // 相对路径依赖 pi 进程 cwd，跳过走默认
+        assert_eq!(
+            resolve_pi_native_sessions_root(home, Some("rel/dir"), None, Some("also/rel")),
+            home.join(".pi/agent/sessions")
+        );
+        // PI_CODING_AGENT_DIR 影响 agentDir 默认
+        assert_eq!(
+            resolve_pi_native_sessions_root(home, None, Some("~/pihome"), None),
+            home.join("pihome/sessions")
+        );
     }
 }
