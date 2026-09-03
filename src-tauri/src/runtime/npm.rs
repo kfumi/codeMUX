@@ -59,6 +59,7 @@ impl NpmRuntimeSpec {
                 format!("@opencode-ai/sdk@{}", version),
                 format!("opencode-ai@{}", version),
             ],
+            Provider::Pi => vec![format!("@mariozechner/pi@{}", version)],
         };
 
         let key_files = vec![
@@ -81,6 +82,7 @@ fn primary_package(provider: Provider) -> &'static str {
         Provider::ClaudeCode => "@anthropic-ai/claude-agent-sdk",
         Provider::Codex => "@openai/codex",
         Provider::OpenCode => "@opencode-ai/sdk",
+        Provider::Pi => "@mariozechner/pi",
     }
 }
 
@@ -151,6 +153,11 @@ fn candidate_binaries(provider: Provider) -> Vec<String> {
                 "opencode"
             };
             vec![format!("node_modules/opencode-ai/bin/{}", binary)]
+        }
+        // `@mariozechner/pi` 是纯 Node 包：bin 入口为 `dist/cli.js`（无平台二进制），
+        // 以该文件作为关键完整性凭证。运行时由 sidecar 以其自身 node 进程启动。
+        Provider::Pi => {
+            vec!["node_modules/@mariozechner/pi/dist/cli.js".to_string()]
         }
     }
 }
@@ -1136,6 +1143,21 @@ mod tests {
                 .unwrap()
                 .packages,
             vec!["@opencode-ai/sdk@1.18.3", "opencode-ai@1.18.3"]
+        );
+        assert_eq!(
+            NpmRuntimeSpec::for_version(Provider::Pi, "1.2.3")
+                .unwrap()
+                .packages,
+            vec!["@mariozechner/pi@1.2.3"]
+        );
+    }
+
+    #[test]
+    fn pi_runtime_key_binary_is_the_node_entry() {
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "1.2.3").unwrap();
+        assert_eq!(
+            spec.candidate_binaries,
+            vec!["node_modules/@mariozechner/pi/dist/cli.js"]
         );
     }
 

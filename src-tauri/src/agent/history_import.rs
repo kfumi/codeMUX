@@ -363,6 +363,8 @@ async fn load_native_session_events(
             crate::agent::commands::load_opencode_session_events(state, app_session_id.to_string())
                 .await
         }
+        // pi 会话时间线以 CodeMUX Event 快照为权威；原生会话导入为二期范围。
+        AgentKind::Pi => Ok(Vec::new()),
         AgentKind::GeminiCli => Ok(Vec::new()),
     }
 }
@@ -453,6 +455,7 @@ fn backfill_subagent_history(
         AgentKind::ClaudeCode => backfill_claude_subagent_history(conn, app_session_id),
         AgentKind::Codex => backfill_codex_subagent_history(conn, app_session_id),
         AgentKind::Opencode => backfill_opencode_subagent_history(conn, app_session_id),
+        AgentKind::Pi => Ok(0),
         AgentKind::GeminiCli => Ok(0),
     }
 }
@@ -998,6 +1001,7 @@ fn agent_label(kind: AgentKind) -> &'static str {
         AgentKind::ClaudeCode => "Claude Code",
         AgentKind::Codex => "Codex",
         AgentKind::Opencode => "OpenCode",
+        AgentKind::Pi => "pi",
         AgentKind::GeminiCli => "Gemini CLI",
     }
 }

@@ -46,6 +46,11 @@ export interface AgentConfigMap {
     permission_config?: OpenCodePermissionConfig;
     timeouts?: AgentTimeouts | null;
   };
+  pi: {
+    default_provider_id?: string | null;
+    default_model?: string;
+    timeouts?: AgentTimeouts | null;
+  };
 }
 
 export type AgentConfigUpdateMap = {
@@ -53,6 +58,7 @@ export type AgentConfigUpdateMap = {
   codex: Partial<AgentConfigMap['codex']>;
   gemini_cli: Partial<AgentConfigMap['gemini_cli']>;
   opencode: Partial<AgentConfigMap['opencode']>;
+  pi: Partial<AgentConfigMap['pi']>;
 };
 
 export type Protocol = 'anthropic' | 'openai_compatible' | 'openai_responses';

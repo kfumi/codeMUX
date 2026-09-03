@@ -150,6 +150,7 @@ fn source_directories(agent_kind: AgentKind) -> &'static [(&'static str, &'stati
         AgentKind::ClaudeCode => &[(".claude", ".claude/skills")],
         AgentKind::Codex => &[(".agents", ".agents/skills")],
         AgentKind::GeminiCli => &[],
+        AgentKind::Pi => &[],
         AgentKind::Opencode => &[
             (".opencode", ".opencode/skills"),
             (".claude", ".claude/skills"),

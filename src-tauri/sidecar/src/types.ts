@@ -3,9 +3,11 @@ import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import type { TurnTimeouts } from './turnTimeouts.js';
 
-export type RuntimeFlavor = 'claude' | 'codex' | 'opencode';
+export type RuntimeFlavor = 'claude' | 'codex' | 'opencode' | 'pi';
 
 export type OpenCodeCredentialSource = 'codemux' | 'environment' | 'opencode' | 'none';
+
+export type PiCredentialSource = 'codemux' | 'environment' | 'none';
 
 export interface SidecarModelLimits {
   contextWindow?: number;
@@ -31,6 +33,27 @@ export interface OpenCodeSessionConfig {
 }
 
 export interface OpenCodeSessionMapping {
+  sessionId: string;
+  agentSessionId: string;
+  runtimeGeneration: number;
+}
+
+export interface PiSessionConfig {
+  cwd: string;
+  sessionId: string;
+  /** pi 会话文件绝对路径（Native Session mapping），存在时以 `--session` 恢复。 */
+  agentSessionId?: string;
+  runtimeGeneration: number;
+  provider?: string;
+  model?: string;
+  credentialSource: PiCredentialSource;
+  apiKey?: string;
+  baseUrl?: string;
+  /** 外部托管 Runtime 引用。 */
+  runtimeRef?: ProviderRuntimeRef;
+}
+
+export interface PiSessionMapping {
   sessionId: string;
   agentSessionId: string;
   runtimeGeneration: number;

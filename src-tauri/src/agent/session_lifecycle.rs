@@ -105,6 +105,7 @@ fn agent_timeouts(
         AgentKind::ClaudeCode => config.agent_configs.claude_code.timeouts.clone(),
         AgentKind::Codex => config.agent_configs.codex.timeouts.clone(),
         AgentKind::Opencode => config.agent_configs.opencode.timeouts.clone(),
+        AgentKind::Pi => config.agent_configs.pi.timeouts.clone(),
         AgentKind::GeminiCli => None,
     }
 }
@@ -190,6 +191,7 @@ fn resolve_active_runtime_config(
             AgentKind::Codex => {
                 "缺少可用的 OpenAI Responses 或 OpenAI 兼容端点 / API Key / 默认模型"
             }
+            AgentKind::Pi => "缺少可用的 Anthropic 或 OpenAI 兼容端点 / API Key / 默认模型",
             AgentKind::GeminiCli => "暂不支持 Model Provider 运行时注入",
         };
         return Err(format!(
@@ -293,6 +295,15 @@ fn resolve_active_runtime_config(
             ),
             Some("codemux".to_string()),
         ),
+        // pi 的供应商命名空间跟随所选端点协议：Anthropic 端点 → `anthropic`
+        // （ANTHROPIC_* 环境变量），OpenAI 兼容端点 → `openai`（OPENAI_*）。
+        AgentKind::Pi => {
+            let provider_key = match endpoint.protocol {
+                Protocol::Anthropic => "anthropic",
+                _ => "openai",
+            };
+            (Some(provider_key.to_string()), Some("codemux".to_string()))
+        }
         _ => (None, None),
     };
 
@@ -900,7 +911,7 @@ pub(crate) fn build_ensure_session_command(
         cmd["resumeOnly"] = serde_json::Value::Bool(true);
     }
 
-    if agent_kind == "opencode" {
+    if agent_kind == "opencode" || agent_kind == "pi" {
         if let Some(generation) = runtime_generation {
             cmd["runtimeGeneration"] = serde_json::json!(generation);
         }
@@ -975,6 +986,7 @@ pub(crate) fn build_ensure_session_command(
         "codex" => "codex",
         "gemini_cli" => "gemini",
         "opencode" => "opencode",
+        "pi" => "pi",
         _ => "claude",
     };
     let mut enabled_skills = {
@@ -1229,7 +1241,7 @@ fn resolve_agent_session_info(
         AgentKind::Codex => {
             find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
         }
-        AgentKind::GeminiCli | AgentKind::Opencode => None,
+        AgentKind::GeminiCli | AgentKind::Opencode | AgentKind::Pi => None,
     }
     .map(|path| path.to_string_lossy().to_string());
 
@@ -1258,7 +1270,7 @@ fn load_latest_token_usage_for_agent_session(
         AgentKind::Codex => {
             find_codex_session_jsonl(&home.join(".codex").join("sessions"), agent_session_id)
         }
-        AgentKind::GeminiCli | AgentKind::Opencode => None,
+        AgentKind::GeminiCli | AgentKind::Opencode | AgentKind::Pi => None,
     };
     let Some(history_path) = history_path else {
         return Ok(None);
@@ -1268,7 +1280,7 @@ fn load_latest_token_usage_for_agent_session(
     let snapshot = match agent_kind {
         AgentKind::ClaudeCode => latest_claude_usage_from_values(&values, freshness),
         AgentKind::Codex => latest_codex_usage_from_values(&values, freshness),
-        AgentKind::GeminiCli | AgentKind::Opencode => None,
+        AgentKind::GeminiCli | AgentKind::Opencode | AgentKind::Pi => None,
     };
 
     Ok(snapshot)

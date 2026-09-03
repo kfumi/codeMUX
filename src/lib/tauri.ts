@@ -790,7 +790,7 @@ export interface AgentRuntimeUpgradeResult {
 // ----------------------------------------------------------------------------
 
 /** CodeMUX 托管的 Provider Runtime 种类。 */
-export type RuntimeProvider = 'claude_code' | 'codex' | 'opencode';
+export type RuntimeProvider = 'claude_code' | 'codex' | 'opencode' | 'pi';
 
 /** 目标平台。 */
 export type RuntimePlatform = 'windows' | 'macos' | 'linux';

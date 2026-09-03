@@ -68,7 +68,8 @@ function normalizeCreateSessionArgs(
     agentKindOrMode === 'claude_code' ||
     agentKindOrMode === 'codex' ||
     agentKindOrMode === 'gemini_cli' ||
-    agentKindOrMode === 'opencode'
+    agentKindOrMode === 'opencode' ||
+    agentKindOrMode === 'pi'
   ) {
     return [title, agentKindOrMode, modeOrProjectId as SessionMode | undefined, projectId, permissionConfig, planMode];
   }

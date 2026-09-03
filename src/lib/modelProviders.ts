@@ -8,6 +8,9 @@ export function requiredProtocol(agentKind: AgentKind): Protocol | null {
     case 'codex':
     case 'opencode':
       return 'openai_compatible';
+    // pi 双协议可用：Anthropic 优先、OpenAI 兼容兜底（与 Rust 侧一致）。
+    case 'pi':
+      return 'anthropic';
     default:
       return null;
   }
@@ -31,11 +34,17 @@ export function codexEndpoint(provider: ModelProvider): ProtocolEndpoint | null 
   );
 }
 
+/** pi 优先 Anthropic 端点（ANTHROPIC_* 凭据注入），回退 OpenAI 兼容端点。 */
+export function piEndpoint(provider: ModelProvider): ProtocolEndpoint | null {
+  return selectEndpoint(provider, 'anthropic') ?? selectEndpoint(provider, 'openai_compatible');
+}
+
 export function agentEndpoint(
   provider: ModelProvider,
   agentKind: AgentKind,
 ): ProtocolEndpoint | null {
   if (agentKind === 'codex') return codexEndpoint(provider);
+  if (agentKind === 'pi') return piEndpoint(provider);
   const protocol = requiredProtocol(agentKind);
   return protocol ? selectEndpoint(provider, protocol) : null;
 }
@@ -66,6 +75,7 @@ export function providerUnusableReason(
   if (!endpoint) {
     if (agentKind === 'claude_code') return '缺少 Anthropic 端点';
     if (agentKind === 'opencode') return '缺少 OpenAI 兼容端点';
+    if (agentKind === 'pi') return '缺少 Anthropic 或 OpenAI 兼容端点';
     return '缺少 OpenAI Responses 或 OpenAI 兼容端点';
   }
   if (!effectiveApiKey(provider, endpoint)) return '未配置 API Key';

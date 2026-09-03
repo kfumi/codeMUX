@@ -23,7 +23,8 @@ import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import { deleteOpenCodeSessionWithOfficialSdk, normalizeOpenCodeModelReference } from './opencodeSdk.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
-import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
+import { PiRuntime } from './piRuntime.js';
+import type { OpenCodeSessionConfig, OpenCodeSessionMapping, PiSessionConfig, PiSessionMapping } from './types.js';
 import {
   getRuntimeFlavor,
 } from './runtimeEvents.js';
@@ -102,6 +103,22 @@ export function buildOpenCodeSessionMappingEvent(mapping: OpenCodeSessionMapping
     type: 'agent_session_mapping',
     app_session_id: mapping.sessionId,
     agent_kind: 'opencode',
+    agent_session_id: mapping.agentSessionId,
+    runtime_generation: mapping.runtimeGeneration,
+  };
+}
+
+export function buildPiSessionMappingEvent(mapping: PiSessionMapping): {
+  type: 'agent_session_mapping';
+  app_session_id: string;
+  agent_kind: 'pi';
+  agent_session_id: string;
+  runtime_generation: number;
+} {
+  return {
+    type: 'agent_session_mapping',
+    app_session_id: mapping.sessionId,
+    agent_kind: 'pi',
     agent_session_id: mapping.agentSessionId,
     runtime_generation: mapping.runtimeGeneration,
   };
@@ -1694,6 +1711,7 @@ type SidecarCommandDispatcherOptions = {
   claudeRuntime: SidecarRuntime;
   codexRuntime: SidecarRuntime;
   createOpenCodeRuntime: (cmd: EnsureSessionCommand) => SidecarRuntime;
+  createPiRuntime: (cmd: EnsureSessionCommand) => SidecarRuntime;
   emit: (event: unknown) => void;
   startProxy?: (cmd: Extract<SidecarCommand, { type: 'start_proxy' }>) => Promise<unknown>;
   stopProxy: () => Promise<void>;
@@ -1706,7 +1724,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   let activeSessionId: string | undefined;
   let activeResumeOnly = false;
   let activeAgentSessionId: string | undefined;
-  let activeOpenCodeRuntime: SidecarRuntime | undefined;
+  let activeManagedRuntime: { flavor: 'opencode' | 'pi'; runtime: SidecarRuntime } | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
   const pendingPermissionResponses = new Map<SidecarRuntime, Map<string, Promise<void>>>();
 
@@ -1719,12 +1737,12 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     return message.includes('abort') || message.includes('the operation was aborted');
   };
 
-  const shutdownOpenCodeRuntime = async (): Promise<void> => {
-    const current = activeOpenCodeRuntime;
+  const shutdownManagedRuntime = async (): Promise<void> => {
+    const current = activeManagedRuntime;
     if (!current) return;
-    await current.shutdown();
-    if (activeOpenCodeRuntime === current) {
-      activeOpenCodeRuntime = undefined;
+    await current.runtime.shutdown();
+    if (activeManagedRuntime === current) {
+      activeManagedRuntime = undefined;
     }
   };
 
@@ -1734,42 +1752,42 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     activeSessionId = cmd.sessionId;
     activeResumeOnly = cmd.resumeOnly === true;
     activeAgentSessionId = cmd.agentSessionId;
-    if (flavor !== 'opencode') {
-      await shutdownOpenCodeRuntime();
+    if (flavor !== 'opencode' && flavor !== 'pi') {
+      await shutdownManagedRuntime();
       const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
       await selectedRuntime.ensure(cmd);
       return;
     }
 
-    const current = activeOpenCodeRuntime;
-    if (current?.canReuse?.(cmd)) {
+    const current = activeManagedRuntime;
+    if (current?.flavor === flavor && current.runtime.canReuse?.(cmd)) {
       process.stderr.write(
-        `[opencode-task] ensure_session REUSE sessionId=${cmd.sessionId ?? 'null'}\n`,
+        `[${flavor}-task] ensure_session REUSE sessionId=${cmd.sessionId ?? 'null'}\n`,
       );
-      await current.updatePermissions({
+      await current.runtime.updatePermissions({
         type: 'update_permissions',
         sessionId: cmd.sessionId,
         agentKind: cmd.agentKind,
         permissionConfig: cmd.permissionConfig,
         planMode: cmd.planMode,
       });
-      current.emitSessionMapping?.(cmd);
+      current.runtime.emitSessionMapping?.(cmd);
       return;
     }
 
-    await shutdownOpenCodeRuntime();
-    const nextRuntime = options.createOpenCodeRuntime(cmd);
+    await shutdownManagedRuntime();
+    const nextRuntime = flavor === 'pi' ? options.createPiRuntime(cmd) : options.createOpenCodeRuntime(cmd);
     try {
       await nextRuntime.ensure(cmd);
     } catch (error) {
       try {
         await nextRuntime.shutdown();
       } catch (cleanupError) {
-        emitError(`${String(error)}; OpenCode cleanup failed: ${String(cleanupError)}`);
+        emitError(`${String(error)}; ${flavor} cleanup failed: ${String(cleanupError)}`);
       }
       throw error;
     }
-    activeOpenCodeRuntime = nextRuntime;
+    activeManagedRuntime = { flavor, runtime: nextRuntime };
   };
 
   const dispatchEnsure = (cmd: EnsureSessionCommand): Promise<void> => {
@@ -1780,7 +1798,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
 
   const selectedRuntime = (): SidecarRuntime | undefined => {
     const flavor = getRuntimeFlavor(activeAgentKind);
-    if (flavor === 'opencode') return activeOpenCodeRuntime;
+    if (flavor === 'opencode' || flavor === 'pi') return activeManagedRuntime?.flavor === flavor ? activeManagedRuntime.runtime : undefined;
     return flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
   };
 
@@ -1810,9 +1828,13 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       case 'update_permissions': {
         activeAgentKind = cmd.agentKind ?? activeAgentKind;
         const flavor = getRuntimeFlavor(activeAgentKind);
+        if (flavor === 'pi') {
+          // pi 无审批模型：权限配置不适用。
+          return;
+        }
         try {
           if (flavor === 'opencode') {
-            const current = activeOpenCodeRuntime;
+            const current = selectedRuntime();
             if (!current) throw new Error('OpenCode runtime is not initialized');
             await current.updatePermissions(cmd);
           } else {
@@ -1996,7 +2018,9 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         return;
       case 'tool_response': {
         const flavor = getRuntimeFlavor(activeAgentKind);
-        const openCodeRuntime = flavor === 'opencode' ? activeOpenCodeRuntime : undefined;
+        const openCodeRuntime = flavor === 'opencode'
+          ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
+          : undefined;
         const codexQuestionRuntime = flavor === 'codex' ? options.codexRuntime : undefined;
         if (openCodeRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
           const raw = Array.isArray(cmd.response) ? cmd.response : [];
@@ -2006,6 +2030,8 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           const raw = Array.isArray(cmd.response) ? cmd.response : [];
           const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
           codexQuestionRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
+        } else if (flavor === 'pi') {
+          emitError('pi tool responses are not supported (no approval model)');
         } else if (openCodeRuntime) {
           options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
         } else {
@@ -2021,8 +2047,12 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
           return;
         }
+        if (flavor === 'pi') {
+          emitError('pi does not support interactive permission requests');
+          return;
+        }
         const current = flavor === 'opencode'
-          ? activeOpenCodeRuntime
+          ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
           : flavor === 'codex'
             ? options.codexRuntime
             : undefined;
@@ -2062,9 +2092,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
         };
         await attemptCleanup('Failed to stop proxy', options.stopProxy);
-        await attemptCleanup('Failed to shutdown OpenCode runtime', shutdownOpenCodeRuntime);
-        if (getRuntimeFlavor(activeAgentKind) !== 'opencode') {
-          const currentRuntime = getRuntimeFlavor(activeAgentKind) === 'codex' ? options.codexRuntime : options.claudeRuntime;
+        await attemptCleanup('Failed to shutdown managed runtime', shutdownManagedRuntime);
+        const activeFlavor = getRuntimeFlavor(activeAgentKind);
+        if (activeFlavor !== 'opencode' && activeFlavor !== 'pi') {
+          const currentRuntime = activeFlavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
           await attemptCleanup('Failed to shutdown active runtime', () => currentRuntime.shutdown());
         }
         if (cleanupErrors.length > 0) {
@@ -2170,6 +2201,63 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
   };
 }
 
+function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
+  let provider = cmd.provider ?? undefined;
+  let model = cmd.model ?? undefined;
+  if (!provider && model && model.includes('/')) {
+    const separatorIndex = model.indexOf('/');
+    provider = model.slice(0, separatorIndex);
+    model = model.slice(separatorIndex + 1);
+  }
+  // pi 无 'opencode' 凭据来源语义；未知值按未配置处理（不回落 pi 自身认证）。
+  const credentialSource: PiSessionConfig['credentialSource'] =
+    cmd.credentialSource === 'codemux' || cmd.credentialSource === 'environment'
+      ? cmd.credentialSource
+      : 'none';
+  return {
+    cwd: ensureWorkingDirectory(cmd.cwd),
+    sessionId: cmd.sessionId ?? crypto.randomUUID(),
+    ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
+    runtimeGeneration: cmd.runtimeGeneration ?? 0,
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    credentialSource,
+    ...(credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
+    ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
+    ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
+  };
+}
+
+function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
+  const config = buildPiSessionConfig(cmd);
+  syncStreamSessionContext({
+    appSessionId: config.sessionId,
+    ...(config.agentSessionId ? { providerSessionId: config.agentSessionId } : {}),
+  });
+  const piRuntime = new PiRuntime(config);
+  return {
+    ensure: async () => {
+      const mapping = await piRuntime.ensure();
+      emit(buildPiSessionMappingEvent(mapping));
+    },
+    emitSessionMapping: (cmd) => {
+      if (!piRuntime.isStarted) {
+        return;
+      }
+      emit(buildPiSessionMappingEvent(piRuntime.buildSessionMapping(cmd.runtimeGeneration ?? 0)));
+    },
+    canReuse: (nextCmd) => piRuntime.canReuse(buildPiSessionConfig(nextCmd)),
+    sendInput: (prompt, inputPayload) => piRuntime.sendInput(prompt, inputPayload),
+    updatePermissions: () => {
+      // pi 无审批模型：权限配置不适用，忽略。
+    },
+    resetSession: () => piRuntime.resetSession(),
+    deleteSession: (agentSessionId) => piRuntime.deleteSession(agentSessionId),
+    interrupt: () => piRuntime.interrupt(),
+    shutdown: () => piRuntime.shutdown(),
+  };
+}
+
 async function main(): Promise<void> {
   // ADR 0005: CodeMUX sessions inject credentials via ensure_session.
   // Do not preload ~/.claude/settings.json into process.env for hosted chats.
@@ -2181,6 +2269,7 @@ async function main(): Promise<void> {
     claudeRuntime: runtime,
     codexRuntime,
     createOpenCodeRuntime: createOpenCodeSidecarRuntime,
+    createPiRuntime: createPiSidecarRuntime,
     emit,
     startProxy: (cmd) => proxyManager.start(cmd.apiKey, cmd.baseUrl, cmd.providerName, cmd.codexNeedsProxy),
     stopProxy: () => proxyManager.stop(),

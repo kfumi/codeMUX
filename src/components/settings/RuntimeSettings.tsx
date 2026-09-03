@@ -79,6 +79,7 @@ const PROVIDER_DOT_COLOR: Record<RuntimeProvider, string> = {
   claude_code: 'text-orange-500',
   codex: 'text-emerald-500',
   opencode: 'text-blue-500',
+  pi: 'text-fuchsia-500',
 };
 
 const CLI_STATUS_LABEL: Record<AgentRuntimeStatus, string> = {

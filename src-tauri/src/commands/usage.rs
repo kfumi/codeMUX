@@ -227,6 +227,8 @@ pub async fn get_usage_token_breakdown(
                 AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
                 AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
                 AgentKind::Opencode => aggregate_opencode_tokens(&home, agent_session_id),
+                // pi 用量来自 usage 轮询事件，不走原生历史聚合。
+                AgentKind::Pi => Ok(BTreeMap::new()),
                 AgentKind::GeminiCli => Ok(BTreeMap::new()),
             };
 

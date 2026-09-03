@@ -133,6 +133,11 @@ pub fn provider_supports_agent(provider: &MobileProvider, agent_kind: AgentKind)
     let required = match agent_kind {
         AgentKind::ClaudeCode => Protocol::Anthropic,
         AgentKind::Codex | AgentKind::Opencode => Protocol::OpenaiCompatible,
+        // pi 双协议可用，与桌面端选择一致：Anthropic 优先、OpenAI 兼容兜底。
+        AgentKind::Pi => {
+            return provider_supports_agent(provider, AgentKind::ClaudeCode)
+                || provider_supports_agent(provider, AgentKind::Opencode)
+        }
         AgentKind::GeminiCli => return false,
     };
     provider.enabled

@@ -38,6 +38,7 @@ const agentLabels: Record<AgentKind, string> = {
   codex: 'Codex',
   gemini_cli: 'Gemini CLI',
   opencode: 'OpenCode',
+  pi: 'pi',
 };
 
 type ImportFilter = 'all' | AgentKind;

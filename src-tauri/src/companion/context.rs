@@ -64,6 +64,7 @@ pub async fn build_composer_context(
                 AgentKind::ClaudeCode => skill.apps.claude,
                 AgentKind::Codex => skill.apps.codex,
                 AgentKind::Opencode => skill.apps.opencode,
+                AgentKind::Pi => false,
                 AgentKind::GeminiCli => false,
             })
             .map(|skill| (skill.name, skill.description, skill.disk_path))

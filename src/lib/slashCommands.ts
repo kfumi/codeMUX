@@ -255,6 +255,8 @@ export function registerSkillCommands(skills: SkillInfo[]): void {
 
 /** 获取指定智能体启用的 skill 命令 */
 function getSkillCommandsForAgent(agentKind: AgentKind): SlashCommand[] {
+  // pi 暂未接入 skills 应用，不产生 skill 命令。
+  if (agentKind === 'pi') return [];
   const enabledApps = {
     claude_code: 'claude',
     codex: 'codex',

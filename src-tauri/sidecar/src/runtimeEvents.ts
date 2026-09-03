@@ -54,6 +54,9 @@ export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   if (agentKind === 'opencode') {
     return 'opencode';
   }
+  if (agentKind === 'pi') {
+    return 'pi';
+  }
   return 'claude';
 }
 

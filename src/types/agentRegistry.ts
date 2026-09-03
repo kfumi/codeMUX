@@ -11,7 +11,7 @@ export interface AgentDefinition {
   kind: AgentKind;
   label: string;
   description: string;
-  icon: 'claude' | 'codex' | 'gemini' | 'opencode';
+  icon: 'claude' | 'codex' | 'gemini' | 'opencode' | 'pi';
   capabilities: AgentCapability[];
 }
 
@@ -51,6 +51,17 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
     capabilities: [
       'supports_resume',
       'supports_tools',
+    ],
+  },
+  {
+    kind: 'pi',
+    label: 'pi',
+    description: '基于 pi RPC 的极简多供应商编码 Agent（无审批弹窗）。',
+    icon: 'pi',
+    capabilities: [
+      'supports_resume',
+      'supports_tools',
+      'supports_cost',
     ],
   },
 ];

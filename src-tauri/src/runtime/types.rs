@@ -13,6 +13,7 @@ pub enum Provider {
     ClaudeCode,
     Codex,
     OpenCode,
+    Pi,
 }
 
 impl Provider {
@@ -21,6 +22,7 @@ impl Provider {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
         }
     }
 
@@ -30,6 +32,7 @@ impl Provider {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
             Self::OpenCode => "OpenCode",
+            Self::Pi => "pi",
         }
     }
 
@@ -39,6 +42,7 @@ impl Provider {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
         }
     }
 
@@ -47,12 +51,18 @@ impl Provider {
             "claude_code" => Some(Self::ClaudeCode),
             "codex" => Some(Self::Codex),
             "opencode" => Some(Self::OpenCode),
+            "pi" => Some(Self::Pi),
             _ => None,
         }
     }
 
     pub fn all() -> &'static [Provider] {
-        &[Provider::ClaudeCode, Provider::Codex, Provider::OpenCode]
+        &[
+            Provider::ClaudeCode,
+            Provider::Codex,
+            Provider::OpenCode,
+            Provider::Pi,
+        ]
     }
 }
 
@@ -470,9 +480,11 @@ mod tests {
         assert_eq!(Provider::ClaudeCode.label(), "Claude Code");
         assert_eq!(Provider::Codex.label(), "Codex");
         assert_eq!(Provider::OpenCode.label(), "OpenCode");
+        assert_eq!(Provider::Pi.label(), "pi");
         assert_eq!(Provider::ClaudeCode.cli_command(), "claude");
         assert_eq!(Provider::Codex.cli_command(), "codex");
         assert_eq!(Provider::OpenCode.cli_command(), "opencode");
+        assert_eq!(Provider::Pi.cli_command(), "pi");
     }
 
     #[test]

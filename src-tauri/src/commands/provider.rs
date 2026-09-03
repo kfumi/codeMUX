@@ -82,6 +82,11 @@ fn apply_agent_config_update(
             }
         }
         AgentKind::GeminiCli => {}
+        AgentKind::Pi => {
+            let update: crate::config::types::PiAgentConfig =
+                serde_json::from_value(config).map_err(|e| format!("Invalid pi config: {}", e))?;
+            app_config.agent_configs.pi = update;
+        }
         AgentKind::Opencode => {
             let update: OpenCodeAgentConfigUpdate = serde_json::from_value(config)
                 .map_err(|e| format!("Invalid OpenCode config: {}", e))?;

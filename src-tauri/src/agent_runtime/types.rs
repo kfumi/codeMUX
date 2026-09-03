@@ -9,6 +9,7 @@ pub enum AgentRuntimeKind {
     ClaudeCode,
     Codex,
     OpenCode,
+    Pi,
 }
 
 impl AgentRuntimeKind {
@@ -17,6 +18,7 @@ impl AgentRuntimeKind {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
         }
     }
 
@@ -24,6 +26,7 @@ impl AgentRuntimeKind {
         match agent_kind {
             "codex" => Self::Codex,
             "opencode" => Self::OpenCode,
+            "pi" => Self::Pi,
             _ => Self::ClaudeCode,
         }
     }

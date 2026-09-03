@@ -127,6 +127,9 @@ pub fn required_protocol(agent_kind: AgentKind) -> Option<Protocol> {
     match agent_kind {
         AgentKind::ClaudeCode => Some(Protocol::Anthropic),
         AgentKind::Codex | AgentKind::Opencode => Some(Protocol::OpenaiCompatible),
+        // pi 双协议都可用；主协议取 Anthropic（凭据经 ANTHROPIC_* 注入），
+        // 端点选择时回退 OpenAI 兼容。
+        AgentKind::Pi => Some(Protocol::Anthropic),
         AgentKind::GeminiCli => None,
     }
 }
@@ -149,6 +152,8 @@ pub fn select_agent_endpoint(
 ) -> Option<&ProtocolEndpoint> {
     match agent_kind {
         AgentKind::Codex => select_endpoint(provider, Protocol::OpenaiResponses)
+            .or_else(|| select_endpoint(provider, Protocol::OpenaiCompatible)),
+        AgentKind::Pi => select_endpoint(provider, Protocol::Anthropic)
             .or_else(|| select_endpoint(provider, Protocol::OpenaiCompatible)),
         other => {
             let protocol = required_protocol(other)?;

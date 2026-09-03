@@ -92,6 +92,8 @@ fn is_codex_visible_user_value(value: &serde_json::Value) -> bool {
 fn is_rewind_user_value(value: &serde_json::Value, agent_kind: AgentKind) -> bool {
     match agent_kind {
         AgentKind::Codex => is_codex_visible_user_value(value),
+        // pi 不支持会话 rewind（无树导航接入）；入口处应已拦截。
+        AgentKind::Pi => false,
         AgentKind::ClaudeCode | AgentKind::GeminiCli | AgentKind::Opencode => {
             is_claude_visible_user_value(value)
         }
@@ -664,6 +666,8 @@ pub async fn rewind_agent_session(
                 find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
             }
             AgentKind::GeminiCli => None,
+            // pi 不支持会话 rewind。
+            AgentKind::Pi => None,
             AgentKind::Opencode => unreachable!(),
         }
         .ok_or_else(|| {

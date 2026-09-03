@@ -9,6 +9,7 @@ pub enum AgentKind {
     Codex,
     GeminiCli,
     Opencode,
+    Pi,
 }
 
 impl AgentKind {
@@ -18,6 +19,7 @@ impl AgentKind {
             Self::Codex => "codex",
             Self::GeminiCli => "gemini_cli",
             Self::Opencode => "opencode",
+            Self::Pi => "pi",
         }
     }
 }
@@ -31,6 +33,7 @@ impl FromStr for AgentKind {
             "codex" => Ok(Self::Codex),
             "gemini_cli" => Ok(Self::GeminiCli),
             "opencode" => Ok(Self::Opencode),
+            "pi" => Ok(Self::Pi),
             _ => Err(format!("Unsupported agent kind: {}", value)),
         }
     }
@@ -341,6 +344,15 @@ pub struct AgentConfigs {
     pub gemini_cli: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub opencode: OpenCodeAgentConfig,
+    #[serde(default)]
+    pub pi: PiAgentConfig,
+}
+
+/// pi 智能体配置。pi 无审批模型与权限配置；首版仅超时可调。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PiAgentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

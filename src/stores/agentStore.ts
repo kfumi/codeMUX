@@ -1182,6 +1182,7 @@ export const AGENT_REWIND_CAPABILITIES: Record<AgentKind, {
   codex: { conversation: true, files: false, both: false },
   gemini_cli: { conversation: false, files: false, both: false },
   opencode: { conversation: true, files: false, both: false },
+  pi: { conversation: false, files: false, both: false },
 };
 
 export function supportsRewindMode(agentKind: AgentKind | undefined, mode: RewindMode): boolean {

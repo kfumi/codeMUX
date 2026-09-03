@@ -341,6 +341,8 @@ pub(crate) async fn cleanup_native_sessions_best_effort(
                     );
                 }
             }
+            // pi 会话文件清理走 delete_session 的专用路径（pi 的 mapping 即文件路径）。
+            AgentKind::Pi => {}
             AgentKind::GeminiCli => {}
         }
     }

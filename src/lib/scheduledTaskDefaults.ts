@@ -45,11 +45,18 @@ export function getAgentPermissionDefault(
   if (!config) {
     return buildDefaultPermissionConfig(agentKind);
   }
-  return serializePermissionConfig(agentKind, config.agent_configs[agentKind]?.permission_config);
+  // pi 无权限配置；联合类型收窄交给调用侧的默认值。
+  const agentConfig = config.agent_configs[agentKind] as { permission_config?: unknown } | undefined;
+  return serializePermissionConfig(agentKind, agentConfig?.permission_config);
 }
 
 function isProviderAgent(agentKind: AgentKind): boolean {
-  return agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
+  return (
+    agentKind === 'claude_code' ||
+    agentKind === 'codex' ||
+    agentKind === 'opencode' ||
+    agentKind === 'pi'
+  );
 }
 
 export function getConfiguredAgentModelIds(
