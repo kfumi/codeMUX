@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useBrowserStore } from './browserStore';
 import { useSidePanelStore } from './sidePanelStore';
 import { useNavigationStore } from './navigationStore';
 
@@ -8,16 +9,27 @@ const fileApiMock = vi.hoisted(() => ({
   writeFile: vi.fn(),
 }));
 
+const browserApiMock = vi.hoisted(() => ({
+  show: vi.fn(),
+  hide: vi.fn(),
+}));
+
 vi.mock('../lib/tauri', () => ({
   fileApi: fileApiMock,
+  browserApi: browserApiMock,
 }));
 
 describe('side panel store', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
+    useBrowserStore.getState().reset();
     useNavigationStore.getState().reset();
     fileApiMock.readFile.mockReset();
     fileApiMock.writeFile.mockReset();
+    browserApiMock.show.mockReset();
+    browserApiMock.hide.mockReset();
+    browserApiMock.show.mockResolvedValue(undefined);
+    browserApiMock.hide.mockResolvedValue(undefined);
     vi.stubGlobal('window', { innerWidth: 1024 });
   });
 
@@ -287,21 +299,56 @@ describe('side panel store', () => {
     });
   });
 
-  it('opens a reusable browser panel without requiring a project path', () => {
+  it('opens multiple browser tabs and activates the latest one', () => {
     const store = useSidePanelStore.getState();
 
-    store.openBrowserTab();
-    store.openBrowserTab();
+    const firstTabId = store.openBrowserTab();
+    const secondTabId = store.openBrowserTab('https://example.com/');
 
     const state = useSidePanelStore.getState();
     expect(state.isOpen).toBe(true);
-    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs).toHaveLength(2);
     expect(state.tabs[0]).toMatchObject({
       kind: 'browser',
-      title: '浏览器',
-      id: 'global:browser',
+      title: '新标签页',
+      id: firstTabId,
     });
-    expect(state.activeTabId).toBe('global:browser');
+    expect(state.tabs[1]).toMatchObject({
+      kind: 'browser',
+      title: '新标签页',
+      browserInitialUrl: 'https://example.com/',
+      id: secondTabId,
+    });
+    expect(state.activeTabId).toBe(secondTabId);
+  });
+
+  it('closes the side panel and hides browser webviews immediately', () => {
+    const store = useSidePanelStore.getState();
+    const tabId = store.openBrowserTab();
+    useBrowserStore.getState().ensureBlankPage(tabId);
+    useBrowserStore.setState((state) => ({
+      pages: {
+        ...state.pages,
+        [Object.keys(state.pages)[0]]: {
+          ...Object.values(state.pages)[0],
+          hostAttached: true,
+        },
+      },
+    }));
+
+    store.closePanel();
+
+    expect(useSidePanelStore.getState().isOpen).toBe(false);
+    expect(browserApiMock.hide).toHaveBeenCalled();
+  });
+
+  it('updates browser tab titles independently', () => {
+    const store = useSidePanelStore.getState();
+    const tabId = store.openBrowserTab();
+
+    store.updateBrowserTabTitle(tabId, 'Example Docs');
+
+    expect(useSidePanelStore.getState().tabs[0].title).toBe('Example Docs');
   });
 
   it('keeps browser panels isolated by session scope', () => {
@@ -316,13 +363,13 @@ describe('side panel store', () => {
     store.openBrowserTab();
     expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
       kind: 'browser',
-      id: 'session-b:browser',
+      id: expect.stringMatching(/^session-b:browser:\d+$/),
     });
 
     store.setScope('session-a');
     expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
       kind: 'browser',
-      id: 'session-a:browser',
+      id: expect.stringMatching(/^session-a:browser:\d+$/),
     });
   });
 });

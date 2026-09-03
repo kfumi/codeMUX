@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const browserApiMock = vi.hoisted(() => ({
   create: vi.fn(),
@@ -21,14 +21,9 @@ const browserApiMock = vi.hoisted(() => ({
 }));
 
 const openMock = vi.hoisted(() => vi.fn());
-const popupViewportMenuMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../lib/tauri', () => ({
   browserApi: browserApiMock,
-}));
-
-vi.mock('../../lib/browserViewportMenu', () => ({
-  popupViewportMenu: popupViewportMenuMock,
 }));
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -43,25 +38,6 @@ vi.mock('../ui/tooltip', () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => children,
 }));
 
-vi.mock('../ui/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-    disabled,
-  }: {
-    children: ReactNode;
-    onClick?: () => void;
-    disabled?: boolean;
-  }) => (
-    <button type="button" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
 import { useBrowserElementStore } from '../../stores/browserElementStore';
 import { useBrowserStore } from '../../stores/browserStore';
 import { BrowserPanel } from './BrowserPanel';
@@ -72,7 +48,26 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
+function openDropdown(triggerName: string) {
+  const trigger = screen.getByRole('button', { name: triggerName });
+  fireEvent.pointerDown(trigger, { pointerType: 'mouse', button: 0 });
+  fireEvent.pointerUp(trigger, { pointerType: 'mouse', button: 0 });
+  fireEvent.click(trigger);
+}
+
 describe('BrowserPanel toolbar', () => {
+  beforeAll(() => {
+    if (!HTMLElement.prototype.hasPointerCapture) {
+      HTMLElement.prototype.hasPointerCapture = () => false;
+    }
+    if (!HTMLElement.prototype.releasePointerCapture) {
+      HTMLElement.prototype.releasePointerCapture = () => {};
+    }
+    if (!HTMLElement.prototype.setPointerCapture) {
+      HTMLElement.prototype.setPointerCapture = () => {};
+    }
+  });
+
   beforeEach(() => {
     useBrowserStore.getState().reset();
     for (const fn of Object.values(browserApiMock)) {
@@ -80,8 +75,6 @@ describe('BrowserPanel toolbar', () => {
       fn.mockResolvedValue(undefined);
     }
     openMock.mockReset();
-    popupViewportMenuMock.mockReset();
-    popupViewportMenuMock.mockResolvedValue(null);
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   });
 
@@ -113,8 +106,31 @@ describe('BrowserPanel toolbar', () => {
     expect(screen.getByRole('button', { name: '选择网页元素加入聊天' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '更多浏览器操作' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '复制链接' })).toBeNull();
-    expect(screen.getByRole('button', { name: '在默认浏览器中打开' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '打开调试工具' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '在默认浏览器中打开' })).toBeNull();
+  });
+
+  it('opens external links from the more menu', async () => {
+    const tabId = 'session-a:browser';
+    const pageId = useBrowserStore.getState().ensureBlankPage(tabId);
+    useBrowserStore.setState((state) => ({
+      pages: {
+        ...state.pages,
+        [pageId]: {
+          ...state.pages[pageId],
+          url: 'https://example.com/',
+          addressDraft: 'https://example.com/',
+          hostAttached: true,
+        },
+      },
+    }));
+    render(<BrowserPanel tabId={tabId} sessionId="session-a" isActive />);
+
+    openDropdown('更多浏览器操作');
+    fireEvent.click(screen.getByRole('menuitem', { name: '在默认浏览器中打开' }));
+
+    await waitFor(() => {
+      expect(openMock).toHaveBeenCalledWith('https://example.com/');
+    });
   });
 
   it('shows the reference viewport chrome after clicking 自由尺寸', async () => {
@@ -134,13 +150,11 @@ describe('BrowserPanel toolbar', () => {
     expect(scaleTrigger.className).toContain('text-ui-meta');
     expect(useBrowserStore.getState().previewByPanel[tabId]).toBe(true);
 
-    popupViewportMenuMock.mockResolvedValueOnce(50);
-    fireEvent.click(scaleTrigger);
+    openDropdown('调整预览尺寸');
+    fireEvent.click(screen.getByRole('menuitem', { name: '50%' }));
     await waitFor(() => {
-      expect(popupViewportMenuMock).toHaveBeenCalled();
       expect(useBrowserStore.getState().viewportModeByPanel[tabId]).toBe(50);
     });
-    expect(popupViewportMenuMock.mock.calls[0]?.[0]).toBe('fit');
 
     fireEvent.click(screen.getByRole('button', { name: '自由尺寸' }));
     expect(screen.queryByText('393 × 852')).toBeNull();

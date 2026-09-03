@@ -3,7 +3,8 @@ pub mod url;
 
 #[cfg(test)]
 mod tests {
-    use super::manager::WEBVIEW_LABEL_PREFIX;
+    use super::manager::{parse_codemux_open_url, WEBVIEW_LABEL_PREFIX};
+    use tauri::Url;
 
     #[test]
     fn default_capability_only_exposes_the_main_webview() {
@@ -41,5 +42,20 @@ mod tests {
             !src.contains("browser_show_viewport_menu"),
             "viewport scale must use the OS menu API, not a child WebView overlay that steals page clicks"
         );
+    }
+
+    #[test]
+    fn parse_codemux_open_url_accepts_http_and_https_targets() {
+        let target = Url::parse("codemux://browser/open?url=https%3A%2F%2Fexample.com%2Fpath").unwrap();
+        assert_eq!(
+            parse_codemux_open_url(&target).as_deref(),
+            Some("https://example.com/path")
+        );
+    }
+
+    #[test]
+    fn parse_codemux_open_url_rejects_non_http_schemes() {
+        let target = Url::parse("codemux://browser/open?url=file%3A%2F%2Ftmp").unwrap();
+        assert!(parse_codemux_open_url(&target).is_none());
     }
 }

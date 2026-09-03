@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { fileApi } from '../lib/tauri';
 import type { SubagentStatus } from '../lib/codeMuxProtocol';
+import { useBrowserStore } from './browserStore';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
 export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file' | 'subagent' | 'browser';
@@ -27,6 +28,8 @@ export interface SidePanelTab {
   subagentId?: string;
   subagentSessionId?: string;
   subagentStatus?: SubagentStatus;
+  /** kind: 'browser' — optional initial URL when opened from target=_blank. */
+  browserInitialUrl?: string;
 }
 
 interface SidePanelSnapshot {
@@ -50,7 +53,7 @@ interface SidePanelState {
   openPanel: () => void;
   openReviewTab: (projectPath: string) => void;
   openTerminalTab: (projectPath: string) => void;
-  openBrowserTab: () => void;
+  openBrowserTab: (initialUrl?: string) => string;
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
   openSubagentTab: (sessionId: string, subagentId: string, title: string, status?: SubagentStatus) => void;
@@ -66,6 +69,8 @@ interface SidePanelState {
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
   setTerminalId: (tabId: string, terminalId: string) => void;
+  updateBrowserTabTitle: (tabId: string, title: string) => void;
+  clearBrowserInitialUrl: (tabId: string) => void;
   isTabPresent: (tabId: string) => boolean;
   restoreNavigation: (navigation: SidePanelNavigationState) => void;
   reset: () => void;
@@ -77,6 +82,7 @@ const PANEL_WIDTH_DEFAULT = 520;
 const MAIN_CONTENT_WIDTH_MIN = 440;
 const DEFAULT_SCOPE_ID = 'global';
 let terminalTabSequence = 0;
+let browserTabSequence = 0;
 
 function defaultSnapshot(): SidePanelSnapshot {
   return {
@@ -111,11 +117,13 @@ function createTab(scopeId: string, kind: SidePanelTabKind, projectPath: string)
   };
 }
 
-function createBrowserTab(scopeId: string): SidePanelTab {
+function createBrowserTab(scopeId: string, initialUrl?: string): SidePanelTab {
+  browserTabSequence += 1;
   return {
-    id: `${scopeId}:browser`,
+    id: `${scopeId}:browser:${browserTabSequence}`,
     kind: 'browser',
-    title: '浏览器',
+    title: '新标签页',
+    browserInitialUrl: initialUrl,
   };
 }
 
@@ -256,17 +264,15 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     recordNavigation(get());
   },
 
-  openBrowserTab: () => {
-    set((state) => {
-      const existingTab = state.tabs.find((tab) => tab.kind === 'browser');
-      const tab = existingTab ?? createBrowserTab(state.activeScopeId);
-      return {
-        isOpen: true,
-        tabs: existingTab ? state.tabs : [...state.tabs, tab],
-        activeTabId: tab.id,
-      };
-    });
+  openBrowserTab: (initialUrl?: string) => {
+    const tab = createBrowserTab(get().activeScopeId, initialUrl);
+    set((state) => ({
+      isOpen: true,
+      tabs: [...state.tabs, tab],
+      activeTabId: tab.id,
+    }));
     recordNavigation(get());
+    return tab.id;
   },
 
   openPlanTab: (planFilePath: string, planContent: string) => {
@@ -438,6 +444,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
 
   closePanel: () => {
     set({ isOpen: false, isExpanded: false });
+    void useBrowserStore.getState().hideAllBrowserHosts();
     recordNavigation(get());
   },
 
@@ -503,6 +510,28 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   setTerminalId: (tabId: string, terminalId: string) => {
     set((state) => ({
       tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, terminalId } : tab)),
+    }));
+  },
+
+  updateBrowserTabTitle: (tabId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    set((state) => ({
+      tabs: state.tabs.map((tab) => (
+        tab.id === tabId && tab.kind === 'browser'
+          ? { ...tab, title: trimmed }
+          : tab
+      )),
+    }));
+  },
+
+  clearBrowserInitialUrl: (tabId: string) => {
+    set((state) => ({
+      tabs: state.tabs.map((tab) => (
+        tab.id === tabId && tab.kind === 'browser'
+          ? { ...tab, browserInitialUrl: undefined }
+          : tab
+      )),
     }));
   },
 

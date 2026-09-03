@@ -51,6 +51,11 @@ vi.mock('../../lib/layoutPreferences', () => ({
   updateLayoutPreferences: vi.fn(),
 }));
 
+vi.mock('../../lib/browserVisibility', () => ({
+  applyBrowserVisibility: vi.fn(),
+  hideAllBrowserHosts: vi.fn(),
+}));
+
 vi.mock('../../stores/sidePanelStore', () => ({
   useSidePanelStore: (selector: (state: typeof sidePanelState) => unknown) => selector(sidePanelState),
 }));
@@ -73,13 +78,6 @@ vi.mock('../preview/DiffView', () => ({
 
 vi.mock('../assistant-ui/file-type-icon', () => ({
   FileTypeIcon: () => null,
-}));
-
-vi.mock('../ui/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('../ui/tooltip', () => ({
