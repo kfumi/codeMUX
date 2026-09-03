@@ -3569,4 +3569,50 @@ describe('agent store Codex history loading', () => {
       { kind: 'user', data: { content: continuePrompt } },
     ]);
   });
+
+  it('replaces the live narration in place when a pi thinking+text final message arrives', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '你好', 'D:/project/x');
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+      send({ type: 'content_started', event_id: 'e1', index: 0, content_kind: 'reasoning' });
+      send({ type: 'reasoning_delta', event_id: 'e2', index: 0, text: 'THINKING' });
+      send({ type: 'content_finished', event_id: 'e3', index: 0 });
+      send({ type: 'content_started', event_id: 'e4', index: 1, content_kind: 'text' });
+      send({ type: 'text_delta', event_id: 'e5', index: 1, text: 'ANSWER' });
+      send({ type: 'content_finished', event_id: 'e6', index: 1 });
+      await vi.advanceTimersByTimeAsync(120);
+      send({
+        type: 'assistant_message',
+        event_id: 'e7',
+        content: [
+          { type: 'thinking', thinking: 'THINKING' },
+          { type: 'text', text: 'ANSWER' },
+        ],
+        provider_stop_reason: 'stop',
+      });
+      await vi.advanceTimersByTimeAsync(120);
+      send({ type: 'turn_finished', event_id: 'e8', outcome: 'completed' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const assistantEvents = events.filter((e) => e.kind === 'assistant');
+      // thinking+text 最终消息必须原地替换流式 narration，而不是追加第二条。
+      expect(assistantEvents).toHaveLength(1);
+      const content = (assistantEvents[0].data as { message?: { content?: Array<{ type?: string; text?: string; thinking?: string }> } }).message?.content ?? [];
+      expect(content).toEqual([
+        { type: 'thinking', thinking: 'THINKING' },
+        { type: 'text', text: 'ANSWER' },
+      ]);
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

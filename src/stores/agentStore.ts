@@ -536,6 +536,32 @@ function isNarrationOnlyAssistantEvent(
   ));
 }
 
+/**
+ * 是否为"延续流式 narration"的最终 assistant 消息：含非空文本块、无工具块，
+ * 允许附带 thinking 块（pi 等运行时把思考与回答合成一条最终消息）。这类事件
+ * 到达时应原地替换正在流式预览的 narration 事件，而不是追加成第二条消息。
+ */
+function isNarrationContinuationAssistantEvent(
+  event: AgentMessage,
+): event is Extract<AgentMessage, { kind: 'assistant' }> {
+  if (event.kind !== 'assistant') {
+    return false;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  let hasText = false;
+  const allAllowed = content.every((block: { type?: string; text?: string }) => {
+    if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
+      hasText = true;
+      return true;
+    }
+    return block?.type === 'thinking';
+  });
+  return allAllowed && hasText;
+}
+
 function isToolOnlyAssistantEvent(
   event: AgentMessage,
 ): event is Extract<AgentMessage, { kind: 'assistant' }> {
@@ -550,7 +576,7 @@ function isToolOnlyAssistantEvent(
 }
 
 function narrationTextFromAssistantEvent(event: AgentMessage): string | undefined {
-  if (!isNarrationOnlyAssistantEvent(event)) {
+  if (!isNarrationContinuationAssistantEvent(event)) {
     return undefined;
   }
   const content = event.data?.message?.content;
@@ -2421,7 +2447,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             );
           } else if (
             event.kind === 'assistant'
-            && isNarrationOnlyAssistantEvent(event)
+            && (isNarrationOnlyAssistantEvent(event) || isNarrationContinuationAssistantEvent(event))
             && !hasSuperseded
           ) {
             const narrationText = narrationTextFromAssistantEvent(event);
