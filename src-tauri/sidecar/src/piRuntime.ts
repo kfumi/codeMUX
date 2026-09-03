@@ -16,7 +16,7 @@ import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { setLogCtx, writeLog } from './writeLog.js';
 
-export const PI_RPC_ENTRY_RELATIVE = 'node_modules/@mariozechner/pi/dist/cli.js';
+export const PI_RPC_ENTRY_RELATIVE = 'node_modules/@mariozechner/pi-coding-agent/dist/cli.js';
 
 /** pi 用量快照（get_session_stats 的 token 子集，用于 turn 级差值）。 */
 interface PiUsageSnapshot {
@@ -53,7 +53,7 @@ interface PiImageContent {
   mimeType: string;
 }
 
-/** 托管 Runtime 里的 pi JS 入口（`@mariozechner/pi` 的 bin 目标）。 */
+/** 托管 Runtime 里的 pi JS 入口（`@mariozechner/pi-coding-agent` 的 bin 目标）。 */
 export function resolvePiEntryFromRuntimeRef(runtimeRef: ProviderRuntimeRef | undefined): string | null {
   if (!runtimeRef?.runtimePath) return null;
   return path.join(runtimeRef.runtimePath, PI_RPC_ENTRY_RELATIVE);

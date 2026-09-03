@@ -118,7 +118,7 @@ impl RuntimeResolver {
     /// - ClaudeCode: `@anthropic-ai/claude-agent-sdk-{platform}-{arch}/claude[.exe]`
     /// - Codex: 无平台二进制（纯 SDK）
     /// - OpenCode: `opencode-ai/bin/opencode[.exe|.cmd]`
-    /// - Pi: `@mariozechner/pi/dist/cli.js`（纯 Node 包，无平台二进制）
+    /// - Pi: `@mariozechner/pi-coding-agent/dist/cli.js`（纯 Node 包，无平台二进制）
     fn local_key_binaries(&self, provider: Provider) -> Vec<String> {
         match provider {
             Provider::ClaudeCode => {
@@ -146,7 +146,7 @@ impl RuntimeResolver {
                 }
             }
             Provider::Pi => {
-                vec!["node_modules/@mariozechner/pi/dist/cli.js".to_string()]
+                vec!["node_modules/@mariozechner/pi-coding-agent/dist/cli.js".to_string()]
             }
         }
     }

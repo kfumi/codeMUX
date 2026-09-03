@@ -4,7 +4,7 @@
 
 ## Problem Statement
 
-CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能体（`gemini_cli` 仅为占位）。pi（npm 包 `@mariozechner/pi`，下称 pi）是一个极简、多供应商、可扩展的终端编码智能体，拥有自己的 RPC 嵌入协议。用户希望在 CodeMUX 中直接选择 pi 驱动会话——流式对话、工具调用、上下文压缩、用量统计、会话恢复与 Fork 等体验与其余智能体一致——而不必离开应用另开终端，也不必放弃 CodeMUX 统一的 Model Provider 配置与会话时间线。
+CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能体（`gemini_cli` 仅为占位）。pi（npm 包 `@mariozechner/pi-coding-agent`，下称 pi）是一个极简、多供应商、可扩展的终端编码智能体，拥有自己的 RPC 嵌入协议。用户希望在 CodeMUX 中直接选择 pi 驱动会话——流式对话、工具调用、上下文压缩、用量统计、会话恢复与 Fork 等体验与其余智能体一致——而不必离开应用另开终端，也不必放弃 CodeMUX 统一的 Model Provider 配置与会话时间线。
 
 ## Solution
 
@@ -96,7 +96,7 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
 - **用量**：turn 边界触发的 3s 间隔轮询 `get_session_stats`，映射 input/cacheRead/output tokens、cost 与 contextUsage；旧版 pi 缺该命令时回退 `get_state.contextUsage`。
 - **排队消息**：turn 进行中的入队消息映射 pi 的 steer/follow-up 语义（默认 one-at-a-time）。
 - **Fork / Delete**：Fork = 拷贝 pi 会话文件为新 Native Session mapping + 新 CodeMUX 会话；Delete = 清理 CodeMUX 会话与对应 pi 会话文件。
-- **托管 Runtime**：安装目标为锁定版本的 `@mariozechner/pi`，完整性检查包含 `pi` 可执行文件；设置页安装指引同步更新（对齐 Codex CLI 托管化改造的既有做法）。
+- **托管 Runtime**：安装目标为锁定版本的 `@mariozechner/pi-coding-agent`，完整性检查包含 `pi` 可执行文件；设置页安装指引同步更新（对齐 Codex CLI 托管化改造的既有做法）。
 - **Rust 面**：`agent_runtime` 新增 pi 薄壳 runtime 实现既有 trait，工厂与 kind 枚举各加一分支；会话删除/Fork 等命令按 kind 扩展；`sessions.agent_kind` 为无约束 TEXT，无需 DB 迁移。
 - **移动端**：不新增 pi 专属 UI；pi 会话经通用时间线与 Companion 通道自然可见，仅回归验证不破坏。
 - **日志**：pi 子进程 stdout/stderr 的关键事件与协议错误按 ADR 0002 结构化日志上下文落盘。

@@ -1888,7 +1888,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         await ensureTail;
         const current = selectedRuntime();
         if (!current) {
-          emitError('OpenCode runtime is not initialized');
+          emitError(`${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
           return;
         }
         const sessionId = cmd.sessionId ?? activeSessionId;
@@ -2014,7 +2014,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       case 'interrupt':
         try {
           const current = selectedRuntime();
-          if (!current) throw new Error('OpenCode runtime is not initialized');
+          if (!current) throw new Error(`${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
           await current.interrupt();
         } catch (error) {
           if (!isAbortError(error)) emitError(error);
