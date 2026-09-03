@@ -2231,6 +2231,13 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
     credentialSource,
     ...(credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
+    ...(cmd.piConfigDir ? { piConfigDir: cmd.piConfigDir } : {}),
+    ...(cmd.modelLimits?.contextWindow && cmd.modelLimits.contextWindow > 0
+      ? { modelContextWindow: cmd.modelLimits.contextWindow }
+      : {}),
+    ...(cmd.modelLimits?.maxTokens && cmd.modelLimits.maxTokens > 0
+      ? { modelMaxTokens: cmd.modelLimits.maxTokens }
+      : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
   };
 }

@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+> 勘误 2026-09-03（真机联调）：pi LLM 错误（assistant message `stopReason:"error"`）不再静默完成 turn——`message_end` 错误不投影空 assistant 气泡，`agent_end` 时延迟裁决（pi 会对瞬态错误 `auto_retry_start` 重试，`maxAttempts` 默认 3），fatal 错误或 `auto_retry_end(success:false)` 以 `error` 事件（`pi_llm_error`）+ `turn_finished(failed)` 收尾。
+
 - [x] 新建会话智能体选择器出现 pi；带 pi 会话配置发送时不再回落到 Claude runtime
 - [x] pi 会话发消息得到流式文本与思考回复，turn 正常完成并产出 Turn Outcome
 - [x] 中断正在运行的 turn 生效（abort）

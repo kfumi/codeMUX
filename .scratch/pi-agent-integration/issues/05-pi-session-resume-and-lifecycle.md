@@ -1,6 +1,6 @@
 # 05 — pi 会话恢复与生命周期清理
 
-**What to build:** pi 会话的连续性：新会话沿用 pi 默认会话目录（`~/.pi/agent/sessions`，与用户手动使用 pi CLI 的会话互通），启动后经 `get_state` 回读会话文件路径存为 Native Session mapping；重启应用后以 `--session <file>` 恢复原生上下文并还原模型/思考等级；硬恢复失败走既有 `session_resume_failed` 事件路径；pi 子进程崩溃后下一轮 ensure 自动重新拉起并以上次会话文件 resume；关闭会话/退出应用时子进程清理不泄漏。
+**What to build:** pi 会话的连续性：新会话经 `PI_CODING_AGENT_DIR` 重定向落入 CodeMUX 托管目录（`<数据根>/pi-agent/sessions/`，与用户 `~/.pi` 硬隔离、不再互通；勘误 2026-09-03），启动后经 `get_state` 回读会话文件路径存为 Native Session mapping；重启应用后以 `--session <file>` 恢复原生上下文并还原模型/思考等级；硬恢复失败走既有 `session_resume_failed` 事件路径；pi 子进程崩溃后下一轮 ensure 自动重新拉起并以上次会话文件 resume；关闭会话/退出应用时子进程清理不泄漏。
 
 **Blocked by:** 03
 

@@ -109,6 +109,13 @@ export class PiRuntime {
   private startPromise: Promise<PiSessionMapping> | undefined;
   private pendingTurn: PiPendingTurn | undefined;
   private interrupted = false;
+  /** 当前 turn 的 LLM 错误（pi stopReason=error）；agent_end 时统一裁决。 */
+  private turnError: string | undefined;
+  /** pi 瞬态错误自动重试进行中（auto_retry_start → auto_retry_end）。 */
+  private retrying = false;
+  private finishCheck: NodeJS.Timeout | undefined;
+  /** 有进行中的 prompt turn：turn_finished / error 事件只发一次。 */
+  private turnOpen = false;
   private agentSessionFile: string | undefined;
   private piSessionId: string | undefined;
   private stopping = false;
@@ -189,6 +196,10 @@ export class PiRuntime {
     writeLog('[pi-task]', `sendInput START model=${this.config.provider ?? 'default'}/${this.config.model ?? 'default'} prompt_preview=${payload.text.slice(0, 120)}`);
 
     this.interrupted = false;
+    this.turnError = undefined;
+    this.retrying = false;
+    this.clearFinishCheck();
+    this.turnOpen = true;
     this.usageBaseline = await this.readUsageSnapshot(transport);
     const turn = new Promise<void>((resolve, reject) => {
       this.pendingTurn = { resolve, reject };
@@ -380,26 +391,106 @@ export class PiRuntime {
   }
 
   private handlePiEvent(event: PiRuntimeEvent): void {
-    if (event.type === 'agent_end') {
-      const outcome = this.interrupted ? 'interrupted' : 'completed';
-      this.interrupted = false;
-      const projected = toCodeMuxEvents(event, this.ctx);
-      for (const mapped of projected) {
-        (this.options.emitEvent ?? emit)(mapped);
+    // LLM 错误与自动重试不投影：错误最终以 error 事件 + turn_finished(failed)
+    // 收尾，避免把空 content 的错误消息渲染成空气泡。
+    if (this.observeTurnFailure(event)) return;
+    if (event.type === 'auto_retry_start') {
+      this.retrying = true;
+      return;
+    }
+    if (event.type === 'auto_retry_end') {
+      this.retrying = false;
+      if (event.success === true) {
+        // 重试成功：清除暂记错误，turn 由后续 agent_end 正常收尾。
+        this.turnError = undefined;
+      } else {
+        const finalError = readPiEventString(event, 'finalError')
+          ?? readPiEventString(event, 'errorMessage')
+          ?? this.turnError
+          ?? 'pi turn failed after auto retries';
+        this.turnError = finalError;
+        this.finishTurnWithError(finalError);
       }
+      return;
+    }
+    if (event.type === 'agent_end') {
+      const interrupted = this.interrupted;
+      this.interrupted = false;
+      if (!interrupted && this.turnError) {
+        // pi 的 auto_retry_start 紧跟 agent_end 同拍发出：延迟一个窗口裁决，
+        // 进入重试则本轮继续，否则按失败收尾（fatal 错误如 403 无重试）。
+        this.scheduleTurnFailureCheck();
+        return;
+      }
+      this.project(event);
       const transport = this.transport;
       void (transport
         ? this.readTurnUsageDelta(transport).catch(() => undefined)
         : Promise.resolve(undefined)
       ).then((usage) => {
-        this.finishTurn(outcome, undefined, usage);
+        this.finishTurn(interrupted ? 'interrupted' : 'completed', undefined, usage);
       });
       return;
     }
+    if (event.type === 'agent_start') {
+      // 新一轮尝试开始：上一个尝试的错误已了结（无论 auto_retry_end 在
+      // 何处发出，恢复与否由新一轮自身的事件决定）。
+      this.turnError = undefined;
+      this.project(event);
+      return;
+    }
+    this.project(event);
+  }
+
+  private project(event: PiRuntimeEvent): void {
     const projected = toCodeMuxEvents(event, this.ctx);
     for (const mapped of projected) {
       (this.options.emitEvent ?? emit)(mapped);
     }
+  }
+
+  /**
+   * 捕获 LLM 错误（message_start/end 携带 stopReason=error）。返回 true 表示
+   * 该事件不应继续投影（message_end 的空错误消息）。
+   */
+  private observeTurnFailure(event: PiRuntimeEvent): boolean {
+    if (event.type !== 'message_start' && event.type !== 'message_end') return false;
+    const message = readRecordField(event, 'message');
+    if (!message || message.stopReason !== 'error') return false;
+    this.turnError = typeof message.errorMessage === 'string' && message.errorMessage
+      ? message.errorMessage
+      : 'pi LLM request failed';
+    return event.type === 'message_end';
+  }
+
+  private scheduleTurnFailureCheck(): void {
+    this.clearFinishCheck();
+    this.finishCheck = setTimeout(() => {
+      this.finishCheck = undefined;
+      if (!this.retrying && this.turnError) {
+        this.finishTurnWithError(this.turnError);
+      }
+    }, 250);
+    this.finishCheck.unref?.();
+  }
+
+  private clearFinishCheck(): void {
+    if (this.finishCheck) {
+      clearTimeout(this.finishCheck);
+      this.finishCheck = undefined;
+    }
+  }
+
+  /** LLM 错误终局：error 事件 + turn_finished(failed)。 */
+  private finishTurnWithError(message: string): void {
+    this.clearFinishCheck();
+    if (!this.turnOpen) return;
+    (this.options.emitEvent ?? emit)({
+      type: 'error',
+      subtype: 'pi_llm_error',
+      error: message,
+    });
+    this.finishTurn('failed', message);
   }
 
   private handleProcessExit(code: number | null, signal: NodeJS.Signals | null): void {
@@ -413,6 +504,12 @@ export class PiRuntime {
   }
 
   private emitTurnError(message: string): void {
+    this.clearFinishCheck();
+    if (!this.turnOpen) {
+      // 空闲期进程退出：无进行中的 turn，不发陈旧的 error/turn_finished。
+      return;
+    }
+    this.turnOpen = false;
     (this.options.emitEvent ?? emit)({
       type: 'error',
       subtype: 'pi_process_error',
@@ -426,7 +523,8 @@ export class PiRuntime {
     reason?: string,
     usage?: PiTurnUsage,
   ): void {
-    (this.options.emitEvent ?? emit)({
+    this.clearFinishCheck();
+    this.turnOpen = false;    (this.options.emitEvent ?? emit)({
       type: 'turn_finished',
       outcome,
       ...(reason ? { reason } : {}),
@@ -500,10 +598,64 @@ function readNumberField(record: Record<string, unknown> | undefined, key: strin
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function readPiEventString(event: PiRuntimeEvent, key: string): string | undefined {
+  const value = event[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+/** pi models.json 的 CodeMUX 供应商条目（端点凭据注入的唯一通道）。 */
+export interface PiProviderDefinition {
+  baseUrl: string;
+  apiKey: string;
+  api: 'anthropic-messages' | 'openai-completions';
+  modelId: string;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
+export function buildPiModelsJson(definition: PiProviderDefinition): string {
+  const model: Record<string, unknown> = {
+    id: definition.modelId,
+    name: definition.modelId,
+  };
+  if (definition.contextWindow && definition.contextWindow > 0) {
+    model.contextWindow = definition.contextWindow;
+  }
+  if (definition.maxTokens && definition.maxTokens > 0) {
+    model.maxTokens = definition.maxTokens;
+  }
+  return `${JSON.stringify(
+    {
+      providers: {
+        codemux: {
+          baseUrl: definition.baseUrl,
+          apiKey: definition.apiKey,
+          api: definition.api,
+          models: [model],
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+/**
+ * 原子写入托管 models.json。pi 仅在进程启动时读取该文件；多个 pi 会话共享
+ * 一份，后写覆盖先写不影响已运行进程（配置已加载进内存）。
+ */
+export function writePiModelsJson(dir: string, definition: PiProviderDefinition): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `models.json.tmp-${process.pid}`);
+  fs.writeFileSync(tmp, buildPiModelsJson(definition), 'utf8');
+  fs.renameSync(tmp, path.join(dir, 'models.json'));
+}
+
 /**
  * 默认传输层：托管 Runtime 存在时以其 node 入口启动 pi（规避 Windows
- * .cmd shim 与 PATH 依赖）；否则回落 PATH 上的 `pi`。凭据按 ADR 0005 经
- * 环境变量注入，不读写 `~/.pi` 原生配置。
+ * .cmd shim 与 PATH 依赖）；否则回落 PATH 上的 `pi`。codemux 凭据经
+ * PI_CODING_AGENT_DIR 托管目录下的 models.json 注入（pi 不读取端点类
+ * 环境变量），配置目录重定向同时切断对 ~/.pi 原生配置的回退（ADR 0005）。
  */
 export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess {
   const args = ['--mode', 'rpc'];
@@ -528,8 +680,10 @@ export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess 
   }
   const provider = config.provider?.trim();
   const model = config.model?.trim();
-  if (provider && model && model !== 'default') {
-    args.push('--model', `${provider}/${model}`);
+  // codemux 凭据来源固定走注入的 `codemux` 供应商命名空间（models.json）。
+  const modelFlagProvider = config.credentialSource === 'codemux' ? 'codemux' : provider;
+  if (modelFlagProvider && model && model !== 'default') {
+    args.push('--model', `${modelFlagProvider}/${model}`);
   } else if (model && model !== 'default') {
     args.push('--model', model);
   }
@@ -543,18 +697,37 @@ export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess 
     if (!apiKey) {
       throw new Error('pi session has no API key configured; refusing to fall back to pi auth (ADR 0005)');
     }
+    // pi 不读取 *_API_KEY/*_BASE_URL 环境变量；端点经 PI_CODING_AGENT_DIR 下
+    // 的 models.json 注入，同时切断对 ~/.pi 原生供应商/认证的一切回退。
     const providerKey = (provider ?? '').toLowerCase();
-    if (providerKey.includes('anthropic')) {
-      env.ANTHROPIC_API_KEY = apiKey;
-      if (config.baseUrl) env.ANTHROPIC_BASE_URL = config.baseUrl;
-    } else if (providerKey.includes('openai')) {
-      env.OPENAI_API_KEY = apiKey;
-      if (config.baseUrl) env.OPENAI_BASE_URL = config.baseUrl;
-    } else {
+    const api = providerKey.includes('anthropic')
+      ? 'anthropic-messages'
+      : providerKey.includes('openai')
+        ? 'openai-completions'
+        : null;
+    if (!api) {
       throw new Error(
-        `pi provider "${provider ?? 'unknown'}" cannot be mapped to environment credentials; configure an anthropic/openai-compatible provider`,
+        `pi provider "${provider ?? 'unknown'}" cannot be mapped to a pi provider api; configure an anthropic/openai-compatible provider`,
       );
     }
+    if (!config.baseUrl?.trim()) {
+      throw new Error('pi session has no endpoint baseUrl configured');
+    }
+    if (!model || model === 'default') {
+      throw new Error('pi session requires a concrete model for the codemux provider');
+    }
+    if (!config.piConfigDir) {
+      throw new Error('pi config dir is required to inject CodeMUX endpoint credentials');
+    }
+    writePiModelsJson(config.piConfigDir, {
+      baseUrl: config.baseUrl.trim(),
+      apiKey,
+      api,
+      modelId: model,
+      ...(config.modelContextWindow ? { contextWindow: config.modelContextWindow } : {}),
+      ...(config.modelMaxTokens ? { maxTokens: config.modelMaxTokens } : {}),
+    });
+    env.PI_CODING_AGENT_DIR = config.piConfigDir;
   }
 
   return PiRpcProcess.start({

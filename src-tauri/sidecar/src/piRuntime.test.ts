@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
-import { PiRuntime } from './piRuntime.js';
+import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, writePiModelsJson } from './piRuntime.js';
 import type { PiSessionConfig } from './types.js';
 
 const FAKE_PI_PATH = fileURLToPath(new URL('./__fixtures__/fake-pi.mjs', import.meta.url));
@@ -354,5 +354,157 @@ describe('PiRuntime', () => {
     } finally {
       await runtime.shutdown();
     }
+  });
+
+  describe('pi LLM errors and auto retry', () => {
+    const FATAL_ERROR_SCENARIO = {
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          result: {},
+          thenEvents: [
+            { event: { type: 'agent_start' } },
+            { event: { type: 'turn_start' } },
+            { event: { type: 'message_start', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '403 Request not allowed' } } },
+            { event: { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '403 Request not allowed' } } },
+            { event: { type: 'turn_end' } },
+            { event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    };
+
+    it('fails the turn with a visible error for fatal LLM errors (no retry)', async () => {
+      const { runtime, events } = startFakePiRuntime(FATAL_ERROR_SCENARIO);
+      try {
+        await runtime.ensure();
+        await expect(runtime.sendInput('hi')).rejects.toThrow(/403 Request not allowed/);
+        const errorIndex = events.findIndex((event) => (event as { subtype?: string }).subtype === 'pi_llm_error');
+        const finished = events.filter((event) => event.type === 'turn_finished');
+        expect(errorIndex).toBeGreaterThanOrEqual(0);
+        expect((events[errorIndex] as { error?: string }).error).toBe('403 Request not allowed');
+        expect(finished).toHaveLength(1);
+        expect(finished[0]?.outcome).toBe('failed');
+        expect(finished[0]?.reason).toBe('403 Request not allowed');
+        // 错误消息不再投影为空 assistant_message 气泡。
+        expect(events.some((event) => event.type === 'assistant_message')).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
+    it('keeps the turn open across auto retry and completes after recovery', async () => {
+      const { runtime, events } = startFakePiRuntime({
+        responses: {
+          get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+          prompt: {
+            result: {},
+            thenEvents: [
+              { event: { type: 'agent_start' } },
+              { event: { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '429 overloaded' } } },
+              { event: { type: 'agent_end' } },
+              { event: { type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 5, errorMessage: '429 overloaded' } },
+              { event: { type: 'agent_start' } },
+              { event: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'recovered' }], stopReason: 'stop' } } },
+              { event: { type: 'agent_end' } },
+              { event: { type: 'auto_retry_end', success: true, attempt: 2 } },
+            ],
+          },
+        },
+      });
+      try {
+        await runtime.ensure();
+        await runtime.sendInput('hi');
+        await vi_waitFor(() => {
+          const errorEvents = events.filter((event) => (event as { subtype?: string }).subtype === 'pi_llm_error');
+          if (errorEvents.length > 0) throw new Error('unexpected pi_llm_error');
+          const finished = events.filter((event) => event.type === 'turn_finished');
+          if (finished.length !== 1) throw new Error('turn not finished exactly once');
+          if (finished[0]?.outcome !== 'completed') throw new Error('turn not completed');
+        });
+        expect(events.some((event) => event.type === 'assistant_message')).toBe(true);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
+    it('fails the turn with finalError when auto retry gives up', async () => {
+      const { runtime, events } = startFakePiRuntime({
+        responses: {
+          get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+          prompt: {
+            result: {},
+            thenEvents: [
+              { event: { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '529 overloaded' } } },
+              { event: { type: 'agent_end' } },
+              { event: { type: 'auto_retry_start', attempt: 3, maxAttempts: 3, delayMs: 5, errorMessage: '529 overloaded' } },
+              { event: { type: 'auto_retry_end', success: false, attempt: 3, finalError: '529 overloaded_error: Overloaded' } },
+            ],
+          },
+        },
+      });
+      try {
+        await runtime.ensure();
+        await expect(runtime.sendInput('hi')).rejects.toThrow(/529 overloaded_error/);
+        const finished = events.filter((event) => event.type === 'turn_finished');
+        expect(finished).toHaveLength(1);
+        expect(finished[0]?.outcome).toBe('failed');
+        expect(finished[0]?.reason).toBe('529 overloaded_error: Overloaded');
+        expect(events.some((event) => (event as { subtype?: string }).subtype === 'pi_llm_error')).toBe(true);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+  });
+
+  it('writes the managed models.json with the CodeMUX endpoint for codemux sessions', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-models-json-'));
+    pendingCleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    writePiModelsJson(dir, {
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'anthropic-messages',
+      modelId: 'glm-5.3-flash',
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, 'models.json'), 'utf8'));
+    expect(written.providers.codemux).toEqual({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'anthropic-messages',
+      models: [{ id: 'glm-5.3-flash', name: 'glm-5.3-flash', contextWindow: 1_000_000, maxTokens: 128_000 }],
+    });
+    expect(buildPiModelsJson({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'openai-completions',
+      modelId: 'glm-5.3-flash',
+    })).toContain('"api": "openai-completions"');
+  });
+
+  it('createDefaultPiTransport writes models.json into the managed config dir', () => {
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-runtime-tree-'));
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-config-dir-'));
+    pendingCleanups.push(() => {
+      fs.rmSync(runtimeDir, { recursive: true, force: true });
+      fs.rmSync(configDir, { recursive: true, force: true });
+    });
+    const entry = path.join(runtimeDir, 'node_modules', '@mariozechner', 'pi-coding-agent', 'dist', 'cli.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, 'process.exit(0);\n', 'utf8');
+
+    createDefaultPiTransport(buildConfig({
+      credentialSource: 'codemux',
+      provider: 'anthropic',
+      model: 'glm-5.3-flash',
+      apiKey: 'sk-test',
+      baseUrl: 'https://provider.example/v1',
+      piConfigDir: configDir,
+      runtimeRef: { provider: 'pi', runtimeRoot: runtimeDir, runtimePath: runtimeDir } as never,
+    }));
+    const written = JSON.parse(fs.readFileSync(path.join(configDir, 'models.json'), 'utf8'));
+    expect(written.providers.codemux.api).toBe('anthropic-messages');
+    expect(written.providers.codemux.models[0].id).toBe('glm-5.3-flash');
   });
 });

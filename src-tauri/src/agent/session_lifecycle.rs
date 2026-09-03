@@ -282,6 +282,23 @@ fn resolve_active_runtime_config(
             }
             (!limits.is_empty()).then_some(serde_json::Value::Object(limits))
         }
+        // pi models.json 的模型条目：contextWindow / maxTokens（输出上限）。
+        AgentKind::Pi => {
+            let mut limits = serde_json::Map::new();
+            if let Some(context_window) = provider_model.context_window.filter(|value| *value > 0) {
+                limits.insert(
+                    "contextWindow".to_string(),
+                    serde_json::Value::Number(context_window.into()),
+                );
+            }
+            if let Some(max_output) = provider_model.max_output_tokens.filter(|value| *value > 0) {
+                limits.insert(
+                    "maxTokens".to_string(),
+                    serde_json::Value::Number(max_output.into()),
+                );
+            }
+            (!limits.is_empty()).then_some(serde_json::Value::Object(limits))
+        }
         _ => None,
     };
 
@@ -920,6 +937,19 @@ pub(crate) fn build_ensure_session_command(
         }
         if let Some(credential_source) = credential_source {
             cmd["credentialSource"] = serde_json::Value::String(credential_source);
+        }
+        if agent_kind == "pi" {
+            // pi 的配置目录重定向到 CodeMUX 托管目录（PI_CODING_AGENT_DIR）：
+            // models.json / auth.json / 会话文件都与用户 ~/.pi 硬隔离（ADR 0005），
+            // CodeMUX 端点凭据由 sidecar 写入该目录的 models.json。
+            let pi_config_dir = state
+                .runtime_resolver
+                .root()
+                .parent()
+                .ok_or_else(|| "无法解析 pi 托管配置目录".to_string())?
+                .join("pi-agent");
+            cmd["piConfigDir"] =
+                serde_json::Value::String(pi_config_dir.to_string_lossy().into_owned());
         }
     }
 
@@ -2277,6 +2307,59 @@ mod tests {
         .unwrap();
         assert!(claude_command.get("provider").is_none());
         assert!(claude_command.get("credentialSource").is_none());
+    }
+
+    #[test]
+    fn builds_pi_ensure_command_with_managed_config_dir() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let version_dir = runtime_root.path().join("pi").join("0.73.1");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::write(version_dir.join("package.json"), b"{}").unwrap();
+        std::fs::write(runtime_root.path().join("pi").join("current"), "0.73.1").unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-pi", "pi", "pi", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(
+                runtime_root.path().to_path_buf(),
+            ),
+        };
+
+        let command = build_ensure_session_command(
+            &app_state,
+            "session-pi",
+            "pi",
+            "D:/workspace/demo".to_string(),
+            Some("secret-key".to_string()),
+            Some("https://provider.example/v1".to_string()),
+            Some("anthropic/glm-5.3-flash".to_string()),
+            None,
+            None,
+            Some("anthropic".to_string()),
+            Some("codemux".to_string()),
+            None,
+            None,
+            Some(serde_json::json!({ "contextWindow": 1_000_000, "maxTokens": 128_000 })),
+        )
+        .unwrap();
+
+        assert_eq!(command["provider"], "anthropic");
+        assert_eq!(command["credentialSource"], "codemux");
+        // 配置目录指向 CodeMUX 数据根下的 pi-agent（与用户 ~/.pi 硬隔离）。
+        let expected_dir = runtime_root.path().parent().unwrap().join("pi-agent");
+        assert_eq!(
+            command["piConfigDir"],
+            serde_json::Value::String(expected_dir.to_string_lossy().into_owned())
+        );
+        assert_eq!(command["modelLimits"]["contextWindow"], 1_000_000);
+        assert_eq!(command["modelLimits"]["maxTokens"], 128_000);
     }
 
     #[test]

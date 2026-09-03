@@ -12,9 +12,9 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
 
 - **进程模型**：托管 Runtime 安装锁定版本的 pi CLI；每个 pi 会话由 sidecar spawn 一个长期存活的 `pi --mode rpc` 子进程，`delete/shutdown` 时 dispose（与 Codex app-server 的进程模型同构，见 ADR 0010 先例）。
 - **协议桥接**：sidecar 内新建 JSONL RPC 传输层（请求/响应按 id 关联、控制面 30s 超时、compact 不限时），将 pi 事件流（流式 delta、工具执行、压缩、turn 生命周期）翻译为 CodeMUX Event（ADR 0003）。
-- **供应商（ADR 0005）**：沿用 CodeMUX 自有 Model Provider，凭据与端点经子进程环境变量注入、`--model` 选型；不读写 `~/.pi` 原生配置，空 Key 不隐式回落 pi 自身登录。
+- **供应商（ADR 0005）**：沿用 CodeMUX 自有 Model Provider，凭据与端点经 `PI_CODING_AGENT_DIR` 托管目录下的 `models.json` 注入（pi 不读取端点类环境变量）、`--model codemux/<modelId>` 选型；配置目录重定向同时不读写 `~/.pi` 原生配置，空 Key 不隐式回落 pi 自身登录。
 - **能力边界**：pi 无原生审批与文件快照，相应能力声明为不支持，UI 隐藏权限选择；token/cost 用量经轮询 `get_session_stats` 支持；`/compact` 映射 pi 原生 compact RPC。
-- **会话连续性**：新会话以 `--session-dir` 落入 CodeMUX 管理目录，`get_state` 回读会话文件路径作为 Native Session mapping；重启后以 `--session <file>` 恢复。会话创建时绑定 kind（会话内 Agent Kind Switch 已随 Session Timeline 重构撤销），Fork 为同种类原生拷贝。
+- **会话连续性**：新会话经 `PI_CODING_AGENT_DIR` 重定向落入 CodeMUX 管理目录（`<piConfigDir>/sessions/`），`get_state` 回读会话文件路径作为 Native Session mapping；重启后以 `--session <file>` 恢复。会话创建时绑定 kind（会话内 Agent Kind Switch 已随 Session Timeline 重构撤销），Fork 为同种类原生拷贝。
 
 存量 `~/.pi` 会话导入、审批流、会话树 rewind 等列为二期，见 Out of Scope。
 
@@ -45,9 +45,9 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
 
 16. As a pi 用户，我希望模型目录来自 pi 的 `get_available_models` 并与 CodeMUX Model Provider 的协议端点匹配，以便只看到当前供应商可用的模型。
 17. As a pi 用户，我希望在会话内切换模型并即时生效（`set_model`），以便中途换用更强或更便宜的模型。
-18. As a 用户，我希望 pi 的供应商凭据由 CodeMUX 经环境变量注入，以便遵循统一的 Model Provider 配置而不碰 `~/.pi`。
+18. As a 用户，我希望 pi 的供应商凭据由 CodeMUX 经托管目录 models.json 注入，以便遵循统一的 Model Provider 配置而不碰 `~/.pi`。
 19. As a 用户，当供应商未配置或 API Key 为空时，我希望 pi 会话发送前被拦截提示，而不是隐式回落 pi 自身认证（ADR 0005 第 4 条）。
-20. As a 使用第三方供应商的用户，当其协议端点无法映射为 pi 可用的供应商/环境变量组合时，我希望该供应商对 pi 不可用并在发送前拦截，以便得到明确反馈而非静默失败。
+20. As a 使用第三方供应商的用户，当其协议端点无法映射为 pi 可用的供应商 api 类型（anthropic-messages / openai-completions）时，我希望该供应商对 pi 不可用并在发送前拦截，以便得到明确反馈而非静默失败。
 21. As a pi 用户，我希望为会话选择思考等级（off/minimal/low/medium/high/xhigh/max，默认 medium），以便在速度与推理深度间权衡。
 
 ### 上下文管理
@@ -90,8 +90,8 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
   - 请求/响应按可选 `id` 关联；控制面调用统一 30s 超时；`compact` 属长阻塞 LLM 任务，不设墙钟超时（仅随进程退出或会话关闭而失败）。
   - stderr 维护有界环形缓冲用于诊断；进程异常退出时 reject 所有未完成请求并广播 `process_exit`。
 - **事件映射（sidecar 纯函数模块）**：`message_update` 的 text/thinking delta 映射为流式事件；`tool_execution_start/_update/_end` 按 `toolCallId` 关联映射为 CodeMUX 工具事件；`turn_start/_end`、`agent_start/_end`、`agent_settled` 映射 turn 生命周期与 Turn Outcome；`compaction_start/_end` 映射压缩时间线条目（trigger 按 manual/auto 归类）。COMPAT：pi ≤ 0.83 的 `message_update` 携带累积全文而非 delta，需去重截断。
-- **会话映射与恢复**：新会话以 `--session-dir` 指向 CodeMUX 管理目录，启动后经 `get_state` 回读 `sessionFile` 并存为 Native Session mapping；恢复以 `--session <file>` 启动并还原该会话的模型与思考等级；恢复失败时 mint 新会话并 emit System Event（沿用现有 native_session_rebuilt 语义）。
-- **供应商注入（ADR 0005）**：会话选定的 Model Provider 经协议端点映射后注入——anthropic 端点映射 `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` 环境变量，openai_compatible 端点映射 `OPENAI_*`；`--model provider/modelId` 以 pi 供应商命名空间表达。无法映射的供应商对 pi 不可用，发送前拦截；空 Key 不回落 `~/.pi` 自身认证。
+- **会话映射与恢复**：新会话经 `PI_CODING_AGENT_DIR` 重定向落入 CodeMUX 管理目录（会话文件位于 `<piConfigDir>/sessions/`），启动后经 `get_state` 回读 `sessionFile` 并存为 Native Session mapping；恢复以 `--session <file>` 启动并还原该会话的模型与思考等级；恢复失败时 mint 新会话并 emit System Event（沿用现有 native_session_rebuilt 语义）。
+- **供应商注入（ADR 0005）**：会话选定的 Model Provider 经协议端点映射后注入——pi 不读取 `*_API_KEY`/`*_BASE_URL` 环境变量；端点经 `PI_CODING_AGENT_DIR` 下 `models.json` 注入（anthropic 端点 → api `anthropic-messages`，openai_compatible 端点 → api `openai-completions`，apiKey 内联于供应商条目）；`--model codemux/<modelId>` 使用固定 `codemux` 供应商命名空间。无法映射的供应商对 pi 不可用，发送前拦截；空 Key 不回落 `~/.pi` 自身认证。
 - **思考等级**：静态七档映射 `set_thinking_level`，默认 medium；随会话的 Kind Model Selection 一起记忆。
 - **用量**：turn 边界触发的 3s 间隔轮询 `get_session_stats`，映射 input/cacheRead/output tokens、cost 与 contextUsage；旧版 pi 缺该命令时回退 `get_state.contextUsage`。
 - **排队消息**：turn 进行中的入队消息映射 pi 的 steer/follow-up 语义（默认 one-at-a-time）。

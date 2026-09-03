@@ -14,6 +14,8 @@ export interface SidecarModelLimits {
   contextWindow?: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  /** pi 模型条目的输出 token 上限（models.json `maxTokens`）。 */
+  maxTokens?: number;
   inputModalities?: string[];
 }
 
@@ -52,6 +54,14 @@ export interface PiSessionConfig {
   credentialSource: PiCredentialSource;
   apiKey?: string;
   baseUrl?: string;
+  /**
+   * pi 配置目录（PI_CODING_AGENT_DIR 重定向目标）。codemux 凭据来源下必填：
+   * 端点凭据经该目录的 models.json 注入，与用户 ~/.pi 硬隔离（ADR 0005）。
+   */
+  piConfigDir?: string;
+  /** pi models.json 模型条目元数据（来自 CodeMUX ProviderModel）。 */
+  modelContextWindow?: number;
+  modelMaxTokens?: number;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
 }
@@ -72,7 +82,7 @@ export interface RuntimeEventContext {
 
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; settingSources?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; settingSources?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits; piConfigDir?: string }
   | { type: 'fork_session'; sessionId: string; requestId: string; sourceAgentSessionId?: string; sourceProviderMessageId?: string; sourceProviderTurnId?: string; sourceProviderTurnOrdinal?: number }
   | { type: 'rewind_files'; sessionId: string; requestId: string; providerMessageId: string }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
