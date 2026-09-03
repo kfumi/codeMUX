@@ -172,6 +172,7 @@ function projectMessageEnd(event: PiRuntimeEvent, ctx: PiEventContext, outputs: 
   if (!message || message.role !== 'assistant') return;
 
   const content: Array<Record<string, unknown>> = [];
+  const toolEvents: CodeMuxEvent[] = [];
   for (const part of Array.isArray(message.content) ? message.content : []) {
     if (!isRecord(part)) continue;
     if (part.type === 'text' && typeof part.text === 'string') {
@@ -179,19 +180,25 @@ function projectMessageEnd(event: PiRuntimeEvent, ctx: PiEventContext, outputs: 
     } else if (part.type === 'thinking' && typeof part.thinking === 'string') {
       content.push({ type: 'thinking', thinking: part.thinking });
     } else if (part.type === 'toolCall' && typeof part.id === 'string' && typeof part.name === 'string') {
-      content.push({
-        type: 'tool_use',
-        id: part.id,
+      // 工具调用拆成独立 tool_started 事件（在思考/正文消息之后），与 CLI
+      // 同步的 normalize 拆分保持一致——否则思考与工具组挤进同一条消息行。
+      // 后续 tool_execution_start 以相同 id 到达时由前端原地刷新参数。
+      toolEvents.push({
+        type: 'tool_started',
+        tool_use_id: part.id,
         name: part.name,
         input: isRecord(part.arguments) ? part.arguments : {},
       });
     }
   }
-  outputs.push({
-    type: 'assistant_message',
-    content,
-    ...(typeof message.stopReason === 'string' ? { provider_stop_reason: message.stopReason } : {}),
-  });
+  if (content.length > 0) {
+    outputs.push({
+      type: 'assistant_message',
+      content,
+      ...(typeof message.stopReason === 'string' ? { provider_stop_reason: message.stopReason } : {}),
+    });
+  }
+  outputs.push(...toolEvents);
 }
 
 function projectToolStart(event: PiRuntimeEvent, outputs: CodeMuxEvent[]): void {

@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import type { AgentMessage } from '@/stores/agentStore';
+import { isEphemeralLiveStreamNarrationEvent } from '@/stores/agentStore';
 
 import { buildAssistantResultTargetMap, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { formatElapsed } from './RunningElapsed';
@@ -141,7 +142,7 @@ export function AssistantCollapseToggle({
   onClick: () => void;
 }) {
   return (
-    <div className={expanded ? 'pb-2' : 'pb-1'}>
+    <div className="pb-2">
       <Button
         type="button"
         variant="ghost"
@@ -194,6 +195,9 @@ function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
   }
 
   if (event.kind === 'assistant') {
+    if (isEphemeralLiveStreamNarrationEvent(event)) {
+      return false;
+    }
     // Empty thinking does not become a visible message, so it cannot be the toggle.
     return hasRenderableAssistantContent(event);
   }

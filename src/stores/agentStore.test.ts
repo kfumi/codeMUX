@@ -3615,4 +3615,156 @@ describe('agent store Codex history loading', () => {
       vi.useRealTimers();
     }
   });
+
+  it('appends pi thinking+text final message after tool steps instead of inserting before them', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '熟悉架构', 'D:/project/x');
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+
+      send({
+        type: 'tool_started',
+        event_id: 'tool-1',
+        tool_use_id: 'call-1',
+        name: 'bash',
+        input: { command: 'ls' },
+      });
+      send({
+        type: 'tool_finished',
+        event_id: 'tool-1-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      send({
+        type: 'assistant_message',
+        event_id: 'final-1',
+        content: [
+          { type: 'thinking', thinking: 'reviewing layout' },
+          { type: 'text', text: '架构概览如下。' },
+        ],
+        provider_stop_reason: 'stop',
+      });
+      send({ type: 'turn_finished', event_id: 'turn-1', outcome: 'completed' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+      const finalTextIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '架构概览如下。',
+        )
+      ));
+
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(finalTextIndex).toBeGreaterThan(toolAssistantIndex);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves pi final answer after tools when live-stream narration was committed too early', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
+
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+
+      send({ type: 'content_started', event_id: 'e1', index: 0, content_kind: 'text' });
+      send({ type: 'text_delta', event_id: 'e2', index: 0, text: '先看下代码' });
+      send({ type: 'content_finished', event_id: 'e3', index: 0 });
+      await vi.advanceTimersByTimeAsync(120);
+
+      send({
+        type: 'tool_started',
+        event_id: 'tool-1',
+        tool_use_id: 'call-1',
+        name: 'read',
+        input: { path: 'src/App.tsx' },
+      });
+      send({
+        type: 'tool_finished',
+        event_id: 'tool-1-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      send({
+        type: 'assistant_message',
+        event_id: 'final-1',
+        content: [
+          { type: 'thinking', thinking: 'reviewing code' },
+          { type: 'text', text: '先看下代码，然后给出结论。' },
+        ],
+        provider_stop_reason: 'stop',
+      });
+      send({ type: 'turn_finished', event_id: 'turn-1', outcome: 'completed' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+      const finalTextIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '先看下代码，然后给出结论。',
+        )
+      ));
+
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(finalTextIndex).toBeGreaterThan(toolAssistantIndex);
+      expect(events.filter((event) => (
+        event.kind === 'assistant'
+        && event.data.uuid === `live-stream-narration:${session.id}`
+      ))).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps pi streaming thinking buffer when answer text block starts', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '分析函数', 'D:/project/x');
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+
+      send({ type: 'content_started', event_id: 'e1', index: 0, content_kind: 'reasoning' });
+      send({ type: 'reasoning_delta', event_id: 'e2', index: 0, text: '先理解函数职责' });
+      send({ type: 'content_finished', event_id: 'e3', index: 0 });
+      await vi.advanceTimersByTimeAsync(120);
+
+      send({ type: 'content_started', event_id: 'e4', index: 1, content_kind: 'text' });
+      send({ type: 'text_delta', event_id: 'e5', index: 1, text: '你说得对！' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      expect(useAgentStore.getState().streamingThinking[session.id]).toBe('先理解函数职责');
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('你说得对！');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

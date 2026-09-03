@@ -1445,7 +1445,6 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   const visibleText = (
     duplicateLiveText
     || textIsMisroutedThinking
-    || visibleThinking.length > 0
   ) ? '' : text;
 
   if (stopped || (!isRunning && !thinking && !visibleText)) {

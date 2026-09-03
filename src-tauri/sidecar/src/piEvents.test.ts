@@ -62,14 +62,38 @@ describe('piEvents text/thinking streaming', () => {
       },
       ctx,
     );
-    expect(events).toHaveLength(1);
+    expect(events.map((event) => event.type)).toEqual(['assistant_message', 'tool_started']);
     expect(events[0]).toMatchObject({ ...BASE, type: 'assistant_message' });
     const content = (events[0] as { content: Array<Record<string, unknown>> }).content;
     expect(content).toEqual([
       { type: 'text', text: 'done' },
       { type: 'thinking', thinking: 'why' },
-      { type: 'tool_use', id: 'call-1', name: 'read', input: { path: 'a.ts' } },
     ]);
+    expect(events[1]).toMatchObject({
+      ...BASE,
+      type: 'tool_started',
+      tool_use_id: 'call-1',
+      name: 'read',
+      input: { path: 'a.ts' },
+    });
+  });
+
+  it('emits only tool_started when a message_end carries no thinking or text', () => {
+    const ctx = createContext();
+    const events = toCodeMuxEvents(
+      {
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'ls' } },
+          ],
+          stopReason: 'toolUse',
+        },
+      },
+      ctx,
+    );
+    expect(events.map((event) => event.type)).toEqual(['tool_started']);
   });
 });
 

@@ -57,6 +57,45 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('ignores ephemeral live-stream narration placeholders during conversion', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: 'hello' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'live-stream-narration:session-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'partial answer' }] },
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'done' },
+              { type: 'text', text: 'partial answer' },
+            ],
+          },
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const assistantMessages = messages.filter((message) => message.role === 'assistant');
+
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).toEqual([
+      { type: 'reasoning', text: 'done' },
+      { type: 'text', text: 'partial answer' },
+    ]);
+  });
+
   it('renders an OpenCode assistant text event before its terminal result', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: 'hello' } },

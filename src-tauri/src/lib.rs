@@ -631,6 +631,7 @@ pub fn run() {
             agent::commands::load_claude_session_events,
             agent::commands::load_codex_session_events,
             agent::commands::load_opencode_session_events,
+            agent::commands::load_pi_session_events,
             agent::history_import::discover_importable_sessions,
             agent::history_import::import_sessions,
             agent::history_import::load_session_events,

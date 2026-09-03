@@ -1,4 +1,4 @@
-import type { AgentMessage } from '../../../stores/agentStore';
+import { isEphemeralLiveStreamNarrationEvent, type AgentMessage } from '../../../stores/agentStore';
 import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
@@ -93,6 +93,9 @@ export function convertAgentEventsToAssistantMessages(
 
     if (event.kind === 'assistant') {
       if (isCodexCompactSummaryAssistantEvent(event)) {
+        return;
+      }
+      if (isEphemeralLiveStreamNarrationEvent(event)) {
         return;
       }
 

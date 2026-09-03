@@ -71,6 +71,13 @@ pub(crate) use super::codex_history::{
     convert_codex_history_values_to_events, find_codex_session_jsonl,
 };
 
+// --- pi history --------------------------------------------------------------
+
+pub use super::pi_history::{
+    __cmd__load_pi_session_events, __tauri_command_name_load_pi_session_events,
+    load_pi_session_events,
+};
+
 // --- OpenCode history --------------------------------------------------------
 
 pub use super::opencode_history::{

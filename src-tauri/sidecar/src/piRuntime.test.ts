@@ -125,6 +125,9 @@ describe('PiRuntime', () => {
       expect(types).toContain('assistant_message');
       expect(types[types.length - 1]).toBe('turn_finished');
       expect(events[events.length - 1]).toMatchObject({ type: 'turn_finished', outcome: 'completed' });
+      // turn_finished 携带真实耗时（缺失会被前端映射成 duration_ms: 0）。
+      const durationMs = (events[events.length - 1] as { duration_ms?: number }).duration_ms;
+      expect(typeof durationMs === 'number' && durationMs >= 0).toBe(true);
     } finally {
       await runtime.shutdown();
     }

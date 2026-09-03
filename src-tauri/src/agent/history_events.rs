@@ -245,7 +245,7 @@ fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
 }
 
 fn tool_finished_from_block(block: &Value, source: &Value) -> Option<Value> {
-    let tool_use_id = first_string(block, &["tool_use_id", "id"])?;
+    let tool_use_id = first_string(block, &["tool_use_id", "toolCallId", "id"])?;
     let content = stringify(block.get("content").unwrap_or(&Value::Null));
     let is_error = block
         .get("is_error")

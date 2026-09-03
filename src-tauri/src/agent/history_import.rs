@@ -363,8 +363,9 @@ async fn load_native_session_events(
             crate::agent::commands::load_opencode_session_events(state, app_session_id.to_string())
                 .await
         }
-        // pi 会话时间线以 CodeMUX Event 快照为权威；原生会话导入为二期范围。
-        AgentKind::Pi => Ok(Vec::new()),
+        AgentKind::Pi => {
+            super::pi_history::load_pi_session_events_internal(state, app_session_id).await
+        }
         AgentKind::GeminiCli => Ok(Vec::new()),
     }
 }

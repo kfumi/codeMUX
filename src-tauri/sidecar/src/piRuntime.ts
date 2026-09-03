@@ -116,6 +116,8 @@ export class PiRuntime {
   private finishCheck: NodeJS.Timeout | undefined;
   /** 有进行中的 prompt turn：turn_finished / error 事件只发一次。 */
   private turnOpen = false;
+  /** 当前 turn 开始时刻（prompt/compact 发起处），用于 turn_finished 的 duration_ms。 */
+  private turnStartedAt: number | undefined;
   private agentSessionFile: string | undefined;
   private piSessionId: string | undefined;
   private stopping = false;
@@ -200,6 +202,7 @@ export class PiRuntime {
     this.retrying = false;
     this.clearFinishCheck();
     this.turnOpen = true;
+    this.turnStartedAt = Date.now();
     this.usageBaseline = await this.readUsageSnapshot(transport);
     const turn = new Promise<void>((resolve, reject) => {
       this.pendingTurn = { resolve, reject };
@@ -246,6 +249,7 @@ export class PiRuntime {
     const customInstructions = commandText.replace(/^\/compact\s*/i, '').trim();
     setLogCtx({ sessionId: this.config.sessionId });
     writeLog('[pi-task]', `compact START${customInstructions ? ' instructions=yes' : ''}`);
+    const compactStartedAt = Date.now();
 
     this.interrupted = false;
     this.usageBaseline = await this.readUsageSnapshot(transport);
@@ -265,6 +269,7 @@ export class PiRuntime {
       type: 'turn_finished',
       outcome: 'completed',
       ...(usage ? { usage } : {}),
+      duration_ms: Math.max(0, Date.now() - compactStartedAt),
     });
     writeLog('[pi-task]', 'compact COMPLETE');
   }
@@ -524,11 +529,15 @@ export class PiRuntime {
     usage?: PiTurnUsage,
   ): void {
     this.clearFinishCheck();
-    this.turnOpen = false;    (this.options.emitEvent ?? emit)({
+    this.turnOpen = false;
+    const startedAt = this.turnStartedAt;
+    this.turnStartedAt = undefined;
+    (this.options.emitEvent ?? emit)({
       type: 'turn_finished',
       outcome,
       ...(reason ? { reason } : {}),
       ...(usage ? { usage } : {}),
+      ...(startedAt !== undefined ? { duration_ms: Math.max(0, Date.now() - startedAt) } : {}),
     });
     const pending = this.pendingTurn;
     this.pendingTurn = undefined;

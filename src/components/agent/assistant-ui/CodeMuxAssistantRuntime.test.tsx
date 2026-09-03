@@ -2186,6 +2186,28 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(longView.container.textContent).not.toContain('tokens');
   });
 
+  it('renders live thinking alongside answer text while pi streams the final reply', () => {
+    const sessionId = 'session-pi-thinking-and-text';
+    useAgentStore.setState((state) => ({
+      isRunning: { ...state.isRunning, [sessionId]: true },
+      queryStartTime: { ...state.queryStartTime, [sessionId]: Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        [sessionId]: '先理解 handleOneClickAction 的职责',
+      },
+      streamingText: {
+        ...state.streamingText,
+        [sessionId]: '你说得对！让我分析一下。',
+      },
+    }));
+
+    const { container } = render(<Harness sessionId={sessionId} />);
+
+    expect(container.querySelector('[data-streaming-reasoning="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-streaming-text="markdown"]')).not.toBeNull();
+    expect(container.textContent).toContain('你说得对！让我分析一下。');
+  });
+
   it('shows live thinking in the streaming panel while a tool group is active', () => {
     const sessionId = 'session-live-explore';
     const events: AgentMessage[] = [

@@ -414,31 +414,6 @@ function applyStreamingBuffer(
       };
     }
 
-    if (buffer.text && getSessionStreamPhase(sessionId) === 'answer' && nextTextPreview.trim()) {
-      const uuid = liveStreamNarrationUuid(sessionId);
-      const liveEvent: AgentMessage = {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid,
-          session_id: sessionId,
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: nextTextPreview }],
-          },
-          parent_tool_use_id: null,
-        },
-      };
-      const prevEvents = state.events[sessionId] || [];
-      const existingIndex = prevEvents.findIndex((entry) => isLiveStreamNarrationEvent(entry, sessionId));
-      updates.events = {
-        ...state.events,
-        [sessionId]: existingIndex >= 0
-          ? prevEvents.map((entry, index) => (index === existingIndex ? liveEvent : entry))
-          : [...prevEvents, liveEvent],
-      };
-    }
-
     updates.streamingVersion = {
       ...state.streamingVersion,
       [sessionId]: (state.streamingVersion[sessionId] ?? 0) + 1,
@@ -537,9 +512,9 @@ function isNarrationOnlyAssistantEvent(
 }
 
 /**
- * 是否为"延续流式 narration"的最终 assistant 消息：含非空文本块、无工具块，
- * 允许附带 thinking 块（pi 等运行时把思考与回答合成一条最终消息）。这类事件
- * 到达时应原地替换正在流式预览的 narration 事件，而不是追加成第二条消息。
+ * 是否为"延续流式 narration"的最终 assistant 消息：同时含 thinking 与 text、
+ * 无工具块（pi 等运行时把思考与回答合成一条最终消息）。这类事件到达时应原地
+ * 替换正在流式预览的 narration 事件，或追加到工具步骤之后，而不是插到 pending tools 前。
  */
 function isNarrationContinuationAssistantEvent(
   event: AgentMessage,
@@ -552,14 +527,54 @@ function isNarrationContinuationAssistantEvent(
     return false;
   }
   let hasText = false;
-  const allAllowed = content.every((block: { type?: string; text?: string }) => {
+  let hasThinking = false;
+  const allAllowed = content.every((block: { type?: string; text?: string; thinking?: string }) => {
     if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
       hasText = true;
       return true;
     }
-    return block?.type === 'thinking';
+    if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim().length > 0) {
+      hasThinking = true;
+      return true;
+    }
+    return false;
   });
-  return allAllowed && hasText;
+  return allAllowed && hasText && hasThinking;
+}
+
+function hasToolOnlyAssistantAfterIndex(events: AgentMessage[], index: number): boolean {
+  for (let i = index + 1; i < events.length; i += 1) {
+    const event = events[i];
+    if (event?.kind === 'user') {
+      return false;
+    }
+    if (isToolOnlyAssistantEvent(event)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function appendPiContinuationAssistantMessage(
+  baseEvents: AgentMessage[],
+  event: Extract<AgentMessage, { kind: 'assistant' }>,
+  sessionId: string,
+): AgentMessage[] {
+  const narrationText = narrationTextFromAssistantEvent(event);
+  const replaceAt = narrationText != null
+    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+    : undefined;
+  const canReplaceInPlace = replaceAt != null
+    && !hasToolOnlyAssistantAfterIndex(baseEvents, replaceAt);
+
+  if (canReplaceInPlace) {
+    return baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+  }
+
+  const cleaned = baseEvents.filter((entry, index) => (
+    index !== replaceAt && !isLiveStreamNarrationEvent(entry, sessionId)
+  ));
+  return [...cleaned, event];
 }
 
 function isToolOnlyAssistantEvent(
@@ -706,12 +721,24 @@ function commitLiveStreamingNarration(
 
 const LIVE_STREAM_NARRATION_UUID_PREFIX = 'live-stream-narration:';
 
+export function isEphemeralLiveStreamNarrationEvent(event: AgentMessage): boolean {
+  return event.kind === 'assistant'
+    && typeof event.data?.uuid === 'string'
+    && event.data.uuid.startsWith(LIVE_STREAM_NARRATION_UUID_PREFIX);
+}
+
 function liveStreamNarrationUuid(sessionId: string): string {
   return `${LIVE_STREAM_NARRATION_UUID_PREFIX}${sessionId}`;
 }
 
 function isLiveStreamNarrationEvent(event: AgentMessage, sessionId: string): boolean {
-  return event.kind === 'assistant' && event.data?.uuid === liveStreamNarrationUuid(sessionId);
+  return event.kind === 'assistant'
+    && isEphemeralLiveStreamNarrationEvent(event)
+    && event.data?.uuid === liveStreamNarrationUuid(sessionId);
+}
+
+function stripEphemeralLiveStreamNarrationEvents(events: AgentMessage[]): AgentMessage[] {
+  return events.filter((entry) => !isEphemeralLiveStreamNarrationEvent(entry));
 }
 
 function queueStreamingDelta(
@@ -2010,7 +2037,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
                   || getSessionStreamPhase(sessionId) === 'answer'
                 ) {
                   setSessionStreamPhase(sessionId, 'answer');
-                  if (hasThinkingContent) {
+                  // Pi 等运行时在最终 assistant_message 到达前不会把思考写入事件；
+                  // 进入 answer 阶段时保留 streamingThinking，避免正文流式输出时思考面板消失。
+                  if (hasThinkingContent && (hasCommittedThinking || isOpencodeLikeAgent(sessionId))) {
                     clearStreamingTextField(sessionId, 'streamingThinking', set, get);
                   }
                 }
@@ -2315,6 +2344,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           const shouldSimulate = Boolean(
             !hasToolUse
             && !supersedesExisting
+            && !isNarrationContinuationAssistantEvent(event)
             && narrationInsertAt == null
             && !currentStreamingText
             && !currentStreamingThinking
@@ -2447,7 +2477,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
             );
           } else if (
             event.kind === 'assistant'
-            && (isNarrationOnlyAssistantEvent(event) || isNarrationContinuationAssistantEvent(event))
+            && isNarrationContinuationAssistantEvent(event)
+            && !hasSuperseded
+          ) {
+            newEvents = appendPiContinuationAssistantMessage(
+              baseEvents,
+              event,
+              sessionId,
+            );
+          } else if (
+            event.kind === 'assistant'
+            && isNarrationOnlyAssistantEvent(event)
             && !hasSuperseded
           ) {
             const narrationText = narrationTextFromAssistantEvent(event);
@@ -2466,7 +2506,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
             newEvents = [...baseEvents, event];
           }
           if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
-            newEvents = newEvents.filter((entry) => !isReconnectingStreamStatus(entry));
+            newEvents = stripEphemeralLiveStreamNarrationEvents(
+              newEvents.filter((entry) => !isReconnectingStreamStatus(entry)),
+            );
           }
           const extractedTodos = extractTodosFromEvents(newEvents);
 
@@ -2889,7 +2931,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
   },
 
-  loadSessionMessages: async (sessionId: string, _options?: { force?: boolean }) => {
+  loadSessionMessages: async (sessionId: string, options?: { force?: boolean }) => {
     const pending = pendingSessionMessageLoads.get(sessionId);
     if (pending) {
       return pending;
@@ -3007,7 +3049,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               isBackgroundLive,
             )
           );
-          const keepCurrentEvents = keepLiveEvents || preferLocalEvents;
+          const keepCurrentEvents = !options?.force && (keepLiveEvents || preferLocalEvents);
           const nextEvents = keepCurrentEvents ? currentEvents! : events;
           const nextTimestamps = keepCurrentEvents
             ? state.eventTimestamps[sessionId] ?? timestamps
