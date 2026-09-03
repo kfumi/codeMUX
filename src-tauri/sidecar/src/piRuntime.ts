@@ -1,8 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
-import { createPiEventContext, toCodeMuxEvents, type PiEventContext, type PiRuntimeEvent } from './piEvents.js';
+import {
+  createPiEventContext,
+  toCodeMuxEvents,
+  type PiEventContext,
+  type PiRuntimeEvent,
+  type PiThinkingLevel,
+} from './piEvents.js';
 import { PiRpcProcess } from './piRpcTransport.js';
 import { emit } from './streamEventBatcher.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
@@ -10,6 +17,21 @@ import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { setLogCtx, writeLog } from './writeLog.js';
 
 export const PI_RPC_ENTRY_RELATIVE = 'node_modules/@mariozechner/pi/dist/cli.js';
+
+/** pi 用量快照（get_session_stats 的 token 子集，用于 turn 级差值）。 */
+interface PiUsageSnapshot {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+}
+
+/** CodeMUX turn_finished.usage 的 token 字段。 */
+interface PiTurnUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens: number;
+  reasoning_output_tokens: number;
+}
 
 export interface PiRuntimeOptions {
   /** 测试 seam：替换传输层构造（fake-pi 基建走这里）。 */
@@ -90,6 +112,7 @@ export class PiRuntime {
   private agentSessionFile: string | undefined;
   private piSessionId: string | undefined;
   private stopping = false;
+  private usageBaseline: PiUsageSnapshot | undefined;
 
   constructor(
     private readonly config: PiSessionConfig,
@@ -110,7 +133,15 @@ export class PiRuntime {
     return (
       this.state === 'started' &&
       next.sessionId === this.config.sessionId &&
-      (next.agentSessionId ?? undefined) === (this.config.agentSessionId ?? undefined)
+      (next.agentSessionId ?? undefined) === (this.config.agentSessionId ?? undefined) &&
+      next.cwd === this.config.cwd &&
+      (next.provider ?? undefined) === (this.config.provider ?? undefined) &&
+      (next.model ?? undefined) === (this.config.model ?? undefined) &&
+      (next.thinkingLevel ?? undefined) === (this.config.thinkingLevel ?? undefined) &&
+      next.credentialSource === this.config.credentialSource &&
+      (next.apiKey ?? undefined) === (this.config.apiKey ?? undefined) &&
+      (next.baseUrl ?? undefined) === (this.config.baseUrl ?? undefined) &&
+      JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null)
     );
   }
 
@@ -126,6 +157,10 @@ export class PiRuntime {
     if (this.state === 'started' && this.transport) {
       return this.buildSessionMapping(this.config.runtimeGeneration);
     }
+    if (this.state === 'starting' && this.startPromise) {
+      return this.startPromise;
+    }
+    // 进程崩溃（disposed）后允许重新拉起：以上次已知会话文件 resume。
     if (!this.startPromise) {
       this.startPromise = this.start().catch((error) => {
         this.startPromise = undefined;
@@ -145,10 +180,16 @@ export class PiRuntime {
     }
 
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    // 手动压缩是独立的阻塞 RPC，不进入常规 prompt 流程。
+    if (payload.text.trim().startsWith('/compact') && (payload.images?.length ?? 0) === 0) {
+      await this.compactSession(payload.text.trim());
+      return;
+    }
     setLogCtx({ sessionId: this.config.sessionId });
     writeLog('[pi-task]', `sendInput START model=${this.config.provider ?? 'default'}/${this.config.model ?? 'default'} prompt_preview=${payload.text.slice(0, 120)}`);
 
     this.interrupted = false;
+    this.usageBaseline = await this.readUsageSnapshot(transport);
     const turn = new Promise<void>((resolve, reject) => {
       this.pendingTurn = { resolve, reject };
     });
@@ -182,6 +223,41 @@ export class PiRuntime {
     }
   }
 
+  /** 手动压缩：`/compact [自定义指令]`。compact 是阻塞 LLM 任务，不设墙钟超时。 */
+  private async compactSession(commandText: string): Promise<void> {
+    const transport = this.transport;
+    if (this.state !== 'started' || !transport) {
+      throw new Error('pi runtime is not started');
+    }
+    if (this.pendingTurn) {
+      throw new Error('pi runtime already has an active turn');
+    }
+    const customInstructions = commandText.replace(/^\/compact\s*/i, '').trim();
+    setLogCtx({ sessionId: this.config.sessionId });
+    writeLog('[pi-task]', `compact START${customInstructions ? ' instructions=yes' : ''}`);
+
+    this.interrupted = false;
+    this.usageBaseline = await this.readUsageSnapshot(transport);
+    try {
+      await transport.request(
+        { type: 'compact', ...(customInstructions ? { customInstructions } : {}) },
+        { timeoutMs: null },
+      );
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      writeLog('[pi-task]', `compact FAILED error=${messageText}`);
+      this.emitTurnError(messageText);
+      throw error;
+    }
+    const usage = await this.readTurnUsageDelta(transport);
+    (this.options.emitEvent ?? emit)({
+      type: 'turn_finished',
+      outcome: 'completed',
+      ...(usage ? { usage } : {}),
+    });
+    writeLog('[pi-task]', 'compact COMPLETE');
+  }
+
   async interrupt(): Promise<void> {
     const transport = this.transport;
     if (this.state !== 'started' || !transport) {
@@ -211,9 +287,29 @@ export class PiRuntime {
     await fs.promises.rm(agentSessionId, { force: true });
   }
 
+  /**
+   * Fork = 拷贝当前 pi 会话文件为同目录下的独立副本，返回新文件路径作为
+   * 新会话的 Native Session mapping。pi 按路径加载会话，文件级拷贝即得到
+   * 互不影响的原生历史副本（provider turn 定位参数不适用，整卷拷贝）。
+   */
+  async forkSession(sourceAgentSessionId?: string): Promise<string> {
+    const source = this.agentSessionFile ?? sourceAgentSessionId;
+    if (!source || !looksLikePiSessionPath(source) || !fs.existsSync(source)) {
+      throw new Error('pi fork requires an existing native session file');
+    }
+    const target = path.join(
+      path.dirname(source),
+      `${path.basename(source, '.jsonl')}-fork-${randomUUID().slice(0, 8)}.jsonl`,
+    );
+    await fs.promises.copyFile(source, target);
+    writeLog('[pi-task]', `fork COPIED to=${target}`);
+    return target;
+  }
+
   async shutdown(): Promise<void> {
     this.stopping = true;
     this.state = 'disposed';
+    this.startPromise = undefined;
     const transport = this.transport;
     this.transport = undefined;
     if (this.pendingTurn) {
@@ -233,9 +329,14 @@ export class PiRuntime {
 
   private async start(): Promise<PiSessionMapping> {
     this.state = 'starting';
+    // resume 路径取最新已知会话文件（崩溃自动恢复时 config 里的还是旧值）。
+    const spawnConfig: PiSessionConfig = {
+      ...this.config,
+      ...(this.agentSessionFile ? { agentSessionId: this.agentSessionFile } : {}),
+    };
     const transport = this.options.transportFactory
-      ? this.options.transportFactory(this.config)
-      : createDefaultPiTransport(this.config);
+      ? this.options.transportFactory(spawnConfig)
+      : createDefaultPiTransport(spawnConfig);
     this.transport = transport;
     transport.onMessage((message) => this.handlePiEvent(message as PiRuntimeEvent));
     void transport.waitForExit().then((info) => {
@@ -286,7 +387,13 @@ export class PiRuntime {
       for (const mapped of projected) {
         (this.options.emitEvent ?? emit)(mapped);
       }
-      this.finishTurn(outcome);
+      const transport = this.transport;
+      void (transport
+        ? this.readTurnUsageDelta(transport).catch(() => undefined)
+        : Promise.resolve(undefined)
+      ).then((usage) => {
+        this.finishTurn(outcome, undefined, usage);
+      });
       return;
     }
     const projected = toCodeMuxEvents(event, this.ctx);
@@ -298,6 +405,7 @@ export class PiRuntime {
   private handleProcessExit(code: number | null, signal: NodeJS.Signals | null): void {
     if (this.stopping || this.state !== 'started') return;
     this.state = 'disposed';
+    this.startPromise = undefined;
     this.transport = undefined;
     const message = `pi process exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
     writeLog('[pi-task]', `process EXIT ${message}`);
@@ -313,11 +421,16 @@ export class PiRuntime {
     this.finishTurn('failed', message);
   }
 
-  private finishTurn(outcome: 'completed' | 'failed' | 'interrupted', reason?: string): void {
+  private finishTurn(
+    outcome: 'completed' | 'failed' | 'interrupted',
+    reason?: string,
+    usage?: PiTurnUsage,
+  ): void {
     (this.options.emitEvent ?? emit)({
       type: 'turn_finished',
       outcome,
       ...(reason ? { reason } : {}),
+      ...(usage ? { usage } : {}),
     });
     const pending = this.pendingTurn;
     this.pendingTurn = undefined;
@@ -330,6 +443,61 @@ export class PiRuntime {
     // outcome，用户主动中断不应再向 send_input 的兜底抛出错误。
     pending.resolve();
   }
+
+  /**
+   * 读取会话用量快照。旧版 pi 缺 `get_session_stats` 时回退
+   * `get_state.contextUsage`（仅上下文占用，无 token 数）。
+   */
+  private async readUsageSnapshot(transport: PiRpcProcess): Promise<PiUsageSnapshot | undefined> {
+    try {
+      const stats = await transport.request({ type: 'get_session_stats' });
+      const tokens = readRecordField(stats, 'tokens');
+      return {
+        inputTokens: readNumberField(tokens, 'input') ?? 0,
+        outputTokens: readNumberField(tokens, 'output') ?? 0,
+        cachedInputTokens: readNumberField(tokens, 'cacheRead') ?? 0,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** turn 级用量 = 结束快照 - 起始快照（pi 的 stats 是会话累计值）。 */
+  private async readTurnUsageDelta(transport: PiRpcProcess): Promise<PiTurnUsage | undefined> {
+    const finalSnapshot = await this.readUsageSnapshot(transport);
+    const baseline = this.usageBaseline;
+    this.usageBaseline = finalSnapshot;
+    if (!finalSnapshot) return undefined;
+    if (!baseline) {
+      return {
+        input_tokens: finalSnapshot.inputTokens,
+        output_tokens: finalSnapshot.outputTokens,
+        cached_input_tokens: finalSnapshot.cachedInputTokens,
+        reasoning_output_tokens: 0,
+      };
+    }
+    return {
+      input_tokens: Math.max(0, finalSnapshot.inputTokens - baseline.inputTokens),
+      output_tokens: Math.max(0, finalSnapshot.outputTokens - baseline.outputTokens),
+      cached_input_tokens: Math.max(0, finalSnapshot.cachedInputTokens - baseline.cachedInputTokens),
+      reasoning_output_tokens: 0,
+    };
+  }
+}
+
+function readRecordField(value: unknown, key: string): Record<string, unknown> | undefined {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const field = (value as Record<string, unknown>)[key];
+    if (typeof field === 'object' && field !== null && !Array.isArray(field)) {
+      return field as Record<string, unknown>;
+    }
+  }
+  return undefined;
+}
+
+function readNumberField(record: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = record?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -354,6 +522,9 @@ export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess 
 
   if (config.agentSessionId && looksLikePiSessionPath(config.agentSessionId)) {
     args.push('--session', config.agentSessionId);
+  }
+  if (config.thinkingLevel) {
+    args.push('--thinking', config.thinkingLevel);
   }
   const provider = config.provider?.trim();
   const model = config.model?.trim();

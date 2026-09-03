@@ -341,6 +341,18 @@ export const sessionApi = {
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
     }),
+  forkPi: (
+    sessionId: string,
+    forkEventId: string,
+    forkProviderMessageId?: string,
+    title?: string,
+  ): Promise<Session> =>
+    invokeLogged('fork_pi_session', {
+      sessionId,
+      forkEventId,
+      forkProviderMessageId: forkProviderMessageId ?? null,
+      title: title ?? null,
+    }),
 };
 
 export const agentApi = {

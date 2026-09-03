@@ -92,9 +92,10 @@ pub use super::rewind::{
 
 pub use super::fork::{
     __cmd__fork_claude_session, __cmd__fork_codex_session, __cmd__fork_opencode_session,
-    __tauri_command_name_fork_claude_session, __tauri_command_name_fork_codex_session,
-    __tauri_command_name_fork_opencode_session, fork_claude_session, fork_codex_session,
-    fork_opencode_session,
+    __cmd__fork_pi_session, __tauri_command_name_fork_claude_session,
+    __tauri_command_name_fork_codex_session, __tauri_command_name_fork_opencode_session,
+    __tauri_command_name_fork_pi_session, fork_claude_session, fork_codex_session,
+    fork_opencode_session, fork_pi_session,
 };
 
 // --- Codex proxy -----------------------------------------------------------------

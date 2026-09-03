@@ -191,6 +191,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         )
         : sourceSession?.agent_kind === 'opencode'
           ? await sessionApi.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
+        : sourceSession?.agent_kind === 'pi'
+          ? await sessionApi.forkPi(sessionId, forkEventId, forkProviderMessageId)
         : await sessionApi.forkClaude(sessionId, forkEventId, forkProviderMessageId);
       useAgentStore.getState().clearEvents(session.id);
       set((state) => ({

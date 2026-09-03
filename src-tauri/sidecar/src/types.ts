@@ -1,5 +1,6 @@
 import type { AgentInputAttachment, AgentInputPayload } from './agentInputPayload.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
+import type { PiThinkingLevel } from './piEvents.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import type { TurnTimeouts } from './turnTimeouts.js';
 
@@ -46,6 +47,8 @@ export interface PiSessionConfig {
   runtimeGeneration: number;
   provider?: string;
   model?: string;
+  /** pi 思考等级（由会话 reasoningEffort 映射，'none' → 'off'）。 */
+  thinkingLevel?: PiThinkingLevel;
   credentialSource: PiCredentialSource;
   apiKey?: string;
   baseUrl?: string;

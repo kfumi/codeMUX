@@ -24,6 +24,7 @@ import { OpenCodeRuntime } from './opencodeRuntime.js';
 import { deleteOpenCodeSessionWithOfficialSdk, normalizeOpenCodeModelReference } from './opencodeSdk.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import { PiRuntime } from './piRuntime.js';
+import type { PiThinkingLevel } from './piEvents.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping, PiSessionConfig, PiSessionMapping } from './types.js';
 import {
   getRuntimeFlavor,
@@ -1914,7 +1915,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         try {
           const current = selectedRuntime();
           const flavor = getRuntimeFlavor(activeAgentKind);
-          if ((flavor !== 'claude' && flavor !== 'codex' && flavor !== 'opencode') || !current?.forkSession) {
+          if (
+            (flavor !== 'claude' && flavor !== 'codex' && flavor !== 'opencode' && flavor !== 'pi')
+            || !current?.forkSession
+          ) {
             throw new Error('This provider runtime does not support session fork');
           }
           const agentSessionId = await current.forkSession(
@@ -2221,11 +2225,30 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
     runtimeGeneration: cmd.runtimeGeneration ?? 0,
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
+    ...(mapReasoningEffortToPiThinking(cmd.reasoningEffort)
+      ? { thinkingLevel: mapReasoningEffortToPiThinking(cmd.reasoningEffort) }
+      : {}),
     credentialSource,
     ...(credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
   };
+}
+
+/** CodeMUX reasoningEffort → pi thinking level（'none' → 'off'，缺省交给 pi 默认 medium）。 */
+function mapReasoningEffortToPiThinking(effort: string | undefined): PiThinkingLevel | undefined {
+  switch (effort) {
+    case 'none':
+      return 'off';
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+    case 'max':
+      return effort;
+    default:
+      return undefined;
+  }
 }
 
 function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
@@ -2251,6 +2274,7 @@ function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
     updatePermissions: () => {
       // pi 无审批模型：权限配置不适用，忽略。
     },
+    forkSession: (sourceAgentSessionId) => piRuntime.forkSession(sourceAgentSessionId),
     resetSession: () => piRuntime.resetSession(),
     deleteSession: (agentSessionId) => piRuntime.deleteSession(agentSessionId),
     interrupt: () => piRuntime.interrupt(),

@@ -643,6 +643,7 @@ pub fn run() {
             agent::commands::fork_claude_session,
             agent::commands::fork_codex_session,
             agent::commands::fork_opencode_session,
+            agent::commands::fork_pi_session,
             agent::commands::get_agent_session_info,
             agent::commands::start_codex_proxy,
             agent::commands::stop_codex_proxy,

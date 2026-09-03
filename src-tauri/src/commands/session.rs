@@ -341,8 +341,21 @@ pub(crate) async fn cleanup_native_sessions_best_effort(
                     );
                 }
             }
-            // pi 会话文件清理走 delete_session 的专用路径（pi 的 mapping 即文件路径）。
-            AgentKind::Pi => {}
+            // pi 的 mapping 即会话文件绝对路径；仅删除 .jsonl 会话文件。
+            AgentKind::Pi => {
+                let path = std::path::Path::new(&session.agent_session_id);
+                if path.is_absolute() && path.extension().is_some_and(|ext| ext == "jsonl") {
+                    if let Err(error) = std::fs::remove_file(path) {
+                        warn!(
+                            target: "session",
+                            "Failed to clean pi native session app_session_id={} agent_session_id={}: {}",
+                            app_session_id,
+                            session.agent_session_id,
+                            error
+                        );
+                    }
+                }
+            }
             AgentKind::GeminiCli => {}
         }
     }

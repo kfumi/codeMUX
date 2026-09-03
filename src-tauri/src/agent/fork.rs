@@ -568,6 +568,96 @@ pub async fn fork_opencode_session(
     .map_err(|error| error.to_string())
 }
 
+/// pi Fork：整卷拷贝原生会话文件（sidecar 侧完成），新 mapping 指向副本。
+/// 与 OpenCode 的「fork 到指定消息」不同，pi 无树导航接入，fork 语义为
+/// 整会话副本；fork_event_id / provider message id 仅透传记录。
+#[tauri::command]
+pub async fn fork_pi_session(
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    reject_read_only_session(&state, &session_id)?;
+
+    let source = {
+        let db = state.db.lock().unwrap();
+        operations::get_session(&db, &session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("Session not found: {}", session_id))?
+    };
+    if source.agent_kind != AgentKind::Pi {
+        return Err("Only pi sessions support the pi Fork command".to_string());
+    }
+    if source.origin == "imported" || source.is_read_only {
+        return Err("Imported or read-only sessions cannot be forked".to_string());
+    }
+    let source_agent_session_id = get_agent_session_id(state.inner(), &session_id, AgentKind::Pi)?
+        .ok_or_else(|| "No pi session mapping found for the source session".to_string())?;
+
+    let sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(SidecarHandle::command_sender)
+    };
+    let Some(sender) = sender else {
+        return Err("pi runtime is not active; reopen the session and try again".to_string());
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (result_sender, result_receiver) = oneshot::channel();
+    agent_state
+        .session_fork_waiters
+        .lock()
+        .await
+        .insert(request_id.clone(), result_sender);
+    let command = serde_json::json!({
+        "type": "fork_session",
+        "sessionId": session_id,
+        "requestId": request_id,
+        "sourceAgentSessionId": source_agent_session_id,
+        "sourceProviderMessageId": fork_provider_message_id,
+    });
+    if sender.send(command.to_string()).await.is_err() {
+        agent_state
+            .session_fork_waiters
+            .lock()
+            .await
+            .remove(&request_id);
+        return Err("Failed to send pi session fork command to sidecar".to_string());
+    }
+
+    let child_result =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), result_receiver).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("pi sidecar stopped before confirming session fork".to_string()),
+            Err(_) => {
+                agent_state
+                    .session_fork_waiters
+                    .lock()
+                    .await
+                    .remove(&request_id);
+                Err("Timed out waiting for pi session fork".to_string())
+            }
+        };
+    let child_agent_session_id = child_result?;
+
+    let child_title = title
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("分支 · {}", source.title));
+    let mut db = state.db.lock().unwrap();
+    operations::create_forked_session(
+        &mut db,
+        &session_id,
+        &child_agent_session_id,
+        &fork_event_id,
+        fork_provider_message_id.as_deref(),
+        &child_title,
+    )
+    .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{install_claude_fork_child_history, stage_claude_history_fork};

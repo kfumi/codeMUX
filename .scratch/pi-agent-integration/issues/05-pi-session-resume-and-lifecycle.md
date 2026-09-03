@@ -1,14 +1,14 @@
 # 05 — pi 会话恢复与生命周期清理
 
-**What to build:** pi 会话的连续性：新会话以 `--session-dir` 落入 CodeMUX 管理目录，启动后回读会话文件路径存为 Native Session mapping；重启应用后以 `--session <file>` 恢复原生上下文并还原模型/思考等级；恢复失败时 mint 新会话并 emit System Event（native_session_rebuilt 语义）；进程崩溃后可重试恢复；关闭会话/退出应用时子进程清理不泄漏。
+**What to build:** pi 会话的连续性：新会话沿用 pi 默认会话目录（`~/.pi/agent/sessions`，与用户手动使用 pi CLI 的会话互通），启动后经 `get_state` 回读会话文件路径存为 Native Session mapping；重启应用后以 `--session <file>` 恢复原生上下文并还原模型/思考等级；硬恢复失败走既有 `session_resume_failed` 事件路径；pi 子进程崩溃后下一轮 ensure 自动重新拉起并以上次会话文件 resume；关闭会话/退出应用时子进程清理不泄漏。
 
 **Blocked by:** 03
 
 **Status:** ready-for-agent
 
-- [ ] 新会话的 pi 会话文件落入管理目录，mapping 正确保存
-- [ ] 重启后继续会话：历史气泡完整且模型可继续对话（--session 恢复）
-- [ ] 恢复失败时新建原生会话并 emit System Event，对话气泡不丢
-- [ ] 恢复时还原该会话的模型与思考等级
-- [ ] 子进程崩溃后重试可继续会话
-- [ ] 关闭会话/退出应用后无 pi 进程残留；fake-pi 测试覆盖恢复与退出路径
+- [x] 新会话的 pi 会话文件路径经 get_state 回读并正确存为 mapping（fake-pi 测试覆盖）
+- [x] 重启后继续会话：以 `--session <file>` 恢复，模型/思考等级经启动参数还原
+- [x] 硬恢复失败走既有 `session_resume_failed` 事件路径，CodeMUX 时间线气泡不丢
+- [x] 恢复时还原该会话的模型与思考等级（canReuse 比对含 provider/model/thinkingLevel）
+- [x] 子进程崩溃后重试可继续会话（ensure 重入 + 最新会话文件 resume，fake-pi 测试覆盖）
+- [x] 关闭会话/退出应用后无 pi 进程残留（优雅关闭阶梯测试覆盖）

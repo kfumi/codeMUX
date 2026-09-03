@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
 import { PiRuntime } from './piRuntime.js';
@@ -12,6 +12,29 @@ const FAKE_PI_PATH = fileURLToPath(new URL('./__fixtures__/fake-pi.mjs', import.
 const FAKE_SESSION_FILE = path.join(os.tmpdir(), `pi-fake-session-${process.pid}.jsonl`);
 
 type WireMessage = Record<string, unknown>;
+
+const pendingCleanups: Array<() => void> = [];
+
+afterEach(() => {
+  while (pendingCleanups.length > 0) {
+    pendingCleanups.pop()?.();
+  }
+});
+
+async function vi_waitFor(condition: () => void, timeoutMs = 2_000): Promise<void> {
+  const started = Date.now();
+  for (;;) {
+    try {
+      condition();
+      return;
+    } catch {
+      if (Date.now() - started > timeoutMs) {
+        throw new Error('vi_waitFor timed out');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
 
 function buildConfig(overrides: Partial<PiSessionConfig> = {}): PiSessionConfig {
   return {
@@ -194,5 +217,142 @@ describe('PiRuntime', () => {
       );
       await expect(runtime.ensure()).rejects.toThrow(/cannot be mapped/);
     });
+  });
+
+  it('attaches per-turn token usage to turn_finished from session stats deltas', async () => {
+    const { runtime, events } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [{ delayMs: 0, event: { type: 'agent_end' } }],
+        },
+      },
+      // 会话累计值：turn 前基线 10/5/2，turn 后 20/9/4 → 差值 10/4/2。
+      responseSequences: {
+        get_session_stats: [
+          { data: { tokens: { input: 10, output: 5, cacheRead: 2 } } },
+          { data: { tokens: { input: 20, output: 9, cacheRead: 4 } } },
+        ],
+      },
+    });
+    try {
+      await runtime.ensure();
+      events.length = 0;
+      await runtime.sendInput('hi');
+      const finished = events.find((event) => event.type === 'turn_finished');
+      expect(finished).toMatchObject({
+        type: 'turn_finished',
+        outcome: 'completed',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 4,
+          cached_input_tokens: 2,
+          reasoning_output_tokens: 0,
+        },
+      });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('routes /compact through the native compact RPC without a wall-clock timeout', async () => {
+    const { runtime, events } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        compact: {
+          data: {},
+          thenEvents: [{ delayMs: 5, event: { type: 'compaction_end', reason: 'manual' } }],
+        },
+      },
+      // 基线 10/5/2 → 压缩后 15/6/2，差值 5/1/0。
+      responseSequences: {
+        get_session_stats: [
+          { data: { tokens: { input: 10, output: 5, cacheRead: 2 } } },
+          { data: { tokens: { input: 15, output: 6, cacheRead: 2 } } },
+        ],
+      },
+    });
+    try {
+      await runtime.ensure();
+      events.length = 0;
+      await runtime.sendInput('/compact keep the plan section');
+      await vi_waitFor(() => expect(events.map((event) => event.type)).toContain('system_event'));
+      const finished = events.find((event) => event.type === 'turn_finished');
+      expect(finished).toMatchObject({
+        type: 'turn_finished',
+        outcome: 'completed',
+        usage: { input_tokens: 5, output_tokens: 1 },
+      });
+      const boundary = events.find((event) => event.type === 'system_event');
+      expect(boundary).toMatchObject({
+        subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'manual' },
+      });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('forks by copying the native session file to a sibling path', async () => {
+    const source = path.join(os.tmpdir(), `pi-fork-source-${Date.now()}.jsonl`);
+    fs.writeFileSync(source, '{"type":"session"}\n', 'utf8');
+    const { runtime } = startFakePiRuntime({
+      responses: { get_state: { data: { sessionId: 'pi-s1', sessionFile: source } } },
+    });
+    try {
+      await runtime.ensure();
+      const forkedPath = await runtime.forkSession();
+      expect(forkedPath).toContain('-fork-');
+      expect(forkedPath.endsWith('.jsonl')).toBe(true);
+      expect(fs.existsSync(forkedPath)).toBe(true);
+      expect(path.dirname(forkedPath)).toBe(path.dirname(source));
+      expect(fs.readFileSync(forkedPath, 'utf8')).toBe('{"type":"session"}\n');
+      fs.rmSync(forkedPath, { force: true });
+    } finally {
+      await runtime.shutdown();
+      fs.rmSync(source, { force: true });
+    }
+  });
+
+  it('re-ensures after a process crash, resuming from the latest session file', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-crash-test-'));
+    pendingCleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const sessionFile = path.join(dir, 'session.jsonl');
+    const scenarioFile = path.join(dir, 'scenario.json');
+    fs.writeFileSync(
+      scenarioFile,
+      JSON.stringify({
+        responses: { get_state: { data: { sessionId: 'pi-s1', sessionFile } } },
+      }),
+      'utf8',
+    );
+    const spawnedConfigs: PiSessionConfig[] = [];
+    const runtime = new PiRuntime(buildConfig({ credentialSource: 'none' }), {
+      transportFactory: (config) => {
+        spawnedConfigs.push(config);
+        return PiRpcProcess.start({
+          command: process.execPath,
+          args: [FAKE_PI_PATH],
+          env: { PI_FAKE_SCENARIO: scenarioFile },
+          requestTimeoutMs: 2_000,
+        });
+      },
+    });
+    try {
+      await runtime.ensure();
+      // 模拟进程崩溃（非主动关闭）。
+      (runtime as unknown as { handleProcessExit: (c: number | null, s: NodeJS.Signals | null) => void })
+        .handleProcessExit(1, null);
+      expect(runtime.isStarted).toBe(false);
+
+      const mapping = await runtime.ensure();
+      expect(mapping.agentSessionId).toBe(sessionFile);
+      expect(spawnedConfigs).toHaveLength(2);
+      // 第二次拉起应携带首次会话文件以便 resume。
+      expect(spawnedConfigs[1]?.agentSessionId).toBe(sessionFile);
+    } finally {
+      await runtime.shutdown();
+    }
   });
 });

@@ -255,15 +255,35 @@ export function toCodeMuxEvents(event: PiRuntimeEvent, ctx: PiEventContext): Cod
     case 'agent_settled':
     case 'turn_start':
     case 'turn_end':
-    case 'compaction_start':
-    case 'compaction_end':
     case 'queue_update':
     case 'extension_ui_request':
     case 'command_output':
+      break;
+    case 'compaction_start':
+    case 'compaction_end':
+      projectCompaction(event, ctx, outputs);
       break;
     default:
       break;
   }
 
   return outputs.map((output) => envelope(ctx, output, sequence++));
+}
+
+/**
+ * 压缩边界投影为 `compact_boundary` 系统事件（与 Claude/Codex 的压缩时间线
+ * 同构）；`trigger` 按 manual/auto 归类，token 数 pi 事件未携带则缺省。
+ */
+function projectCompaction(event: PiRuntimeEvent, ctx: PiEventContext, outputs: CodeMuxEvent[]): void {
+  if (event.type !== 'compaction_end') return;
+  if (event.aborted === true) return;
+  const reason = readString(event.reason);
+  outputs.push({
+    type: 'system_event',
+    subtype: 'compact_boundary',
+    content: 'Conversation compacted',
+    compact_metadata: {
+      trigger: reason === 'manual' ? 'manual' : 'auto',
+    },
+  });
 }
