@@ -27,7 +27,23 @@ export type CodexPermissionConfig = {
   networkAccessEnabled: boolean;
 };
 
-export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig | OpenCodePermissionConfig;
+/**
+ * pi 无原生权限模式，档位由临时扩展的 tool_call 拦截策略实现：确认编辑/
+ * 仅确认命令/全放行（plan 档对 pi 不适用，选择器不提供）。变更经 pi 进程
+ * 重建于下一轮生效（与模型/思考等级同机制）。
+ */
+export type PiPermissionConfig = {
+  kind: 'pi';
+  executionMode: 'confirm_before_edit' | 'auto_edit' | 'full_access';
+};
+
+const PI_EXECUTION_MODES: PiPermissionConfig['executionMode'][] = [
+  'confirm_before_edit',
+  'auto_edit',
+  'full_access',
+];
+
+export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig | OpenCodePermissionConfig | PiPermissionConfig;
 
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
   'default',
@@ -55,6 +71,10 @@ export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermiss
 
   if (agentKind === 'codex') {
     return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
+  }
+
+  if (agentKind === 'pi') {
+    return { kind: 'pi', executionMode: 'confirm_before_edit' };
   }
 
   return {
@@ -89,6 +109,19 @@ export function mapExecutionModeToPermissionConfig(
         // never reaches this branch either — Codex Plan Mode is an orthogonal
         // toggle (ADR 0010) and callers flip it without touching the tier.
         return { kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true };
+    }
+  }
+
+  if (agentKind === 'pi') {
+    switch (executionMode) {
+      case 'auto_edit':
+        return { kind: 'pi', executionMode: 'auto_edit' };
+      case 'full_access':
+        return { kind: 'pi', executionMode: 'full_access' };
+      // plan 对 pi 不适用（选择器不提供），确认档为缺省。
+      case 'confirm_before_edit':
+      default:
+        return { kind: 'pi', executionMode: 'confirm_before_edit' };
     }
   }
 
@@ -196,6 +229,13 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
         : resolveCodexWorkflowMode(raw) === 'read-only' ? false : true,
     };
   }
+  if (agentKind === 'pi') {
+    // pi kind 之前 pi 会话误存 claude_code 快照（选择器错位显示），统一迁到默认确认档。
+    return {
+      kind: 'pi',
+      executionMode: isPiExecutionMode(raw.executionMode) ? raw.executionMode : 'confirm_before_edit',
+    };
+  }
 
   return {
     kind: 'claude_code',
@@ -222,6 +262,10 @@ export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWor
 
 function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {
   return typeof value === 'string' && CLAUDE_PERMISSION_MODES.includes(value as ClaudePermissionMode);
+}
+
+function isPiExecutionMode(value: unknown): value is PiPermissionConfig['executionMode'] {
+  return typeof value === 'string' && (PI_EXECUTION_MODES as string[]).includes(value);
 }
 
 function isCodexWorkflowMode(value: unknown): value is CodexWorkflowMode {

@@ -4,6 +4,8 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type CodexApprovalPolicy = 'untrusted' | 'on-request' | 'never';
 export type CodexWorkflowMode = 'read-only' | 'auto' | 'auto-review' | 'full-access';
 
+export type PiApprovalExecutionMode = 'confirm_before_edit' | 'auto_edit' | 'full_access';
+
 export type SidecarPermissionConfig =
   | { kind: 'claude_code'; permissionMode?: ClaudePermissionMode }
   | { kind: 'opencode'; autoApprovePermissions?: boolean }
@@ -13,7 +15,8 @@ export type SidecarPermissionConfig =
     sandboxMode?: CodexSandboxMode;
     approvalPolicy?: CodexApprovalPolicy;
     networkAccessEnabled?: boolean;
-  };
+  }
+  | { kind: 'pi'; executionMode?: PiApprovalExecutionMode };
 
 export type CodexTurnPolicy = {
   sandboxMode: CodexSandboxMode;

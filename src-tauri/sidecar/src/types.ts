@@ -1,5 +1,6 @@
 import type { AgentInputAttachment, AgentInputPayload } from './agentInputPayload.js';
-import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
+import type { AgentPlanMode, PiApprovalExecutionMode, SidecarPermissionConfig } from './agentPermissions.js';
+import type { PiApprovalMode } from './piExtension.js';
 import type { PiThinkingLevel } from './piEvents.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import type { TurnTimeouts } from './turnTimeouts.js';
@@ -54,6 +55,11 @@ export interface PiSessionConfig {
   credentialSource: PiCredentialSource;
   apiKey?: string;
   baseUrl?: string;
+  /**
+   * pi 审批档位（映射 CodeMUX execution mode；plan 对 pi 不适用）。变更经
+   * canReuse 比对触发 pi 进程重建，与模型/思考等级同机制，下一轮生效。
+   */
+  approvalMode?: PiApprovalMode;
   /**
    * pi 配置目录（PI_CODING_AGENT_DIR 重定向目标）。codemux 凭据来源下必填：
    * 端点凭据经该目录的 models.json 注入，与用户 ~/.pi 硬隔离（ADR 0005）。

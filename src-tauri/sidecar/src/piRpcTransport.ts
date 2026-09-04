@@ -131,6 +131,16 @@ export class PiRpcConnection {
     });
   }
 
+  /**
+   * Sends a frame without registering a pending request — for replies to
+   * pi-initiated requests such as `extension_ui_response`（pi 按 frame 里的
+   * `id`（它自己发的 uuid）匹配挂起的 extension UI 请求）。
+   */
+  notify(frame: Record<string, unknown>): void {
+    if (this.disposed) return;
+    this.writeLine(frame);
+  }
+
   /** Client-initiated teardown. Rejects pending requests with the given reason. */
   dispose(reason = new Error('pi RPC connection disposed')): void {
     this.handleDisconnect(reason);
@@ -319,6 +329,11 @@ export class PiRpcProcess {
     const effectiveOptions: { timeoutMs?: number | null } =
       options.timeoutMs !== undefined ? options : { timeoutMs: this.options.requestTimeoutMs };
     return this.connection.request<T>(command, effectiveOptions);
+  }
+
+  /** Sends a frame without awaiting a response (see {@link PiRpcConnection.notify}). */
+  notify(frame: Record<string, unknown>): void {
+    this.connection?.notify(frame);
   }
 
   /** Bounded tail of everything pi wrote to stderr, for diagnostics. */

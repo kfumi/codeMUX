@@ -56,12 +56,13 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'pi',
     label: 'pi',
-    description: '基于 pi RPC 的极简多供应商编码 Agent（无审批弹窗）。',
+    description: '基于 pi RPC 的极简多供应商编码 Agent，经临时扩展支持审批与提问。',
     icon: 'pi',
     capabilities: [
       'supports_resume',
       'supports_tools',
       'supports_cost',
+      'supports_ask_user_question',
     ],
   },
 ];

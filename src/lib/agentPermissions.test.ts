@@ -12,6 +12,42 @@ import {
 
 describe('agentPermissions', () => {
   it('uses safe defaults for each agent kind', () => {
+    expect(buildDefaultPermissionConfig('pi')).toEqual({
+      kind: 'pi',
+      executionMode: 'confirm_before_edit',
+    });
+  });
+
+  it('maps unified execution presets to pi approval tiers and migrates legacy snapshots', () => {
+    expect(mapExecutionModeToPermissionConfig('pi', 'confirm_before_edit')).toEqual({
+      kind: 'pi',
+      executionMode: 'confirm_before_edit',
+    });
+    expect(mapExecutionModeToPermissionConfig('pi', 'auto_edit')).toEqual({
+      kind: 'pi',
+      executionMode: 'auto_edit',
+    });
+    expect(mapExecutionModeToPermissionConfig('pi', 'full_access')).toEqual({
+      kind: 'pi',
+      executionMode: 'full_access',
+    });
+    // plan 对 pi 不适用：落到确认档。
+    expect(mapExecutionModeToPermissionConfig('pi', 'plan')).toEqual({
+      kind: 'pi',
+      executionMode: 'confirm_before_edit',
+    });
+    // pi kind 之前误存 claude_code 快照（选择器错位显示），统一迁移。
+    expect(serializePermissionConfig('pi', { kind: 'claude_code', permissionMode: 'bypassPermissions' })).toEqual({
+      kind: 'pi',
+      executionMode: 'confirm_before_edit',
+    });
+    expect(serializePermissionConfig('pi', { kind: 'pi', executionMode: 'full_access' })).toEqual({
+      kind: 'pi',
+      executionMode: 'full_access',
+    });
+  });
+
+  it('keeps other-kind defaults untouched', () => {
     expect(buildDefaultPermissionConfig('claude_code')).toEqual({
       kind: 'claude_code',
       permissionMode: 'default',

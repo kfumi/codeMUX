@@ -91,6 +91,13 @@ const codexReadOnlyOption: PermissionOption = {
   icon: Eye,
 };
 
+// pi 无原生权限模式，档位由临时扩展的 tool_call 拦截策略实现；plan 档不适用。
+const piOptions: PermissionOption[] = [
+  { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行命令前先询问。', icon: Hand },
+  { mode: 'auto_edit', label: '自动编辑', description: '允许 pi 自动编辑文件，运行命令前询问。', icon: ShieldCheck },
+  { mode: 'full_access', label: '完全访问', description: '跳过权限确认，直接执行所有工具。', icon: Shield, tone: 'warning' },
+];
+
 export function AgentPermissionSelector({
   agentKind,
   permissionConfig,
@@ -117,6 +124,7 @@ export function AgentPermissionSelector({
 
   const options = useMemo(() => {
     if (agentKind === 'opencode') return opencodeOptions;
+    if (agentKind === 'pi') return piOptions;
     if (agentKind === 'codex') {
       // The official three-tier selector; sessions already stored on the
       // read-only tier keep that entry as an exit hatch. The orthogonal Plan
@@ -141,8 +149,9 @@ export function AgentPermissionSelector({
       : mapExecutionModeToPermissionConfig(agentKind, mode);
     // Codex Plan Mode is orthogonal (ADR 0010 Decision 4): picking a Workflow
     // tier never flips the plan toggle. Claude/OpenCode treat plan as a native
-    // permission mode, so their selection drives plan state directly.
-    const nextPlanMode = agentKind === 'codex'
+    // permission mode, so their selection drives plan state directly. pi 无
+    // plan 档，选择即落 off。
+    const nextPlanMode = agentKind === 'codex' || agentKind === 'pi'
       ? planMode
       : (mode === 'plan' ? 'on' as const : 'off' as const);
 
@@ -309,6 +318,10 @@ function inferExecutionMode(
     if (permissionConfig.permissionMode === 'bypassPermissions') return 'full_access';
     if (permissionConfig.permissionMode === 'auto') return 'auto_review';
     if (permissionConfig.permissionMode === 'acceptEdits') return 'auto_edit';
+  }
+
+  if (agentKind === 'pi' && permissionConfig.kind === 'pi') {
+    return permissionConfig.executionMode;
   }
 
   return 'confirm_before_edit';

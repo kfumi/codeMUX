@@ -202,6 +202,46 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 
+  it('shows pi approval tiers without a plan entry and writes pi configs', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="pi"
+        permissionConfig={{ kind: 'pi', executionMode: 'confirm_before_edit' }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '变更前确认' }));
+
+    expect(screen.getByText('自动编辑')).toBeTruthy();
+    expect(screen.getByText('完全访问')).toBeTruthy();
+    // pi 无原生 plan 档，不出现计划模式入口。
+    expect(screen.queryByText('计划模式')).toBeNull();
+
+    fireEvent.click(screen.getByText('完全访问'));
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'pi', executionMode: 'full_access' });
+  });
+
+  it('migrates legacy claude snapshots stored for pi sessions onto the safe default', () => {
+    render(
+      <AgentPermissionSelector
+        agentKind="pi"
+        permissionConfig={{ kind: 'claude_code', permissionMode: 'bypassPermissions' } as never}
+        planMode="off"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+      />,
+    );
+
+    // 序列化迁移后选中态是确认档（defaultSelected 变更前确认）。
+    expect(screen.getAllByText('变更前确认').length).toBeGreaterThan(0);
+  });
+
   it('prefers onModeChange over separate callbacks when switching Codex modes', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();

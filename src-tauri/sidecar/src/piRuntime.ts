@@ -10,6 +10,15 @@ import {
   type PiRuntimeEvent,
   type PiThinkingLevel,
 } from './piEvents.js';
+import {
+  createPiExtensionFile,
+  parsePiInteractiveTitle,
+  PI_APPROVAL_CHOICES,
+  PI_APPROVE_TITLE_PREFIX,
+  PI_ASK_TITLE_PREFIX,
+  type PiApprovalMode,
+  type PiExtensionFile,
+} from './piExtension.js';
 import { PiRpcProcess } from './piRpcTransport.js';
 import { emit } from './streamEventBatcher.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
@@ -45,6 +54,30 @@ type RuntimeState = 'idle' | 'starting' | 'started' | 'disposed';
 interface PiPendingTurn {
   resolve: () => void;
   reject: (error: Error) => void;
+}
+
+/** 挂起的 extension_ui_request（approve = 工具审批，ask = ask_user_question 对话框）。 */
+interface PiPendingExtensionUi {
+  id: string;
+  kind: 'approve' | 'ask';
+  toolCallId?: string;
+}
+
+/** ask_user_question 工具执行期间的会话状态（一个工具调用对应一张提问卡）。 */
+interface PiActiveAsk {
+  toolCallId: string;
+  questions: Array<Record<string, unknown>>;
+  cardEmitted: boolean;
+  answered: boolean;
+  cancelled: boolean;
+  resolved: boolean;
+  nextAnswerIndex: number;
+  answers: string[][];
+}
+
+interface PiTrackedToolCall {
+  name: string;
+  input: Record<string, unknown>;
 }
 
 interface PiImageContent {
@@ -122,6 +155,13 @@ export class PiRuntime {
   private piSessionId: string | undefined;
   private stopping = false;
   private usageBaseline: PiUsageSnapshot | undefined;
+  /** 临时审批/ask-user 扩展（approvalMode 配置时随进程注入）。 */
+  private extensionFile: PiExtensionFile | undefined;
+  /** 挂起的 extension_ui_request（id → 语义）。 */
+  private pendingExtensionUi = new Map<string, PiPendingExtensionUi>();
+  /** 本 turn 已见到的工具调用参数（审批卡/提问卡的 metadata 来源）。 */
+  private trackedToolCalls = new Map<string, PiTrackedToolCall>();
+  private activeAsk: PiActiveAsk | undefined;
 
   constructor(
     private readonly config: PiSessionConfig,
@@ -147,6 +187,7 @@ export class PiRuntime {
       (next.provider ?? undefined) === (this.config.provider ?? undefined) &&
       (next.model ?? undefined) === (this.config.model ?? undefined) &&
       (next.thinkingLevel ?? undefined) === (this.config.thinkingLevel ?? undefined) &&
+      (next.approvalMode ?? undefined) === (this.config.approvalMode ?? undefined) &&
       next.credentialSource === this.config.credentialSource &&
       (next.apiKey ?? undefined) === (this.config.apiKey ?? undefined) &&
       (next.baseUrl ?? undefined) === (this.config.baseUrl ?? undefined) &&
@@ -326,15 +367,22 @@ export class PiRuntime {
     this.stopping = true;
     this.state = 'disposed';
     this.startPromise = undefined;
-    const transport = this.transport;
-    this.transport = undefined;
-    if (this.pendingTurn) {
-      const pending = this.pendingTurn;
-      this.pendingTurn = undefined;
+    this.cancelAllInteractiveRequests();
+    const pending = this.pendingTurn;
+    this.pendingTurn = undefined;
+    if (pending) {
       pending.reject(new Error('pi runtime is shutting down'));
     }
-    if (!transport) return;
+    const transport = this.transport;
+    this.transport = undefined;
+    if (!transport) {
+      this.extensionFile?.cleanup();
+      this.extensionFile = undefined;
+      return;
+    }
     await transport.close(new Error('pi runtime is shutting down')).catch(() => undefined);
+    this.extensionFile?.cleanup();
+    this.extensionFile = undefined;
   }
 
   private currentNativeSessionId(): string {
@@ -350,9 +398,15 @@ export class PiRuntime {
       ...this.config,
       ...(this.agentSessionFile ? { agentSessionId: this.agentSessionFile } : {}),
     };
+    // 审批/ask-user 临时扩展只在真实 pi 子进程上注入；fake-pi 测试自行讲协议。
+    let extensionFile: PiExtensionFile | undefined;
+    if (spawnConfig.approvalMode && !this.options.transportFactory) {
+      extensionFile = createPiExtensionFile(spawnConfig.approvalMode);
+      this.extensionFile = extensionFile;
+    }
     const transport = this.options.transportFactory
       ? this.options.transportFactory(spawnConfig)
-      : createDefaultPiTransport(spawnConfig);
+      : createDefaultPiTransport(spawnConfig, extensionFile?.path);
     this.transport = transport;
     transport.onMessage((message) => this.handlePiEvent(message as PiRuntimeEvent));
     void transport.waitForExit().then((info) => {
@@ -365,11 +419,13 @@ export class PiRuntime {
       this.state = 'disposed';
       this.transport = undefined;
       await transport.close(new Error('pi runtime failed to start')).catch(() => undefined);
+      extensionFile?.cleanup();
+      this.extensionFile = undefined;
       throw error;
     }
     this.ctx.agentSessionId = this.agentSessionFile;
     this.state = 'started';
-    writeLog('[pi-task]', `ensure STARTED session=${this.currentNativeSessionId()}`);
+    writeLog('[pi-task]', `ensure STARTED session=${this.currentNativeSessionId()} approvalMode=${spawnConfig.approvalMode ?? 'confirm_before_edit'}`);
     return this.buildSessionMapping(this.config.runtimeGeneration);
   }
 
@@ -396,6 +452,13 @@ export class PiRuntime {
   }
 
   private handlePiEvent(event: PiRuntimeEvent): void {
+    if (event.type === 'extension_ui_request') {
+      this.handleExtensionUiRequest(event);
+      return;
+    }
+    if (event.type === 'tool_execution_start') {
+      this.trackToolExecutionStart(event);
+    }
     // LLM 错误与自动重试不投影：错误最终以 error 事件 + turn_finished(failed)
     // 收尾，避免把空 content 的错误消息渲染成空气泡。
     if (this.observeTurnFailure(event)) return;
@@ -454,6 +517,196 @@ export class PiRuntime {
     }
   }
 
+  // =========================================================================
+  // 交互桥：临时扩展的 extension_ui_request ↔ CodeMUX 审批/提问卡
+  // =========================================================================
+
+  /** 记录工具调用参数，供审批卡 metadata 与提问卡 questions 取用。 */
+  private trackToolExecutionStart(event: PiRuntimeEvent): void {
+    const toolCallId = readPiEventString(event, 'toolCallId');
+    const name = readPiEventString(event, 'toolName');
+    if (!toolCallId || !name) return;
+    this.trackedToolCalls.set(toolCallId, {
+      name,
+      input: typeof event.args === 'object' && event.args !== null && !Array.isArray(event.args)
+        ? (event.args as Record<string, unknown>)
+        : {},
+    });
+  }
+
+  private handleExtensionUiRequest(event: PiRuntimeEvent): void {
+    const id = readPiEventString(event, 'id');
+    const method = readPiEventString(event, 'method');
+    if (!id || !method) return;
+    // notify/setStatus/setWidget 等为 fire-and-forget，无需回包。
+    if (method !== 'select' && method !== 'input' && method !== 'confirm') return;
+
+    const title = readPiEventString(event, 'title') ?? '';
+    const approvePayload = parsePiInteractiveTitle(PI_APPROVE_TITLE_PREFIX, title);
+    if (approvePayload) {
+      this.handleApproveRequest(id, approvePayload);
+      return;
+    }
+    const askPayload = parsePiInteractiveTitle(PI_ASK_TITLE_PREFIX, title);
+    if (askPayload) {
+      this.handleAskDialog(id, askPayload);
+      return;
+    }
+    // 非 CodeMUX 注入的对话框无宿主语义（托管目录不加载用户扩展，正常不出现）：
+    // 取消而非悬挂，宁严勿挂。
+    writeLog('[pi-task]', `extension_ui CANCELLED unknown dialog id=${id} method=${method}`);
+    this.respondExtensionUi(id, { cancelled: true });
+  }
+
+  private handleApproveRequest(id: string, payload: Record<string, unknown>): void {
+    const toolCallId = readPiEventString(payload, 'toolCallId');
+    const toolName = readPiEventString(payload, 'toolName') ?? 'unknown';
+    this.pendingExtensionUi.set(id, { id, kind: 'approve', ...(toolCallId ? { toolCallId } : {}) });
+    writeLog('[pi-task]', `permission REQUEST id=${id} tool=${toolName}`);
+    const tracked = toolCallId ? this.trackedToolCalls.get(toolCallId) : undefined;
+    this.emitInteractive({
+      type: 'permission_requested',
+      request_id: id,
+      permission_id: id,
+      permission_type: tracked?.name ?? toolName,
+      description: `pi 请求执行 ${toolName}，等待确认`,
+      metadata: {
+        title: `允许 ${toolName}？`,
+        toolName,
+        ...(toolCallId ? { toolCallId } : {}),
+        input: tracked?.input ?? {},
+      },
+    });
+  }
+
+  private handleAskDialog(id: string, payload: Record<string, unknown>): void {
+    const toolCallId = readPiEventString(payload, 'toolCallId');
+    if (!toolCallId) {
+      this.respondExtensionUi(id, { cancelled: true });
+      return;
+    }
+    let ask = this.activeAsk;
+    if (!ask || ask.toolCallId !== toolCallId) {
+      const tracked = this.trackedToolCalls.get(toolCallId);
+      const questions = tracked && tracked.name === 'ask_user_question'
+        ? readQuestionArray(tracked.input.questions)
+        : [];
+      ask = {
+        toolCallId,
+        questions,
+        cardEmitted: false,
+        answered: false,
+        cancelled: false,
+        resolved: false,
+        nextAnswerIndex: 0,
+        answers: [],
+      };
+      this.activeAsk = ask;
+    }
+    this.pendingExtensionUi.set(id, { id, kind: 'ask', toolCallId });
+    if (!ask.cardEmitted) {
+      ask.cardEmitted = true;
+      writeLog('[pi-task]', `ask_user REQUEST toolCallId=${toolCallId} questions=${ask.questions.length}`);
+      this.emitInteractive({
+        type: 'user_input_requested',
+        tool_use_id: toolCallId,
+        questions: piAskQuestionsToCodeMux(ask.questions),
+      });
+    }
+    // 用户已应答而后续对话框才到达（顺序执行）：立即续喂。
+    this.feedNextAskAnswer();
+  }
+
+  /** 审批回复：once/always/reject → 扩展 select 选项；always 由扩展内存记忆。 */
+  async respondToPermission(
+    requestId: string,
+    response: 'once' | 'always' | 'reject' | { approved: boolean; always?: boolean },
+    _sessionId: string,
+  ): Promise<void> {
+    const pending = this.pendingExtensionUi.get(requestId);
+    if (!pending || pending.kind !== 'approve') {
+      throw new Error(`pi permission request ${requestId} is no longer pending`);
+    }
+    const decision =
+      typeof response === 'object'
+        ? response.approved
+          ? (response.always ? 'always' : 'once')
+          : 'reject'
+        : response;
+    const choice =
+      decision === 'always' ? PI_APPROVAL_CHOICES[1]
+        : decision === 'reject' ? PI_APPROVAL_CHOICES[2]
+          : PI_APPROVAL_CHOICES[0];
+    writeLog('[pi-task]', `permission RESPOND id=${requestId} response=${decision}`);
+    this.respondExtensionUi(requestId, { value: choice });
+    this.pendingExtensionUi.delete(requestId);
+    this.emitInteractive({ type: 'permission_resolved', request_id: requestId, request_kind: 'permission' });
+  }
+
+  /** 提问回复：一次带全部答案，sidecar 按对话框到达顺序逐个续喂。 */
+  async respondToQuestion(requestId: string, answers: string[][]): Promise<void> {
+    const ask = this.activeAsk;
+    if (!ask || ask.toolCallId !== requestId || ask.resolved) {
+      throw new Error(`pi question ${requestId} is no longer pending`);
+    }
+    ask.answers = answers;
+    ask.cancelled = answers.some((entry) => entry.length === 1 && entry[0] === '__cancelled__');
+    ask.answered = true;
+    writeLog('[pi-task]', `ask_user RESPOND toolCallId=${requestId} cancelled=${ask.cancelled}`);
+    this.feedNextAskAnswer();
+    ask.resolved = true;
+    this.emitInteractive({ type: 'permission_resolved', request_id: requestId, request_kind: 'question' });
+  }
+
+  isPendingQuestion(requestId: string): boolean {
+    const ask = this.activeAsk;
+    return Boolean(ask && ask.toolCallId === requestId && ask.cardEmitted && !ask.resolved);
+  }
+
+  /** 把已就绪的答案喂给下一个到达（或已挂起）的 ask 对话框。 */
+  private feedNextAskAnswer(): void {
+    const ask = this.activeAsk;
+    if (!ask || !ask.answered) return;
+    for (const [id, pending] of [...this.pendingExtensionUi.entries()]) {
+      if (pending.kind !== 'ask') continue;
+      if (ask.cancelled) {
+        this.respondExtensionUi(id, { cancelled: true });
+      } else {
+        const answer = ask.answers[ask.nextAnswerIndex]?.[0];
+        this.respondExtensionUi(id, { value: typeof answer === 'string' ? answer : '' });
+        ask.nextAnswerIndex += 1;
+      }
+      this.pendingExtensionUi.delete(id);
+    }
+  }
+
+  /** turn 结束/进程退出/会话关闭时收敛所有挂起请求并撤卡。 */
+  private cancelAllInteractiveRequests(): void {
+    if (this.pendingExtensionUi.size === 0 && !this.activeAsk) {
+      this.trackedToolCalls.clear();
+      return;
+    }
+    for (const [id, pending] of this.pendingExtensionUi.entries()) {
+      this.respondExtensionUi(id, { cancelled: true });
+      this.emitInteractive({
+        type: 'permission_resolved',
+        request_id: id,
+        request_kind: pending.kind === 'ask' ? 'question' : 'permission',
+      });
+    }
+    this.pendingExtensionUi.clear();
+    this.activeAsk = undefined;
+    this.trackedToolCalls.clear();
+  }
+
+  private respondExtensionUi(id: string, response: Record<string, unknown>): void {
+    this.transport?.notify({ type: 'extension_ui_response', id, ...response });
+  }
+
+  private emitInteractive(event: Record<string, unknown>): void {
+    (this.options.emitEvent ?? emit)(event);
+  }
+
   /**
    * 捕获 LLM 错误（message_start/end 携带 stopReason=error）。返回 true 表示
    * 该事件不应继续投影（message_end 的空错误消息）。
@@ -503,6 +756,9 @@ export class PiRuntime {
     this.state = 'disposed';
     this.startPromise = undefined;
     this.transport = undefined;
+    this.cancelAllInteractiveRequests();
+    this.extensionFile?.cleanup();
+    this.extensionFile = undefined;
     const message = `pi process exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
     writeLog('[pi-task]', `process EXIT ${message}`);
     this.emitTurnError(message);
@@ -530,6 +786,8 @@ export class PiRuntime {
   ): void {
     this.clearFinishCheck();
     this.turnOpen = false;
+    // turn 收敛时清理挂起的审批/提问请求（正常应已被应答；此处兜底撤卡）。
+    this.cancelAllInteractiveRequests();
     const startedAt = this.turnStartedAt;
     this.turnStartedAt = undefined;
     (this.options.emitEvent ?? emit)({
@@ -607,9 +865,44 @@ function readNumberField(record: Record<string, unknown> | undefined, key: strin
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function readPiEventString(event: PiRuntimeEvent, key: string): string | undefined {
+function readPiEventString(event: Record<string, unknown>, key: string): string | undefined {
   const value = event[key];
   return typeof value === 'string' && value ? value : undefined;
+}
+
+function readQuestionArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+  );
+}
+
+/**
+ * pi ask_user_question 的 questions 参数 → CodeMuxQuestion。单选/自由文本
+ * （pi 0.73.1 的 ui.select 不支持多选）；options 为空 = 自由文本。
+ */
+export function piAskQuestionsToCodeMux(
+  questions: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return questions.map((question, index) => {
+    const options = readQuestionArray(question.options)
+      .map((option) => ({
+        label: typeof option.label === 'string' ? option.label : '',
+        ...(typeof option.description === 'string' && option.description
+          ? { description: option.description }
+          : {}),
+      }))
+      .filter((option) => option.label);
+    return {
+      question: typeof question.question === 'string' && question.question
+        ? question.question
+        : `Question ${index + 1}`,
+      ...(typeof question.header === 'string' && question.header ? { header: question.header } : {}),
+      options,
+      multiSelect: false,
+    };
+  });
 }
 
 /** pi models.json 的 CodeMUX 供应商条目（端点凭据注入的唯一通道）。 */
@@ -665,8 +958,9 @@ export function writePiModelsJson(dir: string, definition: PiProviderDefinition)
  * .cmd shim 与 PATH 依赖）；否则回落 PATH 上的 `pi`。codemux 凭据经
  * PI_CODING_AGENT_DIR 托管目录下的 models.json 注入（pi 不读取端点类
  * 环境变量），配置目录重定向同时切断对 ~/.pi 原生配置的回退（ADR 0005）。
+ * extensionPath 存在时经 `--extension` 注入审批/ask-user 临时扩展。
  */
-export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess {
+export function createDefaultPiTransport(config: PiSessionConfig, extensionPath?: string): PiRpcProcess {
   const args = ['--mode', 'rpc'];
   let command: string;
 
@@ -683,6 +977,9 @@ export function createDefaultPiTransport(config: PiSessionConfig): PiRpcProcess 
 
   if (config.agentSessionId && looksLikePiSessionPath(config.agentSessionId)) {
     args.push('--session', config.agentSessionId);
+  }
+  if (extensionPath) {
+    args.push('--extension', extensionPath);
   }
   if (config.thinkingLevel) {
     args.push('--thinking', config.thinkingLevel);

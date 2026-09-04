@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
+import { PI_APPROVE_TITLE_PREFIX, PI_ASK_TITLE_PREFIX } from './piExtension.js';
 import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, writePiModelsJson } from './piRuntime.js';
 import type { PiSessionConfig } from './types.js';
 
@@ -49,17 +50,18 @@ function buildConfig(overrides: Partial<PiSessionConfig> = {}): PiSessionConfig 
 function startFakePiRuntime(
   scenario: WireMessage,
   configOverrides: Partial<PiSessionConfig> = {},
-): { runtime: PiRuntime; events: Array<Record<string, unknown>> } {
+): { runtime: PiRuntime; events: Array<Record<string, unknown>>; wireLog: () => Array<WireMessage> } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-fake-scenario-'));
   const scenarioFile = path.join(dir, 'scenario.json');
   fs.writeFileSync(scenarioFile, JSON.stringify(scenario), 'utf8');
+  const wireLogFile = path.join(dir, 'wire.log');
   const events: Array<Record<string, unknown>> = [];
   const runtime = new PiRuntime(buildConfig(configOverrides), {
     transportFactory: () =>
       PiRpcProcess.start({
         command: process.execPath,
         args: [FAKE_PI_PATH],
-        env: { PI_FAKE_SCENARIO: scenarioFile },
+        env: { PI_FAKE_SCENARIO: scenarioFile, PI_FAKE_LOG: wireLogFile },
         requestTimeoutMs: 2_000,
       }),
     eventIdFactory: (() => {
@@ -70,7 +72,17 @@ function startFakePiRuntime(
       events.push(event as Record<string, unknown>);
     },
   });
-  return { runtime, events };
+  pendingCleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const wireLog = (): Array<WireMessage> =>
+    fs.existsSync(wireLogFile)
+      ? fs
+        .readFileSync(wireLogFile, 'utf8')
+        .split('\n')
+        .filter((line) => line.trim())
+        .map((line) => JSON.parse(line) as { direction: string; message: WireMessage })
+        .map((entry) => entry.message)
+      : [];
+  return { runtime, events, wireLog };
 }
 
 describe('PiRuntime', () => {
@@ -134,23 +146,30 @@ describe('PiRuntime', () => {
   });
 
   it('marks the turn interrupted after abort()', async () => {
-    const { runtime, events } = startFakePiRuntime({
+    const { runtime, events, wireLog } = startFakePiRuntime({
       responses: {
         get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
         abort: { data: {} },
         prompt: {
           data: {},
+          // agent_end 缓存到收到 abort 才放行：中断标记一定先于 agent_end。
+          holdUntilAbort: true,
           thenEvents: [
-            { delayMs: 20, event: { type: 'agent_end' } },
+            { delayMs: 5, event: { type: 'agent_end' } },
           ],
         },
       },
     });
     try {
       await runtime.ensure();
-      events.length = 0;
       const turn = runtime.sendInput('long task');
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // 等 prompt 受理回执再中断：pendingTurn 在受理之前才赋值（前面还有一次
+      // get_session_stats 往返），负载下过早中断会丢 interrupted 标记。
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
       await runtime.interrupt();
       // 中断正常结束 sendInput：outcome 由 turn_finished 事件携带，不再抛错。
       await turn;
@@ -509,5 +528,247 @@ describe('PiRuntime', () => {
     const written = JSON.parse(fs.readFileSync(path.join(configDir, 'models.json'), 'utf8'));
     expect(written.providers.codemux.api).toBe('anthropic-messages');
     expect(written.providers.codemux.models[0].id).toBe('glm-5.3-flash');
+  });
+});
+
+describe('PiRuntime interactive extension bridge', () => {
+  function approveTitle(toolCallId: string, toolName: string): string {
+    return PI_APPROVE_TITLE_PREFIX + JSON.stringify({ toolCallId, toolName });
+  }
+
+  function askTitle(toolCallId: string, index: number): string {
+    return PI_ASK_TITLE_PREFIX + JSON.stringify({ toolCallId, index });
+  }
+
+  function waitForEvent(events: Array<Record<string, unknown>>, type: string): void {
+    return vi_waitFor(() => {
+      if (events.find((event) => event.type === type) === undefined) {
+        throw new Error(`${type} not emitted yet`);
+      }
+    });
+  }
+
+  it('bridges an approval dialog: permission_requested then extension_ui_response', async () => {
+    const { runtime, events, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { event: { type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command: 'ls -la' } } },
+            {
+              event: {
+                type: 'extension_ui_request',
+                id: 'ext-1',
+                method: 'select',
+                title: approveTitle('t1', 'bash'),
+                options: ['Allow', 'Always allow', 'Reject'],
+              },
+              awaitResponse: true,
+            },
+            { event: { type: 'tool_execution_end', toolCallId: 't1', result: 'ok', isError: false } },
+            { event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('run ls');
+      await waitForEvent(events, 'permission_requested');
+      expect(events.find((event) => event.type === 'permission_requested')).toMatchObject({
+        request_id: 'ext-1',
+        permission_type: 'bash',
+        metadata: { toolName: 'bash', input: { command: 'ls -la' } },
+      });
+      await runtime.respondToPermission('ext-1', 'once', 'app-session-1');
+      await turn;
+      const response = wireLog().find((message) => message.type === 'extension_ui_response');
+      expect(response).toMatchObject({ id: 'ext-1', value: 'Allow' });
+      expect(events.find((event) => event.type === 'permission_resolved')).toMatchObject({
+        request_id: 'ext-1',
+        request_kind: 'permission',
+      });
+      const finished = events.find((event) => event.type === 'turn_finished');
+      expect(finished).toMatchObject({ type: 'turn_finished', outcome: 'completed' });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('maps reject responses onto the extension select choice', async () => {
+    const { runtime, events, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { event: { type: 'tool_execution_start', toolCallId: 't1', toolName: 'write', args: {} } },
+            {
+              event: {
+                type: 'extension_ui_request',
+                id: 'ext-2',
+                method: 'select',
+                title: approveTitle('t1', 'write'),
+              },
+              awaitResponse: true,
+            },
+            { event: { type: 'tool_execution_end', toolCallId: 't1', result: 'blocked', isError: true } },
+            { event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('write file');
+      await waitForEvent(events, 'permission_requested');
+      await runtime.respondToPermission('ext-2', 'reject', 'app-session-1');
+      await turn;
+      const response = wireLog().find((message) => message.type === 'extension_ui_response');
+      expect(response).toMatchObject({ id: 'ext-2', value: 'Reject' });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('combines sequential ask dialogs into one user_input_requested card', async () => {
+    const questions = [
+      { question: '选择方案', options: [{ label: 'A' }, { label: 'B' }] },
+      { question: '补充说明' },
+    ];
+    const { runtime, events, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { event: { type: 'tool_execution_start', toolCallId: 'a1', toolName: 'ask_user_question', args: { questions } } },
+            {
+              event: { type: 'extension_ui_request', id: 'ask-0', method: 'select', title: askTitle('a1', 0) },
+              awaitResponse: true,
+            },
+            {
+              event: { type: 'extension_ui_request', id: 'ask-1', method: 'input', title: askTitle('a1', 1) },
+              awaitResponse: true,
+            },
+            { event: { type: 'tool_execution_end', toolCallId: 'a1', result: 'done', isError: false } },
+            { event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      expect(runtime.isPendingQuestion('a1')).toBe(false);
+      const turn = runtime.sendInput('ask me');
+      await waitForEvent(events, 'user_input_requested');
+      expect(runtime.isPendingQuestion('a1')).toBe(true);
+      expect(events.find((event) => event.type === 'user_input_requested')).toMatchObject({
+        tool_use_id: 'a1',
+        questions: [
+          { question: '选择方案', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false },
+          { question: '补充说明', options: [], multiSelect: false },
+        ],
+      });
+      await runtime.respondToQuestion('a1', [['B'], ['补充文字']]);
+      await turn;
+      const responses = wireLog().filter((message) => message.type === 'extension_ui_response');
+      expect(responses.map((message) => ({ id: message.id, value: message.value }))).toEqual([
+        { id: 'ask-0', value: 'B' },
+        { id: 'ask-1', value: '补充文字' },
+      ]);
+      expect(events.find((event) => event.type === 'permission_resolved')).toMatchObject({
+        request_id: 'a1',
+        request_kind: 'question',
+      });
+      expect(runtime.isPendingQuestion('a1')).toBe(false);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('cancels dialogs from unknown extensions instead of hanging', async () => {
+    const { runtime, events, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { event: { type: 'extension_ui_request', id: 'foreign-1', method: 'select', title: '第三方扩展对话框' } },
+            { event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      await runtime.sendInput('hello');
+      await vi_waitFor(() => {
+        if (wireLog().find((message) => message.type === 'extension_ui_response') === undefined) {
+          throw new Error('extension_ui_response not sent yet');
+        }
+      });
+      const response = wireLog().find((message) => message.type === 'extension_ui_response');
+      expect(response).toMatchObject({ id: 'foreign-1', cancelled: true });
+      expect(events.find((event) => event.type === 'permission_requested')).toBeUndefined();
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('cancels pending requests on shutdown and dismisses the card', async () => {
+    const { runtime, events } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { event: { type: 'tool_execution_start', toolCallId: 't9', toolName: 'bash', args: {} } },
+            {
+              event: {
+                type: 'extension_ui_request',
+                id: 'ext-9',
+                method: 'select',
+                title: approveTitle('t9', 'bash'),
+              },
+              awaitResponse: true,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      // 预挂 catch：shutdown 会 reject 挂起的 sendInput，避免未处理拒绝告警。
+      const turn = runtime.sendInput('run').catch(() => undefined);
+      await waitForEvent(events, 'permission_requested');
+      await runtime.shutdown();
+      await turn;
+      expect(events.find((event) => event.type === 'permission_resolved')).toMatchObject({
+        request_id: 'ext-9',
+        request_kind: 'permission',
+      });
+    } finally {
+      await runtime.shutdown().catch(() => undefined);
+    }
+  });
+
+  it('rebuilds the process when the approval mode changes (canReuse)', async () => {
+    const { runtime } = startFakePiRuntime(
+      {
+        responses: {
+          get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        },
+      },
+      { approvalMode: 'confirm_before_edit' },
+    );
+    try {
+      await runtime.ensure();
+      expect(runtime.canReuse(buildConfig({ approvalMode: 'confirm_before_edit' }))).toBe(true);
+      expect(runtime.canReuse(buildConfig({ approvalMode: 'full_access' }))).toBe(false);
+    } finally {
+      await runtime.shutdown();
+    }
   });
 });

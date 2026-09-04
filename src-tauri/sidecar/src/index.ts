@@ -37,6 +37,7 @@ import { emit, resetStreamEventSequences, syncStreamSessionContext } from './str
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
+import type { PiApprovalMode } from './piExtension.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
   buildClaudeModeBlockedEvent,
@@ -1830,7 +1831,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         activeAgentKind = cmd.agentKind ?? activeAgentKind;
         const flavor = getRuntimeFlavor(activeAgentKind);
         if (flavor === 'pi') {
-          // pi 无审批模型：权限配置不适用。
+          // pi 权限档位经 canReuse 比对在下一轮 ensure 重建生效，原地更新为 no-op。
           return;
         }
         try {
@@ -2026,6 +2027,9 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
           : undefined;
         const codexQuestionRuntime = flavor === 'codex' ? options.codexRuntime : undefined;
+        const piRuntime = flavor === 'pi'
+          ? (activeManagedRuntime?.flavor === 'pi' ? activeManagedRuntime.runtime : undefined)
+          : undefined;
         if (openCodeRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
           const raw = Array.isArray(cmd.response) ? cmd.response : [];
           const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
@@ -2034,8 +2038,12 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           const raw = Array.isArray(cmd.response) ? cmd.response : [];
           const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
           codexQuestionRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
+        } else if (piRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
+          const raw = Array.isArray(cmd.response) ? cmd.response : [];
+          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
+          piRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
         } else if (flavor === 'pi') {
-          emitError('pi tool responses are not supported (no approval model)');
+          emitError('pi tool responses are only supported while a question is pending');
         } else if (openCodeRuntime) {
           options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
         } else {
@@ -2051,19 +2059,19 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
           return;
         }
-        if (flavor === 'pi') {
-          emitError('pi does not support interactive permission requests');
-          return;
-        }
         const current = flavor === 'opencode'
           ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
           : flavor === 'codex'
             ? options.codexRuntime
-            : undefined;
+            : flavor === 'pi'
+              ? (activeManagedRuntime?.flavor === 'pi' ? activeManagedRuntime.runtime : undefined)
+              : undefined;
         if (!current?.respondToPermission) {
           emitError(flavor === 'codex'
             ? 'Codex runtime is not initialized'
-            : 'OpenCode runtime is not initialized');
+            : flavor === 'pi'
+              ? 'pi runtime is not initialized'
+              : 'OpenCode runtime is not initialized');
           return;
         }
         const runtimePendingResponses = pendingPermissionResponses.get(current) ?? new Map<string, Promise<void>>();
@@ -2232,6 +2240,7 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
     ...(credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
     ...(cmd.piConfigDir ? { piConfigDir: cmd.piConfigDir } : {}),
+    approvalMode: resolvePiApprovalMode(cmd.permissionConfig),
     ...(cmd.modelLimits?.contextWindow && cmd.modelLimits.contextWindow > 0
       ? { modelContextWindow: cmd.modelLimits.contextWindow }
       : {}),
@@ -2240,6 +2249,16 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
       : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
   };
+}
+
+/** pi 审批档位：只识别 pi kind 的配置（executionMode），其余回落 confirm_before_edit。 */
+function resolvePiApprovalMode(config: SidecarPermissionConfig | undefined): PiApprovalMode {
+  if (config?.kind === 'pi') {
+    if (config.executionMode === 'auto_edit' || config.executionMode === 'full_access') {
+      return config.executionMode;
+    }
+  }
+  return 'confirm_before_edit';
 }
 
 /** CodeMUX reasoningEffort → pi thinking level（'none' → 'off'，缺省交给 pi 默认 medium）。 */
@@ -2279,8 +2298,13 @@ function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
     canReuse: (nextCmd) => piRuntime.canReuse(buildPiSessionConfig(nextCmd)),
     sendInput: (prompt, inputPayload) => piRuntime.sendInput(prompt, inputPayload),
     updatePermissions: () => {
-      // pi 无审批模型：权限配置不适用，忽略。
+      // pi 权限档位经 canReuse 比对在下一轮 ensure 重建生效（与模型/思考等级同机制），
+      // 原地更新为 no-op。
     },
+    respondToPermission: (requestId, response, sessionId) =>
+      piRuntime.respondToPermission(requestId, response, sessionId),
+    respondToQuestion: (requestId, answers) => piRuntime.respondToQuestion(requestId, answers),
+    isPendingQuestion: (requestId) => piRuntime.isPendingQuestion(requestId),
     forkSession: (sourceAgentSessionId) => piRuntime.forkSession(sourceAgentSessionId),
     resetSession: () => piRuntime.resetSession(),
     deleteSession: (agentSessionId) => piRuntime.deleteSession(agentSessionId),

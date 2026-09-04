@@ -29,6 +29,9 @@
 // - `responses[command]` is spread into the pi response frame (`data`,
 //   `success`, `error`). `thenEvents`: scripted event frames written after
 //   the response (each with its own delayMs). `thenExit`: exit afterwards.
+//   A step with `awaitResponse: true` pauses the sequence until the client
+//   sends an `extension_ui_response` frame whose `id` matches the step
+//   event's `id` (simulating a pending extension UI dialog).
 // - `responseSequences[command]` is consumed one per request (last repeats).
 // - Commands in `hang` never receive a response.
 // - Default behavior without a scenario: answer every command with
@@ -83,6 +86,10 @@ if (Array.isArray(scenario.stderrLines)) {
 }
 
 const sequenceQueues = new Map();
+/** extension_ui_request id → resolver（客户端回包后放行 awaitResponse 步骤）。 */
+const awaitedResponses = new Map();
+/** holdUntilAbort 缓存的事件（收到 abort 后放行）。 */
+let heldEvents = null;
 
 function responseFor(type) {
   const sequence = scenario.responseSequences?.[type];
@@ -107,14 +114,15 @@ function responseFor(type) {
 }
 
 function respondTo(id, type, payload) {
-  const { thenEvents, thenExit, ...responsePayload } = payload;
+  const { thenEvents, thenExit, holdUntilAbort, ...responsePayload } = payload;
   send({ type: 'response', command: type, id, ...responsePayload });
-  for (const step of Array.isArray(thenEvents) ? thenEvents : []) {
-    const delay = typeof step.delayMs === 'number' ? step.delayMs : 0;
-    setTimeout(() => {
-      send(step.event);
-    }, delay);
+  if (holdUntilAbort && Array.isArray(thenEvents)) {
+    // 中断时序测试用：缓存事件，等客户端发来 abort 再放行，
+    // 保证 agent_end 一定在 abort 之后到达（不依赖定时器竞争）。
+    heldEvents = { steps: thenEvents, thenExit };
+    return;
   }
+  void runSteps(Array.isArray(thenEvents) ? thenEvents : []);
   if (thenExit && typeof thenExit === 'object') {
     const delay = typeof thenExit.delayMs === 'number' ? thenExit.delayMs : 0;
     setTimeout(() => {
@@ -123,8 +131,50 @@ function respondTo(id, type, payload) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 顺序执行 thenEvents；`awaitResponse` 步骤等客户端回包后再继续。 */
+async function runSteps(steps) {
+  for (const step of steps) {
+    const delay = typeof step.delayMs === 'number' ? step.delayMs : 0;
+    if (delay > 0) {
+      await sleep(delay);
+    }
+    send(step.event);
+    if (step.awaitResponse && step.event && step.event.id !== undefined) {
+      await new Promise((resolve) => {
+        awaitedResponses.set(String(step.event.id), resolve);
+      });
+    }
+  }
+}
+
 function handleMessage(message) {
   log({ direction: 'received', message });
+
+  if (message.type === 'extension_ui_response') {
+    const key = String(message.id);
+    const resolve = awaitedResponses.get(key);
+    if (resolve) {
+      awaitedResponses.delete(key);
+      resolve();
+    }
+    return;
+  }
+
+  if (message.type === 'abort' && heldEvents) {
+    const held = heldEvents;
+    heldEvents = null;
+    void runSteps(held.steps);
+    if (held.thenExit && typeof held.thenExit === 'object') {
+      const delay = typeof held.thenExit.delayMs === 'number' ? held.thenExit.delayMs : 0;
+      setTimeout(() => {
+        process.exit(typeof held.thenExit.code === 'number' ? held.thenExit.code : 0);
+      }, delay);
+    }
+  }
 
   if (typeof message.type === 'string' && message.type !== 'response') {
     // Client command.
