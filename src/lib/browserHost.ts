@@ -35,3 +35,4 @@ export interface BrowserHost {
 }
 
 export const BROWSER_PAGE_EVENT = 'browser-page-event';
+export const BROWSER_NEW_WINDOW_EVENT = 'browser-new-window-event';

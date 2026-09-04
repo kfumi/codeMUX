@@ -5,6 +5,8 @@ import { normalizeBrowserUrl } from '../lib/browserUrl';
 import { createBrowserId } from '../lib/browserPage';
 import { browserViewportBounds, hostBoundsForViewportTransition, type BrowserViewportMode } from '../lib/browserViewport';
 import type { BrowserPageBounds, BrowserPagePatch } from '../lib/browserHost';
+import { resolveEffectiveBrowserTabId } from '../lib/browserVisibilityPolicy';
+import { isBoundsOccluded } from '../lib/nativeViewOcclusion';
 import { createLogger, serializeError } from '../lib/logger';
 
 const logger = createLogger('browserStore');
@@ -12,6 +14,86 @@ const FALLBACK_BOUNDS: BrowserPageBounds = { x: 0, y: 0, width: 1, height: 1 };
 
 function hasUsableBounds(bounds: BrowserPageBounds): boolean {
   return bounds.width >= 2 && bounds.height >= 2;
+}
+
+function queueGlobalBrowserVisibilitySync() {
+  const sidePanel = import('./sidePanelStore').then(({ useSidePanelStore }) => {
+    const state = useSidePanelStore.getState();
+    const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+    const requestedTabId = activeTab?.kind === 'browser' ? activeTab.id : null;
+    return resolveEffectiveBrowserTabId(requestedTabId);
+  });
+  void sidePanel.then((effectiveTabId) => {
+    void useBrowserStore.getState().syncGlobalBrowserVisibility(effectiveTabId);
+  });
+}
+
+async function hideHostIfPanelClosed(pageId: string, panelTabId: string) {
+  const visibleTabId = resolveEffectiveBrowserTabId(panelTabId);
+  const activePageId = useBrowserStore.getState().activePageIdByPanel[panelTabId];
+  if (visibleTabId === panelTabId && activePageId === pageId) return;
+  try {
+    await browserApi.hide(pageId);
+  } catch (error) {
+    logger.warn('Failed to hide browser page after host attach', { browserId: pageId }, serializeError(error));
+  }
+}
+
+const hostCreatePromises = new Map<string, Promise<boolean>>();
+
+function isWebviewAlreadyExistsError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('already exists');
+}
+
+async function ensureHostAttached(
+  pageId: string,
+  url: string,
+  viewportBounds: BrowserPageBounds,
+): Promise<boolean> {
+  const page = useBrowserStore.getState().pages[pageId];
+  if (!page) return false;
+  if (page.hostAttached) return true;
+
+  const pending = hostCreatePromises.get(pageId);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    try {
+      await browserApi.create(pageId, url, viewportBounds);
+      useBrowserStore.setState((state) => ({
+        pages: state.pages[pageId]
+          ? {
+              ...state.pages,
+              [pageId]: { ...state.pages[pageId], hostAttached: true, lastError: null },
+            }
+          : state.pages,
+      }));
+      await hideHostIfPanelClosed(pageId, page.panelTabId);
+      queueGlobalBrowserVisibilitySync();
+      return true;
+    } catch (error) {
+      if (isWebviewAlreadyExistsError(error)) {
+        useBrowserStore.setState((state) => ({
+          pages: state.pages[pageId]
+            ? {
+                ...state.pages,
+                [pageId]: { ...state.pages[pageId], hostAttached: true, lastError: null },
+              }
+            : state.pages,
+        }));
+        await hideHostIfPanelClosed(pageId, page.panelTabId);
+        queueGlobalBrowserVisibilitySync();
+        return true;
+      }
+      throw error;
+    } finally {
+      hostCreatePromises.delete(pageId);
+    }
+  })();
+
+  hostCreatePromises.set(pageId, promise);
+  return promise;
 }
 
 export interface BrowserPage {
@@ -37,6 +119,10 @@ interface BrowserState {
   previewByPanel: Record<string, boolean>;
   inspectingPageId: string | null;
   inspectError: string | null;
+  nativeMenuOpenCount: number;
+  lastVisibleBrowserTabId: string | null;
+  beginNativeMenuOpen: () => void;
+  endNativeMenuOpen: () => void;
   ensureBlankPage: (panelTabId: string) => string;
   addPage: (panelTabId: string) => string;
   closePage: (pageId: string) => Promise<{ panelEmpty: boolean; panelTabId: string }>;
@@ -50,6 +136,8 @@ interface BrowserState {
   setViewportMode: (panelTabId: string, mode: BrowserViewportMode) => Promise<void>;
   setViewportPreview: (panelTabId: string, preview: boolean) => Promise<void>;
   syncVisibility: (panelTabId: string, visiblePageId: string | null) => Promise<void>;
+  syncGlobalBrowserVisibility: (activeBrowserTabId: string | null) => Promise<void>;
+  hideAllBrowserHosts: () => Promise<void>;
   applyHostPatch: (patch: BrowserPagePatch) => void;
   startInspect: (pageId: string) => void;
   stopInspect: () => void;
@@ -104,6 +192,24 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   previewByPanel: {},
   inspectingPageId: null,
   inspectError: null,
+  nativeMenuOpenCount: 0,
+  lastVisibleBrowserTabId: null,
+
+  beginNativeMenuOpen: () => {
+    set((state) => ({ nativeMenuOpenCount: state.nativeMenuOpenCount + 1 }));
+    void Promise.all(
+      Object.values(get().pages)
+        .filter((page) => page.hostAttached)
+        .map((page) => browserApi.hide(page.id).catch((error) => {
+          logger.warn('Failed to hide browser page for overlay', { browserId: page.id }, serializeError(error));
+        })),
+    );
+  },
+
+  endNativeMenuOpen: () => {
+    set((state) => ({ nativeMenuOpenCount: Math.max(0, state.nativeMenuOpenCount - 1) }));
+    queueGlobalBrowserVisibilitySync();
+  },
 
   ensureBlankPage: (panelTabId) => {
     const existing = get().pageIdsByPanel[panelTabId] ?? [];
@@ -141,12 +247,11 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return { panelEmpty: true, panelTabId: '' };
     }
     const panelTabId = page.panelTabId;
-    if (page.hostAttached) {
-      try {
-        await browserApi.destroy(pageId);
-      } catch (error) {
-        logger.warn('Failed to destroy browser page', { browserId: pageId }, serializeError(error));
-      }
+    hostCreatePromises.delete(pageId);
+    try {
+      await browserApi.destroy(pageId);
+    } catch (error) {
+      logger.warn('Failed to destroy browser page', { browserId: pageId }, serializeError(error));
     }
 
     const ids = (get().pageIdsByPanel[panelTabId] ?? []).filter((id) => id !== pageId);
@@ -247,12 +352,12 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         if (!hasUsableBounds(hostBounds)) {
           return;
         }
-        await browserApi.create(pageId, result.url, viewportBounds);
-        set((state) => ({
-          pages: state.pages[pageId]
-            ? { ...state.pages, [pageId]: { ...state.pages[pageId], hostAttached: true } }
-            : state.pages,
-        }));
+        const attached = await ensureHostAttached(pageId, result.url, viewportBounds);
+        if (!attached) return;
+        const currentUrl = get().pages[pageId]?.url;
+        if (currentUrl && currentUrl !== result.url) {
+          await browserApi.navigate(pageId, result.url);
+        }
       } else {
         await browserApi.navigate(pageId, result.url);
       }
@@ -316,12 +421,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         panelTabId,
       );
       try {
-        await browserApi.create(page.id, page.url, viewportBounds);
-        set((state) => ({
-          pages: state.pages[page.id]
-            ? { ...state.pages, [page.id]: { ...state.pages[page.id], hostAttached: true } }
-            : state.pages,
-        }));
+        await ensureHostAttached(page.id, page.url, viewportBounds);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('Failed to create browser page after layout', { browserId: page.id }, serializeError(error));
@@ -416,6 +516,59 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     }));
   },
 
+  hideAllBrowserHosts: async () => {
+    set({ lastVisibleBrowserTabId: null });
+    if (get().inspectingPageId) {
+      get().stopInspect();
+    }
+    await Promise.all(Object.values(get().pages).map((page) => hidePage(page)));
+  },
+
+  syncGlobalBrowserVisibility: async (activeBrowserTabId) => {
+    const resolvedTabId = resolveEffectiveBrowserTabId(activeBrowserTabId);
+    if (resolvedTabId !== null) {
+      set({ lastVisibleBrowserTabId: resolvedTabId });
+    } else if (activeBrowserTabId === null) {
+      set({ lastVisibleBrowserTabId: null });
+    }
+    const effectiveBrowserTabId = resolvedTabId;
+    const inspectingId = get().inspectingPageId;
+    const visiblePageId = effectiveBrowserTabId
+      ? get().activePageIdByPanel[effectiveBrowserTabId] ?? null
+      : null;
+    if (inspectingId && inspectingId !== visiblePageId) {
+      get().stopInspect();
+    }
+    await Promise.all(Object.values(get().pages).map(async (page) => {
+      if (!page.hostAttached) return;
+      const viewportBounds = viewportBoundsForPanel(
+        get().boundsByPanel,
+        get().viewportModeByPanel,
+        get().previewByPanel,
+        page.panelTabId,
+      );
+      const hostsBlockedByMenu = get().nativeMenuOpenCount > 0;
+      const shouldShow = Boolean(
+        effectiveBrowserTabId
+        && page.panelTabId === effectiveBrowserTabId
+        && page.id === visiblePageId
+        && hasUsableBounds(viewportBounds)
+        && !hostsBlockedByMenu
+        && !isBoundsOccluded(viewportBounds),
+      );
+      try {
+        if (shouldShow) {
+          await browserApi.setBounds(page.id, viewportBounds);
+          await browserApi.show(page.id);
+        } else {
+          await browserApi.hide(page.id);
+        }
+      } catch (error) {
+        logger.warn('Failed to sync global browser visibility', { browserId: page.id }, serializeError(error));
+      }
+    }));
+  },
+
   applyHostPatch: (patch) => {
     set((state) => {
       const page = state.pages[patch.browserId];
@@ -454,8 +607,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   destroyPanel: async (panelTabId) => {
     const ids = get().pageIdsByPanel[panelTabId] ?? [];
     await Promise.all(ids.map(async (id) => {
-      const page = get().pages[id];
-      if (!page?.hostAttached) return;
+      hostCreatePromises.delete(id);
       try {
         await browserApi.destroy(id);
       } catch (error) {
@@ -498,5 +650,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     previewByPanel: {},
     inspectingPageId: null,
     inspectError: null,
+    nativeMenuOpenCount: 0,
+    lastVisibleBrowserTabId: null,
   }),
 }));

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use log::warn;
 use serde::{Deserialize, Serialize};
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, Window};
 
 use crate::config::types::AppConfig;
@@ -13,6 +13,7 @@ use crate::AppState;
 use super::url::normalize_browser_url;
 
 pub const BROWSER_PAGE_EVENT: &str = "browser-page-event";
+pub const BROWSER_NEW_WINDOW_EVENT: &str = "browser-new-window-event";
 const MAIN_WINDOW_LABEL: &str = "main";
 const CACHE_CLEAR_SCRIPT: &str = r#"(async () => {
   try {
@@ -28,6 +29,63 @@ const CACHE_CLEAR_SCRIPT: &str = r#"(async () => {
 const FAVICON_SCRIPT: &str = r#"(function () {
   const link = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
   return link ? link.href : null;
+})()"#;
+const BLANK_LINK_INTERCEPT_SCRIPT: &str = r#"(function () {
+  function installBlankBridge() {
+    if (window.__codemuxBrowserBlankBridge) return;
+    window.__codemuxBrowserBlankBridge = true;
+    function openInAppTab(url) {
+      try {
+        const parsed = new URL(url, window.location.href);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+        const bridge = "codemux://browser/open?url=" + encodeURIComponent(parsed.href);
+        const link = document.createElement("a");
+        link.href = bridge;
+        link.style.display = "none";
+        (document.body || document.documentElement).appendChild(link);
+        link.click();
+        link.remove();
+      } catch (error) {}
+    }
+    function shouldOpenInNewTab(link, event) {
+      const target = (link.getAttribute("target") || "").toLowerCase();
+      if (target === "_blank" || target === "_new") return true;
+      if (!event) return false;
+      return event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1;
+    }
+    document.addEventListener(
+      "click",
+      function (event) {
+        const link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+        if (!link || !shouldOpenInNewTab(link, event)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openInAppTab(link.href);
+      },
+      true,
+    );
+    document.addEventListener(
+      "auxclick",
+      function (event) {
+        if (event.button !== 1) return;
+        const link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+        if (!link) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openInAppTab(link.href);
+      },
+      true,
+    );
+    const originalOpen = window.open;
+    window.open = function (url, target) {
+      if (url) {
+        openInAppTab(String(url));
+        return null;
+      }
+      return originalOpen.apply(this, arguments);
+    };
+  }
+  installBlankBridge();
 })()"#;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +117,13 @@ pub struct BrowserPageEvent {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserNewWindowEvent {
+    pub source_browser_id: String,
+    pub url: String,
+}
+
 struct BrowserPageRecord {
     history: Vec<String>,
     index: usize,
@@ -88,6 +153,40 @@ fn main_window(app: &AppHandle) -> Result<Window, String> {
 fn emit_page(app: &AppHandle, event: BrowserPageEvent) {
     if let Err(error) = app.emit(BROWSER_PAGE_EVENT, event) {
         warn!(target: "browser", "Failed to emit browser page event: {error}");
+    }
+}
+
+fn emit_new_window(app: &AppHandle, source_browser_id: &str, url: String) {
+    if let Err(error) = app.emit(
+        BROWSER_NEW_WINDOW_EVENT,
+        BrowserNewWindowEvent {
+            source_browser_id: source_browser_id.to_string(),
+            url,
+        },
+    ) {
+        warn!(target: "browser", "Failed to emit browser new-window event: {error}");
+    }
+}
+
+pub(crate) fn parse_codemux_open_url(target: &Url) -> Option<String> {
+    if target.scheme() != "codemux" {
+        return None;
+    }
+    if target.host_str() != Some("browser") {
+        return None;
+    }
+    if target.path() != "/open" {
+        return None;
+    }
+    let encoded = target
+        .query_pairs()
+        .find(|(key, _)| key == "url")
+        .map(|(_, value)| value.into_owned())?;
+    let parsed = Url::parse(&encoded).ok()?;
+    if parsed.scheme() == "http" || parsed.scheme() == "https" {
+        Some(parsed.to_string())
+    } else {
+        None
     }
 }
 
@@ -149,7 +248,8 @@ pub fn create_page(
 
     let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed.clone()))
         .data_directory(profile_dir)
-        .devtools(true);
+        .devtools(true)
+        .initialization_script(BLANK_LINK_INTERCEPT_SCRIPT);
 
     #[cfg(windows)]
     {
@@ -165,6 +265,12 @@ pub fn create_page(
     let app_for_nav = app.clone();
     let nav_id = browser_id.clone();
     builder = builder.on_navigation(move |target| {
+        if target.scheme() == "codemux" {
+            if let Some(url) = parse_codemux_open_url(&target) {
+                emit_new_window(&app_for_nav, &nav_id, url);
+            }
+            return false;
+        }
         let allowed = target.scheme() == "http" || target.scheme() == "https";
         if !allowed {
             emit_page(
@@ -183,6 +289,15 @@ pub fn create_page(
             return false;
         }
         true
+    });
+
+    let app_for_new_window = app.clone();
+    let new_window_id = browser_id.clone();
+    builder = builder.on_new_window(move |url, _features| {
+        if url.scheme() == "http" || url.scheme() == "https" {
+            emit_new_window(&app_for_new_window, &new_window_id, url.to_string());
+        }
+        NewWindowResponse::Deny
     });
 
     let app_for_title = app.clone();
@@ -232,6 +347,7 @@ pub fn create_page(
             },
         );
         if !is_loading {
+            let _ = webview.eval(BLANK_LINK_INTERCEPT_SCRIPT);
             let app = app_for_load.clone();
             let browser_id = load_id.clone();
             let _ = webview.eval_with_callback(FAVICON_SCRIPT, move |result| {
@@ -258,16 +374,21 @@ pub fn create_page(
     let window = main_window(app)?;
     let width = bounds.width.max(1.0);
     let height = bounds.height.max(1.0);
-    window
-        .add_child(
-            builder,
-            LogicalPosition::new(bounds.x, bounds.y),
-            LogicalSize::new(width, height),
-        )
-        .map_err(|error| {
+    match window.add_child(
+        builder,
+        LogicalPosition::new(bounds.x, bounds.y),
+        LogicalSize::new(width, height),
+    ) {
+        Ok(_) => {}
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("already exists") {
+                return navigate_page(app, state, browser_id, normalized);
+            }
             warn!(target: "browser", "Failed to create browser page {browser_id}: {error}");
-            format!("无法创建浏览器页: {error}")
-        })?;
+            return Err(format!("无法创建浏览器页: {error}"));
+        }
+    }
 
     record_navigation(state, &browser_id, normalized.clone());
     emit_page(

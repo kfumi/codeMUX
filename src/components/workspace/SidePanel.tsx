@@ -1,12 +1,12 @@
 import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { applyBrowserVisibility, hideAllBrowserHosts } from '../../lib/browserVisibility';
+import { TooltipHint } from '../ui/tooltip';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
@@ -16,7 +16,9 @@ import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { FileEditorPanel } from './FileEditorPanel';
 import { SubagentPreviewPanel } from './SubagentPreviewPanel';
 import { BrowserPanel } from '../browser/BrowserPanel';
-import { NEW_SESSION_DRAFT_SESSION_ID } from '../../stores/newSessionStore';
+import { composerSessionIdForBrowserPanel } from '../../lib/browserPanelTab';
+import { useBrowserDropdownHostGuard, useBrowserOverlayOpenChange } from '../../lib/useNativeViewOccluder';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 
 interface SidePanelProps {
   projectPath?: string | null;
@@ -46,6 +48,10 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const setScope = useSidePanelStore((state) => state.setScope);
   const draggingRef = useRef(false);
   const panelRef = useRef<HTMLElement | null>(null);
+  const tabMenuContentRef = useRef<HTMLDivElement | null>(null);
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+
+  useBrowserDropdownHostGuard('side-panel:tab-menu', tabMenuOpen, tabMenuContentRef);
 
   useLayoutEffect(() => {
     setScope(scopeId);
@@ -79,6 +85,16 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   }, [setPanelWidth]);
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      void hideAllBrowserHosts();
+      return;
+    }
+    const panelOpen = isOpen;
+    const activeBrowserTabId = panelOpen && activeTab?.kind === 'browser' ? activeTab.id : null;
+    void applyBrowserVisibility(activeBrowserTabId);
+  }, [activeTab?.id, activeTab?.kind, isOpen, isVisible]);
   const terminalTabs = useMemo(() => {
     const allTabs = [
       ...tabs,
@@ -172,7 +188,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       </div>
 
       <div className="flex h-full w-full min-w-0 flex-col">
-        <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
+        <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
           <TooltipHint content="收起面板">
             <button
               aria-label="收起面板"
@@ -198,31 +214,40 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
           </div>
 
           <div className="flex shrink-0 items-center gap-0.5">
-            <DropdownMenu>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="打开标签"
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>打开标签</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <DropdownMenuContent align="end" className="z-190 min-w-32">
-                <DropdownMenuItem disabled={!projectPath} onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
+            <DropdownMenu onOpenChange={setTabMenuOpen}>
+              <TooltipHint content="打开标签">
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="打开标签"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipHint>
+              <DropdownMenuContent
+                ref={tabMenuContentRef}
+                side="bottom"
+                align="end"
+                avoidCollisions={false}
+                className="z-180 min-w-36"
+              >
+                <DropdownMenuItem
+                  disabled={!projectPath}
+                  icon={<FileSearch className="h-3.5 w-3.5" />}
+                  onClick={openReview}
+                >
                   审查
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={!projectPath} onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
+                <DropdownMenuItem
+                  disabled={!projectPath}
+                  icon={<Terminal className="h-3.5 w-3.5" />}
+                  onClick={openTerminal}
+                >
                   终端
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={openBrowser} icon={<Globe className="h-3.5 w-3.5" />}>
+                <DropdownMenuItem icon={<Globe className="h-3.5 w-3.5" />} onClick={openBrowser}>
                   浏览器
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -275,7 +300,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               >
                 <BrowserPanel
                   tabId={tab.id}
-                  sessionId={composerSessionIdForPanel(tab.id)}
+                  sessionId={composerSessionIdForBrowserPanel(tab.id)}
                   isActive={isActive}
                 />
               </div>
@@ -317,14 +342,6 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   );
 }
 
-function composerSessionIdForPanel(panelTabId: string): string {
-  const scopeId = panelTabId.replace(/:browser$/, '');
-  if (scopeId === 'home' || scopeId === 'global' || scopeId.startsWith('draft:')) {
-    return NEW_SESSION_DRAFT_SESSION_ID;
-  }
-  return scopeId;
-}
-
 function TabButton({
   tab,
   active,
@@ -340,6 +357,12 @@ function TabButton({
   onCloseOther: () => void;
   onCloseAll: () => void;
 }) {
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const contextMenuContentRef = useRef<HTMLDivElement | null>(null);
+  const handleContextMenuOpenChange = useBrowserOverlayOpenChange(setContextMenuOpen);
+
+  useBrowserDropdownHostGuard(`side-panel:tab-context:${tab.id}`, contextMenuOpen, contextMenuContentRef);
+
   const Icon = tab.kind === 'review'
     ? FileSearch
     : tab.kind === 'terminal'
@@ -353,7 +376,7 @@ function TabButton({
           : FileText;
 
   return (
-    <ContextMenu>
+    <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
       <ContextMenuTrigger asChild>
         <button
           className={cn(
@@ -386,7 +409,7 @@ function TabButton({
           </span>
         </button>
       </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-36">
+      <ContextMenuContent ref={contextMenuContentRef} className="z-180 min-w-36">
         <ContextMenuItem onClick={onClose}>关闭标签</ContextMenuItem>
         <ContextMenuItem onClick={onCloseOther}>关闭其他标签</ContextMenuItem>
         <ContextMenuItem onClick={onCloseAll}>关闭所有标签</ContextMenuItem>

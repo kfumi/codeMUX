@@ -1,16 +1,11 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Bug,
-  Globe,
   ChevronDown,
   MonitorSmartphone,
   MoreHorizontal,
   MousePointer2,
-  Plus,
   RotateCw,
-  SquareArrowOutUpRight,
-  X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
@@ -21,24 +16,23 @@ import {
   ELEMENT_SELECTOR_START_SCRIPT,
   ELEMENT_SELECTOR_STOP_SCRIPT,
 } from '../../lib/elementSelector';
-import { browserPageTitle } from '../../lib/browserPage';
+import { browserApi } from '../../lib/tauri';
+import { cn } from '../../lib/utils';
+import { useBrowserElementStore } from '../../stores/browserElementStore';
+import { useBrowserStore } from '../../stores/browserStore';
+import { useSidePanelStore } from '../../stores/sidePanelStore';
 import {
   BROWSER_REFERENCE_VIEWPORT,
   BROWSER_VIEWPORT_CHROME_HEIGHT,
+  BROWSER_VIEWPORT_OPTIONS,
   browserViewportScaleLabel,
   formatViewportSize,
   type BrowserViewportMode,
 } from '../../lib/browserViewport';
-import { popupViewportMenu } from '../../lib/browserViewportMenu';
-import { browserApi } from '../../lib/tauri';
-import { cn } from '../../lib/utils';
-import { useBrowserElementStore } from '../../stores/browserElementStore';
-import { useBrowserStore, type BrowserPage } from '../../stores/browserStore';
-import { useSidePanelStore } from '../../stores/sidePanelStore';
+import { useBrowserDropdownHostGuard, useBrowserOverlayOpenChange } from '../../lib/useNativeViewOccluder';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { TooltipHint } from '../ui/tooltip';
-
-const EMPTY_PAGE_IDS: string[] = [];
+import type { BrowserPage } from '../../stores/browserStore';
 
 interface BrowserPanelProps {
   tabId: string;
@@ -47,14 +41,13 @@ interface BrowserPanelProps {
 }
 
 export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) {
-  const pageIds = useBrowserStore((state) => state.pageIdsByPanel[tabId] ?? EMPTY_PAGE_IDS);
   const activePageId = useBrowserStore((state) => state.activePageIdByPanel[tabId] ?? null);
   const pages = useBrowserStore((state) => state.pages);
   const inspectingPageId = useBrowserStore((state) => state.inspectingPageId);
+  const browserInitialUrl = useSidePanelStore(
+    (state) => state.tabs.find((tab) => tab.id === tabId)?.browserInitialUrl,
+  );
   const ensureBlankPage = useBrowserStore((state) => state.ensureBlankPage);
-  const addPage = useBrowserStore((state) => state.addPage);
-  const closePage = useBrowserStore((state) => state.closePage);
-  const setActivePage = useBrowserStore((state) => state.setActivePage);
   const setAddressDraft = useBrowserStore((state) => state.setAddressDraft);
   const navigate = useBrowserStore((state) => state.navigate);
   const back = useBrowserStore((state) => state.back);
@@ -65,17 +58,31 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
   const setViewportPreview = useBrowserStore((state) => state.setViewportPreview);
   const viewportMode = useBrowserStore((state) => state.viewportModeByPanel[tabId] ?? 'fit');
   const previewActive = useBrowserStore((state) => state.previewByPanel[tabId] ?? false);
-  const syncVisibility = useBrowserStore((state) => state.syncVisibility);
   const startInspect = useBrowserStore((state) => state.startInspect);
   const stopInspect = useBrowserStore((state) => state.stopInspect);
   const destroyPanel = useBrowserStore((state) => state.destroyPanel);
-  const closeTab = useSidePanelStore((state) => state.closeTab);
+  const clearBrowserInitialUrl = useSidePanelStore((state) => state.clearBrowserInitialUrl);
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   useEffect(() => {
     ensureBlankPage(tabId);
   }, [ensureBlankPage, tabId]);
+
+  useEffect(() => {
+    if (!isActive || !browserInitialUrl) return;
+    const pageId = useBrowserStore.getState().activePageIdByPanel[tabId];
+    if (!pageId) return;
+    let cancelled = false;
+    void (async () => {
+      await navigate(pageId, browserInitialUrl);
+      if (!cancelled) {
+        clearBrowserInitialUrl(tabId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [browserInitialUrl, clearBrowserInitialUrl, isActive, navigate, tabId]);
 
   useEffect(() => {
     return () => {
@@ -89,11 +96,6 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
     };
   }, [destroyPanel, tabId]);
 
-  useEffect(() => {
-    const visiblePageId = isActive ? activePageId : null;
-    void syncVisibility(tabId, visiblePageId);
-  }, [activePageId, isActive, syncVisibility, tabId]);
-
   useLayoutEffect(() => {
     const node = hostRef.current;
     if (!node || !isActive) return;
@@ -101,10 +103,10 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
     const updateBounds = () => {
       const rect = node.getBoundingClientRect();
       void setPanelBounds(tabId, {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x: Math.ceil(rect.left),
+        y: Math.ceil(rect.top),
+        width: Math.max(0, Math.floor(rect.width)),
+        height: Math.max(0, Math.floor(rect.height)),
       });
     };
 
@@ -191,13 +193,6 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
     };
   }, [activePage?.hostAttached, activePage?.isLoading, activePage?.url, activePageId, inspecting, isActive, sessionId, stopInspect]);
 
-  const handleClosePage = useCallback(async (pageId: string) => {
-    const result = await closePage(pageId);
-    if (result.panelEmpty) {
-      closeTab(tabId);
-    }
-  }, [closePage, closeTab, tabId]);
-
   const handleInspectToggle = useCallback(async () => {
     if (!activePage?.hostAttached || activePage.isLoading) return;
     if (inspecting) {
@@ -209,34 +204,6 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col', !isActive && 'hidden')}>
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border/25 px-1.5">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {pageIds.map((pageId) => {
-            const page = pages[pageId];
-            if (!page) return null;
-            return (
-              <BrowserPageTab
-                key={pageId}
-                page={page}
-                active={pageId === activePageId}
-                onClick={() => void setActivePage(tabId, pageId)}
-                onClose={() => void handleClosePage(pageId)}
-              />
-            );
-          })}
-        </div>
-        <TooltipHint content="新标签页">
-          <button
-            type="button"
-            aria-label="新标签页"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-            onClick={() => addPage(tabId)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </TooltipHint>
-      </div>
-
       <BrowserToolbar
         page={activePage}
         inspecting={inspecting}
@@ -248,8 +215,6 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
         onReload={() => activePage && void reload(activePage.id)}
         onInspect={() => void handleInspectToggle()}
         onTogglePreview={() => void setViewportPreview(tabId, !previewActive)}
-        moreMenuOpen={moreMenuOpen}
-        onMoreMenuOpenChange={setMoreMenuOpen}
       />
 
       {activePage?.lastError ? (
@@ -290,27 +255,11 @@ function BrowserViewportChrome({
   viewportMode: BrowserViewportMode;
   onSelectMode: (mode: BrowserViewportMode) => void;
 }) {
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuContentRef = useRef<HTMLDivElement | null>(null);
+  const handleMenuOpenChange = useBrowserOverlayOpenChange(setMenuOpen);
 
-  const openMenu = async () => {
-    const trigger = triggerRef.current;
-    if (!trigger || menuOpen) return;
-
-    const rect = trigger.getBoundingClientRect();
-    setMenuOpen(true);
-    try {
-      const selected = await popupViewportMenu(viewportMode, {
-        x: rect.left,
-        y: rect.bottom,
-      });
-      if (selected != null) onSelectMode(selected);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '无法打开尺寸菜单');
-    } finally {
-      setMenuOpen(false);
-    }
-  };
+  useBrowserDropdownHostGuard('browser:viewport-menu', menuOpen, menuContentRef);
 
   return (
     <div
@@ -320,66 +269,30 @@ function BrowserViewportChrome({
       <span className="text-ui-meta text-muted-foreground">
         {formatViewportSize(BROWSER_REFERENCE_VIEWPORT.width, BROWSER_REFERENCE_VIEWPORT.height)}
       </span>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label="调整预览尺寸"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        className="inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent py-0.5 text-ui-meta text-muted-foreground outline-none hover:text-foreground"
-        onClick={() => void openMenu()}
-      >
-        {browserViewportScaleLabel(viewportMode)}
-        <ChevronDown className="h-3 w-3" />
-      </button>
+      <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="调整预览尺寸"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent py-0.5 text-ui-meta text-muted-foreground outline-none hover:text-foreground"
+          >
+            {browserViewportScaleLabel(viewportMode)}
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent ref={menuContentRef} side="top" align="center" avoidCollisions={false} className="z-180 min-w-36">
+          {BROWSER_VIEWPORT_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={String(option.value)}
+              className={cn(option.value === viewportMode && 'bg-muted/70 text-foreground')}
+              onClick={() => onSelectMode(option.value)}
+            >
+              {option.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
-  );
-}
-
-function BrowserPageTab({
-  page,
-  active,
-  onClick,
-  onClose,
-}: {
-  page: BrowserPage;
-  active: boolean;
-  onClick: () => void;
-  onClose: () => void;
-}) {
-  const title = browserPageTitle(page.title, page.url);
-  return (
-    <button
-      type="button"
-      className={cn(
-        'group flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-ui-caption transition-colors',
-        active
-          ? 'border-border/55 bg-muted/45 text-foreground'
-          : 'border-transparent text-muted-foreground/70 hover:bg-muted/35 hover:text-foreground/86',
-      )}
-      onClick={onClick}
-    >
-      {page.faviconUrl ? (
-        <img src={page.faviconUrl} alt="" className="h-3.5 w-3.5 shrink-0" />
-      ) : (
-        <Globe className="h-3.5 w-3.5 shrink-0" />
-      )}
-      <span className="truncate">{title}</span>
-      {page.isLoading ? (
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-      ) : null}
-      <span
-        role="button"
-        tabIndex={-1}
-        className="rounded p-0.5 text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose();
-        }}
-      >
-        <X className="h-3 w-3" />
-      </span>
-    </button>
   );
 }
 
@@ -394,8 +307,6 @@ function BrowserToolbar({
   onReload,
   onInspect,
   onTogglePreview,
-  moreMenuOpen,
-  onMoreMenuOpenChange,
 }: {
   page?: BrowserPage;
   inspecting: boolean;
@@ -407,11 +318,14 @@ function BrowserToolbar({
   onReload: () => void;
   onInspect: () => void;
   onTogglePreview: () => void;
-  moreMenuOpen: boolean;
-  onMoreMenuOpenChange: (open: boolean) => void;
 }) {
   const canInspect = Boolean(page?.hostAttached) && !page?.isLoading;
   const pageUrl = page?.url || page?.addressDraft || '';
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuContentRef = useRef<HTMLDivElement | null>(null);
+  const handleMoreMenuOpenChange = useBrowserOverlayOpenChange(setMoreMenuOpen);
+
+  useBrowserDropdownHostGuard('browser:more-menu', moreMenuOpen, moreMenuContentRef);
 
   const openInDefaultBrowser = async () => {
     if (!pageUrl) return;
@@ -419,6 +333,15 @@ function BrowserToolbar({
       await open(pageUrl);
     } catch {
       toast.error('无法在默认浏览器中打开');
+    }
+  };
+
+  const openDevtools = async () => {
+    if (!page?.hostAttached) return;
+    try {
+      await browserApi.openDevtools(page.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '无法打开调试工具');
     }
   };
 
@@ -509,30 +432,24 @@ function BrowserToolbar({
           <MousePointer2 className="h-3.5 w-3.5" />
         </button>
       </TooltipHint>
-      <DropdownMenu open={moreMenuOpen} onOpenChange={onMoreMenuOpenChange}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label="更多浏览器操作"
-            title="更多浏览器操作"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side="left" className="z-190 min-w-44">
-          <DropdownMenuItem
-            disabled={!pageUrl}
-            icon={<SquareArrowOutUpRight className="h-3.5 w-3.5" />}
-            onClick={() => void openInDefaultBrowser()}
-          >
+      <DropdownMenu open={moreMenuOpen} onOpenChange={handleMoreMenuOpenChange}>
+        <TooltipHint content="更多浏览器操作">
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="更多浏览器操作"
+              title="更多浏览器操作"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipHint>
+        <DropdownMenuContent ref={moreMenuContentRef} side="top" align="end" avoidCollisions={false} className="z-180 min-w-44">
+          <DropdownMenuItem disabled={!pageUrl} onClick={() => void openInDefaultBrowser()}>
             在默认浏览器中打开
           </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!page?.hostAttached}
-            icon={<Bug className="h-3.5 w-3.5" />}
-            onClick={() => page && void browserApi.openDevtools(page.id)}
-          >
+          <DropdownMenuItem disabled={!page?.hostAttached} onClick={() => void openDevtools()}>
             打开调试工具
           </DropdownMenuItem>
         </DropdownMenuContent>
