@@ -164,7 +164,8 @@ export class PiRuntime {
   private activeAsk: PiActiveAsk | undefined;
 
   constructor(
-    private readonly config: PiSessionConfig,
+    // 可变：forkToEntry 后会话文件变化，需同步更新以便 canReuse 识别为同一运行时。
+    private config: PiSessionConfig,
     private readonly options: PiRuntimeOptions = {},
   ) {
     this.ctx = createPiEventContext({
@@ -361,6 +362,44 @@ export class PiRuntime {
     await fs.promises.copyFile(source, target);
     writeLog('[pi-task]', `fork COPIED to=${target}`);
     return target;
+  }
+
+  /**
+   * 会话树 rewind：经 pi 原生 `fork` RPC 回退到目标用户消息之前。pi 会在
+   * 同目录新建 branched 会话文件（原文件不动、树历史保留）并在进程内
+   * rebind——无需重建子进程。返回新会话文件路径供宿主更新 Native mapping；
+   * 运行中的 turn / 待答复的审批与提问会被拒绝。
+   */
+  async forkToEntry(entryId: string): Promise<string> {
+    const transport = this.transport;
+    if (this.state !== 'started' || !transport) {
+      throw new Error('pi runtime is not started');
+    }
+    if (this.pendingTurn) {
+      throw new Error('pi is still running; rewind after the turn finishes');
+    }
+    if (this.pendingExtensionUi.size > 0 || this.activeAsk) {
+      throw new Error('pi has pending approval/question dialogs; resolve them first');
+    }
+    const trimmed = entryId.trim();
+    if (!trimmed) {
+      throw new Error('pi rewind requires a target entry id');
+    }
+    const result = await transport.request({ type: 'fork', entryId: trimmed });
+    const record = typeof result === 'object' && result !== null
+      ? (result as Record<string, unknown>)
+      : {};
+    if (record.cancelled === true) {
+      throw new Error('pi rewind was cancelled');
+    }
+    // 新会话文件路径是本操作的核心产出，回读失败直接报错（不用吞错的 refresh）。
+    await this.readSessionIdentity(transport);
+    if (!this.agentSessionFile) {
+      throw new Error('pi did not report the forked session file');
+    }
+    this.config = { ...this.config, agentSessionId: this.agentSessionFile };
+    writeLog('[pi-task]', `rewind FORKED entry=${trimmed} to=${this.agentSessionFile}`);
+    return this.agentSessionFile;
   }
 
   async shutdown(): Promise<void> {

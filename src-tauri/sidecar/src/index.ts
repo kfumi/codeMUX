@@ -1707,6 +1707,8 @@ type SidecarRuntime = {
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
   respondToQuestion?(requestId: string, answers: string[][]): Promise<void>;
   isPendingQuestion?(requestId: string): boolean;
+  /** 会话树 rewind（pi 专属）：fork 到目标用户消息之前，返回新会话文件路径。 */
+  rewindToEntry?(entryId: string): Promise<string>;
 };
 
 type SidecarCommandDispatcherOptions = {
@@ -1967,6 +1969,33 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         } catch (error) {
           options.emit({
             type: 'session_rewind_files_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            ok: false,
+            error: String(error),
+          });
+        }
+        return;
+      }
+      case 'rewind_conversation': {
+        await ensureTail;
+        try {
+          const current = selectedRuntime();
+          const flavor = getRuntimeFlavor(activeAgentKind);
+          if (flavor !== 'pi' || !current?.rewindToEntry) {
+            throw new Error('This provider runtime does not support conversation rewind');
+          }
+          const agentSessionId = await current.rewindToEntry(cmd.entryId);
+          options.emit({
+            type: 'session_rewind_conversation_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            ok: true,
+            agent_session_id: agentSessionId,
+          });
+        } catch (error) {
+          options.emit({
+            type: 'session_rewind_conversation_result',
             request_id: cmd.requestId,
             session_id: cmd.sessionId,
             ok: false,
@@ -2306,6 +2335,7 @@ function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
     respondToQuestion: (requestId, answers) => piRuntime.respondToQuestion(requestId, answers),
     isPendingQuestion: (requestId) => piRuntime.isPendingQuestion(requestId),
     forkSession: (sourceAgentSessionId) => piRuntime.forkSession(sourceAgentSessionId),
+    rewindToEntry: (entryId) => piRuntime.forkToEntry(entryId),
     resetSession: () => piRuntime.resetSession(),
     deleteSession: (agentSessionId) => piRuntime.deleteSession(agentSessionId),
     interrupt: () => piRuntime.interrupt(),

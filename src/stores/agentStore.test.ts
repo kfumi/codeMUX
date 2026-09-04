@@ -3768,3 +3768,17 @@ describe('agent store Codex history loading', () => {
     }
   });
 });
+
+describe('agent rewind capabilities', () => {
+  it('enables conversation-only rewind for pi (sidecar native fork)', async () => {
+    const { AGENT_REWIND_CAPABILITIES, supportsRewindMode } = await import('./agentStore');
+    expect(supportsRewindMode('pi', 'conversation')).toBe(true);
+    expect(supportsRewindMode('pi', 'files')).toBe(false);
+    expect(supportsRewindMode('pi', 'both')).toBe(false);
+    expect(AGENT_REWIND_CAPABILITIES.pi).toEqual({
+      conversation: true,
+      files: false,
+      both: false,
+    });
+  });
+});

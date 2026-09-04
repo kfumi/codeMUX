@@ -1,7 +1,7 @@
 //! Session rewind: locating the target user turn in native JSONL history and
 //! truncating the file back to that turn across Claude, Codex and OpenCode.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use super::claude_history::{find_claude_session_jsonl, should_include_claude_his
 use super::codex_history::{codex_interactive_events_dir, find_codex_session_jsonl};
 use super::native_jsonl::{sanitize_file_segment, split_jsonl_preserving_newlines};
 use super::opencode_history;
+use super::pi_history;
 use super::session_lifecycle::{
     get_agent_session_id, home_dir, is_imported_session, reject_read_only_session, AgentState,
 };
@@ -92,7 +93,8 @@ fn is_codex_visible_user_value(value: &serde_json::Value) -> bool {
 fn is_rewind_user_value(value: &serde_json::Value, agent_kind: AgentKind) -> bool {
     match agent_kind {
         AgentKind::Codex => is_codex_visible_user_value(value),
-        // pi 不支持会话 rewind（无树导航接入）；入口处应已拦截。
+        // pi 会话树 rewind 走 sidecar 原生 fork（rewind_pi_conversation），
+        // 不经过本函数所在的 JSONL 截断路径。
         AgentKind::Pi => false,
         AgentKind::ClaudeCode | AgentKind::GeminiCli | AgentKind::Opencode => {
             is_claude_visible_user_value(value)
@@ -559,6 +561,131 @@ async fn rewind_agent_files_via_sidecar(
     }
 }
 
+async fn rewind_pi_conversation_via_sidecar(
+    agent_state: &AgentState,
+    app_session_id: &str,
+    entry_id: &str,
+) -> Result<String, String> {
+    let sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars
+            .get(app_session_id)
+            .map(SidecarHandle::command_sender)
+    };
+    let Some(sender) = sender else {
+        return Err("Agent runtime is not active; reopen the session and try again".to_string());
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (result_sender, result_receiver) = oneshot::channel();
+    agent_state
+        .session_rewind_conversation_waiters
+        .lock()
+        .await
+        .insert(request_id.clone(), result_sender);
+    let command = serde_json::json!({
+        "type": "rewind_conversation",
+        "sessionId": app_session_id,
+        "requestId": request_id,
+        "entryId": entry_id,
+    });
+    if sender.send(command.to_string()).await.is_err() {
+        agent_state
+            .session_rewind_conversation_waiters
+            .lock()
+            .await
+            .remove(&request_id);
+        return Err("Failed to send the conversation rewind command to the sidecar".to_string());
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(60), result_receiver).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => {
+            Err("Agent sidecar stopped before confirming the conversation rewind".to_string())
+        }
+        Err(_) => {
+            agent_state
+                .session_rewind_conversation_waiters
+                .lock()
+                .await
+                .remove(&request_id);
+            Err("Timed out waiting for the conversation rewind".to_string())
+        }
+    }
+}
+
+/// pi 会话树 rewind：pi 的原生历史是树形 JSONL 且进程持有 RPC 连接，不能像
+/// Claude/Codex 那样直接截断文件。经 sidecar 调 pi 原生 `fork`——在原文件
+/// 同目录新建 branched 会话文件（原文件与树历史不动）并在进程内 rebind——
+/// 随后把 Native mapping 更新为新文件并重建时间线（branched 文件尚无消息
+/// 条目时清空时间线）。mapping 保留（空 branched 文件仍是可恢复的原生会话），
+/// 也不发 reset_session：pi 进程内已切换，无需重建。
+async fn rewind_pi_conversation(
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+    target: Option<&RewindTarget>,
+) -> Result<RewindSessionResult, String> {
+    let history_path = PathBuf::from(agent_session_id);
+    if !history_path.is_file() {
+        return Err(format!(
+            "pi session file not found for session_id={} path={}",
+            app_session_id,
+            history_path.display()
+        ));
+    }
+    let entry_id = {
+        let path = history_path.clone();
+        let provider_message_id = target.and_then(|entry| entry.provider_message_id.clone());
+        let turn_ordinal = target.and_then(|entry| entry.turn_ordinal);
+        let text_fingerprint = target.and_then(|entry| entry.text_fingerprint.clone());
+        tokio::task::spawn_blocking(move || {
+            pi_history::resolve_pi_rewind_entry_id(
+                &path,
+                provider_message_id.as_deref(),
+                turn_ordinal,
+                text_fingerprint.as_deref(),
+            )
+        })
+        .await
+        .map_err(|error| format!("Failed to join pi rewind resolver: {}", error))??
+    };
+
+    let new_agent_session_id =
+        rewind_pi_conversation_via_sidecar(agent_state.inner(), app_session_id, &entry_id).await?;
+
+    {
+        let db = state.db.lock().unwrap();
+        operations::upsert_agent_session_mapping(
+            &db,
+            app_session_id,
+            agent_kind,
+            &new_agent_session_id,
+        )
+        .map_err(|err| format!("Failed to update rewound agent session mapping: {}", err))?;
+    }
+    super::history_import::reload_session_timeline_from_native(
+        state.clone(),
+        app_session_id,
+        agent_kind,
+    )
+    .await
+    .map_err(|err| format!("Failed to rebuild rewound session timeline: {}", err))?;
+
+    info!(
+        target: "agent",
+        "Rewound pi session via native fork app_session_id={} entry_id={} new_session_file={}",
+        app_session_id,
+        entry_id,
+        new_agent_session_id,
+    );
+    Ok(RewindSessionResult {
+        files_changed: None,
+    })
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn rewind_agent_session(
@@ -647,6 +774,20 @@ pub async fn rewind_agent_session(
         return Ok(RewindSessionResult { files_changed });
     }
 
+    // pi 会话树 rewind 走 sidecar 原生 fork，不做 JSONL 截断（此处 mode 必为
+    // Conversation：files/both 已在上方对非 Claude 拒绝）。
+    if agent_kind == AgentKind::Pi {
+        return rewind_pi_conversation(
+            state,
+            agent_state,
+            &app_session_id,
+            agent_kind,
+            &agent_session_id,
+            target.as_ref(),
+        )
+        .await;
+    }
+
     let home = home_dir()?;
     let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind
         == AgentKind::Opencode
@@ -666,7 +807,7 @@ pub async fn rewind_agent_session(
                 find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
             }
             AgentKind::GeminiCli => None,
-            // pi 不支持会话 rewind。
+            // pi 不可达：rewind_pi_conversation 分支已提前返回。
             AgentKind::Pi => None,
             AgentKind::Opencode => unreachable!(),
         }

@@ -772,3 +772,92 @@ describe('PiRuntime interactive extension bridge', () => {
     }
   });
 });
+
+describe('PiRuntime session-tree rewind', () => {
+  it('forks to an entry and adopts the new session file in-process', async () => {
+    const forkedSessionFile = path.join(os.tmpdir(), `pi-fake-session-forked-${process.pid}.jsonl`);
+    const { runtime, wireLog } = startFakePiRuntime({
+      responseSequences: {
+        // 第一次 ensure 回读旧文件；fork 后的 get_state 回读 branched 新文件。
+        get_state: [
+          { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+          { data: { sessionId: 'pi-s2', sessionFile: forkedSessionFile } },
+        ],
+      },
+      responses: {
+        fork: { data: { text: 'retry prompt', cancelled: false } },
+      },
+    });
+    try {
+      const before = await runtime.ensure();
+      expect(before.agentSessionId).toBe(FAKE_SESSION_FILE);
+
+      const forked = await runtime.forkToEntry('u-entry-1');
+      expect(forked).toBe(forkedSessionFile);
+      expect(wireLog().some((m) => m.type === 'fork' && m.entryId === 'u-entry-1')).toBe(true);
+
+      // 进程内 rebind：不重建子进程，ensure 复用并回报新 mapping；
+      // canReuse 以新会话文件比对（宿主更新 mapping 后不会误触发重建）。
+      const after = await runtime.ensure();
+      expect(after.agentSessionId).toBe(forkedSessionFile);
+      expect(runtime.canReuse(buildConfig({ agentSessionId: forkedSessionFile }))).toBe(true);
+      expect(runtime.canReuse(buildConfig())).toBe(false);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('rejects rewind while a turn is running', async () => {
+    const { runtime, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          // 中断时序测试：agent_end 缓存到收到 abort 再放行，turn 可确定性收尾。
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 0, event: { type: 'agent_end' } }],
+        },
+      },
+      responseSequences: {
+        fork: [{ data: { text: '', cancelled: false } }],
+      },
+    });
+    try {
+      await runtime.ensure();
+      // 预挂 catch：interrupt 正常收尾 sendInput。
+      const turn = runtime.sendInput('long task').catch(() => undefined);
+      await vi_waitFor(() => {
+        if (!wireLog().some((m) => m.type === 'prompt')) {
+          throw new Error('prompt not sent yet');
+        }
+      });
+      await expect(runtime.forkToEntry('u-entry-1')).rejects.toThrow(/still running/i);
+      await runtime.interrupt();
+      await turn;
+      // turn 结束后 rewind 恢复可用（不残留 pendingTurn 误拒）。
+      const forked = await runtime.forkToEntry('u-entry-1');
+      expect(typeof forked).toBe('string');
+    } finally {
+      await runtime.shutdown().catch(() => undefined);
+    }
+  });
+
+  it('surfaces cancelled forks and pi RPC errors', async () => {
+    const { runtime } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+      },
+      responseSequences: {
+        fork: [{ data: { cancelled: true } }, { success: false, error: 'Invalid entry ID for forking' }],
+      },
+    });
+    try {
+      await runtime.ensure();
+      await expect(runtime.forkToEntry('u-entry-1')).rejects.toThrow(/rewind was cancelled/i);
+      await expect(runtime.forkToEntry('missing-entry')).rejects.toThrow(/Invalid entry ID/);
+      await expect(runtime.forkToEntry('   ')).rejects.toThrow(/target entry id/i);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+});

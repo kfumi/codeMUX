@@ -11,6 +11,7 @@ use crate::config::types::AgentKind;
 
 use super::history_events::normalize_history_events;
 use super::native_jsonl::read_json_stream_values;
+use super::rewind::normalize_rewind_text;
 use super::session_lifecycle::get_agent_session_id;
 
 pub(crate) fn convert_pi_history_values_to_events(
@@ -118,6 +119,137 @@ fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
 
     chain.reverse();
     chain.into_iter().map(|index| &raw_events[index]).collect()
+}
+
+/// 活动链上一条可回退的用户消息条目（fork 目标）。
+struct PiRewindableUser {
+    entry_id: String,
+    /// pi 原文文本（string 或 text 块拼接，未做展示层剥离）。
+    text: String,
+}
+
+/// 收集活动链上的可回退用户消息，口径对齐前端 `isRewindableUserEvent`：
+/// 文本非空或含图片附件；tool_result 条目在时间线上不构成用户消息，排除。
+fn collect_pi_rewindable_users(raw_events: &[Value]) -> Vec<PiRewindableUser> {
+    let mut users = Vec::new();
+    for entry in select_pi_active_chain(raw_events) {
+        if entry.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+        let message = match entry.get("message") {
+            Some(message) => message,
+            None => continue,
+        };
+        if message.get("role").and_then(Value::as_str) != Some("user") {
+            continue;
+        }
+        let Some(entry_id) = entry
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let content = message.get("content");
+        let text = match content {
+            Some(Value::String(text)) => text.clone(),
+            Some(Value::Array(blocks)) => blocks
+                .iter()
+                .filter_map(|block| {
+                    let block_type = block.get("type").and_then(Value::as_str)?;
+                    if block_type != "text" && block_type != "input_text" {
+                        return None;
+                    }
+                    block.get("text").and_then(Value::as_str)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        };
+        let has_image = content.and_then(Value::as_array).is_some_and(|blocks| {
+            blocks
+                .iter()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some("image"))
+        });
+        if normalize_rewind_text(&text).is_empty() && !has_image {
+            continue;
+        }
+        users.push(PiRewindableUser { entry_id, text });
+    }
+    users
+}
+
+fn verify_pi_rewind_fingerprint(
+    user: &PiRewindableUser,
+    text_fingerprint: Option<&str>,
+) -> Result<(), String> {
+    if let Some(fingerprint) = text_fingerprint
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        if normalize_rewind_text(&user.text) != normalize_rewind_text(fingerprint) {
+            return Err(format!(
+                "Rewind target text mismatch for pi entry {}",
+                user.entry_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 解析 rewind 目标用户消息的 pi 条目 id（`fork` RPC 的 entryId）。
+/// 定位优先级：providerMessageId（时间线自带 pi 条目 id，精确匹配）→
+/// turnOrdinal（第 N 条可回退用户消息，1-based，附指纹校验）→ 无 locator 时
+/// 取活动链最新一条。ordinal 是较弱定位，指纹不一致或目标不存在时报错
+/// （宁漏勿错，不猜目标）。
+pub(crate) fn resolve_pi_rewind_entry_id(
+    history_path: &Path,
+    provider_message_id: Option<&str>,
+    turn_ordinal: Option<usize>,
+    text_fingerprint: Option<&str>,
+) -> Result<String, String> {
+    let raw_events = read_json_stream_values(history_path)?;
+    // 会话头校验与发现/导入同口径：非 pi 会话文件拒绝操作。
+    if !raw_events
+        .iter()
+        .any(|entry| entry.get("type").and_then(Value::as_str) == Some("session"))
+    {
+        return Err(format!("Not a pi session file: {}", history_path.display()));
+    }
+    let not_found = || {
+        format!(
+            "Target rewind user message not found in session history {}",
+            history_path.display()
+        )
+    };
+    let users = collect_pi_rewindable_users(&raw_events);
+
+    if let Some(id) = provider_message_id
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        let user = users
+            .iter()
+            .find(|user| user.entry_id == id)
+            .ok_or_else(&not_found)?;
+        // pi 树条目不可变，id 命中即目标：不校验指纹——展示层剥离（如附件
+        // 富化包裹）会让时间线文本与原文产生合法差异。
+        return Ok(user.entry_id.clone());
+    }
+
+    if let Some(ordinal) = turn_ordinal {
+        let user = users
+            .get(ordinal.checked_sub(1).ok_or_else(&not_found)?)
+            .ok_or_else(&not_found)?;
+        verify_pi_rewind_fingerprint(user, text_fingerprint)?;
+        return Ok(user.entry_id.clone());
+    }
+
+    users
+        .last()
+        .map(|user| user.entry_id.clone())
+        .ok_or_else(&not_found)
 }
 
 /// Pi JSONL records one assistant `message` per speak/tool step. A single user
@@ -977,5 +1109,117 @@ mod tests {
             resolve_pi_native_sessions_root(home, None, Some("~/pihome"), None),
             home.join("pihome/sessions")
         );
+    }
+
+    /// 树形会话文件：线性主干 + 一条分叉分支（fork 目标解析只认活动链）。
+    fn write_tree_session(path: &std::path::Path) {
+        let lines = vec![
+            json!({"type": "session", "id": "pi-session-1", "cwd": "C:/workspace"}),
+            json!({
+                "type": "message", "id": "u1", "parentId": "",
+                "message": {"role": "user", "content": [{"type": "text", "text": "first  prompt"}]}
+            }),
+            json!({
+                "type": "message", "id": "a1", "parentId": "u1",
+                "message": {"role": "assistant", "stopReason": "stop",
+                    "content": [{"type": "text", "text": "reply"}]}
+            }),
+            json!({
+                "type": "message", "id": "u2", "parentId": "a1",
+                "message": {"role": "user", "content": "second prompt"}
+            }),
+            json!({
+                "type": "message", "id": "u2-branch", "parentId": "a1",
+                "message": {"role": "user", "content": [{"type": "text", "text": "abandoned branch"}]}
+            }),
+            json!({
+                // tool_result 条目：时间线上不构成用户消息，不应计入 turn 序数
+                "type": "message", "id": "tr1", "parentId": "u2",
+                "message": {"role": "user", "content": [{"type": "toolResult", "toolCallId": "t1"}]}
+            }),
+            json!({
+                "type": "message", "id": "u3", "parentId": "tr1",
+                "message": {"role": "user", "content": [{"type": "text", "text": "third prompt"}]}
+            }),
+        ];
+        let content = lines
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .join("\n");
+        fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn resolves_rewind_entry_by_provider_message_id() {
+        let dir = test_home("rewind-by-id");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        write_tree_session(&path);
+
+        let entry_id =
+            resolve_pi_rewind_entry_id(&path, Some("u2"), Some(999), Some("wrong")).unwrap();
+        assert_eq!(entry_id, "u2");
+
+        // 非可回退条目（tool_result / 分支外的助手消息）不可命中
+        assert!(resolve_pi_rewind_entry_id(&path, Some("tr1"), None, None).is_err());
+        assert!(resolve_pi_rewind_entry_id(&path, Some("missing"), None, None).is_err());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolves_rewind_entry_by_turn_ordinal_and_verifies_fingerprint() {
+        let dir = test_home("rewind-by-ordinal");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        write_tree_session(&path);
+
+        // 活动链可回退用户消息 = u1, u2, u3（分支 u2-branch 与 tool_result tr1 不计）
+        // 指纹做空白归一化比较（大小写敏感）
+        let entry_id =
+            resolve_pi_rewind_entry_id(&path, None, Some(1), Some("first prompt")).unwrap();
+        assert_eq!(entry_id, "u1");
+        let entry_id =
+            resolve_pi_rewind_entry_id(&path, None, Some(3), Some("third   prompt")).unwrap();
+        assert_eq!(entry_id, "u3");
+
+        // 序数越界 / 指纹不一致：报错而非猜测
+        assert!(resolve_pi_rewind_entry_id(&path, None, Some(4), None).is_err());
+        assert!(resolve_pi_rewind_entry_id(&path, None, Some(2), Some("different text")).is_err());
+        assert!(resolve_pi_rewind_entry_id(&path, None, Some(0), None).is_err());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolves_rewind_entry_latest_without_locator() {
+        let dir = test_home("rewind-latest");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        write_tree_session(&path);
+
+        // 无 locator：取活动链最新一条（u3，而非同层兄弟分支 u2-branch）
+        assert_eq!(
+            resolve_pi_rewind_entry_id(&path, None, None, None).unwrap(),
+            "u3"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rejects_rewind_on_non_pi_session_file() {
+        let dir = test_home("rewind-not-pi");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        fs::write(&path, "{\"type\":\"message\",\"id\":\"x\"}\n").unwrap();
+
+        assert!(resolve_pi_rewind_entry_id(&path, None, None, None)
+            .unwrap_err()
+            .contains("Not a pi session file"));
+
+        fs::remove_dir_all(&dir).ok();
     }
 }

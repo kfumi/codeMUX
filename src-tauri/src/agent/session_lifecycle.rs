@@ -368,6 +368,8 @@ pub(crate) type SessionForkWaiters =
     Arc<Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>>;
 pub(crate) type SessionRewindFilesWaiters =
     Arc<Mutex<HashMap<String, oneshot::Sender<Result<Vec<String>, String>>>>>;
+pub(crate) type SessionRewindConversationWaiters =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>>;
 
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
@@ -376,6 +378,7 @@ pub struct AgentState {
     pub session_delete_waiters: SessionDeleteWaiters,
     pub session_fork_waiters: SessionForkWaiters,
     pub session_rewind_files_waiters: SessionRewindFilesWaiters,
+    pub session_rewind_conversation_waiters: SessionRewindConversationWaiters,
     /// Port of the running codex compat proxy, if any.
     pub proxy_port: Arc<Mutex<Option<u16>>>,
 }
@@ -389,6 +392,7 @@ impl Default for AgentState {
             session_delete_waiters: Arc::new(Mutex::new(HashMap::new())),
             session_fork_waiters: Arc::new(Mutex::new(HashMap::new())),
             session_rewind_files_waiters: Arc::new(Mutex::new(HashMap::new())),
+            session_rewind_conversation_waiters: Arc::new(Mutex::new(HashMap::new())),
             proxy_port: Arc::new(Mutex::new(None)),
         }
     }
@@ -463,6 +467,8 @@ async fn ensure_sidecar_for_session(
     let session_delete_waiters = agent_state.session_delete_waiters.clone();
     let session_fork_waiters = agent_state.session_fork_waiters.clone();
     let session_rewind_files_waiters = agent_state.session_rewind_files_waiters.clone();
+    let session_rewind_conversation_waiters =
+        agent_state.session_rewind_conversation_waiters.clone();
     let session_id_clone = session_id.to_string();
     let app_handle = app.clone();
     tokio::spawn(async move {
@@ -485,6 +491,16 @@ async fn ensure_sidecar_for_session(
             }
             if let Some(result) = parse_session_rewind_files_result_event(&event) {
                 if let Some(waiter) = session_rewind_files_waiters
+                    .lock()
+                    .await
+                    .remove(&result.request_id)
+                {
+                    let _ = waiter.send(result.result);
+                }
+                continue;
+            }
+            if let Some(result) = parse_session_rewind_conversation_result_event(&event) {
+                if let Some(waiter) = session_rewind_conversation_waiters
                     .lock()
                     .await
                     .remove(&result.request_id)
@@ -657,6 +673,45 @@ pub(crate) fn parse_session_rewind_files_result_event(
             .to_string())
     };
     Some(SessionRewindFilesResultEvent { request_id, result })
+}
+
+pub(crate) struct SessionRewindConversationResultEvent {
+    pub request_id: String,
+    /// 成功时携带 fork 后的新原生会话文件路径（pi 会话树 rewind）。
+    pub result: Result<String, String>,
+}
+
+pub(crate) fn parse_session_rewind_conversation_result_event(
+    event: &str,
+) -> Option<SessionRewindConversationResultEvent> {
+    let value = serde_json::from_str::<serde_json::Value>(event).ok()?;
+    if value.get("type").and_then(|entry| entry.as_str())
+        != Some("session_rewind_conversation_result")
+    {
+        return None;
+    }
+    let request_id = value.get("request_id")?.as_str()?.to_string();
+    let result = if value
+        .get("ok")
+        .and_then(|entry| entry.as_bool())
+        .unwrap_or(false)
+    {
+        value
+            .get("agent_session_id")
+            .and_then(|entry| entry.as_str())
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                "Provider conversation rewind did not include the new session".to_string()
+            })
+    } else {
+        Err(value
+            .get("error")
+            .and_then(|entry| entry.as_str())
+            .unwrap_or("Provider conversation rewind failed")
+            .to_string())
+    };
+    Some(SessionRewindConversationResultEvent { request_id, result })
 }
 
 fn parse_agent_session_mapping_event(

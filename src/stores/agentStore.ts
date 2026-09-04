@@ -1235,7 +1235,8 @@ export const AGENT_REWIND_CAPABILITIES: Record<AgentKind, {
   codex: { conversation: true, files: false, both: false },
   gemini_cli: { conversation: false, files: false, both: false },
   opencode: { conversation: true, files: false, both: false },
-  pi: { conversation: false, files: false, both: false },
+  // pi 经 sidecar 原生 fork 实现会话树 rewind（无文件快照，不支持 files/both）。
+  pi: { conversation: true, files: false, both: false },
 };
 
 export function supportsRewindMode(agentKind: AgentKind | undefined, mode: RewindMode): boolean {
