@@ -115,7 +115,7 @@ CodeMUX 目前提供 Claude Code / Codex / OpenCode 三种可用的编码智能�
 - **审批 / ask-user**（已完成 2026-09-04：经临时扩展 + `extension_ui_request` 桥接实现，见 issues/09）：原定不实现 `extension_ui_request` 桥接；pi 会话无 Interactive Request。
 - **自研 pi 扩展**：不生成临时扩展（system prompt 注入、会话树条目捕获、自定义扩展命令均不做）。
 - **会话树 rewind / fork-to-entry**（已完成 2026-09-04：复用现有 rewind 管线经 sidecar 调 pi 原生 `fork` 实现，见 issues/10）：0.73.1 RPC 无 `get_tree`/`navigateTree`（fork+`get_fork_messages` 即完整 RPC 面）；文件快照 rewind 本就不支持。
-- **MCP 传递**：不向 pi 传 `--mcp-config`；pi 会话不挂 CodeMUX MCP 服务器。
+- **MCP 传递**：不适用——锁定的 pi 0.73.1 没有任何 MCP 能力（README 明确 "No MCP"，无 `--mcp-config` flag、配置无 mcpServers、CHANGELOG 零记录；作者主张以 Skills + 带 README 的 CLI 工具替代）。`McpApps` 勾选面也不含 pi。将来若升级 pin 后 pi 提供原生 MCP，CodeMUX 侧应同步到托管 `piConfigDir`（经 `PI_CODING_AGENT_DIR` 注入，与 ADR 0005 硬隔离一致），届时再立项。
 - **pi 扩展命令作为 slash 命令**：不接 `get_commands`；仅内置 `/compact`。
 - **移动端 pi 专属 UI**：不含移动端新建 pi 会话的专属适配。
 - **pi 专属输出**：`/share`、`export_html`、bash 直连 RPC 等不暴露。
