@@ -1180,6 +1180,9 @@ const originalScrollTo = HTMLElement.prototype.scrollTo;
 const resizeObservers: Array<{ callback: ResizeObserverCallback; target: Element | null }> = [];
 
 function triggerResize(target: Element, width: number, height = 720) {
+  Object.defineProperty(target, 'clientWidth', { configurable: true, value: width });
+  Object.defineProperty(target, 'clientHeight', { configurable: true, value: height });
+
   for (const observer of resizeObservers) {
     if (observer.target !== target) {
       continue;
@@ -2986,8 +2989,29 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-3');
+    expect(shell.className).toContain('px-5');
     expect(shell.className).not.toContain('px-20');
+  });
+
+  it('ignores resize updates while the document is hidden and re-measures on restore', async () => {
+    const { container } = render(<Harness sessionId="session-nav" />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement | null;
+
+    expect(viewport).toBeTruthy();
+    expect(screen.getByTestId('message-nav')).toBeTruthy();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    triggerResize(viewport!, 720);
+    expect(screen.getByTestId('message-nav')).toBeTruthy();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('message-nav')).toBeNull();
+    });
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   });
 
   it('keeps the message navigation floating without shifting thread content off center', () => {

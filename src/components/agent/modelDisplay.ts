@@ -27,7 +27,7 @@ export function checkProfileModelSupports1m(
   return entry?.context_1m === true;
 }
 
-/** Read the configured Codex/OpenCode context window for a model. */
+/** Read the configured context window for Codex, OpenCode, and Pi models. */
 export function getProfileModelContextWindow(
   provider: ModelProvider | null,
   modelId: string,

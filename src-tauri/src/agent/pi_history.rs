@@ -9,10 +9,77 @@ use tauri::State;
 
 use crate::config::types::AgentKind;
 
+use super::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
 use super::history_events::normalize_history_events;
 use super::native_jsonl::read_json_stream_values;
 use super::rewind::normalize_rewind_text;
 use super::session_lifecycle::get_agent_session_id;
+
+/// 从 pi 会话 JSONL 活动链上最后一条带 `usage` 的 assistant 消息提取上下文用量。
+pub(crate) fn latest_pi_usage_from_session_values(
+    raw_events: &[Value],
+    freshness: &str,
+) -> Option<ThreadTokenUsageSnapshot> {
+    for entry in select_pi_active_chain(raw_events).into_iter().rev() {
+        if entry.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+        let message = entry.get("message")?;
+        if message.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let usage = message.get("usage")?;
+        let input_tokens = read_pi_usage_u64(
+            usage
+                .get("input")
+                .or_else(|| usage.get("input_tokens"))
+                .or_else(|| usage.get("inputTokens")),
+        );
+        let cached_input_tokens = read_pi_usage_u64(
+            usage
+                .get("cacheRead")
+                .or_else(|| usage.get("cache_read"))
+                .or_else(|| usage.get("cached_input_tokens"))
+                .or_else(|| usage.get("cachedInputTokens")),
+        );
+        let output_tokens = read_pi_usage_u64(
+            usage
+                .get("output")
+                .or_else(|| usage.get("output_tokens"))
+                .or_else(|| usage.get("outputTokens")),
+        );
+        if input_tokens == 0 && cached_input_tokens == 0 && output_tokens == 0 {
+            continue;
+        }
+
+        let total_tokens = input_tokens.saturating_add(cached_input_tokens);
+        let breakdown = TokenUsageBreakdown {
+            total_tokens,
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            reasoning_output_tokens: 0,
+        };
+
+        return Some(ThreadTokenUsageSnapshot {
+            total: breakdown.clone(),
+            last: breakdown,
+            model_context_window: None,
+            context_usage_source: "history_file".to_string(),
+            context_usage_freshness: freshness.to_string(),
+        });
+    }
+
+    None
+}
+
+fn read_pi_usage_u64(value: Option<&Value>) -> u64 {
+    match value {
+        Some(Value::Number(number)) => number.as_u64().unwrap_or(0),
+        Some(Value::String(text)) => text.parse::<u64>().unwrap_or(0),
+        _ => 0,
+    }
+}
 
 pub(crate) fn convert_pi_history_values_to_events(
     raw_events: &[Value],
@@ -534,7 +601,7 @@ fn pi_turn_result_for_assistant_message(stop_reason: &str, _event: &Value) -> Va
     })
 }
 
-fn looks_like_pi_session_path(value: &str) -> bool {
+pub(crate) fn looks_like_pi_session_path(value: &str) -> bool {
     let path = Path::new(value);
     path.is_absolute() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
 }
@@ -735,6 +802,49 @@ mod tests {
         // turn 时长由段内条目时间戳推算（用户消息 → 最后一条助手消息）。
         assert_eq!(events[2]["duration_ms"], 13531);
         assert_eq!(events[0]["session_id"], "app-1");
+    }
+
+    #[test]
+    fn reads_latest_pi_usage_from_active_chain_assistant_message() {
+        let usage = latest_pi_usage_from_session_values(
+            &[
+                json!({
+                    "type": "message",
+                    "id": "assistant-1",
+                    "message": {
+                        "role": "assistant",
+                        "usage": {
+                            "input": 100,
+                            "output": 9,
+                            "cacheRead": 20,
+                            "cacheWrite": 0
+                        }
+                    }
+                }),
+                json!({
+                    "type": "message",
+                    "id": "assistant-2",
+                    "message": {
+                        "role": "assistant",
+                        "usage": {
+                            "input": 352,
+                            "output": 152,
+                            "cacheRead": 25088,
+                            "cacheWrite": 0
+                        }
+                    }
+                }),
+            ],
+            "live_synced",
+        )
+        .expect("latest pi usage should exist");
+
+        assert_eq!(usage.last.input_tokens, 352);
+        assert_eq!(usage.last.cached_input_tokens, 25_088);
+        assert_eq!(usage.last.output_tokens, 152);
+        assert_eq!(usage.last.total_tokens, 25_440);
+        assert_eq!(usage.context_usage_source, "history_file");
+        assert_eq!(usage.context_usage_freshness, "live_synced");
     }
 
     #[test]

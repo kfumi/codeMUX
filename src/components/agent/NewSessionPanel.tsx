@@ -95,7 +95,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [models, preferredModelId, preferredProviderId]);
   const effectiveModel = preferredModel?.modelId || '';
   const effectiveProviderId = preferredModel?.providerId || preferredProviderId;
-  const configuredContextWindow = selectedAgentKind === 'codex' || selectedAgentKind === 'opencode'
+  const configuredContextWindow = selectedAgentKind === 'codex' || selectedAgentKind === 'opencode' || selectedAgentKind === 'pi'
     ? getProfileModelContextWindow(
       modelProviders.find((provider) => provider.id === effectiveProviderId) ?? null,
       effectiveModel,

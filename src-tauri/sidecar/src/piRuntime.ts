@@ -192,6 +192,8 @@ export class PiRuntime {
       next.credentialSource === this.config.credentialSource &&
       (next.apiKey ?? undefined) === (this.config.apiKey ?? undefined) &&
       (next.baseUrl ?? undefined) === (this.config.baseUrl ?? undefined) &&
+      (next.modelContextWindow ?? undefined) === (this.config.modelContextWindow ?? undefined) &&
+      (next.modelMaxTokens ?? undefined) === (this.config.modelMaxTokens ?? undefined) &&
       JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null)
     );
   }

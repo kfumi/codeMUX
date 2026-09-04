@@ -771,6 +771,25 @@ describe('PiRuntime interactive extension bridge', () => {
       await runtime.shutdown();
     }
   });
+
+  it('rebuilds the process when model context limits change (canReuse)', async () => {
+    const { runtime } = startFakePiRuntime(
+      {
+        responses: {
+          get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        },
+      },
+      { modelContextWindow: 200_000, modelMaxTokens: 8_192 },
+    );
+    try {
+      await runtime.ensure();
+      expect(runtime.canReuse(buildConfig({ modelContextWindow: 200_000, modelMaxTokens: 8_192 }))).toBe(true);
+      expect(runtime.canReuse(buildConfig({ modelContextWindow: 1_000_000, modelMaxTokens: 8_192 }))).toBe(false);
+      expect(runtime.canReuse(buildConfig({ modelContextWindow: 200_000, modelMaxTokens: 128_000 }))).toBe(false);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
 });
 
 describe('PiRuntime session-tree rewind', () => {

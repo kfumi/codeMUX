@@ -112,7 +112,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProvider = sessionProvider ?? activeProvider;
   const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
-  const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode'
+  const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode' || agentKind === 'pi'
     ? getProfileModelContextWindow(runtimeProvider, model)
     : null;
   const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');

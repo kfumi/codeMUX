@@ -1350,6 +1350,18 @@ fn load_latest_token_usage_for_agent_session(
         );
     }
 
+    if agent_kind == AgentKind::Pi {
+        if !super::pi_history::looks_like_pi_session_path(agent_session_id) {
+            return Ok(None);
+        }
+        let history_path = Path::new(agent_session_id);
+        if !history_path.exists() {
+            return Ok(None);
+        }
+        let values = read_json_stream_values(history_path)?;
+        return Ok(super::pi_history::latest_pi_usage_from_session_values(&values, freshness));
+    }
+
     let history_path = match agent_kind {
         AgentKind::ClaudeCode => find_claude_session_jsonl(&home.join(".claude"), agent_session_id),
         AgentKind::Codex => {
@@ -1872,6 +1884,39 @@ mod tests {
         assert_eq!(usage.last.total_tokens, 25);
         assert_eq!(usage.last.cached_input_tokens, 7);
         assert_eq!(usage.model_context_window, Some(200_000));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn loads_latest_pi_token_usage_from_session_jsonl_path() {
+        let temp =
+            std::env::temp_dir().join(format!("codemux-pi-usage-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let session_file = temp.join("pi-session-1.jsonl");
+        std::fs::write(
+            &session_file,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"pi-session-1\"}\n",
+                "{\"type\":\"message\",\"id\":\"assistant-1\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":5,\"cacheRead\":7,\"cacheWrite\":0}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let usage = load_latest_token_usage_for_agent_session(
+            &temp,
+            AgentKind::Pi,
+            session_file.to_string_lossy().as_ref(),
+            "restored",
+        )
+        .expect("load should not fail")
+        .expect("usage should exist");
+
+        assert_eq!(usage.last.input_tokens, 20);
+        assert_eq!(usage.last.cached_input_tokens, 7);
+        assert_eq!(usage.last.output_tokens, 5);
+        assert_eq!(usage.last.total_tokens, 27);
+        assert_eq!(usage.context_usage_freshness, "restored");
 
         let _ = std::fs::remove_dir_all(&temp);
     }

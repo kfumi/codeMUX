@@ -151,24 +151,36 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
       return;
     }
 
-    const updateMessageNavVisibility = (width: number) => {
+    const updateMessageNavVisibility = () => {
+      const width = viewport.clientWidth;
       setShowMessageNav(width === 0 || width >= MESSAGE_NAV_HIDE_BREAKPOINT);
     };
 
-    updateMessageNavVisibility(viewport.clientWidth);
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        updateMessageNavVisibility(entry.contentRect.width);
+    const handleResize = () => {
+      if (document.hidden) {
+        return;
       }
-    });
+      updateMessageNavVisibility();
+    };
 
-    observer.observe(viewport);
-    return () => observer.disconnect();
+    updateMessageNavVisibility();
+
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(handleResize)
+      : null;
+    observer?.observe(viewport);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        updateMessageNavVisibility();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const toggleExpandedTurn = useCallback((turnKey: string) => {
@@ -286,7 +298,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
             <div
               data-testid="thread-content-shell"
               className={cn(
-                'mx-auto flex w-full flex-1 flex-col pt-5 transition-[padding] duration-200 ease-out',
+                'mx-auto flex w-full flex-1 flex-col pt-5',
                 showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
               )}
               style={{ maxWidth: 'var(--content-width, 52rem)' }}
