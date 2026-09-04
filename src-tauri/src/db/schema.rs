@@ -138,6 +138,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             enabled_codex INTEGER NOT NULL DEFAULT 0,
             enabled_gemini INTEGER NOT NULL DEFAULT 0,
             enabled_opencode INTEGER NOT NULL DEFAULT 0,
+            enabled_pi INTEGER NOT NULL DEFAULT 0,
             disk_path TEXT,
             directory TEXT NOT NULL DEFAULT ''
         );
@@ -346,6 +347,17 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     if !has_directory {
         let _ = conn.execute(
             "ALTER TABLE skills ADD COLUMN directory TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+    }
+
+    // Migration: add enabled_pi column to skills if missing
+    let has_enabled_pi: bool = conn
+        .prepare("SELECT enabled_pi FROM skills LIMIT 0")
+        .is_ok();
+    if !has_enabled_pi {
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN enabled_pi INTEGER NOT NULL DEFAULT 0",
             [],
         );
     }

@@ -12,6 +12,7 @@ pub struct ImportResult {
     pub codex: usize,
     pub gemini: usize,
     pub opencode: usize,
+    pub pi: usize,
     pub total: usize,
 }
 
@@ -169,6 +170,7 @@ pub fn import_from_apps(
         codex: 0,
         gemini: 0,
         opencode: 0,
+        pi: 0,
         total: 0,
     };
 
@@ -314,6 +316,7 @@ pub fn import_from_apps(
                 "codex" => result.codex += 1,
                 "gemini" => result.gemini += 1,
                 "opencode" => result.opencode += 1,
+                "pi" => result.pi += 1,
                 _ => {}
             }
             result.total += 1;
@@ -450,6 +453,7 @@ mod tests {
                 codex: true,
                 gemini: true,
                 opencode: true,
+                pi: true,
             },
         )
         .unwrap();
@@ -499,6 +503,7 @@ mod tests {
                 codex: false,
                 gemini: false,
                 opencode: false,
+                pi: false,
             },
             disk_path: None,
             directory: "pre-existing".to_string(),
@@ -517,6 +522,7 @@ mod tests {
                 codex: true,
                 gemini: true,
                 opencode: true,
+                pi: true,
             },
         )
         .unwrap();
@@ -565,6 +571,7 @@ mod tests {
                 codex: true,
                 gemini: true,
                 opencode: true,
+                pi: true,
             },
         )
         .unwrap();

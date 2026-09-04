@@ -76,6 +76,7 @@ fn scan_skills_directory(
                 codex: true,
                 gemini: true,
                 opencode: true,
+                pi: true,
             },
         ) {
             Ok(Some((directory, ssot_path))) => discovered.push((directory, ssot_path)),

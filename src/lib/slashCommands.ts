@@ -51,6 +51,10 @@ export function renderCommandPrompt(command: SlashCommand, args: string): string
 }
 
 export function renderCommandInput(command: SlashCommand, args: string, agentKind: AgentKind): string {
+  // pi 的 skill 命令是原生 `/skill:<name>`（skills 自动注入系统提示词，slash 仅强制加载）。
+  if (agentKind === 'pi' && command.category === 'skill') {
+    return `/skill:${command.name}${args ? ` ${args}` : ''}`;
+  }
   if (agentKind === 'codex' && command.category === 'skill' && command.filePath) {
     const normalized = command.filePath.replace(/[\\/]+$/, '');
     const separator = command.filePath.includes('\\') ? '\\' : '/';
@@ -255,13 +259,14 @@ export function registerSkillCommands(skills: SkillInfo[]): void {
 
 /** 获取指定智能体启用的 skill 命令 */
 function getSkillCommandsForAgent(agentKind: AgentKind): SlashCommand[] {
-  // pi 暂未接入 skills 应用，不产生 skill 命令。
-  if (agentKind === 'pi') return [];
+  // pi 经 SkillAdapter 同步到托管目录（pi 原生发现），命令本地注册，
+  // 不接 get_commands（避免双 listing）。
   const enabledApps = {
     claude_code: 'claude',
     codex: 'codex',
     gemini_cli: 'gemini',
     opencode: 'opencode',
+    pi: 'pi',
   } as const;
   const appKey = enabledApps[agentKind] || 'claude';
   return skillCommandsWithApps

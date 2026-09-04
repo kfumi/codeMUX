@@ -30,7 +30,7 @@ function makeSkill(id: string, name: string, apps: Partial<SkillApps> = {}): Ski
     display_name: null,
     description: null,
     installed_at: '2026-01-01T00:00:00Z',
-    apps: { claude: true, codex: false, gemini: false, opencode: false, ...apps },
+    apps: { claude: true, codex: false, gemini: false, opencode: false, pi: false, ...apps },
     disk_path: null,
     directory: 'alpha',
   };

@@ -250,7 +250,7 @@ describe('CodeMuxComposer', () => {
     registerSkillCommands([{
       name: 'superpowers:brainstorming',
       description: 'Brainstorming',
-      apps: { claude: true, codex: true, gemini: false, opencode: false },
+      apps: { claude: true, codex: true, gemini: false, opencode: false, pi: false },
       diskPath: skillPath,
     }]);
     const formatter = createCodeMuxFormatter('codex');
@@ -655,7 +655,7 @@ describe('CodeMuxComposer', () => {
     registerSkillCommands([{
       name: 'superpowers:brainstorming',
       description: 'Brainstorming',
-      apps: { claude: true, codex: true, gemini: false, opencode: false },
+      apps: { claude: true, codex: true, gemini: false, opencode: false, pi: false },
       diskPath: 'C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming',
     }]);
     composerText = '/superpowers';

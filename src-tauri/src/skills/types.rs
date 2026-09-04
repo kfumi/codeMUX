@@ -6,6 +6,7 @@ pub struct SkillApps {
     pub codex: bool,
     pub gemini: bool,
     pub opencode: bool,
+    pub pi: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct ImportableSkill {
     pub name: String,
     pub display_name: Option<String>,
     pub description: Option<String>,
-    /// Source agent app identifier: "claude" | "codex" | "gemini" | "opencode"
+    /// Source agent app identifier: "claude" | "codex" | "gemini" | "opencode" | "pi"
     pub source_app: String,
     /// Absolute path to the skill directory on disk
     pub disk_path: String,

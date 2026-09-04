@@ -68,7 +68,7 @@ describe('slash commands by agent kind', () => {
     registerSkillCommands([{
       name: 'project-review',
       description: 'Global review',
-      apps: { claude: true, codex: true, gemini: true, opencode: true },
+      apps: { claude: true, codex: true, gemini: true, opencode: true, pi: true },
       diskPath: 'C:\\global\\review',
     }]);
 
@@ -104,5 +104,29 @@ describe('slash commands by agent kind', () => {
 
     expect(renderCommandInput(command, 'changed files', 'codex'))
       .toBe('[$project-review](C:\\project\\.agents\\skills\\project-review\\SKILL.md) changed files');
+  });
+
+  it('exposes pi-enabled skills and renders pi native /skill: commands', () => {
+    // 名字避开 Claude 内置命令（如 review），否则 dedupe 会先命中 builtin。
+    registerSkillCommands([{
+      name: 'codemux-review',
+      description: 'Code review',
+      apps: { claude: true, codex: false, gemini: false, opencode: false, pi: true },
+      diskPath: 'C:\\codemux\\skills\\codemux-review',
+    }]);
+
+    try {
+      // pi 的 skill 命令出现在 / 菜单（经 enabledApps pi -> 'pi' 过滤）。
+      expect(getAllCommands('pi').some((command) => command.name === 'codemux-review')).toBe(true);
+      // codex 未启用该 skill，不出现。
+      expect(getAllCommands('codex').some((command) => command.name === 'codemux-review')).toBe(false);
+
+      const command = findCommand('codemux-review', 'pi')!;
+      // pi 原生语法：/skill:<name> [args]；无参数时不留尾随空格。
+      expect(renderCommandInput(command, 'changed files', 'pi')).toBe('/skill:codemux-review changed files');
+      expect(renderCommandInput(command, '', 'pi')).toBe('/skill:codemux-review');
+    } finally {
+      registerSkillCommands([]);
+    }
   });
 });

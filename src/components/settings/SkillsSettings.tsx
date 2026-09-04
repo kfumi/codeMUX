@@ -15,7 +15,8 @@ import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
 import geminiSvg from '@lobehub/icons-static-svg/icons/gemini-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 
-const APP_SVGS: Record<keyof SkillApps, string> = {
+// pi 无品牌 SVG，回退字母徽标（与 AgentBrandIcon 同策略）。
+const APP_SVGS: Partial<Record<keyof SkillApps, string>> = {
   claude: claudeSvg,
   codex: openAiSvg,
   gemini: geminiSvg,
@@ -27,12 +28,24 @@ const APP_LABELS: Record<keyof SkillApps, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
+  pi: 'pi',
 };
 
-const APP_ORDER: Array<keyof SkillApps> = ['claude', 'codex', 'gemini', 'opencode'];
+const APP_ORDER: Array<keyof SkillApps> = ['claude', 'codex', 'gemini', 'opencode', 'pi'];
 
 function AppIcon({ app, size = 16 }: { app: keyof SkillApps; size?: number }) {
   const svg = APP_SVGS[app];
+  if (!svg) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center justify-center font-semibold tracking-[0.08em]"
+        style={{ fontSize: size * 0.55, width: size, height: size }}
+        aria-hidden="true"
+      >
+        {app.toUpperCase()}
+      </span>
+    );
+  }
   const cleaned = svg
     .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
     .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')

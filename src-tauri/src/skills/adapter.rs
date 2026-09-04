@@ -144,7 +144,13 @@ fn remove_path(path: &Path) -> Result<(), String> {
     // Junctions are reparse points but NOT reported as symlinks by is_symlink().
     // Check for junction first to avoid delete_dir_all following into the target.
     if junction::exists(path).unwrap_or(false) {
-        return junction::delete(path).map_err(|e| format!("Failed to remove junction: {}", e));
+        junction::delete(path).map_err(|e| format!("Failed to remove junction: {}", e))?;
+        // junction::delete 只移除 reparse 点，Windows 上会残留一个空目录；
+        // remove_dir 对非空目录会失败（忽略即可，不碰用户数据）。
+        if path.exists() {
+            let _ = std::fs::remove_dir(path);
+        }
+        return Ok(());
     }
     let metadata = std::fs::symlink_metadata(path);
     match metadata {

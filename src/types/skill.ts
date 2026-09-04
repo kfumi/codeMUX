@@ -3,6 +3,7 @@ export interface SkillApps {
   codex: boolean;
   gemini: boolean;
   opencode: boolean;
+  pi: boolean;
 }
 
 export interface Skill {

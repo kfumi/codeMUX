@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::types::{Skill, SkillApps};
 
-const SELECT_COLUMNS: &str = "id, name, display_name, description, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, installed_at, disk_path, directory";
+const SELECT_COLUMNS: &str = "id, name, display_name, description, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, enabled_pi, installed_at, disk_path, directory";
 
 /// 从数据库行构建 Skill（新 schema）
 fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
@@ -12,6 +12,7 @@ fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
     let enabled_codex: i64 = row.get(5)?;
     let enabled_gemini: i64 = row.get(6)?;
     let enabled_opencode: i64 = row.get(7)?;
+    let enabled_pi: i64 = row.get(8)?;
     Ok(Skill {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -22,10 +23,11 @@ fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
             codex: enabled_codex != 0,
             gemini: enabled_gemini != 0,
             opencode: enabled_opencode != 0,
+            pi: enabled_pi != 0,
         },
-        installed_at: row.get(8)?,
-        disk_path: row.get(9)?,
-        directory: row.get(10)?,
+        installed_at: row.get(9)?,
+        disk_path: row.get(10)?,
+        directory: row.get(11)?,
     })
 }
 
@@ -63,8 +65,8 @@ pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>>
 
 pub fn upsert_skill(conn: &Connection, skill: &Skill) -> Result<()> {
     conn.execute(
-        "INSERT INTO skills (id, name, display_name, description, installed_at, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, disk_path, directory)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO skills (id, name, display_name, description, installed_at, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, enabled_pi, disk_path, directory)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(name) DO UPDATE SET
              display_name = excluded.display_name,
              description = excluded.description,
@@ -74,7 +76,8 @@ pub fn upsert_skill(conn: &Connection, skill: &Skill) -> Result<()> {
              enabled_claude = excluded.enabled_claude,
              enabled_codex = excluded.enabled_codex,
              enabled_gemini = excluded.enabled_gemini,
-             enabled_opencode = excluded.enabled_opencode",
+             enabled_opencode = excluded.enabled_opencode,
+             enabled_pi = excluded.enabled_pi",
         params![
             skill.id,
             skill.name,
@@ -85,6 +88,7 @@ pub fn upsert_skill(conn: &Connection, skill: &Skill) -> Result<()> {
             skill.apps.codex as i32,
             skill.apps.gemini as i32,
             skill.apps.opencode as i32,
+            skill.apps.pi as i32,
             skill.disk_path,
             skill.directory,
         ],
@@ -107,6 +111,7 @@ pub fn set_skill_app_enabled(conn: &Connection, id: &str, app: &str, enabled: bo
         "codex" => "enabled_codex",
         "gemini" => "enabled_gemini",
         "opencode" => "enabled_opencode",
+        "pi" => "enabled_pi",
         _ => return Err(rusqlite::Error::InvalidParameterName(app.to_string())),
     };
     let sql = format!("UPDATE skills SET {column} = ?1 WHERE id = ?2");
@@ -120,6 +125,7 @@ pub fn get_enabled_skill_names_for_app(conn: &Connection, app: &str) -> Result<V
         "codex" => "enabled_codex",
         "gemini" => "enabled_gemini",
         "opencode" => "enabled_opencode",
+        "pi" => "enabled_pi",
         _ => return Ok(Vec::new()),
     };
     let sql = format!("SELECT name FROM skills WHERE {column} = 1 ORDER BY name");
@@ -238,6 +244,7 @@ mod tests {
                 codex: false,
                 gemini: false,
                 opencode: false,
+                pi: false,
             },
         );
         upsert_skill(&conn, &skill).unwrap();
@@ -266,6 +273,7 @@ mod tests {
                     codex: false,
                     gemini: true,
                     opencode: false,
+                    pi: false,
                 },
             ),
         )
@@ -280,6 +288,7 @@ mod tests {
                     codex: true,
                     gemini: false,
                     opencode: true,
+                    pi: false,
                 },
             ),
         )
