@@ -344,6 +344,7 @@ export function AgentPreferencesPanel() {
     ? codexPermissionConfigToExecutionMode(codexPermissionConfig)
     : codexPermissionConfigToExecutionMode({ workflowMode: 'auto' });
   const openCodeAutoApprove = config?.agent_configs.opencode?.permission_config?.autoApprovePermissions ?? false;
+  const piExecutionMode = config?.agent_configs.pi?.permission_config?.executionMode ?? 'confirm_before_edit';
 
   const handleClaudePermissionChange = useCallback(
     (mode: AgentExecutionMode) => {
@@ -371,6 +372,19 @@ export function AgentPreferencesPanel() {
         permission_config: { kind: 'opencode', autoApprovePermissions: enabled },
       });
     },
+    [config, updateAgentConfig],
+  );
+
+  const handlePiPermissionChange = useCallback(
+    (mode: AgentExecutionMode) => {
+      const nextConfig: AgentPermissionConfig = mapExecutionModeToPermissionConfig('pi', mode);
+      if (nextConfig.kind !== 'pi') {
+        return;
+      }
+      void updateAgentConfig('pi', {
+        permission_config: nextConfig,
+      });
+    },
     [updateAgentConfig],
   );
 
@@ -385,6 +399,8 @@ export function AgentPreferencesPanel() {
         onCodexPermissionChange={handleCodexPermissionChange}
         openCodeAutoApprove={openCodeAutoApprove}
         onOpenCodeAutoApproveChange={handleOpenCodeAutoApproveChange}
+        piExecutionMode={piExecutionMode}
+        onPiPermissionChange={handlePiPermissionChange}
       />
       <ProxyRouteSection proxyRunning={proxyRunning} proxyUrl={proxyUrl} />
     </div>
@@ -400,6 +416,8 @@ interface AgentConfigurationSectionProps {
   onCodexPermissionChange: (mode: AgentExecutionMode) => void;
   openCodeAutoApprove: boolean;
   onOpenCodeAutoApproveChange: (enabled: boolean) => void;
+  piExecutionMode: AgentExecutionMode;
+  onPiPermissionChange: (mode: AgentExecutionMode) => void;
 }
 
 function AgentConfigurationSection({
@@ -411,6 +429,8 @@ function AgentConfigurationSection({
   onCodexPermissionChange,
   openCodeAutoApprove,
   onOpenCodeAutoApproveChange,
+  piExecutionMode,
+  onPiPermissionChange,
 }: AgentConfigurationSectionProps) {
   return (
     <section className="space-y-4">
@@ -433,6 +453,8 @@ function AgentConfigurationSection({
             onCodexPermissionChange={onCodexPermissionChange}
             openCodeAutoApprove={entry.kind === 'opencode' ? openCodeAutoApprove : undefined}
             onOpenCodeAutoApproveChange={onOpenCodeAutoApproveChange}
+            piExecutionMode={entry.kind === 'pi' ? piExecutionMode : undefined}
+            onPiPermissionChange={onPiPermissionChange}
           />
         ))}
       </div>
@@ -450,6 +472,8 @@ interface AgentConfigurationCardProps {
   onCodexPermissionChange: (mode: AgentExecutionMode) => void;
   openCodeAutoApprove?: boolean;
   onOpenCodeAutoApproveChange: (enabled: boolean) => void;
+  piExecutionMode?: AgentExecutionMode;
+  onPiPermissionChange?: (mode: AgentExecutionMode) => void;
 }
 
 function AgentConfigurationCard({
@@ -462,6 +486,8 @@ function AgentConfigurationCard({
   onCodexPermissionChange,
   openCodeAutoApprove,
   onOpenCodeAutoApproveChange,
+  piExecutionMode,
+  onPiPermissionChange,
 }: AgentConfigurationCardProps) {
   const definition = getAgentDefinition(agent.kind);
   const agentDefinition = definition ?? {
@@ -541,7 +567,52 @@ function AgentConfigurationCard({
           onChange={onOpenCodeAutoApproveChange}
         />
       )}
+      {agent.kind === 'pi' && piExecutionMode && onPiPermissionChange && (
+        <PiPermissionSection
+          executionMode={piExecutionMode}
+          onChange={onPiPermissionChange}
+        />
+      )}
     </article>
+  );
+}
+
+/* ------------------------------- pi 默认权限区 ------------------------------ */
+
+const PI_PERMISSION_OPTIONS: Array<{ mode: AgentExecutionMode; label: string }> = [
+  { mode: 'confirm_before_edit', label: '变更前确认' },
+  { mode: 'auto_edit', label: '自动编辑' },
+  { mode: 'full_access', label: '完全访问' },
+];
+
+function PiPermissionSection({
+  executionMode,
+  onChange,
+}: {
+  executionMode: AgentExecutionMode;
+  onChange: (mode: AgentExecutionMode) => void;
+}) {
+  return (
+    <section className="mt-4 flex min-w-0 flex-col gap-2 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="shrink-0 space-y-1 lg:w-44">
+        <h3 className="text-sm font-semibold text-foreground">pi 默认权限</h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">新建对话时默认使用的审批级别。</p>
+      </div>
+      <div className="w-full lg:w-72 lg:flex-none">
+        <Select value={executionMode} onValueChange={(value) => onChange(value as AgentExecutionMode)}>
+          <SelectTrigger aria-label="pi 默认权限" className="h-9 w-full">
+            <SelectValue placeholder="选择默认权限" />
+          </SelectTrigger>
+          <SelectContent>
+            {PI_PERMISSION_OPTIONS.map((option) => (
+              <SelectItem key={option.mode} value={option.mode}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </section>
   );
 }
 
@@ -651,10 +722,11 @@ interface RuntimeDetectionSectionProps {
 }
 
 // 运行时检测支持的智能体(与 Rust AGENT_SPECS 对齐,用于加载骨架)
-const RUNTIME_AGENTS: Array<{ kind: AgentKind; label: string; icon: 'claude' | 'codex' | 'opencode' }> = [
+const RUNTIME_AGENTS: Array<{ kind: AgentKind; label: string; icon: 'claude' | 'codex' | 'opencode' | 'pi' }> = [
   { kind: 'claude_code', label: 'Claude Code', icon: 'claude' },
   { kind: 'codex', label: 'Codex', icon: 'codex' },
   { kind: 'opencode', label: 'OpenCode', icon: 'opencode' },
+  { kind: 'pi', label: 'pi', icon: 'pi' },
 ];
 
 function RuntimeDetectionSection({
@@ -723,7 +795,7 @@ function RuntimeSkeletonCard({
   iconKind,
 }: {
   label: string;
-  iconKind: 'claude' | 'codex' | 'opencode';
+  iconKind: 'claude' | 'codex' | 'opencode' | 'pi';
 }) {
   return (
     <div className="flex animate-pulse flex-col gap-3 rounded-2xl border border-border/40 bg-background/60 p-4">

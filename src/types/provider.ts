@@ -1,5 +1,5 @@
 import type { AgentKind } from './session';
-import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig } from '../lib/agentPermissions';
+import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig, PiPermissionConfig } from '../lib/agentPermissions';
 import type { OpenTarget } from '../lib/openTargets';
 
 export type Theme = 'Light' | 'Dark' | 'System';
@@ -49,6 +49,7 @@ export interface AgentConfigMap {
   pi: {
     default_provider_id?: string | null;
     default_model?: string;
+    permission_config?: PiPermissionConfig;
     timeouts?: AgentTimeouts | null;
   };
 }

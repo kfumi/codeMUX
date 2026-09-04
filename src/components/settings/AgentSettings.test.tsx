@@ -597,15 +597,16 @@ describe('AgentSettingsPanel', () => {
 
     render(<AgentSettingsPanel />);
 
-    // 三个骨架卡片都显示"检测中"徽标
+    // 四个骨架卡片都显示"检测中"徽标
     await waitFor(() => {
       const skeletons = screen.getAllByText('检测中');
-      expect(skeletons).toHaveLength(3);
+      expect(skeletons).toHaveLength(4);
     });
     // 骨架卡片显示智能体名称
     expect(screen.getByText('Claude Code')).toBeTruthy();
     expect(screen.getByText('Codex')).toBeTruthy();
     expect(screen.getByText('OpenCode')).toBeTruthy();
+    expect(screen.getByText('pi')).toBeTruthy();
   });
 
   it('未安装时显示"安装"按钮', async () => {
@@ -1021,6 +1022,32 @@ describe('AgentPreferencesPanel', () => {
     await waitFor(() => {
       expect(updateAgentConfig).toHaveBeenCalledWith('opencode', {
         permission_config: { kind: 'opencode', autoApprovePermissions: true },
+      });
+    });
+  });
+
+  it('展示 pi 卡片（默认模型与默认权限下拉）', () => {
+    render(<AgentPreferencesPanel />);
+
+    expect(screen.getByRole('combobox', { name: 'pi 默认权限' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'pi 默认供应商和模型' })).toBeTruthy();
+  });
+
+  it('修改 pi 默认权限时写入 permission_config', async () => {
+    const updateAgentConfig = vi.fn(async () => {});
+    useSettingsStore.setState((state) => ({
+      ...state,
+      updateAgentConfig,
+    }));
+
+    render(<AgentPreferencesPanel />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'pi 默认权限' }));
+    fireEvent.click(screen.getByRole('option', { name: '完全访问' }));
+
+    await waitFor(() => {
+      expect(updateAgentConfig).toHaveBeenCalledWith('pi', {
+        permission_config: { kind: 'pi', executionMode: 'full_access' },
       });
     });
   });

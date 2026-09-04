@@ -83,9 +83,27 @@ fn apply_agent_config_update(
         }
         AgentKind::GeminiCli => {}
         AgentKind::Pi => {
-            let update: crate::config::types::PiAgentConfig =
+            let update: crate::config::types::PiAgentConfigUpdate =
                 serde_json::from_value(config).map_err(|e| format!("Invalid pi config: {}", e))?;
-            app_config.agent_configs.pi = update;
+
+            if let Some(provider_id) = update.default_provider_id {
+                app_config.agent_configs.pi.default_provider_id = Some(provider_id);
+            }
+            if let Some(model) = update.default_model {
+                app_config.agent_configs.pi.default_model = Some(model);
+            }
+            if let Some(permission_config) = update.permission_config {
+                if !matches!(
+                    permission_config.execution_mode.as_str(),
+                    "confirm_before_edit" | "auto_edit" | "full_access"
+                ) {
+                    return Err(format!(
+                        "Unsupported pi executionMode: {}",
+                        permission_config.execution_mode
+                    ));
+                }
+                app_config.agent_configs.pi.permission_config = Some(permission_config);
+            }
         }
         AgentKind::Opencode => {
             let update: OpenCodeAgentConfigUpdate = serde_json::from_value(config)

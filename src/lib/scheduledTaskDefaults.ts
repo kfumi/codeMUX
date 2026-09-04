@@ -45,7 +45,7 @@ export function getAgentPermissionDefault(
   if (!config) {
     return buildDefaultPermissionConfig(agentKind);
   }
-  // pi 无权限配置；联合类型收窄交给调用侧的默认值。
+  // 各 kind 的 agent_configs 均可携带 permission_config；序列化/迁移收敛在 serializePermissionConfig。
   const agentConfig = config.agent_configs[agentKind] as { permission_config?: unknown } | undefined;
   return serializePermissionConfig(agentKind, agentConfig?.permission_config);
 }

@@ -316,6 +316,13 @@ pub struct OpenCodeAgentConfigUpdate {
     pub permission_config: Option<OpenCodePermissionConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PiAgentConfigUpdate {
+    pub default_provider_id: Option<String>,
+    pub default_model: Option<String>,
+    pub permission_config: Option<PiPermissionConfig>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenCodePermissionConfig {
     #[serde(default, rename = "autoApprovePermissions")]
@@ -348,9 +355,38 @@ pub struct AgentConfigs {
     pub pi: PiAgentConfig,
 }
 
-/// pi 智能体配置。pi 无审批模型与权限配置；首版仅超时可调。
+/// pi 默认审批档位（经临时扩展的 tool_call 拦截实现）；plan 档对 pi 不适用。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PiPermissionConfig {
+    #[serde(
+        default = "default_pi_execution_mode",
+        rename = "executionMode",
+        alias = "execution_mode"
+    )]
+    pub execution_mode: String,
+}
+
+impl Default for PiPermissionConfig {
+    fn default() -> Self {
+        Self {
+            execution_mode: default_pi_execution_mode(),
+        }
+    }
+}
+
+fn default_pi_execution_mode() -> String {
+    "confirm_before_edit".to_string()
+}
+
+/// pi 智能体配置：默认模型/供应商、默认审批档位与会话超时。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PiAgentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_config: Option<PiPermissionConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }

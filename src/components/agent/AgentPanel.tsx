@@ -150,7 +150,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [session?.permission_config]);
   const configuredPermissionConfig = agentKind === 'codex'
     ? config?.agent_configs.codex?.permission_config
-    : config?.agent_configs.claude_code.permission_config;
+    : agentKind === 'pi'
+      ? config?.agent_configs.pi?.permission_config
+      : config?.agent_configs.claude_code.permission_config;
   const permissionConfig = useMemo(
     () => serializePermissionConfig(agentKind, rawPermissionConfig ?? configuredPermissionConfig),
     [agentKind, configuredPermissionConfig, rawPermissionConfig],
