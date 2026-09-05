@@ -18,6 +18,7 @@ import { Streamdown } from 'streamdown';
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
+import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
@@ -103,12 +104,6 @@ const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
 const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
-const ASK_USER_QUESTION_TOOL_NAMES = new Set([
-  'AskUserQuestion',
-  'askUserQuestion',
-  'request_user_input',
-  'question',
-]);
 const GROUP_BY_PART_INNER = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
@@ -118,7 +113,7 @@ const GROUP_BY_PART = (
   part: Parameters<typeof GROUP_BY_PART_INNER>[0],
   context?: Parameters<typeof GROUP_BY_PART_INNER>[1],
 ) => {
-  if (part.type === 'tool-call' && ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)) {
+  if (part.type === 'tool-call' && isAskUserQuestionToolName(part.toolName)) {
     return [];
   }
   return GROUP_BY_PART_INNER(part, context);
@@ -1124,11 +1119,10 @@ function AssistantLikeMessage({
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
-  if (message.content.length === 0) {
+  const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
+  if (message.content.length === 0 && !collapseInfo?.isToggleMessage) {
     return null;
   }
-
-  const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
   const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
   const shouldHideCollapsedReasoning = collapseInfo?.hideReasoningOnly && !isCollapseExpanded;

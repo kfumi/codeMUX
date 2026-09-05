@@ -4,6 +4,7 @@ import {
   shouldKeepLiveEventsOnHistoryLoad,
   shouldPreferLocalEventsOnHistoryLoad,
 } from '../lib/attachToActiveTurn';
+import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
 import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
@@ -41,6 +42,7 @@ import {
   isCodeMuxUserMessageEvent,
   isCodeMuxSystemEvent,
   isCodeMuxDiagnosticEvent,
+  isCodeMuxPersistedTimelineEvent,
   isCodeMuxUserInputRequestedEvent,
   isCodeMuxPermissionRequestedEvent,
   isCodeMuxPermissionModeChangedEvent,
@@ -553,6 +555,75 @@ function hasToolOnlyAssistantAfterIndex(events: AgentMessage[], index: number): 
     }
   }
   return false;
+}
+
+function textFromNarrationOnlyAssistantEvent(event: AgentMessage): string | undefined {
+  if (!isNarrationOnlyAssistantEvent(event)) {
+    return undefined;
+  }
+  const content = event.data?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return undefined;
+  }
+  const text = content
+    .map((block: { type?: string; text?: string }) => (block?.type === 'text' ? block.text : ''))
+    .join('');
+  return text.trim().length > 0 ? text : undefined;
+}
+
+function appendPiNarrationFinalAfterTools(
+  baseEvents: AgentMessage[],
+  event: Extract<AgentMessage, { kind: 'assistant' }>,
+  sessionId: string,
+): AgentMessage[] {
+  const narrationText = textFromNarrationOnlyAssistantEvent(event);
+  const replaceAt = narrationText != null
+    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+    : undefined;
+
+  if (replaceAt != null) {
+    return baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+  }
+
+  return [
+    ...stripEphemeralLiveStreamNarrationEvents(baseEvents),
+    event,
+  ];
+}
+
+function insertPiProcessEventBeforeTrailingNarration(
+  baseEvents: AgentMessage[],
+  event: AgentMessage,
+  sessionId: string,
+): AgentMessage[] {
+  if (getSessionAgentKind(sessionId) !== 'pi') {
+    return [...baseEvents, event];
+  }
+
+  if (event.kind !== 'assistant' || !isToolOnlyAssistantEvent(event)) {
+    if (event.kind !== 'tool_result') {
+      return [...baseEvents, event];
+    }
+  }
+
+  for (let index = baseEvents.length - 1; index >= 0; index -= 1) {
+    const candidate = baseEvents[index];
+    if (candidate?.kind === 'tool_result') {
+      continue;
+    }
+    if (candidate?.kind !== 'assistant') {
+      break;
+    }
+    if (isToolOnlyAssistantEvent(candidate)) {
+      continue;
+    }
+    if (isNarrationOnlyAssistantEvent(candidate) || isNarrationContinuationAssistantEvent(candidate)) {
+      return [...baseEvents.slice(0, index), event, ...baseEvents.slice(index)];
+    }
+    break;
+  }
+
+  return [...baseEvents, event];
 }
 
 function appendPiContinuationAssistantMessage(
@@ -2491,20 +2562,27 @@ export const useAgentStore = create<AgentState>((set, get) => {
             && isNarrationOnlyAssistantEvent(event)
             && !hasSuperseded
           ) {
-            const narrationText = narrationTextFromAssistantEvent(event);
-            const replaceAt = narrationText != null
-              ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
-              : undefined;
-            if (replaceAt != null) {
-              newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+            if (getSessionAgentKind(sessionId) === 'pi') {
+              newEvents = appendPiNarrationFinalAfterTools(baseEvents, event, sessionId);
             } else {
-              const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
-              newEvents = insertAt != null
-                ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
-                : [...baseEvents, event];
+              const narrationText = narrationTextFromAssistantEvent(event);
+              const replaceAt = narrationText != null
+                ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+                : undefined;
+              if (replaceAt != null) {
+                newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+              } else {
+                const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
+                newEvents = insertAt != null
+                  ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
+                  : [...baseEvents, event];
+              }
             }
           } else {
-            newEvents = [...baseEvents, event];
+            newEvents = insertPiProcessEventBeforeTrailingNarration(baseEvents, event, sessionId);
+          }
+          if (event.kind === 'result') {
+            newEvents = normalizeTurnProcessEventOrder(newEvents);
           }
           if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
             newEvents = stripEphemeralLiveStreamNarrationEvents(
@@ -3002,11 +3080,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             ts = loadedTimeline[loadedTimeline.length - 1]?.ts ?? 0;
           }
 
-          const event = isCodeMuxToolEvent(rawMsg)
-            || isCodeMuxTurnEvent(rawMsg)
-            || isCodeMuxStreamEvent(rawMsg)
-            || isCodeMuxDiagnosticEvent(rawMsg)
-            || isCodeMuxSystemEvent(rawMsg)
+          const event = isCodeMuxPersistedTimelineEvent(rawMsg)
             ? parseAgentEvent(JSON.stringify(rawMsg))
             : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
           if (event) {
@@ -3015,8 +3089,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
 
         const collapsedTimeline = collapsePersistedCompactTimeline(loadedTimeline);
-        const events = collapsedTimeline.map((entry) => entry.event);
-        const timestamps = collapsedTimeline.map((entry) => entry.ts);
+        const normalizedTimeline = normalizeTurnProcessTimeline(collapsedTimeline);
+        const events = normalizedTimeline.map((entry) => entry.event);
+        const timestamps = normalizedTimeline.map((entry) => entry.ts);
 
         if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
           logger.info('Discarding stale session history load after rewind', {

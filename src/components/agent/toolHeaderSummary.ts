@@ -33,6 +33,7 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   TaskStop: '子智能体结束',
   update_plan: '更新计划',
   AskUserQuestion: '询问用户',
+  ask_user_question: '询问用户',
   request_user_input: '询问用户',
   EnterPlanMode: '进入计划模式',
   ExitPlanMode: '退出计划模式',
@@ -63,6 +64,8 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
   task: 'Task',
   todowrite: 'TodoWrite',
   question: 'AskUserQuestion',
+  ask_user_question: 'AskUserQuestion',
+  askuserquestion: 'AskUserQuestion',
   websearch: 'WebSearch',
   webfetch: 'WebFetch',
 };

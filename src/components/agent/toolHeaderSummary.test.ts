@@ -29,6 +29,7 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('Edit')).toBe('编辑');
     expect(getToolDisplayName('Agent')).toBe('子智能体');
     expect(getToolDisplayName('AskUserQuestion')).toBe('询问用户');
+    expect(getToolDisplayName('ask_user_question')).toBe('询问用户');
     expect(getToolDisplayName('update_plan')).toBe('更新计划');
     expect(getToolDisplayName('EnterWorktree')).toBe('进入工作树');
     expect(getToolDisplayName('ExitWorktree')).toBe('退出工作树');

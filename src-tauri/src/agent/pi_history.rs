@@ -957,6 +957,84 @@ mod tests {
     }
 
     #[test]
+    fn converts_ask_user_question_tool_calls_for_pi_history() {
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message",
+                    "id": "user-1",
+                    "timestamp": "2026-09-05T11:27:46.884Z",
+                    "message": {
+                        "role": "user",
+                        "content": [{ "type": "text", "text": "使用ask_user_question工具随便问我几个问题" }]
+                    }
+                }),
+                json!({
+                    "type": "message",
+                    "id": "assistant-1",
+                    "timestamp": "2026-09-05T11:28:03.820Z",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "content": [
+                            { "type": "text", "text": "\n\n" },
+                            {
+                                "type": "toolCall",
+                                "id": "call-775ead75336345cb8b3ff7b1",
+                                "name": "ask_user_question",
+                                "arguments": {
+                                    "questions": [{
+                                        "question": "你更喜欢哪种编程语言？",
+                                        "options": [{ "label": "Python" }]
+                                    }]
+                                }
+                            }
+                        ]
+                    }
+                }),
+                json!({
+                    "type": "message",
+                    "id": "result-1",
+                    "timestamp": "2026-09-05T11:28:12.381Z",
+                    "message": {
+                        "role": "toolResult",
+                        "toolCallId": "call-775ead75336345cb8b3ff7b1",
+                        "toolName": "ask_user_question",
+                        "content": [{ "type": "text", "text": "你更喜欢哪种编程语言？: Python" }],
+                        "isError": false
+                    }
+                }),
+                json!({
+                    "type": "message",
+                    "id": "assistant-2",
+                    "timestamp": "2026-09-05T11:28:23.060Z",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "谢谢你的回答！" }]
+                    }
+                }),
+            ],
+            "app-1",
+        );
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "user_message",
+                "user_input_requested",
+                "tool_finished",
+                "assistant_message",
+                "turn_finished",
+            ]
+        );
+        assert_eq!(events[1]["tool_use_id"], "call-775ead75336345cb8b3ff7b1");
+    }
+
+    #[test]
     fn flattens_error_tool_result_content() {
         let events = convert_pi_history_values_to_events(
             &[

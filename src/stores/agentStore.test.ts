@@ -637,6 +637,79 @@ describe('agent store Codex history loading', () => {
     });
   });
 
+  it('resyncSessionFromNative preserves ask_user_question rows from persisted timeline', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('pi');
+    resyncSessionFromNativeMock.mockResolvedValueOnce({ eventCount: 4 });
+    loadSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user_message',
+        session_id: session.id,
+        event_id: 'resync-user',
+        content: [{ type: 'text', text: '使用 ask_user_question' }],
+        timestamp: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        type: 'user_input_requested',
+        session_id: session.id,
+        event_id: 'resync-ask',
+        tool_use_id: 'call-1',
+        questions: [{
+          question: '你更喜欢哪种编程语言？',
+          options: [{ label: 'Python' }],
+        }],
+        timestamp: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        type: 'tool_finished',
+        session_id: session.id,
+        event_id: 'resync-tool-result',
+        tool_use_id: 'call-1',
+        content: '你更喜欢哪种编程语言？: Python',
+        is_error: false,
+        timestamp: '2026-01-01T00:00:02.000Z',
+      },
+      {
+        type: 'assistant_message',
+        session_id: session.id,
+        event_id: 'resync-assistant',
+        content: [{ type: 'text', text: '谢谢你的回答！' }],
+        timestamp: '2026-01-01T00:00:03.000Z',
+      },
+      {
+        type: 'turn_finished',
+        session_id: session.id,
+        event_id: 'resync-turn',
+        outcome: 'completed',
+        duration_ms: 36000,
+        timestamp: '2026-01-01T00:00:03.500Z',
+      },
+    ]);
+    useAgentStore.setState({
+      events: {
+        [session.id]: [{
+          kind: 'ask_user_question',
+          data: {
+            tool_use_id: 'call-1',
+            questions: [{ question: '你更喜欢哪种编程语言？', options: [{ label: 'Python' }] }],
+          },
+        }],
+      },
+    });
+
+    await useAgentStore.getState().resyncSessionFromNative(session.id);
+
+    const events = useAgentStore.getState().events[session.id] ?? [];
+    expect(events.some((event) => event.kind === 'ask_user_question')).toBe(true);
+    expect(events.find((event) => event.kind === 'ask_user_question')).toMatchObject({
+      kind: 'ask_user_question',
+      data: {
+        tool_use_id: 'call-1',
+        questions: [{ question: '你更喜欢哪种编程语言？', options: [{ label: 'Python' }] }],
+      },
+    });
+  });
+
   it('resyncSessionFromNative rejects while a turn is running', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
@@ -3735,6 +3808,114 @@ describe('agent store Codex history loading', () => {
         event.kind === 'assistant'
         && event.data.uuid === `live-stream-narration:${session.id}`
       ))).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('appends pi text-only final answer after existing tool steps', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+
+      send({
+        type: 'tool_started',
+        event_id: 'tool-1',
+        tool_use_id: 'call-1',
+        name: 'read',
+        input: { path: 'src/App.tsx' },
+      });
+      send({
+        type: 'tool_finished',
+        event_id: 'tool-1-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      send({
+        type: 'assistant_message',
+        event_id: 'final-1',
+        content: [{ type: 'text', text: '最终结论。' }],
+        provider_stop_reason: 'stop',
+      });
+      send({ type: 'turn_finished', event_id: 'turn-1', outcome: 'completed' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+      const finalTextIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '最终结论。',
+        )
+      ));
+
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(finalTextIndex).toBeGreaterThan(toolAssistantIndex);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reorders pi text-before-tools projection before turn completion', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
+      emitEvent = onEvent;
+    });
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('pi');
+      await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
+      const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
+
+      send({
+        type: 'assistant_message',
+        event_id: 'final-1',
+        content: [{ type: 'text', text: '最终结论。' }],
+        provider_stop_reason: 'stop',
+      });
+      send({
+        type: 'tool_started',
+        event_id: 'tool-1',
+        tool_use_id: 'call-1',
+        name: 'read',
+        input: { path: 'src/App.tsx' },
+      });
+      send({
+        type: 'tool_finished',
+        event_id: 'tool-1-done',
+        tool_use_id: 'call-1',
+        content: 'ok',
+        is_error: false,
+      });
+      send({ type: 'turn_finished', event_id: 'turn-1', outcome: 'completed' });
+      await vi.advanceTimersByTimeAsync(120);
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const toolAssistantIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+      const finalTextIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '最终结论。',
+        )
+      ));
+
+      expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
+      expect(finalTextIndex).toBeGreaterThan(toolAssistantIndex);
     } finally {
       vi.useRealTimers();
     }

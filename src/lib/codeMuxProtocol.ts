@@ -183,6 +183,19 @@ export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
     && ['error', 'turn_finished'].includes((value as { type?: unknown }).type as string);
 }
 
+/** Persisted timeline rows that must go through parseAgentEvent, not legacy Claude mapping. */
+export function isCodeMuxPersistedTimelineEvent(value: unknown): boolean {
+  return isCodeMuxToolEvent(value)
+    || isCodeMuxTurnEvent(value)
+    || isCodeMuxStreamEvent(value)
+    || isCodeMuxDiagnosticEvent(value)
+    || isCodeMuxSystemEvent(value)
+    || isCodeMuxUserInputRequestedEvent(value)
+    || isCodeMuxPermissionRequestedEvent(value)
+    || isCodeMuxPermissionResolvedEvent(value)
+    || isCodeMuxPermissionModeChangedEvent(value);
+}
+
 export type SubagentStatus = 'running' | 'completed' | 'failed' | 'canceled';
 
 export type CodeMuxSubagentUpsertEvent = {

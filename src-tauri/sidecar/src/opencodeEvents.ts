@@ -230,7 +230,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         const callId = readString(part.callID) ?? readString(part.id) ?? 'unknown-tool';
         if (context.terminalToolIds?.has(callId)) break;
         const toolName = readString(part.tool) ?? 'unknown';
-        const isQuestionTool = toolName === 'question' || toolName === 'request_user_input' || toolName === 'AskUserQuestion' || toolName === 'askUserQuestion';
+        const isQuestionTool = toolName === 'question'
+          || toolName === 'request_user_input'
+          || toolName === 'AskUserQuestion'
+          || toolName === 'askUserQuestion'
+          || toolName === 'ask_user_question';
         const status = readString(state?.status);
         if (status === 'pending' || status === 'running') {
           if (isQuestionTool) break;

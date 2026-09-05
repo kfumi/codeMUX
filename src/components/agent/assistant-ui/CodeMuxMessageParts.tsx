@@ -22,6 +22,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/componen
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { useSubagentStore } from '../../../stores/subagentStore';
 import { cn } from '../../../lib/utils';
+import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
 import { countDiffLines, parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
@@ -696,7 +697,7 @@ function isAskUserQuestionCardData(value: unknown): value is AskUserQuestionCard
 
 function getAskUserQuestions(toolName: string, args: Record<string, unknown>): AskUserQuestion[] | null {
   if (
-    !['AskUserQuestion', 'askUserQuestion', 'request_user_input', 'question'].includes(toolName)
+    !isAskUserQuestionToolName(toolName)
     || !Array.isArray(args.questions)
     || args.questions.length === 0
   ) {

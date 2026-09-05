@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toLegacyAssistantMessage, toLegacyPermissionRequestedMessage, toLegacyStreamingMessage, toLegacySystemMessage, toLegacyToolMessage, toLegacyTurnMessage, toLegacyUserInputRequestedMessage, toLegacyUserMessage } from './codeMuxProtocol';
+import { isCodeMuxPersistedTimelineEvent, toLegacyAssistantMessage, toLegacyPermissionRequestedMessage, toLegacyStreamingMessage, toLegacySystemMessage, toLegacyToolMessage, toLegacyTurnMessage, toLegacyUserInputRequestedMessage, toLegacyUserMessage } from './codeMuxProtocol';
 
 describe('CodeMUX frontend protocol adapter', () => {
   it('keeps domain deltas compatible with the internal streaming model', () => {
@@ -182,6 +182,18 @@ describe('CodeMUX frontend protocol adapter', () => {
       kind: 'ask_user_question',
       data: { tool_use_id: 'question-1', questions: [{ question: '继续吗？', options: [] }] },
     });
+  });
+
+  it('detects persisted timeline rows that must bypass legacy Claude mapping', () => {
+    expect(isCodeMuxPersistedTimelineEvent({
+      type: 'user_input_requested',
+      tool_use_id: 'question-1',
+      questions: [],
+    })).toBe(true);
+    expect(isCodeMuxPersistedTimelineEvent({
+      type: 'assistant_message',
+      content: [{ type: 'text', text: 'hello' }],
+    })).toBe(false);
   });
 
   it('projects permission requests to the existing permission model', () => {

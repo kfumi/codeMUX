@@ -35,6 +35,14 @@ export function buildAssistantCollapseInfoMap(
       }
     }
 
+    // Pi can emit tool_started after the final assistant_message in the same turn.
+    // Keep those trailing process rows inside the compact "已处理" group too.
+    for (let index = finalAssistantIndex + 1; index < resultIndex; index++) {
+      if (isCollapsibleProcessEvent(events[index])) {
+        collapsibleEventIndices.push(index);
+      }
+    }
+
     // OpenCode can finish a turn with only a tool call and no narration.
     // Treat that final tool message as the collapsed process in that case.
     if (collapsibleEventIndices.length === 0 && isOpenCodeToolOnlyAssistantEvent(events[finalAssistantIndex])) {
@@ -51,7 +59,9 @@ export function buildAssistantCollapseInfoMap(
     }
 
     const turnKey = `${userIndex}-${finalAssistantIndex}-${resultIndex}`;
-    const firstCollapsibleIndex = collapsibleEventIndices[0];
+    const firstCollapsibleIndex = collapsibleEventIndices.find((eventIndex) => (
+      !isWhitespaceOnlyAssistantEvent(events[eventIndex])
+    )) ?? collapsibleEventIndices[0];
     const durationMs = getTurnDurationMs(events, timestamps, userIndex, finalAssistantIndex, resultIndex);
 
     for (const eventIndex of collapsibleEventIndices) {
@@ -208,6 +218,33 @@ function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
     || event.kind === 'error'
     || event.kind === 'native_session_rebuilt'
     || event.kind === 'stream_status';
+}
+
+function isWhitespaceOnlyAssistantEvent(event: AgentMessage | undefined): boolean {
+  if (event?.kind !== 'assistant') {
+    return false;
+  }
+
+  const content = event.data.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+
+  return content.every((block) => {
+    if (block?.type === 'tool_use') {
+      return false;
+    }
+
+    if (block?.type === 'text') {
+      return typeof block.text !== 'string' || block.text.trim().length === 0;
+    }
+
+    if (block?.type === 'thinking') {
+      return typeof block.thinking !== 'string' || block.thinking.trim().length === 0;
+    }
+
+    return false;
+  });
 }
 
 function hasRenderableAssistantContent(

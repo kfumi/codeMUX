@@ -190,6 +190,11 @@ pub async fn load_session_events(
         operations::get_session_timeline(&db, &app_session_id).map_err(|error| error.to_string())?
     };
 
+    let has_mapping = {
+        let db = state.db.lock().unwrap();
+        has_native_mapping(&db, &app_session_id, agent_kind)?
+    };
+
     if timeline.as_ref().is_some_and(|events| !events.is_empty()) {
         let mut events = timeline.unwrap_or_default();
         if supports_turn_artifact_summary_backfill(agent_kind)
@@ -207,13 +212,39 @@ pub async fn load_session_events(
                 );
             }
         }
+
+        if agent_kind == AgentKind::Pi && has_mapping {
+            if let Ok(native_events) =
+                load_native_session_events(state.clone(), &app_session_id, agent_kind).await
+            {
+                if persisted_timeline_missing_tool_steps(&events, &native_events) {
+                    log::info!(
+                        target: "agent",
+                        "Repairing lossy pi session timeline from native history for app_session_id={}",
+                        app_session_id
+                    );
+                    let mut db = state.db.lock().unwrap();
+                    if let Err(error) = operations::replace_session_timeline(
+                        &mut db,
+                        &app_session_id,
+                        &native_events,
+                    ) {
+                        log::warn!(
+                            target: "agent",
+                            "Failed to repair pi session timeline for app_session_id={}: {}",
+                            app_session_id,
+                            error
+                        );
+                    } else {
+                        events = native_events;
+                    }
+                }
+            }
+        }
+
         return Ok(events);
     }
 
-    let has_mapping = {
-        let db = state.db.lock().unwrap();
-        has_native_mapping(&db, &app_session_id, agent_kind)?
-    };
     let should_hydrate = session
         .as_ref()
         .map(|session| should_hydrate_timeline_from_native(session, &timeline, has_mapping))
@@ -691,6 +722,19 @@ fn live_capture_missing_tool_args(existing_events: &[Value], restored_timeline: 
         }
     }
     false
+}
+
+fn count_tool_started_events(events: &[Value]) -> usize {
+    events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool_started"))
+        .count()
+}
+
+/// True when native pi history carries tool steps that the persisted live
+/// capture omitted entirely (common after older sidecar ordering bugs).
+fn persisted_timeline_missing_tool_steps(existing_events: &[Value], native_events: &[Value]) -> bool {
+    count_tool_started_events(native_events) > count_tool_started_events(existing_events)
 }
 
 #[tauri::command]
@@ -1342,5 +1386,24 @@ mod tests {
             &session, &timeline, true
         ));
         assert_eq!(timeline.as_ref().map(|events| events.len()), Some(1));
+    }
+
+    #[test]
+    fn detects_persisted_pi_timeline_missing_tool_steps() {
+        let persisted = vec![
+            serde_json::json!({ "type": "user_message", "content": "hello" }),
+            serde_json::json!({ "type": "assistant_message", "content": [{ "type": "text", "text": "done" }] }),
+            serde_json::json!({ "type": "turn_finished", "outcome": "completed" }),
+        ];
+        let native = vec![
+            serde_json::json!({ "type": "user_message", "content": "hello" }),
+            serde_json::json!({ "type": "tool_started", "tool_use_id": "call-1", "name": "bash", "input": {} }),
+            serde_json::json!({ "type": "tool_finished", "tool_use_id": "call-1", "content": "ok" }),
+            serde_json::json!({ "type": "assistant_message", "content": [{ "type": "text", "text": "done" }] }),
+            serde_json::json!({ "type": "turn_finished", "outcome": "completed" }),
+        ];
+
+        assert!(super::persisted_timeline_missing_tool_steps(&persisted, &native));
+        assert!(!super::persisted_timeline_missing_tool_steps(&native, &native));
     }
 }

@@ -12,6 +12,7 @@ import {
   ReasoningTrigger,
 } from '@/components/reasoning';
 import { cn } from '@/lib/utils';
+import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 
 import { CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
 import {
@@ -42,12 +43,6 @@ export type TranscriptMessageRenderInput = {
 };
 
 const TRANSCRIPT_COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
-const ASK_USER_QUESTION_TOOL_NAMES = new Set([
-  'AskUserQuestion',
-  'askUserQuestion',
-  'request_user_input',
-  'question',
-]);
 
 type ToolCallPart = Extract<CodeMuxAssistantPart, { type: 'tool-call' }>;
 
@@ -94,7 +89,7 @@ export function groupTranscriptParts(parts: CodeMuxAssistantPart[]): TranscriptP
   };
 
   for (const part of parts) {
-    if (part.type === 'tool-call' && !ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)) {
+    if (part.type === 'tool-call' && !isAskUserQuestionToolName(part.toolName)) {
       toolBuffer.push(part);
       continue;
     }

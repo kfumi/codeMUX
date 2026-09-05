@@ -4,6 +4,7 @@ import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
@@ -637,10 +638,6 @@ function resolveExistingToolCallPart(
   }
   const part = messages[location.messageIndex]?.content[location.partIndex];
   return part?.type === 'tool-call' ? part : undefined;
-}
-
-function isAskUserQuestionToolName(toolName: string): boolean {
-  return toolName === 'AskUserQuestion' || toolName === 'askUserQuestion' || toolName === 'request_user_input' || toolName === 'question';
 }
 
 function attachToolResult(

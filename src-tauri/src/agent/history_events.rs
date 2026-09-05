@@ -93,6 +93,8 @@ fn normalize_assistant(raw: Value) -> Vec<Value> {
         }
     }
 
+    assistant_content.retain(is_renderable_assistant_block);
+
     if !assistant_content.is_empty() {
         let mut assistant = json!({
             "type": "assistant_message",
@@ -228,12 +230,30 @@ fn normalize_system(raw: Value) -> Vec<Value> {
 fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
     let tool_use_id = first_string(block, &["id", "tool_use_id"])?;
     let name = first_string(block, &["name", "tool_name"]).unwrap_or_else(|| "unknown".to_string());
-    let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
+    let input = block.get("input").cloned().unwrap_or_else(|| {
+        block
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+    });
     let input = if input.is_object() {
         input
     } else {
         json!({ "input": input })
     };
+    if is_ask_user_question_tool_name(&name) {
+        if let Some(questions) = input.get("questions").and_then(Value::as_array) {
+            if !questions.is_empty() {
+                let mut event = json!({
+                    "type": "user_input_requested",
+                    "tool_use_id": tool_use_id,
+                    "questions": questions,
+                });
+                copy_history_fields(&mut event, source);
+                return Some(event);
+            }
+        }
+    }
     let mut event = json!({
         "type": "tool_started",
         "tool_use_id": tool_use_id,
@@ -242,6 +262,27 @@ fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
     });
     copy_history_fields(&mut event, source);
     Some(event)
+}
+
+fn is_ask_user_question_tool_name(name: &str) -> bool {
+    matches!(
+        name,
+        "AskUserQuestion" | "askUserQuestion" | "ask_user_question" | "request_user_input" | "question"
+    )
+}
+
+fn is_renderable_assistant_block(block: &Value) -> bool {
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") => block
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty()),
+        Some("thinking") => block
+            .get("thinking")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty()),
+        _ => true,
+    }
 }
 
 fn tool_finished_from_block(block: &Value, source: &Value) -> Option<Value> {
@@ -524,5 +565,55 @@ mod tests {
             events[0]["event_id"], "codemux-history-app-1-0",
             "synthetic native-sequence ids collide after an agent-kind switch"
         );
+    }
+
+    #[test]
+    fn maps_ask_user_question_tool_calls_to_user_input_requested_and_skips_whitespace_assistant() {
+        let events = normalize_history_events(
+            vec![
+                json!({
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            { "type": "text", "text": "\n\n" },
+                            {
+                                "type": "tool_use",
+                                "id": "call-1",
+                                "name": "ask_user_question",
+                                "input": {
+                                    "questions": [{
+                                        "question": "你更喜欢哪种编程语言？",
+                                        "options": [{ "label": "Python" }]
+                                    }]
+                                }
+                            }
+                        ]
+                    }
+                }),
+                json!({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": "call-1",
+                            "content": "你更喜欢哪种编程语言？: Python"
+                        }]
+                    }
+                }),
+            ],
+            "app-1",
+        );
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["user_input_requested", "tool_finished"]
+        );
+        assert_eq!(events[0]["tool_use_id"], "call-1");
+        assert_eq!(events[0]["questions"][0]["question"], "你更喜欢哪种编程语言？");
     }
 }
