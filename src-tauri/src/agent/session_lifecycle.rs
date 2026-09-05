@@ -1319,6 +1319,15 @@ fn resolve_agent_session_info(
         });
     };
 
+    if agent_kind == AgentKind::Pi {
+        let (session_id, message_path) =
+            super::pi_history::resolve_pi_agent_session_info(agent_session_id);
+        return Ok(AgentSessionInfo {
+            agent_session_id: session_id,
+            message_path,
+        });
+    }
+
     let message_path = match agent_kind {
         AgentKind::ClaudeCode => {
             find_claude_session_jsonl(&home.join(".claude"), &agent_session_id)
@@ -1326,7 +1335,8 @@ fn resolve_agent_session_info(
         AgentKind::Codex => {
             find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
         }
-        AgentKind::GeminiCli | AgentKind::Opencode | AgentKind::Pi => None,
+        AgentKind::GeminiCli | AgentKind::Opencode => None,
+        AgentKind::Pi => None,
     }
     .map(|path| path.to_string_lossy().to_string());
 
@@ -1813,6 +1823,34 @@ mod tests {
         assert_eq!(
             info.message_path.as_deref(),
             Some(jsonl.to_string_lossy().as_ref())
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_agent_session_info_splits_pi_session_path_and_id() {
+        let temp =
+            std::env::temp_dir().join(format!("codemux-pi-agent-info-test-{}", uuid::Uuid::new_v4()));
+        let session_file = temp.join("2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl");
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(
+            &session_file,
+            r#"{"type":"session","id":"pi-session-1"}"#,
+        )
+        .unwrap();
+
+        let info = resolve_agent_session_info(
+            &temp,
+            AgentKind::Pi,
+            Some(session_file.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(info.agent_session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(
+            info.message_path.as_deref(),
+            Some(session_file.to_string_lossy().as_ref())
         );
 
         let _ = std::fs::remove_dir_all(&temp);

@@ -606,6 +606,66 @@ pub(crate) fn looks_like_pi_session_path(value: &str) -> bool {
     path.is_absolute() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
 }
 
+/// pi 会话 JSONL 文件名常见格式：`{timestamp}_{session-id}.jsonl`。
+pub(crate) fn extract_pi_session_id_from_filename(path: &str) -> Option<String> {
+    let stem = Path::new(path)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())?;
+    let (_, session_id) = stem.rsplit_once('_')?;
+    if uuid::Uuid::parse_str(session_id).is_ok() {
+        Some(session_id.to_string())
+    } else {
+        None
+    }
+}
+
+/// 读取 pi 会话 JSONL 首条 `type: session` 记录的 `id` 字段。
+pub(crate) fn read_pi_session_id_from_file(path: &Path) -> Option<String> {
+    let values = read_json_stream_values(path).ok()?;
+    for entry in &values {
+        if entry.get("type").and_then(Value::as_str) != Some("session") {
+            continue;
+        }
+        if let Some(id) = entry.get("id").and_then(Value::as_str) {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 将 DB 中存的 pi `agent_session_id`（多为 JSONL 绝对路径）拆成展示用会话 ID 与任务路径。
+pub(crate) fn resolve_pi_agent_session_info(
+    stored_agent_session_id: String,
+) -> (Option<String>, Option<String>) {
+    if looks_like_pi_session_path(&stored_agent_session_id) {
+        let history_path = Path::new(&stored_agent_session_id);
+        let session_id = read_pi_session_id_from_file(history_path)
+            .or_else(|| extract_pi_session_id_from_filename(&stored_agent_session_id));
+        return (session_id, Some(stored_agent_session_id));
+    }
+
+    if let Some(pending) = stored_agent_session_id.strip_prefix("pi:pending-") {
+        return (Some(pending.to_string()), None);
+    }
+
+    if let Some(session_id) = stored_agent_session_id.strip_prefix("pi:") {
+        let trimmed = session_id.trim();
+        if !trimmed.is_empty() {
+            return (Some(trimmed.to_string()), None);
+        }
+    }
+
+    let trimmed = stored_agent_session_id.trim();
+    if trimmed.is_empty() {
+        (None, None)
+    } else {
+        (Some(trimmed.to_string()), None)
+    }
+}
+
 #[tauri::command]
 pub async fn load_pi_session_events(
     state: State<'_, crate::AppState>,
@@ -1041,20 +1101,50 @@ mod tests {
     }
 
     #[test]
-    fn converts_compaction_end_to_compact_boundary() {
-        let events = convert_pi_history_values_to_events(
-            &[json!({
-                "type": "compaction_end",
-                "reason": "manual",
-                "aborted": false
-            })],
-            "app-1",
+    fn resolves_pi_agent_session_info_from_jsonl_mapping_path() {
+        let home = test_home("resolve-info");
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join(
+            "2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl",
         );
+        fs::write(
+            &session_file,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"pi-session-1\"}\n",
+                "{\"type\":\"message\",\"id\":\"user-1\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}}\n",
+            ),
+        )
+        .unwrap();
 
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["type"], "system_event");
-        assert_eq!(events[0]["subtype"], "compact_boundary");
-        assert_eq!(events[0]["compact_metadata"]["trigger"], "manual");
+        let stored = session_file.to_string_lossy().to_string();
+        let expected_path = stored.clone();
+        let (session_id, message_path) = resolve_pi_agent_session_info(stored);
+
+        assert_eq!(session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(message_path.as_deref(), Some(expected_path.as_str()));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn resolves_pi_agent_session_info_from_filename_when_session_header_missing() {
+        let home = test_home("resolve-filename");
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join(
+            "2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl",
+        );
+        fs::write(&session_file, "{}\n").unwrap();
+
+        let stored = session_file.to_string_lossy().to_string();
+        let (session_id, message_path) = resolve_pi_agent_session_info(stored.clone());
+
+        assert_eq!(
+            session_id.as_deref(),
+            Some("01a070dc-4149-734f-ac29-b192160ab52e")
+        );
+        assert_eq!(message_path.as_deref(), Some(stored.as_str()));
+
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]

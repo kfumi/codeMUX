@@ -7,6 +7,7 @@ import zhipuSvg from '@lobehub/icons-static-svg/icons/zhipu-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 import moonshotSvg from '@lobehub/icons-static-svg/icons/moonshot.svg?raw';
 import xiaomimimoSvg from '@lobehub/icons-static-svg/icons/xiaomimimo.svg?raw';
+import amdSvg from '@/assets/providers/radeon-cloud.svg?raw';
 
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ const BRANDS: Record<string, BrandMeta> = {
   moonshot: { label: '月之暗面', svg: moonshotSvg },
   mimo: { label: 'Xiaomi MiMo', svg: xiaomimimoSvg },
   'opencode-go': { label: 'OpenCode Go', svg: opencodeSvg },
+  'amd-gpu-cloud': { label: 'AMD GPU Cloud', svg: amdSvg },
   custom: {
     label: '自定义',
     short: '+',
@@ -75,6 +77,7 @@ export function providerDisplayName(
       'Anthropic',
       'OpenRouter',
       'OpenCode Go',
+      'AMD GPU Cloud',
       'Moonshot',
       'MiMo',
       'Xiaomi MiMo',

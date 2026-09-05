@@ -956,6 +956,42 @@ export interface PiProviderDefinition {
   maxTokens?: number;
 }
 
+const PI_ANTHROPIC_ENDPOINT_SUFFIXES = ['/v1/messages', '/v1'] as const;
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+/**
+ * pi 的 anthropic-messages 走 Anthropic SDK，SDK 会在 baseURL 后追加 `/v1/messages`。
+ * CodeMUX 供应商端点常带 `/v1`（与 OpenAI 共用同一根 URL），写入 models.json 前需剥掉，
+ * 避免请求落到 `.../v1/v1/messages` 而 404。
+ */
+export function normalizePiAnthropicBaseUrl(baseUrl: string): string {
+  let normalized = stripTrailingSlash(baseUrl.trim());
+  for (const suffix of PI_ANTHROPIC_ENDPOINT_SUFFIXES) {
+    if (normalized.endsWith(suffix)) {
+      normalized = stripTrailingSlash(normalized.slice(0, -suffix.length));
+      break;
+    }
+  }
+  return normalized;
+}
+
+export function normalizePiProviderBaseUrl(
+  baseUrl: string,
+  api: PiProviderDefinition['api'],
+): string {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (api === 'anthropic-messages') {
+    return normalizePiAnthropicBaseUrl(trimmed);
+  }
+  return stripTrailingSlash(trimmed);
+}
+
 export function buildPiModelsJson(definition: PiProviderDefinition): string {
   const model: Record<string, unknown> = {
     id: definition.modelId,
@@ -971,7 +1007,7 @@ export function buildPiModelsJson(definition: PiProviderDefinition): string {
     {
       providers: {
         codemux: {
-          baseUrl: definition.baseUrl,
+          baseUrl: normalizePiProviderBaseUrl(definition.baseUrl, definition.api),
           apiKey: definition.apiKey,
           api: definition.api,
           models: [model],

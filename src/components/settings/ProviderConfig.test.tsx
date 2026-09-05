@@ -30,6 +30,12 @@ const {
             api_key_override: null,
             codex_needs_proxy: false,
           },
+          {
+            protocol: 'openai_responses',
+            base_url: 'https://api.deepseek.com',
+            api_key_override: null,
+            codex_needs_proxy: false,
+          },
         ],
         models: [
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
@@ -45,16 +51,16 @@ const {
         name: '智谱',
         endpoints: [
           {
+            protocol: 'anthropic',
+            base_url: 'https://open.bigmodel.cn/api/anthropic',
+            api_key_override: null,
+            codex_needs_proxy: null,
+          },
+          {
             protocol: 'openai_compatible',
             base_url: 'https://open.bigmodel.cn/api/paas/v4',
             api_key_override: null,
             codex_needs_proxy: true,
-          },
-          {
-            protocol: 'openai_responses',
-            base_url: 'https://open.bigmodel.cn/api/v1',
-            api_key_override: null,
-            codex_needs_proxy: false,
           },
         ],
         models: [{ id: 'glm-4.7', name: 'GLM-4.7' }],
@@ -161,6 +167,9 @@ describe('ProviderConfigPanel', () => {
     await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(1));
     expect(openExternal).toHaveBeenCalledWith('https://platform.deepseek.com/api_keys');
     expect(resolveProviderApiKeyUrl('opencode-go')).toBe('https://opencode.ai/auth');
+    expect(resolveProviderApiKeyUrl('amd-gpu-cloud')).toBe(
+      'https://developer.amd.com.cn/radeon/tokenfactory',
+    );
     expect(resolveProviderApiKeyUrl('moonshot')).toBe('https://platform.kimi.com/console/api-keys');
     expect(resolveProviderApiKeyUrl('mimo')).toBe('https://mimo.mi.com/');
     expect(resolveProviderApiKeyUrl('custom')).toBeNull();
@@ -196,13 +205,14 @@ describe('ProviderConfigPanel', () => {
     render(<ProviderConfigPanel />);
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('https://api.deepseek.com')).toBeTruthy();
+      expect(screen.getByText('OpenAI Responses')).toBeTruthy();
     });
-    const responsesInput = screen
-      .getAllByPlaceholderText('https://api.example.com/v1')
-      .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement;
-    expect(responsesInput).toBeTruthy();
-    fireEvent.change(responsesInput, { target: { value: 'https://open.bigmodel.cn/api/v1' } });
+    const responsesSection = screen.getByText('OpenAI Responses').closest('.grid') as HTMLElement;
+    const responsesInput = within(responsesSection).getByRole('textbox') as HTMLInputElement;
+    expect(responsesInput.value).toBe('https://api.deepseek.com');
+    fireEvent.change(responsesInput, {
+      target: { value: 'https://api.deepseek.com/v1' },
+    });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => {
@@ -211,7 +221,7 @@ describe('ProviderConfigPanel', () => {
         endpoints: Array<{ protocol: string; base_url: string; codex_needs_proxy: boolean | null }>;
       };
       const responses = saved.endpoints.find((endpoint) => endpoint.protocol === 'openai_responses');
-      expect(responses?.base_url).toBe('https://open.bigmodel.cn/api/v1');
+      expect(responses?.base_url).toBe('https://api.deepseek.com/v1');
       expect(responses?.codex_needs_proxy).toBe(false);
     });
   });
@@ -220,7 +230,7 @@ describe('ProviderConfigPanel', () => {
     render(<ProviderConfigPanel />);
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('https://api.deepseek.com')).toBeTruthy();
+      expect(screen.getAllByDisplayValue('https://api.deepseek.com').length).toBeGreaterThan(0);
     });
 
     const listEl = document.querySelector('.overflow-y-auto.px-2') as HTMLElement;

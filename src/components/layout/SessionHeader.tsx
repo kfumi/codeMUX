@@ -146,7 +146,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           </TooltipHint>
         </div>
       ) : null}
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <button
             aria-label="任务菜单"
@@ -162,7 +162,13 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           >
             {session?.is_pinned ? '取消置顶任务' : '置顶任务'}
           </DropdownMenuItem>
-          <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
+          <DropdownMenuItem
+            icon={<Pencil className="h-3.5 w-3.5" />}
+            onSelect={(event) => {
+              event.preventDefault();
+              window.setTimeout(() => handleRenameOpen(), 0);
+            }}
+          >
             重命名任务
           </DropdownMenuItem>
           <DropdownMenuItem icon={<Archive className="h-3.5 w-3.5" />} onClick={() => void handleArchive()}>
@@ -204,7 +210,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       </DropdownMenu>
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent className="sm:max-w-100">
+        <DialogContent overlayClassName="z-[170]" className="sm:max-w-100">
           <DialogHeader>
             <DialogTitle>重命名对话</DialogTitle>
           </DialogHeader>

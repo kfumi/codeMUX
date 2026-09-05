@@ -53,6 +53,7 @@ const API_KEY_URLS: Record<string, string> = {
   openai: 'https://platform.openai.com/api-keys',
   openrouter: 'https://openrouter.ai/settings/keys',
   'opencode-go': 'https://opencode.ai/auth',
+  'amd-gpu-cloud': 'https://developer.amd.com.cn/radeon/tokenfactory',
   siliconflow: 'https://cloud.siliconflow.cn/account/ak',
   zhipu: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys',
 };

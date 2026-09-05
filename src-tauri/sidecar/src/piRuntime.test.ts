@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
 import { PI_APPROVE_TITLE_PREFIX, PI_ASK_TITLE_PREFIX } from './piExtension.js';
-import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, writePiModelsJson } from './piRuntime.js';
+import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, normalizePiAnthropicBaseUrl, normalizePiProviderBaseUrl, writePiModelsJson } from './piRuntime.js';
 import type { PiSessionConfig } from './types.js';
 
 const FAKE_PI_PATH = fileURLToPath(new URL('./__fixtures__/fake-pi.mjs', import.meta.url));
@@ -492,7 +492,7 @@ describe('PiRuntime', () => {
     });
     const written = JSON.parse(fs.readFileSync(path.join(dir, 'models.json'), 'utf8'));
     expect(written.providers.codemux).toEqual({
-      baseUrl: 'https://provider.example/v1',
+      baseUrl: 'https://provider.example',
       apiKey: 'sk-test',
       api: 'anthropic-messages',
       models: [{ id: 'glm-5.3-flash', name: 'glm-5.3-flash', contextWindow: 1_000_000, maxTokens: 128_000 }],
@@ -503,6 +503,25 @@ describe('PiRuntime', () => {
       api: 'openai-completions',
       modelId: 'glm-5.3-flash',
     })).toContain('"api": "openai-completions"');
+    expect(buildPiModelsJson({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'openai-completions',
+      modelId: 'glm-5.3-flash',
+    })).toContain('"baseUrl": "https://provider.example/v1"');
+  });
+
+  it('normalizes anthropic baseUrl before pi appends /v1/messages', () => {
+    expect(normalizePiAnthropicBaseUrl('https://developer.amd.com.cn/radeon/api/v1'))
+      .toBe('https://developer.amd.com.cn/radeon/api');
+    expect(normalizePiAnthropicBaseUrl('https://developer.amd.com.cn/radeon/api/v1/messages'))
+      .toBe('https://developer.amd.com.cn/radeon/api');
+    expect(normalizePiAnthropicBaseUrl('https://api.deepseek.com/anthropic'))
+      .toBe('https://api.deepseek.com/anthropic');
+    expect(normalizePiAnthropicBaseUrl('https://openrouter.ai/api/v1/'))
+      .toBe('https://openrouter.ai/api');
+    expect(normalizePiProviderBaseUrl('https://provider.example/v1', 'openai-completions'))
+      .toBe('https://provider.example/v1');
   });
 
   it('createDefaultPiTransport writes models.json into the managed config dir', () => {
@@ -527,6 +546,7 @@ describe('PiRuntime', () => {
     }));
     const written = JSON.parse(fs.readFileSync(path.join(configDir, 'models.json'), 'utf8'));
     expect(written.providers.codemux.api).toBe('anthropic-messages');
+    expect(written.providers.codemux.baseUrl).toBe('https://provider.example');
     expect(written.providers.codemux.models[0].id).toBe('glm-5.3-flash');
   });
 });

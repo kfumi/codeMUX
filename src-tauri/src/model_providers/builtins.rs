@@ -74,11 +74,18 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
         BuiltinProviderTemplate {
             id: "openai".to_string(),
             name: "OpenAI".to_string(),
-            endpoints: vec![endpoint(
-                Protocol::OpenaiCompatible,
-                "https://api.openai.com/v1",
-                Some(false),
-            )],
+            endpoints: vec![
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://api.openai.com/v1",
+                    Some(false),
+                ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://api.openai.com/v1",
+                    Some(false),
+                ),
+            ],
             models: vec![
                 model("gpt-5", "GPT-5", Some(vec!["text", "image"])),
                 model("gpt-4.1", "GPT-4.1", Some(vec!["text", "image"])),
@@ -102,6 +109,11 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                     "https://api.deepseek.com",
                     Some(false),
                 ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://api.deepseek.com",
+                    Some(false),
+                ),
             ],
             models: vec![
                 model("deepseek-v4-flash", "DeepSeek V4 Flash", Some(vec!["text"])),
@@ -120,7 +132,12 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://openrouter.ai/api/v1",
-                    Some(true),
+                    Some(false),
+                ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://openrouter.ai/api/v1",
+                    Some(false),
                 ),
             ],
             models: vec![
@@ -134,16 +151,23 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             default_model: "anthropic/claude-sonnet-4".to_string(),
             opencode_provider_key: Some("openrouter".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
-            default_codex_needs_proxy: true,
+            default_codex_needs_proxy: false,
         },
         BuiltinProviderTemplate {
             id: "siliconflow".to_string(),
             name: "硅基流动".to_string(),
-            endpoints: vec![endpoint(
-                Protocol::OpenaiCompatible,
-                "https://api.siliconflow.cn/v1",
-                Some(true),
-            )],
+            endpoints: vec![
+                endpoint(
+                    Protocol::Anthropic,
+                    "https://api.siliconflow.cn/v1",
+                    None,
+                ),
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://api.siliconflow.cn/v1",
+                    Some(true),
+                ),
+            ],
             models: vec![
                 model(
                     "deepseek-ai/DeepSeek-V3",
@@ -162,15 +186,14 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             name: "智谱".to_string(),
             endpoints: vec![
                 endpoint(
+                    Protocol::Anthropic,
+                    "https://open.bigmodel.cn/api/anthropic",
+                    None,
+                ),
+                endpoint(
                     Protocol::OpenaiCompatible,
                     "https://open.bigmodel.cn/api/paas/v4",
                     Some(true),
-                ),
-                // Native Responses endpoint: Codex dials it directly, no proxy.
-                endpoint(
-                    Protocol::OpenaiResponses,
-                    "https://open.bigmodel.cn/api/v1",
-                    Some(false),
                 ),
             ],
             models: vec![
@@ -185,11 +208,23 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
         BuiltinProviderTemplate {
             id: "moonshot".to_string(),
             name: "月之暗面".to_string(),
-            endpoints: vec![endpoint(
-                Protocol::OpenaiCompatible,
-                "https://api.moonshot.cn/v1",
-                Some(true),
-            )],
+            endpoints: vec![
+                endpoint(
+                    Protocol::Anthropic,
+                    "https://api.moonshot.cn/anthropic",
+                    None,
+                ),
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://api.moonshot.cn/v1",
+                    Some(false),
+                ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://api.moonshot.cn/v1",
+                    Some(false),
+                ),
+            ],
             models: vec![
                 model("kimi-k2.6", "Kimi K2.6", Some(vec!["text"])),
                 model("kimi-k3", "Kimi K3", Some(vec!["text"])),
@@ -197,16 +232,28 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             default_model: "kimi-k2.6".to_string(),
             opencode_provider_key: Some("moonshot".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
-            default_codex_needs_proxy: true,
+            default_codex_needs_proxy: false,
         },
         BuiltinProviderTemplate {
             id: "mimo".to_string(),
             name: "Xiaomi MiMo".to_string(),
-            endpoints: vec![endpoint(
-                Protocol::OpenaiCompatible,
-                "https://api.xiaomimimo.com/v1",
-                Some(true),
-            )],
+            endpoints: vec![
+                endpoint(
+                    Protocol::Anthropic,
+                    "https://api.xiaomimimo.com/anthropic",
+                    None,
+                ),
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://api.xiaomimimo.com/v1",
+                    Some(false),
+                ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://api.xiaomimimo.com/v1",
+                    Some(false),
+                ),
+            ],
             models: vec![
                 model("mimo-m2.5", "MiMo V2.5", Some(vec!["text"])),
                 model("mimo-v2.5-pro", "MiMo V2.5 Pro", Some(vec!["text"])),
@@ -219,17 +266,26 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             default_model: "mimo-m2.5".to_string(),
             opencode_provider_key: Some("mimo".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
-            default_codex_needs_proxy: true,
+            default_codex_needs_proxy: false,
         },
         BuiltinProviderTemplate {
             id: "opencode-go".to_string(),
             name: "OpenCode Go".to_string(),
             endpoints: vec![
-                endpoint(Protocol::Anthropic, "https://opencode.ai/zen/go", None),
+                endpoint(
+                    Protocol::Anthropic,
+                    "https://opencode.ai/zen/go/v1",
+                    None,
+                ),
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://opencode.ai/zen/go/v1",
-                    Some(true),
+                    Some(false),
+                ),
+                endpoint(
+                    Protocol::OpenaiResponses,
+                    "https://opencode.ai/zen/go/v1",
+                    Some(false),
                 ),
             ],
             models: vec![
@@ -240,6 +296,31 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             default_model: "deepseek-v4-flash".to_string(),
             opencode_provider_key: Some("opencode-go".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
+            default_codex_needs_proxy: false,
+        },
+        BuiltinProviderTemplate {
+            id: "amd-gpu-cloud".to_string(),
+            name: "AMD GPU Cloud".to_string(),
+            endpoints: vec![
+                endpoint(
+                    Protocol::Anthropic,
+                    "https://developer.amd.com.cn/radeon/api/v1",
+                    None,
+                ),
+                endpoint(
+                    Protocol::OpenaiCompatible,
+                    "https://developer.amd.com.cn/radeon/api/v1",
+                    Some(true),
+                ),
+            ],
+            models: vec![model(
+                "deepseek-v4-flash",
+                "DeepSeek V4 Flash",
+                Some(vec!["text"]),
+            )],
+            default_model: "deepseek-v4-flash".to_string(),
+            opencode_provider_key: None,
+            opencode_npm: None,
             default_codex_needs_proxy: true,
         },
     ]
@@ -306,6 +387,7 @@ mod tests {
             "moonshot",
             "mimo",
             "opencode-go",
+            "amd-gpu-cloud",
         ] {
             assert!(ids.contains(&expected.to_string()), "missing {expected}");
         }
@@ -325,6 +407,14 @@ mod tests {
             .into_iter()
             .find(|item| item.id == "deepseek")
             .unwrap();
+
+        let responses = template
+            .endpoints
+            .iter()
+            .find(|item| item.protocol == Protocol::OpenaiResponses)
+            .unwrap();
+        assert_eq!(responses.base_url, "https://api.deepseek.com");
+        assert_eq!(responses.codex_needs_proxy, Some(false));
 
         let endpoint = template
             .endpoints
@@ -359,19 +449,25 @@ mod tests {
     }
 
     #[test]
-    fn zhipu_template_offers_native_responses_endpoint_for_codex() {
+    fn zhipu_template_exposes_anthropic_endpoint_without_default_responses() {
         let template = builtin_templates()
             .into_iter()
             .find(|item| item.id == "zhipu")
             .unwrap();
 
-        let responses = template
+        let anthropic = template
             .endpoints
             .iter()
-            .find(|item| item.protocol == Protocol::OpenaiResponses)
-            .expect("zhipu template should expose an OpenAI Responses endpoint");
-        assert_eq!(responses.base_url, "https://open.bigmodel.cn/api/v1");
-        assert_eq!(responses.codex_needs_proxy, Some(false));
+            .find(|item| item.protocol == Protocol::Anthropic)
+            .expect("zhipu template should expose an Anthropic endpoint");
+        assert_eq!(anthropic.base_url, "https://open.bigmodel.cn/api/anthropic");
+
+        assert!(
+            !template
+                .endpoints
+                .iter()
+                .any(|item| item.protocol == Protocol::OpenaiResponses)
+        );
 
         let chat = template
             .endpoints
@@ -380,17 +476,81 @@ mod tests {
             .unwrap();
         assert_eq!(chat.base_url, "https://open.bigmodel.cn/api/paas/v4");
 
+        let models = template.models.clone();
+        let default_model = template.default_model.clone();
+
         let provider = instantiate_template("zhipu", "id-zhipu".to_string()).unwrap();
         assert!(is_provider_usable(
             &{
                 let mut enabled = provider;
                 enabled.enabled = true;
                 enabled.api_key = "sk-test".to_string();
-                enabled.models = template.models;
-                enabled.default_model = template.default_model;
+                enabled.models = models.clone();
+                enabled.default_model = default_model.clone();
                 enabled
             },
             AgentKind::Codex
         ));
+        assert!(is_provider_usable(
+            &{
+                let mut enabled = instantiate_template("zhipu", "id-zhipu-2".to_string()).unwrap();
+                enabled.enabled = true;
+                enabled.api_key = "sk-test".to_string();
+                enabled.models = models;
+                enabled.default_model = default_model;
+                enabled
+            },
+            AgentKind::ClaudeCode
+        ));
+    }
+
+    #[test]
+    fn amd_gpu_cloud_template_exposes_shared_api_base_without_responses() {
+        let template = builtin_templates()
+            .into_iter()
+            .find(|item| item.id == "amd-gpu-cloud")
+            .unwrap();
+
+        assert_eq!(template.name, "AMD GPU Cloud");
+        assert_eq!(
+            template
+                .endpoints
+                .iter()
+                .find(|item| item.protocol == Protocol::Anthropic)
+                .map(|item| item.base_url.as_str()),
+            Some("https://developer.amd.com.cn/radeon/api/v1")
+        );
+        assert_eq!(
+            template
+                .endpoints
+                .iter()
+                .find(|item| item.protocol == Protocol::OpenaiCompatible)
+                .map(|item| item.codex_needs_proxy),
+            Some(Some(true))
+        );
+        assert!(
+            !template
+                .endpoints
+                .iter()
+                .any(|item| item.protocol == Protocol::OpenaiResponses)
+        );
+        assert!(template.default_codex_needs_proxy);
+    }
+
+    #[test]
+    fn mimo_and_opencode_go_default_to_direct_codex_routing() {
+        for template_id in ["mimo", "opencode-go"] {
+            let template = builtin_templates()
+                .into_iter()
+                .find(|item| item.id == template_id)
+                .unwrap();
+            let chat = template
+                .endpoints
+                .iter()
+                .find(|item| item.protocol == Protocol::OpenaiCompatible)
+                .unwrap();
+            assert_eq!(chat.codex_needs_proxy, Some(false), "{template_id}");
+            assert!(!template.default_codex_needs_proxy, "{template_id}");
+        }
     }
 }

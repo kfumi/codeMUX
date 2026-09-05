@@ -236,4 +236,19 @@ describe('SessionHeader', () => {
     expect(screen.queryByText('复制任务路径')).toBeNull();
     expect(screen.getByText('复制会话ID')).toBeTruthy();
   });
+
+  it('closes the rename dialog without leaving a blocking overlay', async () => {
+    openMenu();
+    fireEvent.click(screen.getByText('重命名任务'));
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('取消'));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    const openLayers = Array.from(document.body.querySelectorAll('[data-state="open"]'));
+    expect(openLayers).toHaveLength(0);
+    expect(document.body.style.pointerEvents).not.toBe('none');
+  });
 });
