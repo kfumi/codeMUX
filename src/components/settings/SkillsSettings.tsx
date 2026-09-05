@@ -14,13 +14,14 @@ import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
 import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
 import geminiSvg from '@lobehub/icons-static-svg/icons/gemini-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 
-// pi 无品牌 SVG，回退字母徽标（与 AgentBrandIcon 同策略）。
 const APP_SVGS: Partial<Record<keyof SkillApps, string>> = {
   claude: claudeSvg,
   codex: openAiSvg,
   gemini: geminiSvg,
   opencode: opencodeSvg,
+  pi: piSvg,
 };
 
 const APP_LABELS: Record<keyof SkillApps, string> = {
