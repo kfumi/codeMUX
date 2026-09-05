@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, Result};
 
 use super::types::{McpApps, McpServer};
 
-const SELECT_COLUMNS: &str = "id, name, description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode";
+const SELECT_COLUMNS: &str = "id, name, description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, enabled_pi";
 
 /// 从数据库行构建 McpServer（新 schema）
 fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
@@ -21,6 +21,7 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
             codex: row.get::<_, i64>(5)? != 0,
             gemini: row.get::<_, i64>(6)? != 0,
             opencode: row.get::<_, i64>(7)? != 0,
+            pi: row.get::<_, i64>(8)? != 0,
         },
     })
 }
@@ -35,13 +36,13 @@ pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     Ok(servers)
 }
 
-#[allow(dead_code)]
 pub fn get_servers_enabled_for_app(conn: &Connection, app: &str) -> Result<Vec<McpServer>> {
     let column = match app {
         "claude" => "enabled_claude",
         "codex" => "enabled_codex",
         "gemini" => "enabled_gemini",
         "opencode" => "enabled_opencode",
+        "pi" => "enabled_pi",
         _ => return Ok(Vec::new()),
     };
 
@@ -58,8 +59,8 @@ pub fn upsert_mcp_server(conn: &Connection, server: &McpServer) -> Result<()> {
     let server_config = serde_json::to_string(&server.server).unwrap_or_default();
 
     conn.execute(
-        "INSERT INTO mcp_servers (id, name, description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO mcp_servers (id, name, description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, enabled_pi)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
              name = excluded.name,
              description = excluded.description,
@@ -67,11 +68,13 @@ pub fn upsert_mcp_server(conn: &Connection, server: &McpServer) -> Result<()> {
              enabled_claude = excluded.enabled_claude,
              enabled_codex = excluded.enabled_codex,
              enabled_gemini = excluded.enabled_gemini,
-             enabled_opencode = excluded.enabled_opencode",
+             enabled_opencode = excluded.enabled_opencode,
+             enabled_pi = excluded.enabled_pi",
         params![
             server.id, server.name, server.description, server_config,
             server.apps.claude as i32, server.apps.codex as i32,
             server.apps.gemini as i32, server.apps.opencode as i32,
+            server.apps.pi as i32,
         ],
     )?;
     Ok(())
@@ -99,6 +102,7 @@ pub fn set_mcp_app_enabled(conn: &Connection, id: &str, app: &str, enabled: bool
         "codex" => "enabled_codex",
         "gemini" => "enabled_gemini",
         "opencode" => "enabled_opencode",
+        "pi" => "enabled_pi",
         _ => return Err(rusqlite::Error::InvalidParameterName(app.to_string())),
     };
 
@@ -133,6 +137,7 @@ mod tests {
                 codex: false,
                 gemini: false,
                 opencode: false,
+                pi: false,
             },
         };
 
@@ -145,5 +150,13 @@ mod tests {
         assert!(updated.apps.codex);
         assert!(!updated.apps.gemini);
         assert!(!updated.apps.opencode);
+        assert!(!updated.apps.pi);
+
+        set_mcp_app_enabled(&conn, "fetch", "pi", true).unwrap();
+        let with_pi = get_mcp_server(&conn, "fetch").unwrap().unwrap();
+        assert!(with_pi.apps.pi);
+        let enabled = get_servers_enabled_for_app(&conn, "pi").unwrap();
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].id, "fetch");
     }
 }

@@ -1115,6 +1115,25 @@ pub(crate) fn build_ensure_session_command(
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
+    if agent_kind == "pi" {
+        let mcp_servers = {
+            let db = state.db.lock().unwrap();
+            crate::mcp::db::get_servers_enabled_for_app(&db, "pi").map_err(|error| {
+                format!(
+                    "Failed to load enabled MCP servers for session_id={} agent_kind=pi: {}",
+                    session_id, error
+                )
+            })?
+        };
+        if !mcp_servers.is_empty() {
+            let mut map = serde_json::Map::new();
+            for server in mcp_servers {
+                map.insert(server.name, server.server);
+            }
+            cmd["mcpServers"] = serde_json::Value::Object(map);
+        }
+    }
+
     Ok(cmd)
 }
 
@@ -2456,6 +2475,27 @@ mod tests {
         std::fs::write(version_dir.join("package.json"), b"{}").unwrap();
         std::fs::write(runtime_root.path().join("pi").join("current"), "0.73.1").unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
+        crate::mcp::db::upsert_mcp_server(
+            &conn,
+            &crate::mcp::types::McpServer {
+                id: "fetch".into(),
+                name: "fetch".into(),
+                description: String::new(),
+                server: serde_json::json!({
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-fetch"]
+                }),
+                apps: crate::mcp::types::McpApps {
+                    claude: false,
+                    codex: false,
+                    gemini: false,
+                    opencode: false,
+                    pi: true,
+                },
+            },
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params!["session-pi", "pi", "pi", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
@@ -2498,6 +2538,10 @@ mod tests {
         );
         assert_eq!(command["modelLimits"]["contextWindow"], 1_000_000);
         assert_eq!(command["modelLimits"]["maxTokens"], 128_000);
+        assert_eq!(
+            command["mcpServers"]["fetch"]["command"],
+            "npx"
+        );
     }
 
     #[test]

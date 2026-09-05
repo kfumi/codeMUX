@@ -11,6 +11,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useAgentModels } from '../../hooks/useAgentModels';
+import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
@@ -61,7 +62,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
-  const isProviderAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
+  const usesProviderModel = isProviderAgent(selectedAgentKind);
   const modelProviders = config?.model_providers ?? [];
   const activeProviderId = config?.active_provider_id ?? null;
   const { models, isLoading: areModelsLoading } = useAgentModels(
@@ -69,7 +70,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     modelProviders,
     selectedProviderId ?? activeProviderId,
   );
-  const configuredAgentModel = isProviderAgent
+  const configuredAgentModel = usesProviderModel
     ? config?.agent_configs[selectedAgentKind] as {
         default_provider_id?: string | null;
         default_model?: string;
@@ -101,7 +102,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       effectiveModel,
     )
     : null;
-  const hasUsableProvider = !isProviderAgent
+  const hasUsableProvider = !usesProviderModel
     || Boolean(effectiveModel && effectiveProviderId && !areModelsLoading);
 
   const draftProject = useMemo(
@@ -162,7 +163,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   ]);
 
   useEffect(() => {
-    if (!isProviderAgent) return;
+    if (!usesProviderModel) return;
     if (!preferredModel) {
       setSelectedModel(null);
       setSelectedProviderId(null);
@@ -176,7 +177,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       setSelectedProviderId(preferredModel.providerId);
     }
   }, [
-    isProviderAgent,
+    usesProviderModel,
     preferredModel,
     selectedModel,
     selectedProviderId,
@@ -197,7 +198,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     if (currentStore.selectedAgentKind !== selectedAgentKind || !hasUsableProvider) {
       return;
     }
-    if (isProviderAgent && preferredModel) {
+    if (usesProviderModel && preferredModel) {
       if (effectiveModel !== selectedModel) {
         setSelectedModel(effectiveModel);
       }
@@ -263,7 +264,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               <h1 className="text-center text-ui-heading-md font-semibold leading-tight text-foreground sm:text-ui-heading-lg">
                 {title}
               </h1>
-              {!hasUsableProvider && isProviderAgent && (
+              {!hasUsableProvider && usesProviderModel && (
                 <p className="text-center text-sm text-muted-foreground">
                   请先在设置 → 模型配置中配置并启用可用的模型供应商（需 API Key 与匹配协议端点）。
                 </p>

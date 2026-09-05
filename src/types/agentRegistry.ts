@@ -5,7 +5,8 @@ export type AgentCapability =
   | 'supports_tools'
   | 'supports_file_snapshots'
   | 'supports_cost'
-  | 'supports_ask_user_question';
+  | 'supports_ask_user_question'
+  | 'supports_steer';
 
 export interface AgentDefinition {
   kind: AgentKind;
@@ -63,6 +64,7 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
       'supports_tools',
       'supports_cost',
       'supports_ask_user_question',
+      'supports_steer',
     ],
   },
 ];

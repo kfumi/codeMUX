@@ -274,6 +274,45 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
+  it('steers pi follow-ups into the active turn instead of queueing them', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('pi');
+    startSessionMock.mockImplementationOnce(async () => undefined);
+    vi.mocked(agentApi.sendInput).mockResolvedValue(undefined);
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'focus on errors', 'D:\\workspace');
+
+    expect(startSessionMock).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+      session.id,
+      'focus on errors',
+      { text: 'focus on errors' },
+      'focus on errors',
+    );
+    expect(useAgentStore.getState().queuedQueries[session.id] ?? []).toEqual([]);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user').map((event) => (
+      event.kind === 'user' ? event.data.content : undefined
+    ))).toEqual(['first message', 'focus on errors']);
+  });
+
+  it('still queues pi slash commands while a turn is running', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('pi');
+    startSessionMock.mockImplementationOnce(async () => undefined);
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, '/compact', 'D:\\workspace');
+
+    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      '/compact',
+    ]);
+  });
+
   it('does not stop a live desktop query when attaching to a background turn', async () => {
     const { useAgentStore } = await import('./agentStore');
     const { companionApi } = await import('../lib/tauri');

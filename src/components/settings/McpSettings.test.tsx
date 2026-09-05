@@ -14,7 +14,7 @@ const mockState = {
     name: 'fetch',
     description: 'Web fetcher',
     server: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'] },
-    apps: { claude: true, codex: false, gemini: false, opencode: false },
+    apps: { claude: true, codex: false, gemini: false, opencode: false, pi: false },
   }],
   probeStatus: { fetch: 'idle' as const },
   isLoading: false,
@@ -52,6 +52,7 @@ describe('McpSettingsPanel', () => {
     // Per-tool toggles exist
     expect(screen.getByLabelText('toggle-fetch-codex')).toBeTruthy();
     expect(screen.getByLabelText('toggle-fetch-claude')).toBeTruthy();
+    expect(screen.getByLabelText('toggle-fetch-pi')).toBeTruthy();
 
     // Click codex toggle calls toggleApp with correct args
     fireEvent.click(screen.getByLabelText('toggle-fetch-codex'));

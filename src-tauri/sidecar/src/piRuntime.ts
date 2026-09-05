@@ -19,7 +19,12 @@ import {
   type PiApprovalMode,
   type PiExtensionFile,
 } from './piExtension.js';
-import { PiRpcProcess } from './piRpcTransport.js';
+import {
+  createPiMcpConfigFile,
+  piCommandsIncludeMcpAdapter,
+  type PiMcpConfigFile,
+} from './piMcp.js';
+import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
 import { emit } from './streamEventBatcher.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
@@ -157,6 +162,8 @@ export class PiRuntime {
   private usageBaseline: PiUsageSnapshot | undefined;
   /** 临时审批/ask-user 扩展（approvalMode 配置时随进程注入）。 */
   private extensionFile: PiExtensionFile | undefined;
+  /** 会话级 `--mcp-config` 临时文件。 */
+  private mcpConfigFile: PiMcpConfigFile | undefined;
   /** 挂起的 extension_ui_request（id → 语义）。 */
   private pendingExtensionUi = new Map<string, PiPendingExtensionUi>();
   /** 本 turn 已见到的工具调用参数（审批卡/提问卡的 metadata 来源）。 */
@@ -194,7 +201,8 @@ export class PiRuntime {
       (next.baseUrl ?? undefined) === (this.config.baseUrl ?? undefined) &&
       (next.modelContextWindow ?? undefined) === (this.config.modelContextWindow ?? undefined) &&
       (next.modelMaxTokens ?? undefined) === (this.config.modelMaxTokens ?? undefined) &&
-      JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null)
+      JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null) &&
+      JSON.stringify(next.mcpServers ?? null) === JSON.stringify(this.config.mcpServers ?? null)
     );
   }
 
@@ -228,11 +236,11 @@ export class PiRuntime {
     if (this.state !== 'started' || !transport) {
       throw new Error('pi runtime is not started');
     }
-    if (this.pendingTurn) {
-      throw new Error('pi runtime already has an active turn');
-    }
-
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    if (this.pendingTurn) {
+      await this.steerActiveTurn(payload);
+      return;
+    }
     // 手动压缩是独立的阻塞 RPC，不进入常规 prompt 流程。
     if (payload.text.trim().startsWith('/compact') && (payload.images?.length ?? 0) === 0) {
       await this.compactSession(payload.text.trim());
@@ -281,6 +289,38 @@ export class PiRuntime {
     }
   }
 
+  /**
+   * 活跃 turn 追加：pi `steer` RPC 把消息排进当前 turn 的队列（工具调用之后
+   * 送达）。斜杠命令会被 pi 拒绝，仍按「已有活跃 turn」处理。旧版无 steer
+   * 时回落同一错误，让前端继续走本地队列。
+   */
+  private async steerActiveTurn(payload: AgentInputPayload): Promise<void> {
+    const transport = this.transport;
+    if (this.state !== 'started' || !transport) {
+      throw new Error('pi runtime is not started');
+    }
+    if (payload.text.trim().startsWith('/')) {
+      throw new Error('pi runtime already has an active turn');
+    }
+    const images = mapPiImages(payload);
+    try {
+      await transport.request({
+        type: 'steer',
+        message: payload.text,
+        ...(images.length > 0 ? { images } : {}),
+      });
+    } catch (error) {
+      // COMPAT(piSteerFallback): 旧二进制无 steer RPC。
+      if (isUnknownPiRpcCommand(error, 'steer')) {
+        writeLog('[pi-task]', 'steer UNAVAILABLE (binary lacks steer RPC)');
+        throw new Error('pi runtime already has an active turn');
+      }
+      throw error;
+    }
+    writeLog('[pi-task]', `steer QUEUED prompt_preview=${payload.text.slice(0, 120)}`);
+    this.cancelAllInteractiveRequests();
+  }
+
   /** 手动压缩：`/compact [自定义指令]`。compact 是阻塞 LLM 任务，不设墙钟超时。 */
   private async compactSession(commandText: string): Promise<void> {
     const transport = this.transport;
@@ -327,6 +367,14 @@ export class PiRuntime {
       this.interrupted = true;
     }
     writeLog('[pi-task]', 'interrupt REQUEST');
+    try {
+      await transport.request({ type: 'clear_queue' });
+    } catch (error) {
+      // COMPAT(piClearQueueFallback): clear_queue 自 pi 0.84.4。
+      if (!isUnknownPiRpcCommand(error, 'clear_queue')) {
+        throw error;
+      }
+    }
     await transport.request({ type: 'abort' });
   }
 
@@ -419,11 +467,15 @@ export class PiRuntime {
     if (!transport) {
       this.extensionFile?.cleanup();
       this.extensionFile = undefined;
+      this.mcpConfigFile?.cleanup();
+      this.mcpConfigFile = undefined;
       return;
     }
     await transport.close(new Error('pi runtime is shutting down')).catch(() => undefined);
     this.extensionFile?.cleanup();
     this.extensionFile = undefined;
+    this.mcpConfigFile?.cleanup();
+    this.mcpConfigFile = undefined;
   }
 
   private currentNativeSessionId(): string {
@@ -445,9 +497,20 @@ export class PiRuntime {
       extensionFile = createPiExtensionFile(spawnConfig.approvalMode);
       this.extensionFile = extensionFile;
     }
+    let mcpConfigFile: PiMcpConfigFile | undefined;
+    if (
+      spawnConfig.mcpServers
+      && Object.keys(spawnConfig.mcpServers).length > 0
+      && !this.options.transportFactory
+    ) {
+      mcpConfigFile = createPiMcpConfigFile(spawnConfig.mcpServers, {
+        ...(spawnConfig.piConfigDir ? { piConfigDir: spawnConfig.piConfigDir } : {}),
+      });
+      this.mcpConfigFile = mcpConfigFile;
+    }
     const transport = this.options.transportFactory
       ? this.options.transportFactory(spawnConfig)
-      : createDefaultPiTransport(spawnConfig, extensionFile?.path);
+      : createDefaultPiTransport(spawnConfig, extensionFile?.path, mcpConfigFile?.path);
     this.transport = transport;
     transport.onMessage((message) => this.handlePiEvent(message as PiRuntimeEvent));
     void transport.waitForExit().then((info) => {
@@ -456,12 +519,17 @@ export class PiRuntime {
 
     try {
       await this.readSessionIdentity(transport);
+      if (mcpConfigFile) {
+        await this.noteMcpAdapterAvailability(transport);
+      }
     } catch (error) {
       this.state = 'disposed';
       this.transport = undefined;
       await transport.close(new Error('pi runtime failed to start')).catch(() => undefined);
       extensionFile?.cleanup();
       this.extensionFile = undefined;
+      mcpConfigFile?.cleanup();
+      this.mcpConfigFile = undefined;
       throw error;
     }
     this.ctx.agentSessionId = this.agentSessionFile;
@@ -480,6 +548,21 @@ export class PiRuntime {
         ? record.sessionFile
         : this.agentSessionFile;
     this.ctx.agentSessionId = this.agentSessionFile;
+  }
+
+  /** MCP 依赖 cwd 已加载的 pi-mcp-adapter；探测失败只记日志，不阻断会话。 */
+  private async noteMcpAdapterAvailability(transport: PiRpcProcess): Promise<void> {
+    try {
+      const payload = await transport.request({ type: 'get_commands' }, { timeoutMs: 5_000 });
+      if (!piCommandsIncludeMcpAdapter(payload)) {
+        writeLog('[pi-task]', 'mcp WARN pi-mcp-adapter not loaded; --mcp-config may have no effect');
+      }
+    } catch (error) {
+      writeLog(
+        '[pi-task]',
+        `mcp WARN get_commands failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async refreshSessionIdentity(): Promise<void> {
@@ -1037,7 +1120,11 @@ export function writePiModelsJson(dir: string, definition: PiProviderDefinition)
  * 环境变量），配置目录重定向同时切断对 ~/.pi 原生配置的回退（ADR 0005）。
  * extensionPath 存在时经 `--extension` 注入审批/ask-user 临时扩展。
  */
-export function createDefaultPiTransport(config: PiSessionConfig, extensionPath?: string): PiRpcProcess {
+export function createDefaultPiTransport(
+  config: PiSessionConfig,
+  extensionPath?: string,
+  mcpConfigPath?: string,
+): PiRpcProcess {
   const args = ['--mode', 'rpc'];
   let command: string;
 
@@ -1057,6 +1144,9 @@ export function createDefaultPiTransport(config: PiSessionConfig, extensionPath?
   }
   if (extensionPath) {
     args.push('--extension', extensionPath);
+  }
+  if (mcpConfigPath) {
+    args.push('--mcp-config', mcpConfigPath);
   }
   if (config.thinkingLevel) {
     args.push('--thinking', config.thinkingLevel);

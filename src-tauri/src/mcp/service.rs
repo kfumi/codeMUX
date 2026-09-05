@@ -16,6 +16,7 @@ pub fn diff_apps(previous: &McpApps, next: &McpApps) -> AppDiff {
         ("codex", previous.codex, next.codex),
         ("gemini", previous.gemini, next.gemini),
         ("opencode", previous.opencode, next.opencode),
+        ("pi", previous.pi, next.pi),
     ] {
         if before && !after {
             disable.push(app);
@@ -35,6 +36,7 @@ pub fn merge_imported_server(mut server: McpServer, app: &str) -> McpServer {
         "codex" => server.apps.codex = true,
         "gemini" => server.apps.gemini = true,
         "opencode" => server.apps.opencode = true,
+        "pi" => server.apps.pi = true,
         _ => {}
     }
     server
@@ -124,6 +126,7 @@ pub fn import_from_apps(
                     "codex" => existing.apps.codex = true,
                     "gemini" => existing.apps.gemini = true,
                     "opencode" => existing.apps.opencode = true,
+                    "pi" => existing.apps.pi = true,
                     _ => {}
                 }
                 if let Err(e) = crate::mcp::db::upsert_mcp_server(&db, &existing) {
@@ -139,6 +142,7 @@ pub fn import_from_apps(
                     "codex" => apps.codex = true,
                     "gemini" => apps.gemini = true,
                     "opencode" => apps.opencode = true,
+                    "pi" => apps.pi = true,
                     _ => {}
                 }
                 let server = McpServer {
@@ -179,12 +183,14 @@ mod tests {
             codex: false,
             gemini: true,
             opencode: false,
+            pi: false,
         };
         let next = McpApps {
             claude: false,
             codex: true,
             gemini: true,
             opencode: false,
+            pi: false,
         };
 
         let diff = diff_apps(&previous, &next);
@@ -205,6 +211,7 @@ mod tests {
                 codex: false,
                 gemini: false,
                 opencode: false,
+                pi: false,
             },
         };
 
@@ -213,5 +220,6 @@ mod tests {
         assert!(merged.apps.codex);
         assert!(!merged.apps.gemini);
         assert!(!merged.apps.opencode);
+        assert!(!merged.apps.pi);
     }
 }

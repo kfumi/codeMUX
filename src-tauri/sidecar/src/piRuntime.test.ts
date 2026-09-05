@@ -175,6 +175,126 @@ describe('PiRuntime', () => {
       await turn;
       const finished = events.find((event) => event.type === 'turn_finished');
       expect(finished).toMatchObject({ type: 'turn_finished', outcome: 'interrupted' });
+      expect(wireLog().some((message) => message.type === 'clear_queue')).toBe(true);
+      expect(wireLog().some((message) => message.type === 'abort')).toBe(true);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('steers a follow-up into the active turn instead of rejecting it', async () => {
+    const { runtime, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
+        },
+        steer: { data: {} },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('long task');
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
+      await runtime.sendInput('focus on error handling');
+      expect(wireLog().some((message) => message.type === 'steer' && message.message === 'focus on error handling')).toBe(true);
+      await runtime.interrupt();
+      await turn;
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('does not steer slash commands into the active turn', async () => {
+    const { runtime, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('long task');
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
+      await expect(runtime.sendInput('/model')).rejects.toThrow(/already has an active turn/);
+      expect(wireLog().some((message) => message.type === 'steer')).toBe(false);
+      await runtime.interrupt();
+      await turn;
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('falls back when the pi binary lacks the steer RPC', async () => {
+    const { runtime, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
+        },
+        steer: { success: false, error: 'Unknown command: steer' },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('long task');
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
+      await expect(runtime.sendInput('steer this')).rejects.toThrow(/already has an active turn/);
+      await runtime.interrupt();
+      await turn;
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('still interrupts when the pi binary lacks clear_queue', async () => {
+    const { runtime, events, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        clear_queue: { success: false, error: 'Unknown command: clear_queue' },
+        abort: { data: {} },
+        prompt: {
+          data: {},
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('long task');
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
+      await runtime.interrupt();
+      await turn;
+      expect(events.find((event) => event.type === 'turn_finished')).toMatchObject({
+        type: 'turn_finished',
+        outcome: 'interrupted',
+      });
+      expect(wireLog().some((message) => message.type === 'abort')).toBe(true);
     } finally {
       await runtime.shutdown();
     }

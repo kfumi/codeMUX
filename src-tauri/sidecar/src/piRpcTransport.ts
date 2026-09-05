@@ -14,6 +14,15 @@ export class PiRpcRequestError extends Error {
   }
 }
 
+/** COMPAT: older pi binaries answer unknown RPCs with this exact error string. */
+export function isUnknownPiRpcCommand(error: unknown, command: string): boolean {
+  const expected = `Unknown command: ${command}`;
+  if (error instanceof PiRpcRequestError) {
+    return error.error === expected || error.message.includes(expected);
+  }
+  return String(error).includes(expected);
+}
+
 /** Handler for every pi line that is not a response to a pending request. */
 export type PiRpcMessageHandler = (message: Record<string, unknown>) => void;
 

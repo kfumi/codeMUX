@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  isUnknownPiRpcCommand,
   PiRpcConnection,
   PiRpcProcess,
   PiRpcRequestError,
@@ -65,6 +66,13 @@ function readClientLines(stream: PassThrough, count: number, timeoutMs = 2_000):
 function writeLine(stream: PassThrough, message: WireMessage): void {
   stream.write(`${JSON.stringify(message)}\n`);
 }
+
+describe('isUnknownPiRpcCommand', () => {
+  it('matches the exact pi unknown-command error', () => {
+    expect(isUnknownPiRpcCommand(new PiRpcRequestError('steer', 'Unknown command: steer'), 'steer')).toBe(true);
+    expect(isUnknownPiRpcCommand(new PiRpcRequestError('steer', 'socket closed'), 'steer')).toBe(false);
+  });
+});
 
 describe('PiRpcConnection', () => {
   it('resolves a request when pi answers with a success response', async () => {

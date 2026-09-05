@@ -4,10 +4,11 @@ import { toast } from 'sonner';
 import { getStoredAgentCwd, resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
 import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
+import { normalizeReasoningEffort } from '../../lib/reasoningEffort';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
-import { normalizeReasoningEffort } from '../../lib/reasoningEffort';
+import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
@@ -99,7 +100,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     project?.path ? state.entries[projectSkillCacheKey(project.path, agentKind)] : undefined
   ));
   const projectSkills = projectSkillEntry?.skills ?? EMPTY_PROJECT_SKILLS;
-  const isProviderAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
+  const usesProviderModel = isProviderAgent(agentKind);
   const modelProviders = config?.model_providers ?? [];
   const activeProviderId = config?.active_provider_id ?? null;
   const activeProvider = useMemo(
@@ -139,7 +140,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     usesLargeContext: modelSupports1m(item),
   }), [agentKind, modelSupports1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
-  const hasUsableProvider = !isProviderAgent || Boolean(runtimeProvider && isProviderUsable(runtimeProvider, agentKind) && model);
+  const hasUsableProvider = !usesProviderModel || Boolean(runtimeProvider && isProviderUsable(runtimeProvider, agentKind) && model);
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {
@@ -331,7 +332,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     agentKind,
     cwd,
     workingPath,
-    isProviderAgent,
+    usesProviderModel,
     isReadOnly,
     isRunning,
     modelProviders,

@@ -13,6 +13,7 @@ import type { AgentInputPayload } from './types/agentInput';
 import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
+import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { appApi, sessionApi } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
@@ -306,7 +307,7 @@ function App() {
         throw new Error('无法解析有效的工作目录，请确认已选择项目并重新尝试');
       }
 
-      if (selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode') {
+      if (isProviderAgent(selectedAgentKind)) {
         const runtimeCheck = await appApi.checkManagedRuntimes();
         const runtime = runtimeCheck.runtimes.find((entry) => entry.provider === selectedAgentKind);
         if (!runtime || (runtime.status !== 'ready' && runtime.status !== 'outdated')) {

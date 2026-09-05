@@ -336,6 +336,17 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     // are dropped during the table rebuild.
     migrate_mcp_servers_table(conn)?;
 
+    // Migration: add enabled_pi column to mcp_servers if missing
+    let has_mcp_enabled_pi: bool = conn
+        .prepare("SELECT enabled_pi FROM mcp_servers LIMIT 0")
+        .is_ok();
+    if !has_mcp_enabled_pi {
+        let _ = conn.execute(
+            "ALTER TABLE mcp_servers ADD COLUMN enabled_pi INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+    }
+
     // Migration: add disk_path column to skills if missing
     let has_disk_path: bool = conn.prepare("SELECT disk_path FROM skills LIMIT 0").is_ok();
     if !has_disk_path {
@@ -474,12 +485,13 @@ fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
             enabled_claude INTEGER NOT NULL DEFAULT 0,
             enabled_codex INTEGER NOT NULL DEFAULT 0,
             enabled_gemini INTEGER NOT NULL DEFAULT 0,
-            enabled_opencode INTEGER NOT NULL DEFAULT 0
+            enabled_opencode INTEGER NOT NULL DEFAULT 0,
+            enabled_pi INTEGER NOT NULL DEFAULT 0
         );
 
         INSERT INTO mcp_servers (
             id, name, description, server_config,
-            enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
+            enabled_claude, enabled_codex, enabled_gemini, enabled_opencode, enabled_pi
         )
         SELECT
             id,
@@ -487,6 +499,7 @@ fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
             COALESCE(description, ''),
             transport_config,
             CASE WHEN enabled = 1 THEN 1 ELSE 0 END,
+            0,
             0,
             0,
             0

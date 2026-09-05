@@ -50,7 +50,7 @@ export function getAgentPermissionDefault(
   return serializePermissionConfig(agentKind, agentConfig?.permission_config);
 }
 
-function isProviderAgent(agentKind: AgentKind): boolean {
+export function isProviderAgent(agentKind: AgentKind): boolean {
   return (
     agentKind === 'claude_code' ||
     agentKind === 'codex' ||

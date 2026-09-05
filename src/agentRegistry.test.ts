@@ -32,4 +32,9 @@ describe('agent registry', () => {
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_file_snapshots');
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_ask_user_question');
   });
+
+  it('marks pi as supporting active-turn steer', () => {
+    expect(getAgentDefinition('pi')?.capabilities).toContain('supports_steer');
+    expect(getAgentDefinition('claude_code')?.capabilities).not.toContain('supports_steer');
+  });
 });

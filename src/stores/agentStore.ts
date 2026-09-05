@@ -86,6 +86,7 @@ import {
 } from '../components/agent/contextUsage';
 import { buildConversationTurns } from '../lib/conversationTurns';
 import { extractTodosFromEvents } from '../lib/extractTodosFromEvents';
+import { supportsCapability } from '../components/agent/agentCapabilities';
 import type { ConversationTurn } from '../types/conversationTurn';
 
 export type AgentMessage =
@@ -1770,6 +1771,53 @@ export const useAgentStore = create<AgentState>((set, get) => {
       await pendingHistoryLoad;
     }
     const currentState = get();
+    const isSlashCommand = prompt.trim().startsWith('/');
+    const canSteerIntoActiveTurn =
+      !fromQueue
+      && Boolean(currentState.isRunning[sessionId])
+      && !queuedDispatches.has(sessionId)
+      && !isSlashCommand
+      && !!targetSession
+      && supportsCapability(targetSession.agent_kind, 'supports_steer');
+    if (canSteerIntoActiveTurn) {
+      const steerPayload = inputPayload ?? { text: prompt };
+      const steerAttachments = getPayloadImageAttachments(steerPayload).map((image) => ({
+        type: 'image' as const,
+        name: image.name,
+        mediaType: image.mediaType,
+        dataUrl: image.dataUrl,
+      }));
+      const steerUserContent = displayContent ?? steerPayload.text;
+      useSessionStore.getState().touchSession(sessionId);
+      const steerUserMsg: AgentMessage = {
+        kind: 'user',
+        data: {
+          content: steerUserContent,
+          ...(steerAttachments.length > 0 ? { attachments: steerAttachments } : {}),
+        },
+      };
+      set((s) => ({
+        events: {
+          ...s.events,
+          [sessionId]: [...(s.events[sessionId] || []), steerUserMsg],
+        },
+        eventTimestamps: {
+          ...s.eventTimestamps,
+          [sessionId]: [...(s.eventTimestamps[sessionId] || []), Date.now()],
+        },
+        error: { ...s.error, [sessionId]: null },
+      }));
+      try {
+        await agentApi.sendInput(sessionId, steerPayload.text, steerPayload, steerUserContent);
+      } catch (err) {
+        logger.error('Agent steer failed', { sessionId }, serializeError(err));
+        set((s) => ({
+          error: { ...s.error, [sessionId]: String(err) },
+        }));
+        throw err;
+      }
+      return;
+    }
     // Queue composer sends only while a turn is active or a queued dispatch is in flight.
     // After a failed/paused turn, composer input starts a new turn immediately; existing
     // queued messages stay in order and run after that turn succeeds.

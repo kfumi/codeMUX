@@ -2277,6 +2277,9 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
       ? { modelMaxTokens: cmd.modelLimits.maxTokens }
       : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
+    ...(cmd.mcpServers && Object.keys(cmd.mcpServers).length > 0
+      ? { mcpServers: cmd.mcpServers }
+      : {}),
   };
 }
 

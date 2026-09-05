@@ -232,6 +232,28 @@ describe('NewSessionPanel', () => {
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
+  it('uses the configured pi default model when starting a new conversation', () => {
+    useNewSessionStore.setState({ selectedAgentKind: 'pi' });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              pi: {
+                default_provider_id: 'provider-1',
+                default_model: 'claude-opus-4-1',
+              },
+            },
+          }
+        : null,
+    }));
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+    expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('provider-1');
+  });
+
   it('shows guidance when no usable provider is configured', () => {
     useSettingsStore.setState((state) => ({
       ...state,

@@ -23,7 +23,7 @@ describe('mcpStore', () => {
         name: 'fetch',
         description: 'Web fetcher',
         server: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'] },
-        apps: { claude: true, codex: false, gemini: false, opencode: false },
+        apps: { claude: true, codex: false, gemini: false, opencode: false, pi: false },
       }],
       probeStatus: {},
       isLoading: false,
@@ -42,6 +42,7 @@ describe('mcpStore', () => {
       codex: true,
       gemini: false,
       opencode: false,
+      pi: false,
     });
   });
 

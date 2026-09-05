@@ -2,6 +2,7 @@ import type { AgentInputAttachment, AgentInputPayload } from './agentInputPayloa
 import type { AgentPlanMode, PiApprovalExecutionMode, SidecarPermissionConfig } from './agentPermissions.js';
 import type { PiApprovalMode } from './piExtension.js';
 import type { PiThinkingLevel } from './piEvents.js';
+import type { PiMcpServers } from './piMcp.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import type { TurnTimeouts } from './turnTimeouts.js';
 
@@ -70,6 +71,8 @@ export interface PiSessionConfig {
   modelMaxTokens?: number;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
+  /** CodeMUX 为 pi 启用的 MCP 服务器（启动时写入临时 mcp.json 并传 `--mcp-config`）。 */
+  mcpServers?: PiMcpServers;
 }
 
 export interface PiSessionMapping {
@@ -88,7 +91,7 @@ export interface RuntimeEventContext {
 
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; settingSources?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits; piConfigDir?: string }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; settingSources?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits; piConfigDir?: string; mcpServers?: PiMcpServers }
   | { type: 'fork_session'; sessionId: string; requestId: string; sourceAgentSessionId?: string; sourceProviderMessageId?: string; sourceProviderTurnId?: string; sourceProviderTurnOrdinal?: number }
   | { type: 'rewind_files'; sessionId: string; requestId: string; providerMessageId: string }
   | { type: 'rewind_conversation'; sessionId: string; requestId: string; entryId: string }

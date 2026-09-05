@@ -499,6 +499,7 @@ mod tests {
                     codex: false,
                     gemini: false,
                     opencode: false,
+                    pi: false,
                 },
             },
         )

@@ -3,6 +3,7 @@ export interface McpApps {
   codex: boolean;
   gemini: boolean;
   opencode: boolean;
+  pi: boolean;
 }
 
 export type McpServerSpec = {

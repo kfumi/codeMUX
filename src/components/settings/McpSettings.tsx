@@ -18,12 +18,14 @@ import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
 import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
 import geminiSvg from '@lobehub/icons-static-svg/icons/gemini-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 
 const APP_SVGS: Record<keyof McpApps, string> = {
   claude: claudeSvg,
   codex: openAiSvg,
   gemini: geminiSvg,
   opencode: opencodeSvg,
+  pi: piSvg,
 };
 
 const APP_LABELS: Record<keyof McpApps, string> = {
@@ -31,6 +33,7 @@ const APP_LABELS: Record<keyof McpApps, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
+  pi: 'pi',
 };
 
 function AppIcon({ app, size = 16 }: { app: keyof McpApps; size?: number }) {
@@ -75,7 +78,7 @@ const baseTheme = EditorView.theme({
   '.cm-content ::selection': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
 });
 
-const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'gemini', 'opencode'];
+const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'gemini', 'opencode', 'pi'];
 
 export function McpSettingsPanel() {
   const servers = useMcpStore((s) => s.servers);
@@ -141,7 +144,7 @@ export function McpSettingsPanel() {
       name: '',
       description: '',
       server: defaultServerSpec('stdio'),
-      apps: { claude: false, codex: false, gemini: false, opencode: false },
+      apps: { claude: false, codex: false, gemini: false, opencode: false, pi: false },
     };
     setEditing(server);
     setIsNew(true);
