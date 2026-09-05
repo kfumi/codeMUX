@@ -25,6 +25,7 @@ import {
   type PiMcpConfigFile,
 } from './piMcp.js';
 import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
+import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { emit } from './streamEventBatcher.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
@@ -236,11 +237,11 @@ export class PiRuntime {
     if (this.state !== 'started' || !transport) {
       throw new Error('pi runtime is not started');
     }
-    const payload = normalizeAgentInputPayload(prompt, inputPayload);
     if (this.pendingTurn) {
-      await this.steerActiveTurn(payload);
-      return;
+      throw new Error('pi runtime already has an active turn');
     }
+
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
     // 手动压缩是独立的阻塞 RPC，不进入常规 prompt 流程。
     if (payload.text.trim().startsWith('/compact') && (payload.images?.length ?? 0) === 0) {
       await this.compactSession(payload.text.trim());
@@ -289,38 +290,6 @@ export class PiRuntime {
     }
   }
 
-  /**
-   * 活跃 turn 追加：pi `steer` RPC 把消息排进当前 turn 的队列（工具调用之后
-   * 送达）。斜杠命令会被 pi 拒绝，仍按「已有活跃 turn」处理。旧版无 steer
-   * 时回落同一错误，让前端继续走本地队列。
-   */
-  private async steerActiveTurn(payload: AgentInputPayload): Promise<void> {
-    const transport = this.transport;
-    if (this.state !== 'started' || !transport) {
-      throw new Error('pi runtime is not started');
-    }
-    if (payload.text.trim().startsWith('/')) {
-      throw new Error('pi runtime already has an active turn');
-    }
-    const images = mapPiImages(payload);
-    try {
-      await transport.request({
-        type: 'steer',
-        message: payload.text,
-        ...(images.length > 0 ? { images } : {}),
-      });
-    } catch (error) {
-      // COMPAT(piSteerFallback): 旧二进制无 steer RPC。
-      if (isUnknownPiRpcCommand(error, 'steer')) {
-        writeLog('[pi-task]', 'steer UNAVAILABLE (binary lacks steer RPC)');
-        throw new Error('pi runtime already has an active turn');
-      }
-      throw error;
-    }
-    writeLog('[pi-task]', `steer QUEUED prompt_preview=${payload.text.slice(0, 120)}`);
-    this.cancelAllInteractiveRequests();
-  }
-
   /** 手动压缩：`/compact [自定义指令]`。compact 是阻塞 LLM 任务，不设墙钟超时。 */
   private async compactSession(commandText: string): Promise<void> {
     const transport = this.transport;
@@ -356,6 +325,34 @@ export class PiRuntime {
       duration_ms: Math.max(0, Date.now() - compactStartedAt),
     });
     writeLog('[pi-task]', 'compact COMPLETE');
+  }
+
+  async steerActiveTurn(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    const transport = this.transport;
+    if (this.state !== 'started' || !transport) {
+      throw new Error('pi runtime is not started');
+    }
+    if (!this.pendingTurn) {
+      throw new SteerUnavailableError('no active pi turn to steer');
+    }
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    if (isSteerBlockedPrompt(payload.text)) {
+      throw new SteerUnavailableError('slash commands cannot steer an active pi turn');
+    }
+    const images = mapPiImages(payload);
+    try {
+      await transport.request({
+        type: 'steer',
+        message: payload.text,
+        ...(images.length > 0 ? { images } : {}),
+      });
+    } catch (error) {
+      if (isUnknownPiRpcCommand(error, 'steer')) {
+        throw new SteerUnavailableError('pi binary lacks steer RPC');
+      }
+      throw error;
+    }
+    writeLog('[pi-task]', `steer QUEUED prompt_preview=${payload.text.slice(0, 120)}`);
   }
 
   async interrupt(): Promise<void> {

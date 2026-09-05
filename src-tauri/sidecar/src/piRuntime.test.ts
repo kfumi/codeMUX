@@ -182,7 +182,36 @@ describe('PiRuntime', () => {
     }
   });
 
-  it('steers a follow-up into the active turn instead of rejecting it', async () => {
+  it('rejects a second sendInput while a turn is already active', async () => {
+    const { runtime, wireLog } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          holdUntilAbort: true,
+          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      const turn = runtime.sendInput('long task');
+      await vi_waitFor(() => {
+        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
+          throw new Error('prompt not acknowledged yet');
+        }
+      });
+      await expect(runtime.sendInput('focus on error handling')).rejects.toThrow(/already has an active turn/);
+      expect(wireLog().some((message) => message.type === 'steer')).toBe(false);
+      expect(wireLog().filter((message) => message.type === 'prompt')).toHaveLength(1);
+      await runtime.interrupt();
+      await turn;
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('steers an active turn via the steer RPC', async () => {
     const { runtime, wireLog } = startFakePiRuntime({
       responses: {
         get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
@@ -202,8 +231,10 @@ describe('PiRuntime', () => {
           throw new Error('prompt not acknowledged yet');
         }
       });
-      await runtime.sendInput('focus on error handling');
-      expect(wireLog().some((message) => message.type === 'steer' && message.message === 'focus on error handling')).toBe(true);
+      await runtime.steerActiveTurn('focus on error handling');
+      expect(wireLog().some((message) => (
+        message.type === 'steer' && message.message === 'focus on error handling'
+      ))).toBe(true);
       await runtime.interrupt();
       await turn;
     } finally {
@@ -211,35 +242,7 @@ describe('PiRuntime', () => {
     }
   });
 
-  it('does not steer slash commands into the active turn', async () => {
-    const { runtime, wireLog } = startFakePiRuntime({
-      responses: {
-        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
-        prompt: {
-          data: {},
-          holdUntilAbort: true,
-          thenEvents: [{ delayMs: 5, event: { type: 'agent_end' } }],
-        },
-      },
-    });
-    try {
-      await runtime.ensure();
-      const turn = runtime.sendInput('long task');
-      await vi_waitFor(() => {
-        if (!wireLog().some((message) => message.type === 'response' && message.command === 'prompt')) {
-          throw new Error('prompt not acknowledged yet');
-        }
-      });
-      await expect(runtime.sendInput('/model')).rejects.toThrow(/already has an active turn/);
-      expect(wireLog().some((message) => message.type === 'steer')).toBe(false);
-      await runtime.interrupt();
-      await turn;
-    } finally {
-      await runtime.shutdown();
-    }
-  });
-
-  it('falls back when the pi binary lacks the steer RPC', async () => {
+  it('treats a missing steer RPC as unavailable', async () => {
     const { runtime, wireLog } = startFakePiRuntime({
       responses: {
         get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
@@ -259,7 +262,7 @@ describe('PiRuntime', () => {
           throw new Error('prompt not acknowledged yet');
         }
       });
-      await expect(runtime.sendInput('steer this')).rejects.toThrow(/already has an active turn/);
+      await expect(runtime.steerActiveTurn('focus on error handling')).rejects.toThrow(/lacks steer RPC/);
       await runtime.interrupt();
       await turn;
     } finally {

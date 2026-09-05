@@ -1,7 +1,10 @@
 import { ArrowUp, GripVertical, Pencil, Trash2, Play } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
+import { queuedRunNowHint, normalizeImmediateRunMode } from '../../../lib/agentSteer';
 import { useAgentStore } from '../../../stores/agentStore';
+import { useSessionStore } from '../../../stores/sessionStore';
+import { useSettingsStore } from '../../../stores/settingsStore';
 import type { QueuedAgentQuery } from '../../../types/agentQueue';
 import { cn } from '../../../lib/utils';
 import { TooltipHint } from '../../ui/tooltip';
@@ -21,6 +24,12 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
   const resumeQueuedQueries = useAgentStore((state) => state.resumeQueuedQueries);
   const clearQueuedQueries = useAgentStore((state) => state.clearQueuedQueries);
   const runQueuedQueryNow = useAgentStore((state) => state.runQueuedQueryNow);
+  const agentKind = useSessionStore((state) => (
+    state.sessions.find((session) => session.id === sessionId)
+    ?? state.archivedSessions.find((session) => session.id === sessionId)
+  )?.agent_kind);
+  const immediateRunMode = useSettingsStore((state) => normalizeImmediateRunMode(state.config?.immediate_run_mode));
+  const runNowHint = queuedRunNowHint(agentKind, immediateRunMode);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<{
@@ -146,6 +155,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
               onEdit={() => onEdit(query)}
               onDelete={() => removeQueuedQuery(sessionId, query.id)}
               onRunNow={() => void runQueuedQueryNow(sessionId, query.id)}
+              runNowHint={runNowHint}
             />
           ))}
         </div>
@@ -173,6 +183,7 @@ function QueuedMessageRow({
   onEdit,
   onDelete,
   onRunNow,
+  runNowHint,
 }: {
   query: QueuedAgentQuery;
   index: number;
@@ -182,6 +193,7 @@ function QueuedMessageRow({
   onEdit: () => void | Promise<void>;
   onDelete: () => void;
   onRunNow: () => void;
+  runNowHint: string;
 }) {
   const content = query.displayContent?.trim() || query.prompt.trim() || '空消息';
   const hasImages = (query.inputPayload?.attachments?.length ?? query.inputPayload?.images?.length ?? 0) > 0;
@@ -218,7 +230,7 @@ function QueuedMessageRow({
         {hasImages ? <span className="ml-1 text-[10px] text-muted-foreground">· 图片</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
-        <TooltipHint content="打断当前任务并立即执行这条消息">
+        <TooltipHint content={runNowHint}>
           <button
             type="button"
             onClick={onRunNow}

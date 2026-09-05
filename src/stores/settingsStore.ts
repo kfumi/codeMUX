@@ -9,6 +9,7 @@ import type {
   NotificationSettings,
   Theme,
   BrowserControlSettings,
+  ImmediateRunMode,
 } from '../types/provider';
 import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
@@ -18,6 +19,7 @@ import { normalizeNotificationSettings } from '../lib/notificationSettings';
 import { normalizeGitSettings } from '../lib/gitSettings';
 import { normalizeBrowserControl } from '../lib/browserControl';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
+import { normalizeImmediateRunMode } from '../lib/agentSteer';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
 
 function applyThemeLocally(theme: Theme) {
@@ -53,6 +55,7 @@ interface SettingsState {
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setCompactAiOutput: (enabled: boolean) => Promise<void>;
+  setImmediateRunMode: (mode: ImmediateRunMode) => Promise<void>;
   setAttachmentEnrichment: (enrichment: ImageRecognitionConfig) => Promise<void>;
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
@@ -89,6 +92,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...rawConfig,
         model_providers: rawConfig.model_providers ?? [],
         default_open_target: normalizeOpenTarget(rawConfig.default_open_target),
+        immediate_run_mode: normalizeImmediateRunMode(rawConfig.immediate_run_mode),
         notifications: normalizeNotificationSettings(rawConfig.notifications),
         git: normalizeGitSettings(rawConfig.git),
         browser: normalizeBrowserControl(rawConfig.browser),
@@ -130,6 +134,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previous } : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setImmediateRunMode: async (mode: ImmediateRunMode) => {
+    const previous = normalizeImmediateRunMode(get().config?.immediate_run_mode);
+    const next = normalizeImmediateRunMode(mode);
+    set((state) => ({
+      config: state.config ? { ...state.config, immediate_run_mode: next } : state.config,
+      error: null,
+    }));
+    try {
+      await configApi.setImmediateRunMode(next);
+    } catch (error) {
+      set((state) => ({
+        config: state.config ? { ...state.config, immediate_run_mode: previous } : state.config,
         error: String(error),
       }));
     }

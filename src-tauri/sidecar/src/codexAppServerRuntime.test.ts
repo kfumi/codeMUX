@@ -897,6 +897,65 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   );
 
   it(
+    'steers an active turn with turn/steer and does not start a second turn',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_9' } } },
+            ],
+          },
+          'turn/steer': { result: {} },
+        },
+      };
+      const { runtime, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        const input = runtime.sendInput('long running');
+        await vi.waitFor(() => {
+          expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(1);
+        });
+
+        let steered = false;
+        await vi.waitFor(async () => {
+          if (steered) {
+            return;
+          }
+          await runtime.steerActiveTurn('focus on tests');
+          steered = true;
+        });
+
+        const steers = receivedRequests(readLog(), 'turn/steer');
+        expect(steers).toHaveLength(1);
+        expect(steers[0]?.params).toMatchObject({
+          threadId: 'thread_1',
+          expectedTurnId: 'turn_9',
+        });
+        expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(1);
+
+        await runtime.interrupt();
+        await input;
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it('rejects steer when no Codex turn is active', async () => {
+    const { runtime, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+    try {
+      await runtime.ensure(ensureCommand());
+      await expect(runtime.steerActiveTurn('focus on tests')).rejects.toThrow(/no active Codex turn/);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it(
     'resetSession tears down the transport so the next ensure spawns a fresh thread',
     async () => {
       const { runtime, readLog, ensureCommand } = await createHarness(DEFAULT_SCENARIO);

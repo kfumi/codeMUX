@@ -1548,12 +1548,20 @@ pub async fn send_agent_input(
     prompt: String,
     input_payload: Option<serde_json::Value>,
     display_content: Option<String>,
+    delivery: Option<String>,
+    request_id: Option<String>,
 ) -> Result<(), String> {
     reject_read_only_session(&state, &session_id)?;
     let mut cmd =
         OpenCodeRuntime::send_input_command(&session_id, prompt, display_content.as_deref());
     if let Some(payload) = input_payload {
         cmd["inputPayload"] = payload;
+    }
+    if let Some(delivery) = delivery {
+        cmd["delivery"] = serde_json::Value::String(delivery);
+    }
+    if let Some(request_id) = request_id {
+        cmd["requestId"] = serde_json::Value::String(request_id);
     }
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent input command sent for session_id={}", session_id);

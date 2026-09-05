@@ -500,6 +500,7 @@ pub fn run() {
             commands::provider::update_agent_config,
             commands::provider::set_theme,
             commands::provider::set_compact_ai_output,
+            commands::provider::set_immediate_run_mode,
             commands::provider::set_attachment_enrichment,
             commands::provider::set_notification_settings,
             commands::provider::set_default_open_target,

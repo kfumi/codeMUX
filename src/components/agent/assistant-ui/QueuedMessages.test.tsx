@@ -17,15 +17,43 @@ const queries: QueuedAgentQuery[] = [
 ];
 
 let mockState: Record<string, unknown>;
+const sessionMock = vi.hoisted(() => ({ agentKind: 'pi' }));
+const settingsMock = vi.hoisted(() => ({ mode: 'steer' as string }));
 
 vi.mock('../../../stores/agentStore', () => ({
   useAgentStore: (selector: (state: Record<string, unknown>) => unknown) => selector(mockState),
+}));
+
+vi.mock('../../../stores/sessionStore', () => ({
+  useSessionStore: (selector: (state: {
+    sessions: Array<{ id: string; agent_kind: string }>;
+    archivedSessions: Array<{ id: string; agent_kind: string }>;
+  }) => unknown) => selector({
+    sessions: [{ id: 'session-1', agent_kind: sessionMock.agentKind }],
+    archivedSessions: [],
+  }),
+}));
+
+vi.mock('../../../stores/settingsStore', () => ({
+  useSettingsStore: (selector: (state: { config: { immediate_run_mode?: string } | null }) => unknown) =>
+    selector({ config: { immediate_run_mode: settingsMock.mode } }),
+}));
+
+vi.mock('../../ui/tooltip', () => ({
+  TooltipHint: ({ content, children }: { content?: string; children: unknown }) => (
+    <>
+      {children}
+      {content ? <span data-testid="run-now-hint">{content}</span> : null}
+    </>
+  ),
 }));
 
 import { QueuedMessages } from './QueuedMessages';
 
 describe('QueuedMessages', () => {
   beforeEach(() => {
+    sessionMock.agentKind = 'pi';
+    settingsMock.mode = 'steer';
     mockState = {
       queuedQueries: { 'session-1': queries },
       queuePaused: { 'session-1': false },
@@ -57,5 +85,25 @@ describe('QueuedMessages', () => {
     fireEvent.click(screen.getByLabelText('立即执行第 2 条排队消息'));
 
     expect(runQueuedQueryNow).toHaveBeenCalledWith('session-1', 'q-2');
+  });
+
+  it('describes run-now as injecting the current turn when the agent can steer', () => {
+    render(<QueuedMessages sessionId="session-1" onEdit={vi.fn()} />);
+
+    expect(screen.getAllByTestId('run-now-hint')[0]?.textContent).toBe('注入当前轮并立即执行这条消息');
+  });
+
+  it('describes run-now as interrupting when the agent cannot steer', () => {
+    sessionMock.agentKind = 'gemini_cli';
+    render(<QueuedMessages sessionId="session-1" onEdit={vi.fn()} />);
+
+    expect(screen.getAllByTestId('run-now-hint')[0]?.textContent).toBe('打断当前任务并立即执行这条消息');
+  });
+
+  it('describes run-now as interrupting when the user prefers interrupt', () => {
+    settingsMock.mode = 'interrupt';
+    render(<QueuedMessages sessionId="session-1" onEdit={vi.fn()} />);
+
+    expect(screen.getAllByTestId('run-now-hint')[0]?.textContent).toBe('打断当前任务并立即执行这条消息');
   });
 });

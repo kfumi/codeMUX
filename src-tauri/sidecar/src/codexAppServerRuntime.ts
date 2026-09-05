@@ -20,6 +20,7 @@ import {
 } from './runtimeLoader.js';
 import {
   AppServerTransport,
+  AppServerRpcRequestError,
   CODEX_APP_SERVER_DEFAULT_ARGS,
   type AppServerTransportOptions,
 } from './appServerTransport.js';
@@ -85,6 +86,7 @@ import {
 } from './codexModelCatalog.js';
 import type { CodeMuxSubagentEvent } from './codeMuxProtocol.js';
 import { CodexSubagentSource, type CodexSubagentContext } from './codexSubagentSource.js';
+import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -414,6 +416,34 @@ export class CodexAppServerRuntime {
         agent_kind: 'codex',
       });
     }
+  }
+
+  async steerActiveTurn(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    const config = this.config;
+    const transport = this.transport;
+    const turn = this.activeTurn;
+    if (!config || !transport || !this.threadId || !turn?.turnId) {
+      throw new SteerUnavailableError('no active Codex turn to steer');
+    }
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    if (isSteerBlockedPrompt(payload.text)) {
+      throw new SteerUnavailableError('slash commands cannot steer an active Codex turn');
+    }
+    const imagePaths = await writePayloadImagesToTempFiles(payload);
+    turn.imagePaths.push(...imagePaths);
+    try {
+      await transport.request('turn/steer', {
+        threadId: this.threadId,
+        expectedTurnId: turn.turnId,
+        input: buildAppServerUserInput(buildCodexInputEntries(payload, imagePaths, true)),
+      });
+    } catch (error) {
+      if (isCodexSteerUnavailable(error)) {
+        throw new SteerUnavailableError(error instanceof Error ? error.message : String(error));
+      }
+      throw error;
+    }
+    writeLog('[codex-app-server]', `steer QUEUED prompt_preview=${payload.text.slice(0, 120)}`);
   }
 
   async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
@@ -1842,6 +1872,21 @@ function readStringRecordField(value: unknown, key: string): string | null {
     return null;
   }
   return readString(value[key]);
+}
+
+function isCodexSteerUnavailable(error: unknown): boolean {
+  if (error instanceof AppServerRpcRequestError) {
+    const message = error.message.toLowerCase();
+    if (error.method === 'turn/steer' && (error.code === -32600 || error.code === -32601 || error.code === -32000)) {
+      return true;
+    }
+    return message.includes('not steerable') || message.includes('no active turn');
+  }
+  const message = String(error).toLowerCase();
+  return message.includes('not steerable')
+    || message.includes('no active turn')
+    || message.includes('unknown method')
+    || message.includes('method not found');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

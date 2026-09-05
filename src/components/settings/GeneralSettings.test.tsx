@@ -8,6 +8,7 @@ import type { AppConfig } from '../../types/provider';
 import { GeneralSettings } from './GeneralSettings';
 
 const setDefaultOpenTargetMock = vi.fn();
+const setImmediateRunModeMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -48,6 +49,7 @@ describe('GeneralSettings', () => {
     useSettingsStore.setState({
       config: structuredClone(baseConfig),
       setDefaultOpenTarget: setDefaultOpenTargetMock,
+      setImmediateRunMode: setImmediateRunModeMock,
       setCompactAiOutput: vi.fn(),
     } as Partial<ReturnType<typeof useSettingsStore.getState>>);
   });
@@ -66,5 +68,17 @@ describe('GeneralSettings', () => {
     fireEvent.click(screen.getByText('Cursor'));
 
     expect(setDefaultOpenTargetMock).toHaveBeenCalledWith('cursor');
+  });
+
+  it('renders and updates the immediate-run preference', () => {
+    render(<GeneralSettings />);
+
+    expect(screen.getByText('「立即」的行为')).toBeTruthy();
+    expect(screen.getByText('引导')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('立即的行为'));
+    fireEvent.click(screen.getByText('中断'));
+
+    expect(setImmediateRunModeMock).toHaveBeenCalledWith('interrupt');
   });
 });

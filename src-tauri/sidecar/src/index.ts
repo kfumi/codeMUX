@@ -51,6 +51,7 @@ import {
   normalizeAgentInputPayload,
   type AgentInputPayload,
 } from './agentInputPayload.js';
+import { isSteerBlockedPrompt, isSteerUnavailableError, SteerUnavailableError } from './steer.js';
 import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
@@ -470,6 +471,22 @@ export class SessionRuntime {
       writeLog('[claude-task]', `sendInput FAILED error=${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
+  }
+
+  async steerActiveTurn(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    if (!this.config) {
+      throw new Error('Session has not been bootstrapped. Call ensure_session first.');
+    }
+    if (!this.turnActive || !this.queryHandle || !this.promptStream) {
+      throw new SteerUnavailableError('no active Claude turn to steer');
+    }
+    if (isSteerBlockedPrompt(prompt)) {
+      throw new SteerUnavailableError('slash commands cannot steer an active Claude turn');
+    }
+    if (!this.promptStream.push(prompt, inputPayload, { priority: 'next' })) {
+      throw new SteerUnavailableError('Claude prompt stream is closed');
+    }
+    writeLog('[claude-task]', `steer QUEUED prompt_preview=${prompt.slice(0, 120)}`);
   }
 
   async forkSession(sourceAgentSessionId?: string): Promise<string> {
@@ -1693,6 +1710,7 @@ type SidecarRuntime = {
   emitSessionMapping?(cmd: EnsureSessionCommand): void;
   updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
+  steerActiveTurn?(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
   forkSession?(
     sourceAgentSessionId?: string,
     sourceProviderTurnId?: string,
@@ -1895,6 +1913,33 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           return;
         }
         const sessionId = cmd.sessionId ?? activeSessionId;
+        if (cmd.delivery === 'steer') {
+          try {
+            if (!current.steerActiveTurn) {
+              throw new SteerUnavailableError(`${getRuntimeFlavor(activeAgentKind)} runtime does not support steer`);
+            }
+            await current.steerActiveTurn(cmd.prompt, cmd.inputPayload);
+            if (sessionId) {
+              options.emit(buildUserMessageEvent(sessionId, cmd.prompt, cmd.inputPayload, cmd.displayContent));
+            }
+            if (cmd.requestId) {
+              options.emit({ type: 'steer_result', request_id: cmd.requestId, ok: true });
+            }
+          } catch (error) {
+            if (cmd.requestId) {
+              options.emit({
+                type: 'steer_result',
+                request_id: cmd.requestId,
+                ok: false,
+                unavailable: isSteerUnavailableError(error),
+                error: String(error),
+              });
+            } else if (!isSteerUnavailableError(error)) {
+              emitError(error);
+            }
+          }
+          return;
+        }
         if (sessionId) {
           options.emit(buildUserMessageEvent(sessionId, cmd.prompt, cmd.inputPayload, cmd.displayContent));
         }
@@ -2220,6 +2265,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     },
     canReuse: (nextCmd) => openCodeRuntime.canReuse(buildOpenCodeSessionConfig(nextCmd)),
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
+    steerActiveTurn: (prompt, inputPayload) => openCodeRuntime.steerActiveTurn(prompt, inputPayload),
     updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
     forkSession: (
       sourceAgentSessionId,
@@ -2329,6 +2375,7 @@ function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
     },
     canReuse: (nextCmd) => piRuntime.canReuse(buildPiSessionConfig(nextCmd)),
     sendInput: (prompt, inputPayload) => piRuntime.sendInput(prompt, inputPayload),
+    steerActiveTurn: (prompt, inputPayload) => piRuntime.steerActiveTurn(prompt, inputPayload),
     updatePermissions: () => {
       // pi 权限档位经 canReuse 比对在下一轮 ensure 重建生效（与模型/思考等级同机制），
       // 原地更新为 no-op。

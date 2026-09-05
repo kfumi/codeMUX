@@ -27,14 +27,21 @@ describe('agent registry', () => {
     expect(getAgentDefinition('opencode')?.capabilities).toEqual([
       'supports_resume',
       'supports_tools',
+      'supports_steer',
     ]);
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_cost');
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_file_snapshots');
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_ask_user_question');
   });
 
-  it('marks pi as supporting active-turn steer', () => {
+  it('marks Claude, Codex, OpenCode and pi as supporting steer', () => {
+    expect(getAgentDefinition('claude_code')?.capabilities).toContain('supports_steer');
+    expect(getAgentDefinition('codex')?.capabilities).toContain('supports_steer');
+    expect(getAgentDefinition('opencode')?.capabilities).toContain('supports_steer');
     expect(getAgentDefinition('pi')?.capabilities).toContain('supports_steer');
-    expect(getAgentDefinition('claude_code')?.capabilities).not.toContain('supports_steer');
+  });
+
+  it('does not mark Gemini CLI as supporting steer', () => {
+    expect(getAgentDefinition('gemini_cli')?.capabilities).not.toContain('supports_steer');
   });
 });

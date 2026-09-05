@@ -97,7 +97,7 @@ export type SidecarCommand =
   | { type: 'rewind_conversation'; sessionId: string; requestId: string; entryId: string }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'enrich_attachments'; requestId: string; attachments: AgentInputAttachment[]; protocol: 'anthropic' | 'openai_compatible'; apiKey: string; baseUrl: string; model: string }
-  | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }
+  | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload; delivery?: 'steer'; requestId?: string }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'delete_session'; sessionId: string; agentSessionId: string; requestId: string; cwd?: string; runtimeRef: ProviderRuntimeRef }
   | { type: 'interrupt' }

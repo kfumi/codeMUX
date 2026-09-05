@@ -274,42 +274,65 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
-  it('steers pi follow-ups into the active turn instead of queueing them', async () => {
+  it('queues pi follow-ups during a running turn instead of sending them immediately', async () => {
     const { useAgentStore } = await import('./agentStore');
     const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('pi');
     startSessionMock.mockImplementationOnce(async () => undefined);
-    vi.mocked(agentApi.sendInput).mockResolvedValue(undefined);
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
-    await useAgentStore.getState().startQuery(session.id, 'focus on errors', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'third message', 'D:\\workspace');
 
+    expect(startSessionMock).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+      'third message',
+    ]);
+  });
+
+  it('runQueuedQueryNow steers a running pi turn and keeps the remaining queue', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('pi');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'third message', 'D:\\workspace');
+
+    const queueBefore = useAgentStore.getState().queuedQueries[session.id] ?? [];
+    const promoted = queueBefore[1];
+    expect(promoted?.prompt).toBe('third message');
+
+    await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
+
+    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
     expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
       session.id,
-      'focus on errors',
-      { text: 'focus on errors' },
-      'focus on errors',
+      'third message',
+      undefined,
+      undefined,
+      expect.objectContaining({ delivery: 'steer', requestId: expect.any(String) }),
     );
-    expect(useAgentStore.getState().queuedQueries[session.id] ?? []).toEqual([]);
-    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
-    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user').map((event) => (
-      event.kind === 'user' ? event.data.content : undefined
-    ))).toEqual(['first message', 'focus on errors']);
-  });
-
-  it('still queues pi slash commands while a turn is running', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
-    const session = await primeSession('pi');
-    startSessionMock.mockImplementationOnce(async () => undefined);
-
-    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
-    await useAgentStore.getState().startQuery(session.id, '/compact', 'D:\\workspace');
-
-    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
     expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
-      '/compact',
+      'second message',
+    ]);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'steer_result',
+      request_id: (vi.mocked(agentApi.sendInput).mock.calls[0]?.[4] as { requestId: string }).requestId,
+      ok: true,
+    }));
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
     ]);
   });
 
@@ -332,15 +355,12 @@ describe('agent store Codex history loading', () => {
     ))).toBe(true);
   });
 
-  it('runQueuedQueryNow interrupts the active turn and runs the chosen message first', async () => {
+  it('runQueuedQueryNow steers the active Codex turn without interrupting', async () => {
     const { useAgentStore } = await import('./agentStore');
     const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
-    let firstOnEvent: ((event: string) => void) | undefined;
 
-    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
-      firstOnEvent = onEvent;
-    });
+    startSessionMock.mockImplementationOnce(async () => undefined);
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
     await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
@@ -351,44 +371,30 @@ describe('agent store Codex history loading', () => {
     expect(promoted?.prompt).toBe('third message');
     expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
 
-    const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
+    await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
-    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
-
-    firstOnEvent?.(JSON.stringify({
-      type: 'result',
-      subtype: 'success',
-      is_error: false,
-      result: '',
-      session_id: session.id,
-    }));
-
-    await runPromise;
-
-    expect(useAgentStore.getState().queuePaused[session.id]).toBe(false);
-
-    await vi.waitFor(() => {
-      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
-        'first message',
-        'third message',
-        'second message',
-      ]);
-    });
-    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
-    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+      session.id,
+      'third message',
+      undefined,
+      undefined,
+      expect.objectContaining({ delivery: 'steer' }),
+    );
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+    ]);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().queuePaused[session.id]).toBeFalsy();
   });
 
-  it('keeps isRunning true after runQueuedQueryNow until the promoted turn finishes', async () => {
+  it('keeps isRunning true after runQueuedQueryNow steers the queued message', async () => {
     const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
-    let firstOnEvent: ((event: string) => void) | undefined;
 
-    startSessionMock
-      .mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
-        firstOnEvent = onEvent;
-      })
-      .mockImplementationOnce(async () => {});
+    startSessionMock.mockImplementationOnce(async () => undefined);
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
     await useAgentStore.getState().startQuery(session.id, 'queued second', 'D:\\workspace');
@@ -396,7 +402,166 @@ describe('agent store Codex history loading', () => {
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
     expect(queued?.prompt).toBe('queued second');
 
+    await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+
+    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+      session.id,
+      'queued second',
+      undefined,
+      undefined,
+      expect.objectContaining({ delivery: 'steer' }),
+    );
+    expect(startSessionMock).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
+  it('runQueuedQueryNow interrupts a slash command instead of steering', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, '/compact', 'D:\\workspace');
+
+    const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    expect(queued?.prompt).toBe('/compact');
+
     const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+    await runPromise;
+
+    await vi.waitFor(() => {
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
+        'first message',
+        '/compact',
+      ]);
+    });
+  });
+
+  it('runQueuedQueryNow interrupts agents that cannot steer', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('gemini_cli');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+
+    const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+
+    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+    await runPromise;
+
+    await vi.waitFor(() => {
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
+        'first message',
+        'second message',
+      ]);
+    });
+  });
+
+  it('runQueuedQueryNow interrupts when the user prefers interrupt over steer', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSettingsStore } = await import('./settingsStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? { ...state.config, immediate_run_mode: 'interrupt' }
+        : state.config,
+    }));
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+
+    const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+
+    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+    await runPromise;
+
+    await vi.waitFor(() => {
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
+        'first message',
+        'second message',
+      ]);
+    });
+  });
+
+  it('falls back to interrupt when steer_result reports unavailable', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { agentApi } = await import('../lib/tauri');
+    const session = await primeSession('codex');
+    let firstOnEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      firstOnEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'steer me', 'D:\\workspace');
+
+    const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
+
+    const requestId = (vi.mocked(agentApi.sendInput).mock.calls[0]?.[4] as { requestId: string }).requestId;
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+
+    firstOnEvent?.(JSON.stringify({
+      type: 'steer_result',
+      request_id: requestId,
+      ok: false,
+      unavailable: true,
+    }));
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]?.[0]?.prompt).toBe('steer me');
 
     firstOnEvent?.(JSON.stringify({
       type: 'result',
@@ -406,11 +571,11 @@ describe('agent store Codex history loading', () => {
       session_id: session.id,
     }));
 
-    await runPromise;
-
     await vi.waitFor(() => {
-      expect(startSessionMock).toHaveBeenCalledTimes(2);
-      expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+      expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual([
+        'first message',
+        'steer me',
+      ]);
     });
   });
 

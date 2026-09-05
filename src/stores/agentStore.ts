@@ -6,6 +6,8 @@ import {
 } from '../lib/attachToActiveTurn';
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
 import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
+import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
+import { supportsCapability } from '../components/agent/agentCapabilities';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   buildSessionTitleFromUserContent,
@@ -86,7 +88,6 @@ import {
 } from '../components/agent/contextUsage';
 import { buildConversationTurns } from '../lib/conversationTurns';
 import { extractTodosFromEvents } from '../lib/extractTodosFromEvents';
-import { supportsCapability } from '../components/agent/agentCapabilities';
 import type { ConversationTurn } from '../types/conversationTurn';
 
 export type AgentMessage =
@@ -1624,6 +1625,7 @@ function updateSessionWorkingPaths(
 
 export const useAgentStore = create<AgentState>((set, get) => {
   const queuedDispatches = new Map<string, Promise<void>>();
+  const inflightSteerRequests = new Map<string, { sessionId: string; query: QueuedAgentQuery }>();
 
   const createQueuedQuery = (
     prompt: string,
@@ -1705,6 +1707,66 @@ export const useAgentStore = create<AgentState>((set, get) => {
     });
   };
 
+  const consumeSteerResultEvent = (
+    raw: string,
+    onUnavailable: (sessionId: string, query: QueuedAgentQuery) => void,
+  ): boolean => {
+    try {
+      const data = JSON.parse(raw) as {
+        type?: string;
+        request_id?: string;
+        ok?: boolean;
+      };
+      if (data.type !== 'steer_result' || typeof data.request_id !== 'string') {
+        return false;
+      }
+      const pending = inflightSteerRequests.get(data.request_id);
+      inflightSteerRequests.delete(data.request_id);
+      if (pending && data.ok !== true) {
+        onUnavailable(pending.sessionId, pending.query);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const interruptAndRunQueuedQuery = async (sessionId: string, queryId: string) => {
+    const queue = get().queuedQueries[sessionId] ?? [];
+    if (!queue.some((query) => query.id === queryId)) {
+      return;
+    }
+
+    get().reorderQueuedQuery(sessionId, queryId, 0);
+
+    const wasRunning = get().isRunning[sessionId] ?? false;
+    await get().interrupt(sessionId);
+    if (wasRunning) {
+      await waitForInterruptDrain(sessionId);
+    }
+    get().resumeQueuedQueries(sessionId);
+  };
+
+  const restoreQueuedQueryAtFront = (sessionId: string, query: QueuedAgentQuery) => {
+    set((state) => {
+      const current = state.queuedQueries[sessionId] ?? [];
+      if (current.some((item) => item.id === query.id)) {
+        return state;
+      }
+      return {
+        queuedQueries: {
+          ...state.queuedQueries,
+          [sessionId]: [query, ...current],
+        },
+      };
+    });
+  };
+
+  const fallbackQueuedQueryNow = (sessionId: string, query: QueuedAgentQuery) => {
+    restoreQueuedQueryAtFront(sessionId, query);
+    void interruptAndRunQueuedQuery(sessionId, query.id);
+  };
+
   return ({
   events: {},
   turns: {},
@@ -1771,53 +1833,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       await pendingHistoryLoad;
     }
     const currentState = get();
-    const isSlashCommand = prompt.trim().startsWith('/');
-    const canSteerIntoActiveTurn =
-      !fromQueue
-      && Boolean(currentState.isRunning[sessionId])
-      && !queuedDispatches.has(sessionId)
-      && !isSlashCommand
-      && !!targetSession
-      && supportsCapability(targetSession.agent_kind, 'supports_steer');
-    if (canSteerIntoActiveTurn) {
-      const steerPayload = inputPayload ?? { text: prompt };
-      const steerAttachments = getPayloadImageAttachments(steerPayload).map((image) => ({
-        type: 'image' as const,
-        name: image.name,
-        mediaType: image.mediaType,
-        dataUrl: image.dataUrl,
-      }));
-      const steerUserContent = displayContent ?? steerPayload.text;
-      useSessionStore.getState().touchSession(sessionId);
-      const steerUserMsg: AgentMessage = {
-        kind: 'user',
-        data: {
-          content: steerUserContent,
-          ...(steerAttachments.length > 0 ? { attachments: steerAttachments } : {}),
-        },
-      };
-      set((s) => ({
-        events: {
-          ...s.events,
-          [sessionId]: [...(s.events[sessionId] || []), steerUserMsg],
-        },
-        eventTimestamps: {
-          ...s.eventTimestamps,
-          [sessionId]: [...(s.eventTimestamps[sessionId] || []), Date.now()],
-        },
-        error: { ...s.error, [sessionId]: null },
-      }));
-      try {
-        await agentApi.sendInput(sessionId, steerPayload.text, steerPayload, steerUserContent);
-      } catch (err) {
-        logger.error('Agent steer failed', { sessionId }, serializeError(err));
-        set((s) => ({
-          error: { ...s.error, [sessionId]: String(err) },
-        }));
-        throw err;
-      }
-      return;
-    }
     // Queue composer sends only while a turn is active or a queued dispatch is in flight.
     // After a failed/paused turn, composer input starts a new turn immediately; existing
     // queued messages stay in order and run after that turn succeeds.
@@ -1987,6 +2002,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // Subagent tracks are routed to their own store and never enter the
         // parent timeline events.
         if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
+          return;
+        }
+        if (consumeSteerResultEvent(raw, (failedSessionId, query) => {
+          void fallbackQueuedQueryNow(failedSessionId, query);
+        })) {
           return;
         }
         let event = parseAgentEvent(raw);
@@ -2912,26 +2932,43 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
   runQueuedQueryNow: async (sessionId: string, queryId: string) => {
     const queue = get().queuedQueries[sessionId] ?? [];
-    if (!queue.some((query) => query.id === queryId)) {
+    const query = queue.find((item) => item.id === queryId);
+    if (!query) {
       return;
     }
 
-    // Promote the chosen message to the front; the remaining messages keep their relative order.
-    get().reorderQueuedQuery(sessionId, queryId, 0);
-
+    const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
+      ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
     const wasRunning = get().isRunning[sessionId] ?? false;
+    const prefersSteer = normalizeImmediateRunMode(useSettingsStore.getState().config?.immediate_run_mode) === 'steer';
+    const canSteer = prefersSteer
+      && wasRunning
+      && !isSteerBlockedPrompt(query.prompt)
+      && !!targetSession
+      && supportsCapability(targetSession.agent_kind, 'supports_steer');
 
-    // Stop the active turn first (no-op when nothing is running).
-    await get().interrupt(sessionId);
-
-    // Wait for the interrupted turn to emit its terminal event before starting the promoted message.
-    // Otherwise a stale terminal can land on the new handler and clear isRunning immediately.
-    if (wasRunning) {
-      await waitForInterruptDrain(sessionId);
+    if (canSteer) {
+      const requestId = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      get().removeQueuedQuery(sessionId, queryId);
+      inflightSteerRequests.set(requestId, { sessionId, query });
+      try {
+        await agentApi.sendInput(
+          sessionId,
+          query.prompt,
+          query.inputPayload,
+          query.displayContent,
+          { delivery: 'steer', requestId },
+        );
+      } catch (error) {
+        inflightSteerRequests.delete(requestId);
+        logger.error('Agent steer failed; falling back to interrupt', { sessionId, queryId }, serializeError(error));
+        restoreQueuedQueryAtFront(sessionId, query);
+        await interruptAndRunQueuedQuery(sessionId, query.id);
+      }
+      return;
     }
 
-    // Interrupting pauses the queue by design — lift the pause so the promoted message runs now.
-    get().resumeQueuedQueries(sessionId);
+    await interruptAndRunQueuedQuery(sessionId, queryId);
   },
 
   clearQueuedQueries: (sessionId: string) => {

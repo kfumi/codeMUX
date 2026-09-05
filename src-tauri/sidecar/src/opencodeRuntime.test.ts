@@ -1252,6 +1252,32 @@ describe('OpenCodeRuntime', () => {
     expect(client.abort).toHaveBeenCalledWith('opencode-new');
   });
 
+  it('steers an active task with a second prompt without replacing the active task', async () => {
+    const { port, client } = createPort();
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    const sendPromise = runtime.sendInput('long task');
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledTimes(1));
+    await runtime.steerActiveTurn('focus on tests');
+    expect(client.prompt).toHaveBeenCalledTimes(2);
+    expect(client.prompt.mock.calls[1]?.[0]).toMatchObject({
+      sessionId: 'opencode-new',
+      prompt: 'focus on tests',
+      agent: 'build',
+    });
+    await expect(runtime.sendInput('another turn')).rejects.toThrow(/already has an active task/);
+
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-1' } });
+    await sendPromise;
+    await runtime.shutdown();
+  });
+
   it('continues cleanup after interrupt and active task failures, then aggregates errors', async () => {
     const { port, server, client } = createPort();
     let rejectPrompt!: (reason: unknown) => void;

@@ -8,6 +8,7 @@ const deleteModelProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
 const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const setDefaultOpenTargetMock = vi.fn<(target: string) => Promise<void>>();
+const setImmediateRunModeMock = vi.fn<(mode: string) => Promise<void>>();
 const setBrowserControlMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const getConfigMock = vi.fn(async () => structuredClone(baseConfig));
 
@@ -27,6 +28,7 @@ vi.mock('../lib/tauri', () => ({
     setCompactAiOutput: setCompactAiOutputMock,
     setNotificationSettings: setNotificationSettingsMock,
     setDefaultOpenTarget: setDefaultOpenTargetMock,
+    setImmediateRunMode: setImmediateRunModeMock,
     setBrowserControl: setBrowserControlMock,
   },
   agentApi: {
@@ -115,6 +117,15 @@ describe('settings store agent config actions', () => {
 
     expect(setDefaultOpenTargetMock).toHaveBeenCalledWith('vscode');
     expect(useSettingsStore.getState().config?.default_open_target).toBe('vscode');
+  });
+
+  it('persists the immediate-run preference', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setImmediateRunMode('interrupt');
+
+    expect(setImmediateRunModeMock).toHaveBeenCalledWith('interrupt');
+    expect(useSettingsStore.getState().config?.immediate_run_mode).toBe('interrupt');
   });
 
   it('keeps the active provider consistent when the active provider is deleted', async () => {

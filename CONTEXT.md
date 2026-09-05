@@ -66,8 +66,8 @@ _Avoid_: prompt, input event
 _Avoid_: steering（注入进行中的一轮）, 把排队消息当作已进入对话历史的消息
 
 ### Immediate Run
-把某条 Queued Message 提前为下一轮的动作：打断当前进行中的 turn（该轮 Turn Outcome 记为中断），被选中的消息立即发送，其余排队消息保留原顺序随后执行。它作用于 turn 边界，不是 turn 中途的 steer。
-_Avoid_: 轮中热切 / steer, 清空剩余队列, 中断后自动放行整个队列
+把某条 Queued Message 立刻生效的动作。用户可在设置中选择默认走注入当前轮（steer）还是打断当前轮；缺省为注入。当前 Agent Kind 支持注入且偏好为注入时，将消息 steer 进进行中的 turn（不打断、不改 Turn Outcome）；偏好为打断、不支持、没有活跃 turn、斜杠命令、或协议拒绝时，回落为打断当前轮再作为下一轮发送。其余排队消息保留原顺序，等这一轮真正结束后再发。
+_Avoid_: 把普通 composer 发送当成 steer, 清空剩余队列, 中断后自动放行整个队列
 
 ### System Event
 不属于用户或助手正文、但会改变对话解释方式的领域事件，例如上下文压缩边界和 Agent Kind Switch。它可以被 UI 投影为状态提示，但不应被当作助手正文或 User Message。

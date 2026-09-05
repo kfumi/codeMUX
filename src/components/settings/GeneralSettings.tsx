@@ -4,18 +4,22 @@ import { Copy, FolderOpen, Check } from 'lucide-react';
 
 import { appApi } from '../../lib/tauri';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
+import { normalizeImmediateRunMode } from '../../lib/agentSteer';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
+import type { ImmediateRunMode } from '../../types/provider';
 
 export function GeneralSettings() {
   const [configDir, setConfigDir] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
+  const immediateRunMode = useSettingsStore((state) => normalizeImmediateRunMode(state.config?.immediate_run_mode));
   const defaultOpenTarget = useSettingsStore((state) => normalizeOpenTarget(state.config?.default_open_target));
   const setCompactAiOutput = useSettingsStore((state) => state.setCompactAiOutput);
+  const setImmediateRunMode = useSettingsStore((state) => state.setImmediateRunMode);
   const setDefaultOpenTarget = useSettingsStore((state) => state.setDefaultOpenTarget);
 
   useEffect(() => {
@@ -59,6 +63,34 @@ export function GeneralSettings() {
               void setCompactAiOutput(checked);
             }}
           />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <label className="text-sm text-foreground/74">对话</label>
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/90">「立即」的行为</div>
+            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+              运行中点排队消息的「立即」时，优先引导进当前轮，还是中断当前轮再发送。斜杠命令和不支持引导的智能体仍会中断。
+            </p>
+          </div>
+          <Select
+            value={immediateRunMode}
+            onValueChange={(value) => {
+              void setImmediateRunMode(value as ImmediateRunMode);
+            }}
+          >
+            <SelectTrigger aria-label="立即的行为" className="h-9 w-28 shrink-0 rounded-lg">
+              <SelectValue>
+                {immediateRunMode === 'interrupt' ? '中断' : '引导'}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="steer">引导</SelectItem>
+              <SelectItem value="interrupt">中断</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

@@ -3,6 +3,7 @@ import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionC
 import type { OpenTarget } from '../lib/openTargets';
 
 export type Theme = 'Light' | 'Dark' | 'System';
+export type ImmediateRunMode = 'steer' | 'interrupt';
 
 export const NOTIFICATION_SOUNDS = ['ding', 'chime', 'bell', 'success'] as const;
 export type NotificationSound = typeof NOTIFICATION_SOUNDS[number];
@@ -168,6 +169,8 @@ export interface AppConfig {
   agent_defaults: AgentDefaults;
   agent_configs: AgentConfigMap;
   compact_ai_output: boolean;
+  /** Queue “立即” when the agent can steer: inject into the current turn, or interrupt. */
+  immediate_run_mode?: ImmediateRunMode;
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
   git?: GitSettings;

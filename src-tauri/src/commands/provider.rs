@@ -302,6 +302,23 @@ pub fn set_compact_ai_output(
 }
 
 #[tauri::command]
+pub fn set_immediate_run_mode(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    mode: String,
+) -> Result<(), String> {
+    if !matches!(mode.as_str(), "steer" | "interrupt") {
+        return Err(format!("Unsupported immediate run mode: {}", mode));
+    }
+
+    info!(target: "provider", "Setting immediate run mode mode={}", mode);
+    let mut config = state.config.lock().unwrap();
+    config.immediate_run_mode = mode;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_attachment_enrichment(
     state: State<'_, AppState>,
     app: AppHandle,

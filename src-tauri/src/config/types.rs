@@ -73,6 +73,10 @@ fn default_open_target() -> String {
     "file_explorer".to_string()
 }
 
+fn default_immediate_run_mode() -> String {
+    "steer".to_string()
+}
+
 fn default_companion_port() -> u16 {
     9240
 }
@@ -445,6 +449,8 @@ pub struct AppConfig {
     pub agent_configs: AgentConfigs,
     #[serde(default = "default_false")]
     pub compact_ai_output: bool,
+    #[serde(default = "default_immediate_run_mode")]
+    pub immediate_run_mode: String,
     #[serde(default = "default_open_target")]
     pub default_open_target: String,
     #[serde(default)]
@@ -479,6 +485,7 @@ impl Default for AppConfig {
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
             compact_ai_output: false,
+            immediate_run_mode: default_immediate_run_mode(),
             default_open_target: default_open_target(),
             notifications: NotificationSettings::default(),
             git: GitSettingsConfig::default(),
@@ -511,6 +518,7 @@ mod tests {
         assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert!(!config.compact_ai_output);
+        assert_eq!(config.immediate_run_mode, "steer");
     }
 
     #[test]

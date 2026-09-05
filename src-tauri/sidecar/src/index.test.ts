@@ -11,6 +11,7 @@ function createRuntime() {
     emitSessionMapping: vi.fn(),
     updatePermissions: vi.fn(),
     sendInput: vi.fn().mockResolvedValue(undefined),
+    steerActiveTurn: vi.fn().mockResolvedValue(undefined),
     forkSession: vi.fn().mockResolvedValue('forked-session'),
     resetSession: vi.fn().mockResolvedValue(undefined),
     deleteSession: vi.fn().mockResolvedValue(undefined),
@@ -623,5 +624,71 @@ describe('sidecar command dispatcher', () => {
       response: 'always',
     };
     expect(command.type).toBe('respond_to_permission');
+  });
+
+  it('routes send_input delivery steer to steerActiveTurn and emits user_message plus steer_result', async () => {
+    const claude = createRuntime();
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'session-1' });
+    await dispatcher.dispatch({
+      type: 'send_input',
+      sessionId: 'session-1',
+      prompt: 'focus on tests',
+      delivery: 'steer',
+      requestId: 'steer-1',
+    });
+
+    expect(claude.steerActiveTurn).toHaveBeenCalledWith('focus on tests', undefined);
+    expect(claude.sendInput).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'user_message',
+      session_id: 'session-1',
+      content: 'focus on tests',
+    }));
+    expect(emit).toHaveBeenCalledWith({ type: 'steer_result', request_id: 'steer-1', ok: true });
+  });
+
+  it('emits steer_result unavailable when steerActiveTurn rejects as unavailable', async () => {
+    const { SteerUnavailableError } = await import('./steer.js');
+    const claude = createRuntime();
+    claude.steerActiveTurn.mockRejectedValue(new SteerUnavailableError('no active Claude turn to steer'));
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'session-1' });
+    await dispatcher.dispatch({
+      type: 'send_input',
+      sessionId: 'session-1',
+      prompt: 'focus on tests',
+      delivery: 'steer',
+      requestId: 'steer-2',
+    });
+
+    expect(emit).toHaveBeenCalledWith({
+      type: 'steer_result',
+      request_id: 'steer-2',
+      ok: false,
+      unavailable: true,
+      error: expect.stringContaining('no active Claude turn'),
+    });
+    expect(claude.sendInput).not.toHaveBeenCalled();
   });
 });

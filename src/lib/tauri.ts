@@ -14,6 +14,7 @@ import type {
   Provider,
   Theme,
   BrowserControlSettings,
+  ImmediateRunMode,
 } from '../types/provider';
 import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
@@ -373,7 +374,15 @@ export const agentApi = {
     prompt: string,
     inputPayload?: AgentInputPayload,
     displayContent?: string,
-  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt, inputPayload, displayContent }),
+    options?: { delivery?: 'steer'; requestId?: string },
+  ): Promise<void> => invokeLogged('send_agent_input', {
+    sessionId,
+    prompt,
+    inputPayload,
+    displayContent,
+    delivery: options?.delivery,
+    requestId: options?.requestId,
+  }),
   enrichAttachments: (attachments: AgentInputAttachment[]): Promise<{ blocks: EnrichmentBlockResult[] }> =>
     invokeLogged('enrich_attachments', { attachments }),
   startSession: (
@@ -484,6 +493,8 @@ export const configApi = {
   setTheme: (theme: Theme): Promise<void> => invokeLogged('set_theme', { theme: theme.toLowerCase() }),
   setCompactAiOutput: (enabled: boolean): Promise<void> =>
     invokeLogged('set_compact_ai_output', { enabled }),
+  setImmediateRunMode: (mode: ImmediateRunMode): Promise<void> =>
+    invokeLogged('set_immediate_run_mode', { mode }),
   setAttachmentEnrichment: (enrichment: ImageRecognitionConfig): Promise<void> =>
     invokeLogged('set_attachment_enrichment', { enrichment }),
   setNotificationSettings: (settings: NotificationSettings): Promise<void> =>

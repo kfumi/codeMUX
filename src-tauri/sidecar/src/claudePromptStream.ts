@@ -21,7 +21,7 @@ export class ClaudePromptStream {
   }
 
   /** Push a follow-up prompt. Returns false when the stream is closed. */
-  push(prompt: string, inputPayload?: AgentInputPayload): boolean {
+  push(prompt: string, inputPayload?: AgentInputPayload, options?: { priority?: 'next' }): boolean {
     if (this.closed) return false;
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
     this.pending.push({
@@ -31,6 +31,7 @@ export class ClaudePromptStream {
         content: buildClaudeUserMessageContent(payload, this.includeImages) as SDKUserMessage['message']['content'],
       },
       parent_tool_use_id: null,
+      ...(options?.priority ? { priority: options.priority } : {}),
     });
     this.wake();
     return true;

@@ -32,6 +32,7 @@ import { setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import { isMutationTool, TurnArtifactAggregator } from './turnArtifactSummary.js';
+import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -277,6 +278,39 @@ export class OpenCodeRuntime {
         this.activeTask = undefined;
       }
     }
+  }
+
+  async steerActiveTurn(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (this.shutdownPromise || this.state === 'disposing' || this.state === 'cleanup_failed') {
+      throw new SteerUnavailableError('OpenCode runtime is shutting down');
+    }
+    if (this.state !== 'started' || !client || !sessionId || !this.activeTask) {
+      throw new SteerUnavailableError('no active OpenCode turn to steer');
+    }
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    if (isSteerBlockedPrompt(payload.text)) {
+      throw new SteerUnavailableError('slash commands cannot steer an active OpenCode turn');
+    }
+    const agent = this.planMode === 'on' ? 'plan' : 'build';
+    try {
+      await client.prompt({
+        sessionId,
+        prompt: payload.text,
+        inputPayload: payload,
+        images: mapOpenCodeImages(payload),
+        provider: this.config.provider,
+        model: this.config.model,
+        agent,
+      });
+    } catch (error) {
+      if (isOpenCodeSteerRejection(error)) {
+        throw new SteerUnavailableError(error instanceof Error ? error.message : String(error));
+      }
+      throw error;
+    }
+    writeLog('[opencode-task]', `steer QUEUED prompt_preview=${payload.text.slice(0, 120)}`);
   }
 
   private async compactSession(): Promise<void> {
@@ -1473,6 +1507,15 @@ function providerFailureMessage(event: unknown): string {
   return readString(status?.message)
     ?? readString(asRecord(status?.action)?.message)
     ?? 'OpenCode 子任务因免费额度限制失败，请检查账户额度或订阅状态';
+}
+
+function isOpenCodeSteerRejection(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  return message.includes('404')
+    || message.includes('409')
+    || message.includes('not found')
+    || message.includes('busy')
+    || message.includes('not running');
 }
 
 function isChildTerminalEventType(type: string): boolean {
