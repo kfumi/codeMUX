@@ -9,7 +9,7 @@ use crate::companion::pairing_code::{
     resolve_lan_ip,
 };
 use crate::companion::relay::{set_relay_config, set_relay_enabled, RelayConnectionState};
-use crate::companion::{start_companion_server, stop_companion_server, CompanionState};
+use crate::companion::{start_daemon_server, stop_daemon_server, CompanionState};
 use crate::config;
 use crate::db::operations::{self, PairedDevice};
 use crate::AppState;
@@ -27,7 +27,11 @@ pub struct CompanionRelayStatus {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompanionStatus {
+    /// LAN / relay exposure (user-facing "移动伴侣").
     pub enabled: bool,
+    /// Loopback daemon is listening.
+    pub daemon_ready: bool,
+    pub daemon_error: Option<String>,
     pub port: u16,
     pub desktop_id: Option<String>,
     pub lan_ip: Option<String>,
@@ -66,7 +70,8 @@ async fn build_companion_status(
     companion_state: &CompanionState,
 ) -> Result<CompanionStatus, String> {
     let desktop_id = ensure_desktop_id_persisted(app, state)?;
-    let enabled = companion_state.inner.is_enabled();
+    let daemon_ready = companion_state.inner.is_loopback_running();
+    let lan_exposed = companion_state.inner.is_lan_exposed();
     let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
 
     let (
@@ -87,7 +92,7 @@ async fn build_companion_status(
         let previous_lan_ip = config.companion.last_lan_ip.clone();
         let lan_ip = resolve_lan_ip(&mut config.companion, detected_lan_ip);
         let mut should_save_config = previous_lan_ip != config.companion.last_lan_ip;
-        let (pairing_code, pairing_code_expires_at) = if enabled {
+        let (pairing_code, pairing_code_expires_at) = if lan_exposed {
             let previous_code = config.companion.pairing_code.clone();
             let code = ensure_persisted_pairing_code(companion_state, &mut config.companion);
             if config.companion.pairing_code != previous_code {
@@ -118,7 +123,9 @@ async fn build_companion_status(
     let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
 
     Ok(CompanionStatus {
-        enabled,
+        enabled: lan_exposed,
+        daemon_ready,
+        daemon_error: None,
         port,
         desktop_id: Some(desktop_id),
         lan_ip,
@@ -133,6 +140,11 @@ async fn build_companion_status(
             desktop_public_key_b64,
         },
     })
+}
+
+#[tauri::command]
+pub fn get_local_daemon_token(state: State<'_, AppState>) -> Result<String, String> {
+    crate::companion::local_daemon_token::ensure_local_daemon_token(&state.app_data_dir, false)
 }
 
 #[tauri::command]
@@ -169,20 +181,27 @@ pub async fn set_companion_enabled(
                 config.companion.listen_address.clone(),
             )
         };
-        if let Err(error) = start_companion_server(app.clone(), port, listen_address).await {
+        if let Err(error) = start_daemon_server(app.clone(), port, true, listen_address).await {
             let mut config = state.config.lock().map_err(|error| error.to_string())?;
             config.companion.enabled = false;
             config::save_config(&app, &config)?;
-            companion_state.inner.set_enabled(false);
+            companion_state.inner.set_lan_exposed(false);
             companion_state.clear_pairing_codes();
             return Err(error);
         }
     } else {
-        stop_companion_server(app.clone()).await?;
-        // Stopping the companion should disconnect existing clients without
-        // revoking their pairing tokens, so a short desktop restart can
-        // recover automatically.
+        let (port, listen_address) = {
+            let config = state.config.lock().map_err(|error| error.to_string())?;
+            (
+                config.companion.port,
+                config.companion.listen_address.clone(),
+            )
+        };
+        crate::companion::relay::stop_relay_transport(&companion_state).await;
         companion_state.clear_pairing_codes();
+        if let Err(error) = start_daemon_server(app.clone(), port, false, listen_address).await {
+            return Err(error);
+        }
     }
 
     build_companion_status(&app, state.inner(), &companion_state).await
@@ -217,7 +236,7 @@ pub async fn refresh_companion_pairing_code(
     state: State<'_, AppState>,
     companion_state: State<'_, CompanionState>,
 ) -> Result<CompanionStatus, String> {
-    if !companion_state.inner.is_enabled() {
+    if !companion_state.inner.is_lan_exposed() {
         return Err("Companion server is not enabled".to_string());
     }
     {
@@ -247,7 +266,7 @@ pub async fn get_companion_pairing_offer(
     let (desktop_id, port, relay, lan_ip) = {
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         let mut should_save = false;
-        if companion_state.inner.is_enabled() {
+        if companion_state.inner.is_lan_exposed() {
             let previous_code = config.companion.pairing_code.clone();
             ensure_persisted_pairing_code(&companion_state, &mut config.companion);
             if config.companion.pairing_code != previous_code {

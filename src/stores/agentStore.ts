@@ -5,7 +5,8 @@ import {
   shouldPreferLocalEventsOnHistoryLoad,
 } from '../lib/attachToActiveTurn';
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
-import { agentApi, companionApi, fileApi, sessionApi } from '../lib/tauri';
+import { agentApi, companionApi, fileApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
 import { supportsCapability } from '../components/agent/agentCapabilities';
 import { createLogger, serializeError } from '../lib/logger';
@@ -1815,7 +1816,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         session.id === sessionId ? { ...session, working_path: trimmed } : session
       )),
     }));
-    void sessionApi.updateWorkingPath(sessionId, trimmed).catch((error) => {
+    void daemonFacade.updateWorkingPath(sessionId, trimmed).catch((error) => {
       logger.warn('Failed to persist session working path', { sessionId }, serializeError(error));
     });
   },
@@ -2834,7 +2835,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const request = (get().pendingPermissions[sessionId] ?? []).find((item) => item.request_id === requestId);
     if (!request) return;
     try {
-      await agentApi.respondToAgentPermission(sessionId, request.request_id, response);
+      await daemonFacade.respondToPermissionViaDaemon(sessionId, request.request_id, response);
       set((state) => ({
         pendingPermissions: {
           ...state.pendingPermissions,
@@ -2883,7 +2884,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
     try {
-      await agentApi.interrupt(sessionId);
+      await daemonFacade.interruptViaDaemon(sessionId);
     } catch {
       // Sidecar may already be gone — UI is already stopped.
     }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
@@ -20,6 +20,8 @@ use crate::companion::actions::{
     interrupt_companion_session, respond_companion_permission, send_companion_message,
     send_companion_tool_response, update_companion_settings, CompanionSettingsUpdate,
 };
+use crate::companion::local_daemon_token;
+use crate::companion::routes_extended;
 use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
@@ -31,8 +33,8 @@ use crate::db::operations;
 use crate::AppState;
 
 #[derive(Clone)]
-struct ServerContext {
-    app: AppHandle,
+pub(crate) struct ServerContext {
+    pub app: AppHandle,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,15 +142,20 @@ struct WsQuery {
     session_id: String,
 }
 
-pub async fn start_companion_server(
+pub async fn start_daemon_server(
     app: AppHandle,
     port: u16,
-    listen_address: String,
+    expose_lan: bool,
+    lan_listen_address: String,
 ) -> Result<(), String> {
     let companion_state = app.state::<CompanionState>();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
 
-    stop_companion_server_inner(&companion_state).await?;
+    stop_daemon_server_inner(&companion_state).await?;
+
+    let app_state = app.state::<AppState>();
+    let app_data_dir = app_state.app_data_dir.clone();
+    let _token = local_daemon_token::ensure_local_daemon_token(&app_data_dir, true)?;
 
     {
         let mut stored_port = companion_state.inner.port.write().await;
@@ -159,7 +166,12 @@ pub async fn start_companion_server(
     let ctx = ServerContext { app: app.clone() };
     let router = build_router(ctx, static_dir);
 
-    let addr = parse_listen_addr(&listen_address, port)?;
+    let bind_address = if expose_lan {
+        lan_listen_address.trim()
+    } else {
+        "127.0.0.1"
+    };
+    let addr = parse_listen_addr(bind_address, port)?;
     let listener = bind_listener_with_retry(addr).await?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -171,38 +183,64 @@ pub async fn start_companion_server(
         *waiter = Some(stopped_rx);
     }
 
-    companion_state.inner.set_enabled(true);
-    info!(target: "companion", "Companion server listening on {}", addr);
+    companion_state.inner.set_loopback_running(true);
+    companion_state.inner.set_lan_exposed(expose_lan);
+    info!(
+        target: "companion",
+        "Daemon server listening on {} (lan_exposed={})",
+        addr,
+        expose_lan
+    );
 
-    if let Err(error) = crate::companion::relay::sync_relay_transport(&app, &companion_state).await
-    {
-        warn!(target: "companion", "Failed to start relay transport: {}", error);
+    if expose_lan {
+        if let Err(error) =
+            crate::companion::relay::sync_relay_transport(&app, &companion_state).await
+        {
+            warn!(target: "companion", "Failed to start relay transport: {}", error);
+        }
     }
 
     let companion_for_shutdown = companion_state.inner.clone();
     tokio::spawn(async move {
-        let result = axum::serve(listener, router)
+        let result = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
             })
             .await;
         if let Err(error) = result {
-            warn!(target: "companion", "Companion server stopped with error: {}", error);
+            warn!(target: "companion", "Daemon server stopped with error: {}", error);
         }
-        companion_for_shutdown.set_enabled(false);
+        companion_for_shutdown.set_loopback_running(false);
+        companion_for_shutdown.set_lan_exposed(false);
         let _ = stopped_tx.send(());
     });
 
     Ok(())
 }
 
-pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
-    let companion_state = app.state::<CompanionState>();
-    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
-    stop_companion_server_inner(&companion_state).await
+/// Start with LAN exposure (legacy alias).
+pub async fn start_companion_server(
+    app: AppHandle,
+    port: u16,
+    listen_address: String,
+) -> Result<(), String> {
+    start_daemon_server(app, port, true, listen_address).await
 }
 
-async fn stop_companion_server_inner(companion_state: &CompanionState) -> Result<(), String> {
+pub async fn stop_daemon_server(app: AppHandle) -> Result<(), String> {
+    let companion_state = app.state::<CompanionState>();
+    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
+    stop_daemon_server_inner(&companion_state).await
+}
+
+pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
+    stop_daemon_server(app).await
+}
+
+async fn stop_daemon_server_inner(companion_state: &CompanionState) -> Result<(), String> {
     crate::companion::relay::stop_relay_transport(companion_state).await;
     let shutdown_tx = companion_state.inner.shutdown_tx.lock().unwrap().take();
     let stopped_rx = companion_state.inner.stopped_waiter.lock().unwrap().take();
@@ -221,7 +259,8 @@ async fn stop_companion_server_inner(companion_state: &CompanionState) -> Result
             }
         }
     }
-    companion_state.inner.set_enabled(false);
+    companion_state.inner.set_loopback_running(false);
+    companion_state.inner.set_lan_exposed(false);
     Ok(())
 }
 
@@ -304,6 +343,8 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/interactive/user-input", post(user_input_respond))
         .route("/ws", get(ws_handler));
 
+    let api = routes_extended::extend_api_router(api);
+
     let index_file = static_dir.join("index.html");
     let static_service = ServeDir::new(static_dir).not_found_service(ServeFile::new(index_file));
 
@@ -318,14 +359,22 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .with_state(ctx)
 }
 
-async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "ok": true }))
+async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
+    let companion_state = ctx.app.state::<CompanionState>();
+    Json(serde_json::json!({
+        "ok": companion_state.inner.is_loopback_running(),
+        "loopback": companion_state.inner.is_loopback_running(),
+        "lanExposed": companion_state.inner.is_lan_exposed(),
+    }))
 }
 
 async fn pair_offer(
     State(ctx): State<ServerContext>,
 ) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
     let companion_state = ctx.app.state::<CompanionState>();
+    if !companion_state.inner.is_lan_exposed() {
+        return Err(ApiError::forbidden("Mobile companion is not enabled"));
+    }
     let (desktop_id, port, relay) = {
         let app_state = ctx.app.state::<AppState>();
         let mut config = app_state
@@ -362,9 +411,13 @@ async fn pair_offer(
 
 async fn pair_claim(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<PairClaimRequest>,
 ) -> Result<Json<PairClaimResponse>, ApiError> {
     let companion_state = ctx.app.state::<CompanionState>();
+    if !is_loopback_peer(Some(peer)) && !companion_state.inner.is_lan_exposed() {
+        return Err(ApiError::forbidden("Mobile companion is not enabled"));
+    }
     // 配对码随二维码下发，扫码即自动 claim：校验但不作废，
     // 二维码本身 5 分钟过期，窗口内允许多次尝试（PWA 刷新/重试）。
     if !companion_state.validate_pairing_code(&body.code) {
@@ -382,9 +435,10 @@ async fn pair_claim(
 
 async fn list_sessions(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<operations::Session>>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.app.state::<AppState>();
     let db = app_state
         .db
@@ -397,10 +451,11 @@ async fn list_sessions(
 
 async fn create_session(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<Json<operations::Session>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.app.state::<AppState>();
     let agent_kind = AgentKind::from_str(body.agent_kind.as_deref().unwrap_or("claude_code"))
         .map_err(ApiError::bad_request)?;
@@ -453,11 +508,12 @@ async fn create_session(
 
 async fn session_events(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Query(query): Query<SessionEventsQuery>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let after = query.after.unwrap_or(-1);
     if after < 0 {
         let page = read_session_timeline_page(
@@ -483,11 +539,12 @@ async fn session_events(
 
 async fn session_timeline(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Query(query): Query<SessionTimelineQuery>,
 ) -> Result<Json<operations::SessionTimelinePage>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let page = read_session_timeline_page(&ctx, &session_id, query)?;
     Ok(Json(page))
 }
@@ -512,10 +569,11 @@ fn read_session_timeline_page(
 
 async fn session_runtime_state(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let companion_state = ctx.app.state::<CompanionState>();
     Ok(Json(serde_json::json!({
         "running": companion_state.is_turn_active(&session_id),
@@ -524,11 +582,12 @@ async fn session_runtime_state(
 
 async fn send_message(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     if !has_sendable_input(&body.prompt, body.input_payload.as_ref()) {
         return Err(ApiError::bad_request("Prompt cannot be empty"));
     }
@@ -545,10 +604,11 @@ async fn send_message(
 
 async fn composer_context(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Result<Json<crate::companion::context::ComposerContext>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.app.state::<AppState>();
     build_composer_context(app_state.inner(), &session_id)
         .await
@@ -558,11 +618,12 @@ async fn composer_context(
 
 async fn update_session_settings(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Json(body): Json<SessionSettingsRequest>,
 ) -> Result<Json<operations::Session>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let agent_kind = AgentKind::from_str(&body.agent_kind).map_err(ApiError::bad_request)?;
     let session = update_companion_settings(
         &ctx.app,
@@ -589,10 +650,11 @@ async fn update_session_settings(
 
 async fn interrupt_session(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     interrupt_companion_session(&ctx.app, &session_id)
         .await
         .map_err(ApiError::bad_request)?;
@@ -601,9 +663,10 @@ async fn interrupt_session(
 
 async fn list_projects(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<operations::Project>>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.app.state::<AppState>();
     let db = app_state
         .db
@@ -616,19 +679,21 @@ async fn list_projects(
 
 async fn bootstrap(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Json<crate::companion::config::MobileBootstrap>, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.app.state::<AppState>();
     Ok(Json(build_mobile_bootstrap(app_state.inner())))
 }
 
 async fn permission_respond(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<PermissionRespondRequest>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     respond_companion_permission(&ctx.app, &body.session_id, &body.request_id, body.response)
         .await
         .map_err(ApiError::bad_request)?;
@@ -637,10 +702,11 @@ async fn permission_respond(
 
 async fn user_input_respond(
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<UserInputRespondRequest>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&ctx, &headers)?;
+    authorize(&ctx, &headers, Some(peer))?;
     send_companion_tool_response(&ctx.app, &body.session_id, &body.tool_use_id, body.response)
         .await
         .map_err(ApiError::bad_request)?;
@@ -650,9 +716,10 @@ async fn user_input_respond(
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Query(query): Query<WsQuery>,
 ) -> Result<Response, ApiError> {
-    authorize_token(&ctx, &query.token)?;
+    authorize_token(&ctx, &query.token, Some(peer))?;
     let session_id = query.session_id.clone();
     Ok(ws.on_upgrade(move |socket| handle_socket(socket, ctx, session_id)))
 }
@@ -750,28 +817,57 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     }
 }
 
-fn authorize(ctx: &ServerContext, headers: &HeaderMap) -> Result<(), ApiError> {
-    authorize_device(ctx, headers).map(|_| ())
+fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
+    match peer {
+        Some(addr) => addr.ip().is_loopback(),
+        None => true,
+    }
+}
+
+pub(crate) fn authorize(ctx: &ServerContext, headers: &HeaderMap, peer: Option<SocketAddr>) -> Result<(), ApiError> {
+    authorize_device(ctx, headers, peer).map(|_| ())
 }
 
 fn authorize_device(
     ctx: &ServerContext,
     headers: &HeaderMap,
+    peer: Option<SocketAddr>,
 ) -> Result<operations::PairedDevice, ApiError> {
     let token =
         extract_bearer_token(headers).ok_or_else(|| ApiError::unauthorized("Missing token"))?;
-    authorize_token_device(ctx, &token)
+    authorize_token_device(ctx, &token, peer)
 }
 
-fn authorize_token(ctx: &ServerContext, token: &str) -> Result<(), ApiError> {
-    authorize_token_device(ctx, token).map(|_| ())
+fn authorize_token(ctx: &ServerContext, token: &str, peer: Option<SocketAddr>) -> Result<(), ApiError> {
+    authorize_token_device(ctx, token, peer).map(|_| ())
 }
 
 fn authorize_token_device(
     ctx: &ServerContext,
     token: &str,
+    peer: Option<SocketAddr>,
 ) -> Result<operations::PairedDevice, ApiError> {
     let app_state = ctx.app.state::<AppState>();
+    let companion_state = ctx.app.state::<CompanionState>();
+    let loopback = is_loopback_peer(peer);
+
+    if loopback {
+        if local_daemon_token::verify_local_daemon_token(&app_state.app_data_dir, token) {
+            return Ok(operations::PairedDevice {
+                id: "local-daemon".to_string(),
+                name: "Local Daemon".to_string(),
+                paired_at: String::new(),
+                last_seen_at: None,
+            });
+        }
+    } else if !companion_state.inner.is_lan_exposed() {
+        return Err(ApiError::unauthorized("Mobile companion is not enabled"));
+    } else if local_daemon_token::verify_local_daemon_token(&app_state.app_data_dir, token) {
+        return Err(ApiError::unauthorized(
+            "Local daemon token is not accepted from non-loopback clients",
+        ));
+    }
+
     let db = app_state
         .db
         .lock()
@@ -790,34 +886,41 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 #[derive(Debug)]
-struct ApiError {
+pub(crate) struct ApiError {
     status: StatusCode,
     message: String,
 }
 
 impl ApiError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
         }
     }
 
-    fn conflict(message: impl Into<String>) -> Self {
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
             message: message.into(),
         }
     }
 
-    fn unauthorized(message: impl Into<String>) -> Self {
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             message: message.into(),
         }
     }
 
-    fn internal(message: impl Into<String>) -> Self {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: message.into(),

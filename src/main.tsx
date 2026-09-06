@@ -4,6 +4,7 @@ import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
+import { initDaemonClient } from "./lib/daemon-bootstrap";
 import { initScheduledTasksBridge } from "./lib/scheduledTasksBridge";
 import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
@@ -13,6 +14,7 @@ import "./styles/globals.css";
 import "./styles/hljs-theme.css";
 
 initLogging();
+void initDaemonClient();
 initCompanionStreamBridge();
 initSessionsChangeBridge();
 initScheduledTasksBridge();

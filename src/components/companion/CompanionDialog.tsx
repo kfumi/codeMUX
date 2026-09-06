@@ -316,7 +316,7 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
             </>
           ) : (
             <div className="rounded-xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-foreground/55">
-              移动伴侣未开启。关闭此窗口后，可再次点击左下角手机图标开启配对。
+              移动伴侣未开启 — 本机 Daemon 仍在运行，桌面可正常使用；开启后可扫码配对手机。
             </div>
           )}
         </div>

@@ -33,7 +33,10 @@ pub struct CompanionInner {
     pub stopped_waiter: Mutex<Option<oneshot::Receiver<()>>>,
     pub lifecycle_lock: tokio::sync::Mutex<()>,
     pub port: RwLock<u16>,
-    pub enabled: AtomicBool,
+    /// Loopback daemon is listening (always on after app start).
+    pub loopback_running: AtomicBool,
+    /// LAN / relay exposure enabled (user-facing "移动伴侣").
+    pub lan_exposed: AtomicBool,
     pub turn_active: Mutex<HashSet<String>>,
     pub message_queues: Mutex<HashMap<String, VecDeque<QueuedCompanionMessage>>>,
     pub relay_controller: tokio::sync::Mutex<Option<RelayTransportController>>,
@@ -51,7 +54,8 @@ impl CompanionInner {
             stopped_waiter: Mutex::new(None),
             lifecycle_lock: tokio::sync::Mutex::new(()),
             port: RwLock::new(crate::config::types::CompanionConfig::default().port),
-            enabled: AtomicBool::new(false),
+            loopback_running: AtomicBool::new(false),
+            lan_exposed: AtomicBool::new(false),
             turn_active: Mutex::new(HashSet::new()),
             message_queues: Mutex::new(HashMap::new()),
             relay_controller: tokio::sync::Mutex::new(None),
@@ -60,12 +64,29 @@ impl CompanionInner {
         }
     }
 
+    pub fn is_loopback_running(&self) -> bool {
+        self.loopback_running.load(Ordering::SeqCst)
+    }
+
+    pub fn set_loopback_running(&self, running: bool) {
+        self.loopback_running.store(running, Ordering::SeqCst);
+    }
+
+    pub fn is_lan_exposed(&self) -> bool {
+        self.lan_exposed.load(Ordering::SeqCst)
+    }
+
+    pub fn set_lan_exposed(&self, exposed: bool) {
+        self.lan_exposed.store(exposed, Ordering::SeqCst);
+    }
+
+    /// Backward-compatible alias: true when loopback daemon is listening.
     pub fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::SeqCst)
+        self.is_loopback_running()
     }
 
     pub fn set_enabled(&self, enabled: bool) {
-        self.enabled.store(enabled, Ordering::SeqCst);
+        self.set_loopback_running(enabled);
     }
 
     pub fn clear_pairing_codes(&self) {

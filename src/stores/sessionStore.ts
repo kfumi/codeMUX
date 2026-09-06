@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AgentKind, Session, SessionMode } from '../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
 import { isValidWorkingPath } from '../lib/sessionCwd';
-import { sessionApi, agentApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useAgentStore } from './agentStore';
 import { useSettingsStore } from './settingsStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
@@ -110,10 +110,10 @@ function createSessionAction(
         resolvedInputPlanMode,
       );
       const session = resolvedPermissionConfig || resolvedPlanMode
-        ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode, model)
+        ? await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode, model)
         : model
-          ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, undefined, undefined, model)
-          : await sessionApi.create(title, agentKind, mode, resolvedProjectId);
+          ? await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId, undefined, undefined, model)
+          : await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId);
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,
@@ -141,7 +141,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const rememberedPaths = useAgentStore.getState().sessionWorkingPaths;
-      const fetched = await sessionApi.getAll();
+      const fetched = await daemonFacade.listSessions();
       const sessions = fetched.map((session) => {
         const remembered = rememberedPaths[session.id]?.trim();
         if (isValidWorkingPath(remembered) && remembered !== session.working_path) {
@@ -163,7 +163,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   fetchArchivedSessions: async () => {
     set({ isArchivedLoading: true, error: null });
     try {
-      const archivedSessions = await sessionApi.getArchived();
+      const archivedSessions = await daemonFacade.listArchivedSessions();
       set({ archivedSessions, isArchivedLoading: false });
     } catch (error) {
       set({ error: String(error), isArchivedLoading: false });
@@ -182,7 +182,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const sourceSession = get().sessions.find((entry) => entry.id === sessionId)
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
       const session = sourceSession?.agent_kind === 'codex'
-        ? await sessionApi.forkCodex(
+        ? await daemonFacade.forkCodex(
           sessionId,
           forkEventId,
           forkProviderMessageId,
@@ -190,10 +190,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           forkProviderTurnOrdinal,
         )
         : sourceSession?.agent_kind === 'opencode'
-          ? await sessionApi.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
+          ? await daemonFacade.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
         : sourceSession?.agent_kind === 'pi'
-          ? await sessionApi.forkPi(sessionId, forkEventId, forkProviderMessageId)
-        : await sessionApi.forkClaude(sessionId, forkEventId, forkProviderMessageId);
+          ? await daemonFacade.forkPi(sessionId, forkEventId, forkProviderMessageId)
+        : await daemonFacade.forkClaude(sessionId, forkEventId, forkProviderMessageId);
       useAgentStore.getState().clearEvents(session.id);
       set((state) => ({
         sessions: [session, ...state.sessions.filter((entry) => entry.id !== session.id)],
@@ -213,14 +213,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
       if (session?.origin !== 'imported' && !session?.is_read_only) {
         try {
-          await agentApi.shutdown(sessionId);
-          await agentApi.resetSession(sessionId);
+          await daemonFacade.shutdownAgent(sessionId);
+          await daemonFacade.resetAgentSession(sessionId);
         } catch {
           // Ignore cleanup errors — the sidecar may already be gone.
         }
       }
       useAgentStore.getState().clearEvents(sessionId);
-      await sessionApi.delete(sessionId);
+      await daemonFacade.deleteSession(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter((s) => s.id !== sessionId);
         const newArchivedSessions = state.archivedSessions.filter((s) => s.id !== sessionId);
@@ -238,7 +238,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   archiveSession: async (sessionId: string) => {
     try {
-      await sessionApi.archive(sessionId);
+      await daemonFacade.archiveViaDaemon(sessionId);
       set((state) => {
         const session = state.sessions.find((entry) => entry.id === sessionId);
         const remainingSessions = state.sessions.filter((entry) => entry.id !== sessionId);
@@ -258,7 +258,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   unarchiveSession: async (sessionId: string) => {
     try {
-      await sessionApi.unarchive(sessionId);
+      await daemonFacade.unarchiveViaDaemon(sessionId);
       set((state) => {
         const session = state.archivedSessions.find((entry) => entry.id === sessionId);
         if (!session) return state;
@@ -276,7 +276,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setSessionPinned: async (sessionId: string, pinned: boolean) => {
     try {
-      await sessionApi.setPinned(sessionId, pinned);
+      await daemonFacade.patchSessionViaDaemon(sessionId, { pinned });
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
         archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
@@ -287,7 +287,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setSessionReadOnly: async (sessionId: string, readOnly: boolean) => {
     try {
-      await sessionApi.setReadOnly(sessionId, readOnly);
+      await daemonFacade.patchSessionViaDaemon(sessionId, { readOnly });
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
         archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
@@ -307,7 +307,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   updateSessionTitle: async (sessionId: string, title: string) => {
     try {
-      await sessionApi.updateTitle(sessionId, title);
+      await daemonFacade.patchSessionViaDaemon(sessionId, { title });
       set((state) => ({
         sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, title } : s),
       }));
@@ -322,7 +322,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   updateSessionPermissions: async (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => {
     try {
-      await sessionApi.updatePermissions(sessionId, permissionConfig, planMode);
+      await daemonFacade.updatePermissions(sessionId, permissionConfig, planMode);
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId
           ? {
@@ -344,7 +344,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         .map((s) => s.id === sessionId ? { ...s, updated_at: now } : s)
         .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
     }));
-    sessionApi.touch(sessionId).catch(() => {});
+    daemonFacade.touchSession(sessionId).catch(() => {});
   },
   markSessionRead: (sessionId: string) => {
     set((state) => {

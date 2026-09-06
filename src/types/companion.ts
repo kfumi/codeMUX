@@ -16,7 +16,11 @@ export interface CompanionRelayStatus {
 }
 
 export interface CompanionStatus {
+  /** LAN / relay exposure — user-facing「移动伴侣」 */
   enabled: boolean;
+  /** Loopback daemon is listening */
+  daemonReady: boolean;
+  daemonError?: string | null;
   port: number;
   desktopId?: string | null;
   lanIp?: string | null;

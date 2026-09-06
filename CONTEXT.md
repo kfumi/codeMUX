@@ -157,17 +157,37 @@ _Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）；把思考强
 浏览器中的移动端 PWA，与桌面实例配对后查看并驱动其 Session。它是桌面的远程伴侣而不是独立应用：算力、配置与权威存储都在桌面端。它只看到未归档的 Session，可在已有项目上新建 Session，发消息进入同一队列，审批走同一条响应命令。
 _Avoid_: 移动端独立应用, 云同步端, 手机版桌面
 
+### Daemon
+本机权威：拥有 SQLite Timeline、Session、Agent Kind 编排、Sidecar、MCP、skills 与 Scheduled Task。窗口不是 Daemon；Sidecar 也不是。
+_Avoid_: 后端（含糊）, sidecar（当指权威时）, Electron main, Tauri command 层
+
+### Desktop Shell
+承载窗口、托盘、自动更新、原生对话框与 Browser Host 的桌面宿主。它不拥有 Session，也不驾驶 Agent Kind。
+_Avoid_: 桌面应用（当兼指 Daemon 与 UI 时）, 前端
+
+### Daemon Client
+通过 Companion Server 与 Daemon 对话的客户端。桌面 UI、Mobile Companion 与 CLI 都是 Daemon Client。
+_Avoid_: 把 Tauri invoke 当业务 API；把壳 IPC 当 Daemon 协议
+
 ### Companion Server
-桌面端开启移动同步后对外暴露的本机 HTTP/WS 服务（内嵌于 Rust）。它提供配对、会话列表与事件历史的只读查询、实时 CodeMUX Event 订阅，以及驱动动作（发送/新建/审批）的转发。它是移动端对桌面的唯一寻址入口；未来公网中继只换寻址路径，不换协议。
-_Avoid_: 中继服务, 云服务, sync server（当指跨设备状态数据库时）
+Daemon 的 HTTP/WS 协议入口（内嵌于 Rust）。回环始终供本机 Daemon Client 使用；局域网与中继暴露仍由用户显式开启。它提供配对、Session 与 Timeline 查询、CodeMUX Event 订阅，以及驱动动作的转发。公网中继只换寻址路径，不换协议。
+_Avoid_: 中继服务, 云服务, sync server（当指跨设备状态数据库时）；把服务是否存在等同于是否开启移动伴侣
+
+### Local Daemon Token
+Daemon 颁发给本机 Desktop Shell 或 CLI 的回环鉴权凭证。它不是 Pairing Token，不代表一台已配对手机。
+_Avoid_: Pairing Token（当指本机桌面连接时）, API key, 会话 token
 
 ### Pairing Token
 一次设备配对后颁发给某台移动设备的长期随机凭证，移动端存于 IndexedDB，所有请求与 WS 连接携带它以鉴权。它是「这台手机配过这台桌面」的信任凭证；桌面端可撤销，撤销后该设备失效。
-_Avoid_: 会话 token, session credential, API key
+_Avoid_: 会话 token, session credential, API key；用 Pairing Token 冒充本机桌面连接
 
 ### Device Pairing
 移动端与桌面实例建立信任的动作：扫码读取桌面地址与一次性配对码，换取该设备的 Pairing Token。配对建立后移动端即信任该桌面。
-_Avoid_: 登录, 连接（当指长期信任时）
+_Avoid_: 登录, 连接（当指长期信任时）；把 Desktop Shell 连回环当成 Device Pairing
+
+### Browser Host
+Desktop Shell 上的内置浏览契约：创建、导航、停放浏览器页，并与主界面隔离站点资料。Daemon 不创建 WebView；智能体网页工具若存在，只转发给声明了该能力的壳。
+_Avoid_: iframe, 系统浏览器（当指内置页时）；把浏览页当成 Session
 
 ### Scheduled Task
 一条持久的定时任务定义：绑定项目、Agent Kind、Kind Model Selection、用户为该任务选定的 Permission Snapshot、计划与任务指令。它不是 Session，也不另建一套对话时间线。
@@ -216,10 +236,15 @@ _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 
 | Enrichment Provider / enrichment 供应商 | vision model, fallback model |
 | Attachment Processor / 附件处理器 | enricher, handler |
 | Enriched Context Block / enriched 上下文块 | OCR 结果, caption |
+| Daemon | 后端（含糊）, 把 sidecar 或窗口当权威 |
+| Desktop Shell / 桌面壳 | 桌面应用（兼指权威时） |
+| Daemon Client | 把 Tauri invoke 当业务 API |
 | Mobile Companion / 移动伴侣 | 独立移动应用, 云同步端 |
-| Companion Server / 伴侣服务 | 中继服务, 云服务 |
+| Companion Server / 伴侣服务 | 中继服务, 云服务；把服务是否存在等同于移动伴侣开关 |
+| Local Daemon Token / 本机守护凭证 | Pairing Token（指本机桌面连接时） |
 | Pairing Token / 配对令牌 | 会话 token, API key |
-| Device Pairing / 设备配对 | 登录, 普通连接 |
+| Device Pairing / 设备配对 | 登录, 普通连接；壳连回环 |
+| Browser Host | iframe；Daemon 里的 WebView |
 | Queued Message / 排队消息 | steering（注入进行中的一轮） |
 | Immediate Run / 立即执行 | 轮中热切 / steer, 清空剩余队列 |
 | Scheduled Task / 定时任务 | automation, job, workflow（当指用户可见实体时）；创建时不能改权限档
@@ -232,7 +257,7 @@ _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 
 
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
-- 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。
+- 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。Daemon 边界与回环 Companion Server 见 [.scratch/daemon-boundary/spec.md](.scratch/daemon-boundary/spec.md)；落地后应修订 ADR 0008「服务仅随移动同步开启」的表述。
 - Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
 - 定时任务决策见 [docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md](docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md)。
 

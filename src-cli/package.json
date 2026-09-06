@@ -1,0 +1,9 @@
+{
+  "name": "@codemux/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codemux-cli": "./bin/codemux-cli.mjs"
+  }
+}

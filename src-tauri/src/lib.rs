@@ -444,24 +444,22 @@ pub fn run() {
                 let config = state.config.lock().unwrap();
                 config.companion.clone()
             };
-            if config_for_companion.enabled {
-                let app_handle = app.handle().clone();
-                let port = config_for_companion.port;
-                let listen_address = config_for_companion.listen_address.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) =
-                        companion::start_companion_server(app_handle.clone(), port, listen_address).await
-                    {
-                        warn!(target: "companion", "Failed to auto-start companion server: {}", error);
-                        if let Some(state) = app_handle.try_state::<AppState>() {
-                            if let Ok(mut config) = state.config.lock() {
-                                config.companion.enabled = false;
-                                let _ = config::save_config(&app_handle, &config);
-                            }
-                        }
-                    }
-                });
-            }
+            let app_handle = app.handle().clone();
+            let port = config_for_companion.port;
+            let listen_address = config_for_companion.listen_address.clone();
+            let expose_lan = config_for_companion.enabled;
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = companion::start_daemon_server(
+                    app_handle.clone(),
+                    port,
+                    expose_lan,
+                    listen_address,
+                )
+                .await
+                {
+                    warn!(target: "companion", "Failed to auto-start daemon server: {}", error);
+                }
+            });
 
             let tick_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -663,6 +661,7 @@ pub fn run() {
             skills::commands::list_project_skills,
             commands::perf::get_tokio_console_info,
             commands::perf::export_perf_snapshot,
+            commands::companion::get_local_daemon_token,
             commands::companion::get_companion_status,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_relay_enabled,
