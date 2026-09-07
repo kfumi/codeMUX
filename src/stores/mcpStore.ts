@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { McpServer, McpApps } from '../types/mcp';
-import { mcpApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 
 interface McpStore {
   servers: McpServer[];
@@ -27,7 +27,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   fetchServers: async () => {
     set({ isLoading: true, error: null });
     try {
-      const servers = await mcpApi.getAll();
+      const servers = await daemonFacade.mcp.getAll();
       console.log('[mcpStore] fetchServers got', servers.length, 'servers');
       set({ servers, isLoading: false });
     } catch (error) {
@@ -38,7 +38,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
 
   upsertServer: async (server: McpServer) => {
     try {
-      await mcpApi.upsert(server);
+      await daemonFacade.mcp.upsert(server);
       set((state) => {
         const exists = state.servers.some((s) => s.id === server.id);
         const servers = exists
@@ -54,7 +54,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
 
   deleteServer: async (id: string) => {
     try {
-      await mcpApi.delete(id);
+      await daemonFacade.mcp.delete(id);
       set((state) => ({
         servers: state.servers.filter((s) => s.id !== id),
       }));
@@ -66,7 +66,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
 
   toggleApp: async (serverId: string, app: keyof McpApps, enabled: boolean) => {
     try {
-      await mcpApi.toggleApp(serverId, app, enabled);
+      await daemonFacade.mcp.toggleApp(serverId, app, enabled);
       set((state) => ({
         servers: state.servers.map((s) =>
           s.id === serverId
@@ -85,7 +85,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
       probeStatus: { ...state.probeStatus, [id]: 'pending' },
     }));
     try {
-      const result = await mcpApi.probe(id);
+      const result = await daemonFacade.mcp.probe(id);
       set((state) => ({
         probeStatus: {
           ...state.probeStatus,
@@ -103,7 +103,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     if (get().isProbing) return;
     set({ isProbing: true });
     try {
-      const results = await mcpApi.probeAll();
+      const results = await daemonFacade.mcp.probeAll();
       // Backend returns name→connected map; match to server.id for UI
       const servers = get().servers;
       const probeStatus: Record<string, 'connected' | 'failed'> = {};
@@ -123,7 +123,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
 
   importFromApps: async () => {
     try {
-      const result = await mcpApi.importFromApps();
+      const result = await daemonFacade.mcp.importFromApps();
       console.log('[mcpStore] importFromApps result:', result);
       if (result.total > 0) {
         // Refresh the server list after import

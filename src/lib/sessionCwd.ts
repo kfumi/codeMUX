@@ -4,7 +4,8 @@ import {
   resolveWorktreeBaseRef,
   type DraftWorkspaceSelection,
 } from './draftWorkspacePicker';
-import { appApi, gitApi } from './tauri';
+import { appApi } from './tauri';
+import { daemonFacade } from './facades/daemon-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -214,9 +215,9 @@ export async function resolveDraftSessionCwd(
     return fallbackCwd;
   }
 
-  const repositoryState = await gitApi.getRepositoryState(project.path);
+  const repositoryState = await daemonFacade.git.getRepositoryState(project.path);
   const baseRef = resolveWorktreeBaseRef(draftWorkspace.baseRef, repositoryState);
   const branchName = deriveWorktreeBranchName();
-  const created = await gitApi.createWorktree(project.path, branchName, baseRef);
+  const created = await daemonFacade.git.createWorktree(project.path, branchName, baseRef);
   return created.path;
 }

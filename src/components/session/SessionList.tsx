@@ -3,12 +3,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, MessageSquarePlus, Plus } from 'lucide-react';
 
 import type { Project } from '../../types/project';
+import { getDaemonStartupError, initDaemonClient } from '../../lib/daemon-bootstrap';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { useCompanionStatus } from '../../hooks/useCompanionStatus';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
 import { ProjectGroup } from './ProjectGroup';
 import { SessionItem } from './SessionItem';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 
 interface SessionListProps {
@@ -86,6 +90,8 @@ export function SessionList({
   const {
     sessions,
     activeSessionId,
+    error: sessionError,
+    isLoading,
     fetchSessions,
     fetchArchivedSessions,
     archiveSession,
@@ -94,6 +100,7 @@ export function SessionList({
     updateSessionTitle,
   } = useSessionStore();
   const { projects, activeProjectId, fetchProjects, deleteProject, renameProject } = useProjectStore();
+  const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
   const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
@@ -118,6 +125,18 @@ export function SessionList({
 
   const pinnedSessions = useMemo(() => sessions.filter((session) => session.is_pinned), [sessions]);
   const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id && !session.is_pinned), [sessions]);
+
+  const daemonIssue = useMemo(() => {
+    const startupError = getDaemonStartupError();
+    if (startupError) return startupError;
+    if (companionStatus?.daemonError) return companionStatus.daemonError;
+    if (companionStatus && !companionStatus.daemonReady) {
+      return '本机 Daemon 未就绪，请稍后重试或重启应用。';
+    }
+    return sessionError;
+  }, [companionStatus, sessionError]);
+
+  const showDaemonIssue = Boolean(daemonIssue) && !isLoading;
 
   const toggleProjectsExpanded = useCallback(() => {
     setProjectsExpanded((current) => {
@@ -153,8 +172,31 @@ export function SessionList({
     }
   }, []);
 
+  const handleRetryDaemon = useCallback(async () => {
+    daemonFacade.resetClient();
+    await initDaemonClient();
+    await fetchSessions();
+  }, [fetchSessions]);
+
   return (
     <div className="space-y-2 stagger-children">
+      {showDaemonIssue && (
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-caption leading-relaxed text-destructive"
+        >
+          <p>{daemonIssue}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => void handleRetryDaemon()}
+          >
+            重试连接 Daemon
+          </Button>
+        </div>
+      )}
       {pinnedSessions.length > 0 && (
         <div>
           <SectionHeader
@@ -252,7 +294,7 @@ export function SessionList({
         </div>
       )}
 
-      {sessions.length === 0 && projects.length === 0 && (
+      {sessions.length === 0 && projects.length === 0 && !showDaemonIssue && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/18 text-[hsl(var(--sidebar-accent))]">
             <MessageSquarePlus className="h-4 w-4" />

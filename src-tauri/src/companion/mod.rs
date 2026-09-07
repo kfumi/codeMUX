@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod actions;
 pub mod config;
 pub mod context;
@@ -9,10 +10,16 @@ pub mod offer;
 pub mod pairing;
 pub mod pairing_code;
 pub mod relay;
+pub mod routes_providers;
+pub mod routes_terminal;
+pub mod routes_control_plane;
 pub mod routes_extended;
+pub mod routes_app_config;
+pub mod routes_history_import;
+pub mod routes_agent_runtime;
 pub mod server;
 pub mod state;
 
 pub use events::handle_sidecar_event_for_companion;
-pub use server::{start_companion_server, start_daemon_server, stop_companion_server, stop_daemon_server};
+pub use server::{start_companion_server, start_daemon_server, stop_companion_server, stop_daemon_for_state, stop_daemon_server};
 pub use state::CompanionState;

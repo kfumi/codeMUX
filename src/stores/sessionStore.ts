@@ -109,11 +109,15 @@ function createSessionAction(
         permissionConfig,
         resolvedInputPlanMode,
       );
-      const session = resolvedPermissionConfig || resolvedPlanMode
-        ? await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode, model)
-        : model
-          ? await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId, undefined, undefined, model)
-          : await daemonFacade.createSession(title, agentKind, mode, resolvedProjectId);
+      const session = await daemonFacade.createSessionViaDaemon({
+        title,
+        agentKind,
+        mode: mode ?? 'chat',
+        projectId: resolvedProjectId ?? null,
+        permissionConfig: resolvedPermissionConfig ? JSON.stringify(resolvedPermissionConfig) : null,
+        planMode: resolvedPlanMode ?? null,
+        model: model ?? null,
+      }) as Session;
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,
@@ -209,16 +213,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const session = get().sessions.find((entry) => entry.id === sessionId)
-        ?? get().archivedSessions.find((entry) => entry.id === sessionId);
-      if (session?.origin !== 'imported' && !session?.is_read_only) {
-        try {
-          await daemonFacade.shutdownAgent(sessionId);
-          await daemonFacade.resetAgentSession(sessionId);
-        } catch {
-          // Ignore cleanup errors — the sidecar may already be gone.
-        }
-      }
       useAgentStore.getState().clearEvents(sessionId);
       await daemonFacade.deleteSession(sessionId);
       set((state) => {

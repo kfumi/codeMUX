@@ -36,10 +36,19 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    patchSessionViaDaemon: vi.fn().mockResolvedValue(undefined),
+    archiveViaDaemon: vi.fn().mockResolvedValue(undefined),
+    unarchiveViaDaemon: vi.fn().mockResolvedValue(undefined),
+    updateWorkingPath: vi.fn().mockResolvedValue(undefined),
+    touchSession: vi.fn().mockResolvedValue(undefined),
     getSessionInfo: mocks.getSessionInfo,
   },
+}));
+
+vi.mock('../../lib/tauri', () => ({
+  agentApi: {},
   sessionApi: {
     archive: vi.fn().mockResolvedValue(undefined),
     setPinned: vi.fn().mockResolvedValue(undefined),

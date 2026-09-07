@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { skillApi } from '@/lib/tauri';
+import { daemonFacade } from '@/lib/facades/daemon-facade';
 import type { AgentKind } from '@/types/session';
 import type { ProjectSkill } from '@/types/skill';
 
@@ -56,7 +56,7 @@ export const useProjectSkillStore = create<ProjectSkillState>((set, get) => ({
       },
     }));
 
-    const request = skillApi.listProject(root, agentKind, force)
+    const request = daemonFacade.skills.listProject(root, agentKind, force)
       .then((skills) => {
         set((state) => ({
           entries: {

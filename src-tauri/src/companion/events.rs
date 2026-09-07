@@ -107,7 +107,14 @@ fn maybe_finish_turn_and_drain_queue(app: &AppHandle, session_id: &str, event: &
     tauri::async_runtime::spawn(async move {
         for message in queued {
             if let Err(error) =
-                send_companion_message(&app, &session_id, &message.prompt, message.input_payload)
+                send_companion_message(
+                    &app,
+                    &session_id,
+                    &message.prompt,
+                    message.input_payload,
+                    None,
+                    None,
+                )
                     .await
             {
                 warn!(

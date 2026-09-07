@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
-import { usageApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { TokenBreakdownResponse, UsageStatsResponse } from '../../types/usage';
 import { Button } from '../ui/button';
@@ -111,7 +111,7 @@ export function UsageStatistics() {
 
     const agentArg = agentKind === 'all' ? undefined : agentKind;
 
-    usageApi
+    daemonFacade.usage
       .getStats(agentArg, days)
       .then((response) => {
         if (cancelled) return;
@@ -121,7 +121,7 @@ export function UsageStatistics() {
         if (!cancelled) setLoadingStats(false);
       });
 
-    usageApi
+    daemonFacade.usage
       .getTokenBreakdown(agentArg, days)
       .then((response) => {
         if (cancelled) return;

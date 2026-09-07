@@ -2,22 +2,74 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
 
-const createMock = vi.fn<(...args: unknown[]) => Promise<Session>>();
-const touchMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const getArchivedMock = vi.fn<(...args: unknown[]) => Promise<Session[]>>();
-const archiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const unarchiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const updatePermissionsMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const deleteSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const deleteOpenCodeSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
-const forkMock = vi.fn<(...args: unknown[]) => Promise<Session>>();
+const {
+  createMock,
+  touchMock,
+  archiveMock,
+  unarchiveMock,
+  updatePermissionsMock,
+  deleteSessionMock,
+  shutdownAgentMock,
+  resetAgentSessionMock,
+  forkClaudeMock,
+  forkCodexMock,
+  forkOpenCodeMock,
+  clearEventsMock,
+  patchSessionViaDaemonMock,
+  listSessionsMock,
+} = vi.hoisted(() => ({
+  createMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
+  touchMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  archiveMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  unarchiveMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  updatePermissionsMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  deleteSessionMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  shutdownAgentMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  resetAgentSessionMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  forkClaudeMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
+  forkCodexMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
+  forkOpenCodeMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
+  clearEventsMock: vi.fn(),
+  patchSessionViaDaemonMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  listSessionsMock: vi.fn<(...args: unknown[]) => Promise<Session[]>>(),
+}));
+
+vi.mock('./agentStore', () => ({
+  useAgentStore: {
+    getState: () => ({
+      sessionWorkingPaths: {},
+      clearEvents: clearEventsMock,
+      setSessionWorkingPath: vi.fn(),
+    }),
+  },
+}));
+
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    createSessionViaDaemon: createMock,
+    listSessions: listSessionsMock,
+    listArchivedSessions: vi.fn(() => Promise.resolve([])),
+    forkClaude: forkClaudeMock,
+    forkCodex: forkCodexMock,
+    forkOpenCode: forkOpenCodeMock,
+    forkPi: forkClaudeMock,
+    shutdownAgent: shutdownAgentMock,
+    resetAgentSession: resetAgentSessionMock,
+    deleteSession: deleteSessionMock,
+    archiveViaDaemon: archiveMock,
+    unarchiveViaDaemon: unarchiveMock,
+    patchSessionViaDaemon: patchSessionViaDaemonMock,
+    updatePermissions: updatePermissionsMock,
+    touchSession: touchMock,
+  },
+}));
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
     shutdown: vi.fn(),
     deleteClaudeSessionFiles: vi.fn(),
     deleteCodexSessionFiles: vi.fn(),
-    deleteOpenCodeSession: deleteOpenCodeSessionMock,
+    deleteOpenCodeSession: vi.fn(),
     resetSession: vi.fn(),
   },
   configApi: {
@@ -32,24 +84,28 @@ vi.mock('../lib/tauri', () => ({
     testProvider: vi.fn(),
   },
   sessionApi: {
-    create: createMock,
+    create: vi.fn(),
     getAll: vi.fn(),
-    getArchived: getArchivedMock,
-    delete: deleteSessionMock,
-    archive: archiveMock,
-    unarchive: unarchiveMock,
+    getArchived: vi.fn(),
+    delete: vi.fn(),
+    archive: vi.fn(),
+    unarchive: vi.fn(),
     updateTitle: vi.fn(),
-    updatePermissions: updatePermissionsMock,
-    touch: touchMock,
-    forkClaude: forkMock,
-    forkCodex: forkMock,
-    forkOpenCode: forkMock,
+    updatePermissions: vi.fn(),
+    touch: vi.fn(),
+    forkClaude: vi.fn(),
+    forkCodex: vi.fn(),
+    forkOpenCode: vi.fn(),
   },
 }));
 
 describe('session store createSession', () => {
   beforeEach(async () => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
+    shutdownAgentMock.mockResolvedValue(undefined);
+    resetAgentSessionMock.mockResolvedValue(undefined);
+    deleteSessionMock.mockResolvedValue(undefined);
+    touchMock.mockResolvedValue(undefined);
     const { useSessionStore } = await import('./sessionStore');
     const { useSettingsStore } = await import('./settingsStore');
     useSessionStore.setState({
@@ -104,7 +160,7 @@ describe('session store createSession', () => {
       title: '分支 · Parent',
       parent_session_id: 'parent',
     };
-    forkMock.mockResolvedValue(child);
+    forkClaudeMock.mockResolvedValue(child);
 
     const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
@@ -112,7 +168,7 @@ describe('session store createSession', () => {
     const result = await useSessionStore.getState().forkSession('parent', 'assistant-1', 'provider-1');
 
     expect(result).toEqual(child);
-    expect(forkMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1', undefined, undefined);
+    expect(forkClaudeMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1');
     expect(useSessionStore.getState().activeSessionId).toBe('child');
     expect(useSessionStore.getState().sessions[0]).toEqual(child);
   });
@@ -135,14 +191,14 @@ describe('session store createSession', () => {
       title: '分支 · Codex Parent',
       parent_session_id: parent.id,
     };
-    forkMock.mockResolvedValue(child);
+    forkCodexMock.mockResolvedValue(child);
 
     const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
 
-    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1, undefined, undefined);
+    expect(forkCodexMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
   });
 
   it('routes an OpenCode fork through the OpenCode session command', async () => {
@@ -163,14 +219,14 @@ describe('session store createSession', () => {
       title: '分支 · OpenCode Parent',
       parent_session_id: parent.id,
     };
-    forkMock.mockResolvedValue(child);
+    forkOpenCodeMock.mockResolvedValue(child);
 
     const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-3', 'message-3');
 
-    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3', undefined, undefined);
+    expect(forkOpenCodeMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3');
   });
 
   it('keeps the legacy createSession(title, mode, projectId) call shape', async () => {
@@ -191,7 +247,15 @@ describe('session store createSession', () => {
     const created = await useSessionStore.getState().createSession('Legacy', 'agent', 'project-1');
 
     expect(created).toEqual(session);
-    expect(createMock).toHaveBeenCalledWith('Legacy', 'claude_code', 'agent', 'project-1');
+    expect(createMock).toHaveBeenCalledWith({
+      title: 'Legacy',
+      agentKind: 'claude_code',
+      mode: 'agent',
+      projectId: 'project-1',
+      permissionConfig: null,
+      planMode: null,
+      model: null,
+    });
   });
 
   it('uses the persisted default agent for legacy createSession(title, mode, projectId)', async () => {
@@ -224,7 +288,15 @@ describe('session store createSession', () => {
     const created = await useSessionStore.getState().createSession('Legacy Codex', 'agent', 'project-3');
 
     expect(created).toEqual(session);
-    expect(createMock).toHaveBeenCalledWith('Legacy Codex', 'codex', 'agent', 'project-3');
+    expect(createMock).toHaveBeenCalledWith({
+      title: 'Legacy Codex',
+      agentKind: 'codex',
+      mode: 'agent',
+      projectId: 'project-3',
+      permissionConfig: null,
+      planMode: null,
+      model: null,
+    });
   });
 
   it('supports createSession(title, agentKind, mode, projectId)', async () => {
@@ -245,7 +317,15 @@ describe('session store createSession', () => {
     const created = await useSessionStore.getState().createSession('New', 'codex', 'agent', 'project-2');
 
     expect(created).toEqual(session);
-    expect(createMock).toHaveBeenCalledWith('New', 'codex', 'agent', 'project-2');
+    expect(createMock).toHaveBeenCalledWith({
+      title: 'New',
+      agentKind: 'codex',
+      mode: 'agent',
+      projectId: 'project-2',
+      permissionConfig: null,
+      planMode: null,
+      model: null,
+    });
   });
 
   it('persists the selected model when creating a session', async () => {
@@ -278,15 +358,15 @@ describe('session store createSession', () => {
       'opencode/north-mini-code-free',
     );
 
-    expect(createMock).toHaveBeenCalledWith(
-      'OpenCode',
-      'opencode',
-      'agent',
-      undefined,
-      undefined,
-      'off',
-      'opencode/north-mini-code-free',
-    );
+    expect(createMock).toHaveBeenCalledWith({
+      title: 'OpenCode',
+      agentKind: 'opencode',
+      mode: 'agent',
+      projectId: null,
+      permissionConfig: null,
+      planMode: 'off',
+      model: 'opencode/north-mini-code-free',
+    });
   });
 
   it('moves a touched historical session to the front of the local list', async () => {
@@ -339,7 +419,7 @@ describe('session store createSession', () => {
     vi.useRealTimers();
   });
 
-  it('shuts down the sidecar then deletes the app session, including OpenCode', async () => {
+  it('deletes the app session through the daemon client, including OpenCode', async () => {
     const session: Session = {
       id: 'session-opencode-delete',
       title: 'OpenCode',
@@ -352,7 +432,6 @@ describe('session store createSession', () => {
       created_at: '2026-06-20T00:00:00.000Z',
       updated_at: '2026-06-20T00:00:00.000Z',
     };
-    const { agentApi } = await import('../lib/tauri');
     const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [session],
@@ -365,9 +444,10 @@ describe('session store createSession', () => {
 
     await useSessionStore.getState().deleteSession(session.id);
 
-    expect(agentApi.shutdown).toHaveBeenCalledWith(session.id);
-    expect(deleteOpenCodeSessionMock).not.toHaveBeenCalled();
     expect(deleteSessionMock).toHaveBeenCalledWith(session.id);
+    expect(clearEventsMock).toHaveBeenCalledWith(session.id);
+    expect(shutdownAgentMock).not.toHaveBeenCalled();
+    expect(resetAgentSessionMock).not.toHaveBeenCalled();
   });
   it('archives a session and removes it from the active sidebar list', async () => {
     archiveMock.mockResolvedValue(undefined);
@@ -556,5 +636,61 @@ describe('session store createSession', () => {
     useSessionStore.getState().markSessionUnread(inactiveSession.id);
 
     expect(useSessionStore.getState().unreadSessions.has(inactiveSession.id)).toBe(true);
+  });
+
+  it('exposes maintenance updates to a second daemon client via listSessions', async () => {
+    const session: Session = {
+      id: 'session-shared',
+      title: 'Shared Session',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      is_pinned: false,
+      is_archived: false,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+
+    let sharedSession = { ...session };
+    patchSessionViaDaemonMock.mockImplementation(async (sessionId: string, patch: Record<string, unknown>) => {
+      if (sessionId !== sharedSession.id) {
+        throw new Error('Session not found');
+      }
+      if (typeof patch.pinned === 'boolean') {
+        sharedSession = { ...sharedSession, is_pinned: patch.pinned };
+      }
+      if (typeof patch.title === 'string') {
+        sharedSession = { ...sharedSession, title: patch.title };
+      }
+    });
+    listSessionsMock.mockImplementation(async () => [sharedSession]);
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [sharedSession],
+      archivedSessions: [],
+      activeSessionId: sharedSession.id,
+      unreadSessions: new Set<string>(),
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    await useSessionStore.getState().setSessionPinned(sharedSession.id, true);
+    await useSessionStore.getState().updateSessionTitle(sharedSession.id, 'Renamed by desktop');
+
+    const secondClientSessions = await listSessionsMock();
+    expect(secondClientSessions).toEqual([
+      {
+        ...session,
+        is_pinned: true,
+        title: 'Renamed by desktop',
+      },
+    ]);
+    expect(patchSessionViaDaemonMock).toHaveBeenCalledWith('session-shared', { pinned: true });
+    expect(patchSessionViaDaemonMock).toHaveBeenCalledWith('session-shared', { title: 'Renamed by desktop' });
   });
 });

@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::str::FromStr;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::agent::claude_subagent_history::load_claude_session_subagent_history;
 use crate::agent::codex_subagent_history::load_codex_session_subagent_history;
@@ -77,6 +77,13 @@ pub async fn discover_importable_sessions(
     state: State<'_, crate::AppState>,
     agent_kind: Option<String>,
 ) -> Result<Vec<ImportCandidate>, String> {
+    discover_importable_sessions_for_companion(state.inner(), agent_kind).await
+}
+
+pub async fn discover_importable_sessions_for_companion(
+    state: &crate::AppState,
+    agent_kind: Option<String>,
+) -> Result<Vec<ImportCandidate>, String> {
     let home = home_dir()?;
     let agent_kind = parse_agent_kind_filter(agent_kind)?;
     let discovered = tokio::task::spawn_blocking(move || discover_all(&home, agent_kind))
@@ -106,6 +113,13 @@ pub async fn discover_importable_sessions(
 #[tauri::command]
 pub fn import_sessions(
     state: State<'_, crate::AppState>,
+    request: ImportSessionsRequest,
+) -> Result<ImportSessionsResult, String> {
+    import_sessions_for_companion(state.inner(), request)
+}
+
+pub fn import_sessions_for_companion(
+    state: &crate::AppState,
     request: ImportSessionsRequest,
 ) -> Result<ImportSessionsResult, String> {
     let home = home_dir()?;
@@ -330,6 +344,13 @@ pub async fn resync_session_from_native(
     Ok(ResyncSessionFromNativeResult {
         event_count: native_events.len(),
     })
+}
+
+pub async fn resync_session_from_native_for_companion(
+    app: &tauri::AppHandle,
+    app_session_id: String,
+) -> Result<ResyncSessionFromNativeResult, String> {
+    resync_session_from_native(app.state::<crate::AppState>(), app_session_id).await
 }
 
 pub(crate) fn can_resync_session_from_native(

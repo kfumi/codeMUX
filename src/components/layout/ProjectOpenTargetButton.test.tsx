@@ -12,8 +12,8 @@ const { openProjectPathMock } = vi.hoisted(() => ({
   openProjectPathMock: vi.fn(async () => undefined),
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  fileApi: {
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
     openProjectPath: openProjectPathMock,
   },
 }));

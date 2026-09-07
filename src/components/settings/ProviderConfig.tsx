@@ -29,7 +29,7 @@ import {
   toggleOptionalInputModality,
 } from '@/lib/inputModalities';
 import { enrichFetchedModels, resolveModelDisplayName } from '@/lib/providerModels';
-import { configApi } from '@/lib/tauri';
+import { daemonFacade } from '@/lib/facades/daemon-facade';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type {
@@ -279,7 +279,7 @@ export function ProviderConfigPanel() {
 
   useEffect(() => {
     void fetchConfig();
-    void configApi.listBuiltinProviderTemplates().then(setTemplates).catch(() => setTemplates([]));
+    void daemonFacade.listBuiltinProviderTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, [fetchConfig]);
 
   const catalog = useMemo(() => {
@@ -647,7 +647,7 @@ export function ProviderConfigPanel() {
     }
 
     try {
-      const fetched = await configApi.fetchProviderModels(apiKey, baseUrl);
+      const fetched = await daemonFacade.fetchProviderModels(apiKey, baseUrl);
       const catalog = enrichFetchedModels(
         current.builtin_template_id,
         fetched.map((item) => ({ id: item.id, name: item.name })),

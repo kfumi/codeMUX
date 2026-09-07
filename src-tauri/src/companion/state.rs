@@ -42,6 +42,7 @@ pub struct CompanionInner {
     pub relay_controller: tokio::sync::Mutex<Option<RelayTransportController>>,
     pub relay_state: RelayTransportState,
     pub e2ee_public_key_b64: RwLock<Option<String>>,
+    pub daemon_error: RwLock<Option<String>>,
 }
 
 impl CompanionInner {
@@ -61,6 +62,7 @@ impl CompanionInner {
             relay_controller: tokio::sync::Mutex::new(None),
             relay_state: RelayTransportState::new(),
             e2ee_public_key_b64: RwLock::new(None),
+            daemon_error: RwLock::new(None),
         }
     }
 
@@ -218,10 +220,77 @@ impl CompanionState {
             .map(|queue| queue.into_iter().collect())
             .unwrap_or_default()
     }
+
+    pub async fn set_daemon_error(&self, error: Option<String>) {
+        let mut guard = self.inner.daemon_error.write().await;
+        *guard = error;
+    }
+
+    pub async fn daemon_error(&self) -> Option<String> {
+        self.inner.daemon_error.read().await.clone()
+    }
 }
 
 impl Default for CompanionState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queues_messages_while_turn_is_active() {
+        let state = CompanionState::new();
+        state.mark_turn_active("session-1");
+        state.enqueue_message("session-1", "first".to_string(), None);
+        state.enqueue_message("session-1", "second".to_string(), None);
+
+        assert!(state.is_turn_active("session-1"));
+
+        let drained = state.finish_turn("session-1");
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].prompt, "first");
+        assert_eq!(drained[1].prompt, "second");
+        assert!(!state.is_turn_active("session-1"));
+    }
+
+    #[test]
+    fn finish_turn_drains_queue_for_one_session_only() {
+        let state = CompanionState::new();
+        state.mark_turn_active("session-a");
+        state.mark_turn_active("session-b");
+        state.enqueue_message("session-a", "a1".to_string(), None);
+        state.enqueue_message("session-b", "b1".to_string(), None);
+
+        let drained_a = state.finish_turn("session-a");
+        assert_eq!(drained_a.len(), 1);
+        assert_eq!(drained_a[0].prompt, "a1");
+        assert!(!state.is_turn_active("session-a"));
+        assert!(state.is_turn_active("session-b"));
+
+        let drained_b = state.finish_turn("session-b");
+        assert_eq!(drained_b.len(), 1);
+        assert_eq!(drained_b[0].prompt, "b1");
+    }
+
+    #[test]
+    fn loopback_running_is_independent_from_lan_exposure() {
+        let inner = CompanionInner::new();
+        inner.set_loopback_running(true);
+        inner.set_lan_exposed(false);
+        assert!(inner.is_loopback_running());
+        assert!(!inner.is_lan_exposed());
+        assert!(inner.is_enabled());
+
+        inner.set_lan_exposed(true);
+        assert!(inner.is_lan_exposed());
+        assert!(inner.is_loopback_running());
+
+        inner.set_loopback_running(false);
+        assert!(!inner.is_loopback_running());
+        assert!(!inner.is_enabled());
     }
 }

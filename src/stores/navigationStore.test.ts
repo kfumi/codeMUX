@@ -7,6 +7,7 @@ const home: NavigationLocation = {
   settingsTab: 'general',
   activeSessionId: null,
   activeProjectId: null,
+  automationTaskId: null,
   draftProjectId: null,
   isDraftOpen: false,
   sidePanel: {

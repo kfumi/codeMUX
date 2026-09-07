@@ -11,7 +11,8 @@ import type {
   BrowserControlSettings,
   ImmediateRunMode,
 } from '../types/provider';
-import { configApi, agentApi } from '../lib/tauri';
+import { agentApi, configApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
@@ -87,7 +88,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
     try {
-      const rawConfig = await configApi.get();
+      const rawConfig = await daemonFacade.getConfig();
       const config: AppConfig = {
         ...rawConfig,
         model_providers: rawConfig.model_providers ?? [],
@@ -113,7 +114,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await configApi.setTheme(theme);
+      await daemonFacade.setTheme(theme);
     } catch (error) {
       applyThemeLocally(previousTheme);
       set((state) => ({
@@ -130,7 +131,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await configApi.setCompactAiOutput(enabled);
+      await daemonFacade.setCompactAiOutput(enabled);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previous } : state.config,
@@ -147,7 +148,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await configApi.setImmediateRunMode(next);
+      await daemonFacade.setImmediateRunMode(next);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, immediate_run_mode: previous } : state.config,
@@ -163,7 +164,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await configApi.setAttachmentEnrichment(enrichment);
+      await daemonFacade.setAttachmentEnrichment(enrichment);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, attachment_enrichment: previous } : state.config,
@@ -179,7 +180,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await configApi.setDefaultOpenTarget(target);
+      await daemonFacade.setDefaultOpenTarget(target);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, default_open_target: previous } : state.config,
@@ -197,7 +198,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await configApi.setNotificationSettings(nextSettings);
+      await daemonFacade.setNotificationSettings(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config && previousNotifications
@@ -217,7 +218,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await configApi.setGitSettings(nextSettings);
+      await daemonFacade.setGitSettings(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config && previousGit
@@ -249,7 +250,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setActiveProvider: async (providerId: string) => {
     try {
-      await configApi.setActiveProvider(providerId);
+      await daemonFacade.setActiveProvider(providerId);
       set((state) => ({
         config: state.config ? { ...state.config, active_provider_id: providerId } : null,
       }));
@@ -261,7 +262,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   upsertModelProvider: async (provider: ModelProvider) => {
     try {
-      await configApi.upsertModelProvider(provider);
+      await daemonFacade.upsertModelProvider(provider);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -271,7 +272,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   deleteModelProvider: async (providerId: string) => {
     try {
-      await configApi.deleteModelProvider(providerId);
+      await daemonFacade.deleteModelProvider(providerId);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -281,7 +282,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setModelProviderEnabled: async (providerId: string, enabled: boolean) => {
     try {
-      await configApi.setModelProviderEnabled(providerId, enabled);
+      await daemonFacade.setModelProviderEnabled(providerId, enabled);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -290,13 +291,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   instantiateBuiltinTemplate: async (templateId: string) => {
-    const provider = await configApi.instantiateBuiltinProviderTemplate(templateId);
+    const provider = await daemonFacade.instantiateBuiltinProviderTemplate(templateId);
     await get().fetchConfig();
-    return provider;
+    return provider as ModelProvider;
   },
 
   testModelProvider: async (apiKey: string, baseUrl: string) => {
-    return configApi.testModelProvider(apiKey, baseUrl);
+    return daemonFacade.testModelProvider(apiKey, baseUrl);
   },
 
   getActiveProvider: () => {
@@ -322,7 +323,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setDefaultAgentKind: async (agentKind: AgentKind) => {
     try {
-      await configApi.setDefaultAgentKind(agentKind);
+      await daemonFacade.setDefaultAgentKind(agentKind);
       useNewSessionStore.getState().setSelectedAgentKind(agentKind);
       set((state) => ({
         config: state.config
@@ -342,7 +343,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   updateAgentConfig: async <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => {
     try {
-      await configApi.updateAgentConfig(agentKind, config);
+      await daemonFacade.updateAgentConfig(agentKind, config);
       set((state) => ({
         config: state.config
           ? {

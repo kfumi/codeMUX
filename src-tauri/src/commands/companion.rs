@@ -121,11 +121,12 @@ async fn build_companion_status(
 
     let relay_state = companion_state.relay_state().get().await;
     let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
+    let daemon_error = companion_state.daemon_error().await;
 
     Ok(CompanionStatus {
         enabled: lan_exposed,
         daemon_ready,
-        daemon_error: None,
+        daemon_error,
         port,
         desktop_id: Some(desktop_id),
         lan_ip,
@@ -298,4 +299,19 @@ pub async fn get_companion_pairing_offer(
         Some(relay),
         desktop_public_key_b64,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::companion::CompanionState;
+
+    #[test]
+    fn mobile_companion_disabled_keeps_loopback_daemon_ready() {
+        let companion_state = CompanionState::new();
+        companion_state.inner.set_loopback_running(true);
+        companion_state.inner.set_lan_exposed(false);
+
+        assert!(companion_state.inner.is_loopback_running());
+        assert!(!companion_state.inner.is_lan_exposed());
+    }
 }

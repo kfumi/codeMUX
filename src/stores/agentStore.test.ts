@@ -5,28 +5,76 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../types/session';
 import type { AgentUserMessageLocator } from '../types/agent';
 
-const startSessionMock = vi.fn<
-  (
-    sessionId: string,
-    prompt: string,
-    cwd: string,
-    onEvent: (event: string) => void,
-    reasoningEffort?: string,
-    inputPayload?: { text: string },
-  ) => Promise<void>
->();
-const enrichAttachmentsMock = vi.fn<
-  (attachments: Array<{ type: string; name: string; mediaType: string; dataUrl: string }>) => Promise<{ blocks: Array<{ attachment_name: string; markdown: string; ok: boolean; error?: string }> }>
->();
-const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<void>>();
-const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
-const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const resyncSessionFromNativeMock = vi.fn<(appSessionId: string) => Promise<{ eventCount: number }>>();
-const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, mode?: string) => Promise<{ filesChanged?: number }>>();
-const respondToAgentPermissionMock = vi.fn();
+const {
+  startSessionMock,
+  enrichAttachmentsMock,
+  saveEventsMock,
+  getEventsMock,
+  loadClaudeSessionEventsMock,
+  loadCodexSessionEventsMock,
+  loadSessionEventsMock,
+  resyncSessionFromNativeMock,
+  loadLatestTokenUsageMock,
+  rewindSessionMock,
+  respondToAgentPermissionMock,
+  sessionHandlers,
+  sendMessageViaDaemonMock,
+  interruptViaDaemonMock,
+  getTimelineMock,
+} = vi.hoisted(() => {
+  const sessionHandlers = new Map<string, (raw: string) => void>();
+  const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+  const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+  const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+  const startSessionMock = vi.fn<
+    (
+      sessionId: string,
+      prompt: string,
+      cwd: string,
+      onEvent: (event: string) => void,
+      reasoningEffort?: string,
+      inputPayload?: { text: string },
+    ) => Promise<void>
+  >();
+  const sendMessageViaDaemonMock = vi.fn<
+    (sessionId: string, prompt: string, payload?: { text: string }, options?: { delivery?: 'steer'; requestId?: string }) => Promise<void>
+  >();
+  const interruptViaDaemonMock = vi.fn<(sessionId: string) => Promise<void>>();
+  const getTimelineMock = vi.fn(async (sessionId: string) => {
+    const { useSessionStore } = await import('./sessionStore');
+    const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId)
+      ?? useSessionStore.getState().archivedSessions.find((entry) => entry.id === sessionId);
+    const agentKind = session?.agent_kind ?? 'claude_code';
+    let events = await loadSessionEventsMock(sessionId);
+    if (!events?.length) {
+      if (agentKind === 'codex') {
+        events = await loadCodexSessionEventsMock(sessionId);
+      } else {
+        events = await loadClaudeSessionEventsMock(sessionId);
+      }
+    }
+    return { events: events ?? [], hasMore: false };
+  });
+  return {
+    sessionHandlers,
+    startSessionMock,
+    enrichAttachmentsMock: vi.fn<
+      (attachments: Array<{ type: string; name: string; mediaType: string; dataUrl: string }>) => Promise<{ blocks: Array<{ attachment_name: string; markdown: string; ok: boolean; error?: string }> }>
+    >(),
+    saveEventsMock: vi.fn<(sessionId: string, eventsJson: string) => Promise<void>>(),
+    getEventsMock: vi.fn<(sessionId: string) => Promise<string>>(),
+    loadClaudeSessionEventsMock,
+    loadCodexSessionEventsMock,
+    loadSessionEventsMock,
+    resyncSessionFromNativeMock: vi.fn<(appSessionId: string) => Promise<{ eventCount: number }>>(),
+    loadLatestTokenUsageMock: vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>(),
+    rewindSessionMock: vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, mode?: string) => Promise<{ filesChanged?: number }>>(),
+    respondToAgentPermissionMock: vi.fn(),
+    sendMessageViaDaemonMock,
+    interruptViaDaemonMock,
+    getTimelineMock,
+  };
+});
 
 vi.mock('sonner', () => ({
   toast: {
@@ -114,6 +162,51 @@ vi.mock('../lib/tauri', () => ({
   },
 }));
 
+vi.mock('../lib/daemon-session-bridge', () => ({
+  registerDaemonSessionHandler: vi.fn((sessionId: string, handler: (raw: string) => void) => {
+    sessionHandlers.set(sessionId, handler);
+  }),
+  unregisterDaemonSessionHandler: vi.fn((sessionId: string) => {
+    sessionHandlers.delete(sessionId);
+  }),
+  getLastEventSequence: vi.fn(() => -1),
+  setLastEventSequence: vi.fn(),
+  catchUpTimelineAfterSequence: vi.fn(),
+  teardownDaemonSession: vi.fn(),
+  resetDaemonSessionBridge: vi.fn(),
+}));
+
+vi.mock('../lib/facades/daemon-facade', () => ({
+  ensureDaemonClient: vi.fn(() => Promise.resolve({
+    sendMessage: sendMessageViaDaemonMock,
+    getTimeline: getTimelineMock,
+  })),
+  daemonFacade: {
+    sendMessageViaDaemon: sendMessageViaDaemonMock,
+    getTimeline: getTimelineMock,
+    interruptViaDaemon: interruptViaDaemonMock,
+    respondToPermissionViaDaemon: respondToAgentPermissionMock,
+    respondToInteractiveViaDaemon: vi.fn(),
+    rewindSession: rewindSessionMock,
+    resyncSessionFromNative: resyncSessionFromNativeMock,
+    updateWorkingPath: vi.fn(() => Promise.resolve()),
+    touchSession: vi.fn(() => Promise.resolve()),
+    updateSessionTitle: vi.fn(() => Promise.resolve()),
+    listSessions: vi.fn(() => Promise.resolve([])),
+    listArchivedSessions: vi.fn(() => Promise.resolve([])),
+    listProjects: vi.fn(() => Promise.resolve([])),
+    ensureClient: vi.fn(),
+    enrichAttachments: enrichAttachmentsMock,
+    loadLatestTokenUsage: loadLatestTokenUsageMock,
+    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
+    ensureAgentSession: vi.fn(() => Promise.resolve()),
+    getAgentSessionInfo: vi.fn(() => Promise.resolve({ agentSessionId: null, messagePath: null })),
+    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+  },
+  getDaemonClientInitError: vi.fn(() => null),
+  resetDaemonClient: vi.fn(),
+}));
+
 describe('agent store Codex history loading', () => {
   async function primeSession(agentKind: Session['agent_kind']) {
     const { useAgentStore } = await import('./agentStore');
@@ -167,7 +260,21 @@ describe('agent store Codex history loading', () => {
   }
 
   beforeEach(async () => {
-    vi.clearAllMocks();
+    vi.useRealTimers();
+    startSessionMock.mockClear();
+    enrichAttachmentsMock.mockClear();
+    sendMessageViaDaemonMock.mockClear();
+    interruptViaDaemonMock.mockClear();
+    getTimelineMock.mockClear();
+    loadSessionEventsMock.mockClear();
+    loadClaudeSessionEventsMock.mockClear();
+    loadCodexSessionEventsMock.mockClear();
+    resyncSessionFromNativeMock.mockClear();
+    loadLatestTokenUsageMock.mockClear();
+    rewindSessionMock.mockClear();
+    saveEventsMock.mockClear();
+    getEventsMock.mockClear();
+    respondToAgentPermissionMock.mockClear();
     enrichAttachmentsMock.mockResolvedValue({
       blocks: [{ attachment_name: 'screen.png', markdown: 'Visible terminal error.', ok: true }],
     });
@@ -225,7 +332,18 @@ describe('agent store Codex history loading', () => {
       onEvent(JSON.stringify({ type: 'sidecar_query_done' }));
     });
 
-    saveEventsMock.mockResolvedValue();
+    interruptViaDaemonMock.mockResolvedValue(undefined);
+
+    sendMessageViaDaemonMock.mockImplementation(async (sessionId, prompt, payload, options) => {
+      if (options?.delivery === 'steer') {
+        return;
+      }
+      const handler = sessionHandlers.get(sessionId);
+      if (!handler) return;
+      await startSessionMock(sessionId, prompt, '', handler, undefined, payload);
+    });
+
+    loadSessionEventsMock.mockResolvedValue([]);
     getEventsMock.mockResolvedValue(JSON.stringify({
       events: [
         { kind: 'user', data: { content: 'stale sqlite event' } },
@@ -285,7 +403,12 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().startQuery(session.id, 'third message', 'D:\\workspace');
 
     expect(startSessionMock).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
+      session.id,
+      'first message',
+      expect.objectContaining({ text: 'first message' }),
+    );
     expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
       'second message',
       'third message',
@@ -313,11 +436,11 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
     expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
+    expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'third message',
-      undefined,
       undefined,
       expect.objectContaining({ delivery: 'steer', requestId: expect.any(String) }),
     );
@@ -328,7 +451,9 @@ describe('agent store Codex history loading', () => {
 
     firstOnEvent?.(JSON.stringify({
       type: 'steer_result',
-      request_id: (vi.mocked(agentApi.sendInput).mock.calls[0]?.[4] as { requestId: string }).requestId,
+      request_id: (sendMessageViaDaemonMock.mock.calls.find((call) => (
+        (call[3] as { delivery?: string })?.delivery === 'steer'
+      ))?.[3] as { requestId: string }).requestId,
       ok: true,
     }));
     expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
@@ -338,9 +463,9 @@ describe('agent store Codex history loading', () => {
 
   it('does not stop a live desktop query when attaching to a background turn', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { companionApi } = await import('../lib/tauri');
+    const { daemonFacade } = await import('../lib/facades/daemon-facade');
     const session = await primeSession('codex');
-    vi.mocked(companionApi.isSessionTurnActive).mockResolvedValue(false);
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
 
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -374,11 +499,11 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
     expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
+    expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'third message',
-      undefined,
       undefined,
       expect.objectContaining({ delivery: 'steer' }),
     );
@@ -404,10 +529,9 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
-    expect(vi.mocked(agentApi.sendInput)).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'queued second',
-      undefined,
       undefined,
       expect.objectContaining({ delivery: 'steer' }),
     );
@@ -433,8 +557,8 @@ describe('agent store Codex history loading', () => {
     expect(queued?.prompt).toBe('/compact');
 
     const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
-    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
-    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+    expect(interruptViaDaemonMock).toHaveBeenCalledWith(session.id);
 
     firstOnEvent?.(JSON.stringify({
       type: 'result',
@@ -469,8 +593,8 @@ describe('agent store Codex history loading', () => {
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
     const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
-    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
-    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+    expect(interruptViaDaemonMock).toHaveBeenCalledWith(session.id);
 
     firstOnEvent?.(JSON.stringify({
       type: 'result',
@@ -512,8 +636,8 @@ describe('agent store Codex history loading', () => {
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
     const runPromise = useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
-    expect(vi.mocked(agentApi.sendInput)).not.toHaveBeenCalled();
-    expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+    expect(interruptViaDaemonMock).toHaveBeenCalledWith(session.id);
 
     firstOnEvent?.(JSON.stringify({
       type: 'result',
@@ -548,7 +672,10 @@ describe('agent store Codex history loading', () => {
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
     await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
-    const requestId = (vi.mocked(agentApi.sendInput).mock.calls[0]?.[4] as { requestId: string }).requestId;
+    const steerCall = sendMessageViaDaemonMock.mock.calls.find((call) => (
+      (call[3] as { delivery?: string })?.delivery === 'steer'
+    ));
+    const requestId = (steerCall?.[3] as { requestId: string }).requestId;
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
 
     firstOnEvent?.(JSON.stringify({
@@ -559,7 +686,7 @@ describe('agent store Codex history loading', () => {
     }));
 
     await vi.waitFor(() => {
-      expect(vi.mocked(agentApi.interrupt)).toHaveBeenCalledWith(session.id);
+      expect(interruptViaDaemonMock).toHaveBeenCalledWith(session.id);
     });
     expect(useAgentStore.getState().queuedQueries[session.id]?.[0]?.prompt).toBe('steer me');
 
@@ -700,6 +827,7 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().runQueuedQueryNow(session.id, 'queued-b');
 
     expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
+    expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual(['beta', 'alpha']);
     });
@@ -717,7 +845,10 @@ describe('agent store Codex history loading', () => {
     const first = useAgentStore.getState().loadSessionMessages(session.id);
     const second = useAgentStore.getState().loadSessionMessages(session.id);
 
-    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(getTimelineMock).toHaveBeenCalledTimes(1);
+      expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    });
     resolveHistory?.([]);
     await Promise.all([first, second]);
 
@@ -751,7 +882,7 @@ describe('agent store Codex history loading', () => {
     }));
     loadClaudeSessionEventsMock.mockResolvedValueOnce([persistedUser]);
 
-    await useAgentStore.getState().loadSessionMessages(session.id);
+    await useAgentStore.getState().loadSessionMessages(session.id, { force: true });
 
     expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
     expect(useAgentStore.getState().events[session.id]?.[0]).toMatchObject({
@@ -1409,14 +1540,10 @@ describe('agent store Codex history loading', () => {
       .getState()
       .startQuery(session.id, 'TEMPLATE: review current changes', 'D:\\project\\ai-code\\codeMUX', undefined, '/review');
 
-    expect(startSessionMock).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'TEMPLATE: review current changes',
-      'D:\\project\\ai-code\\codeMUX',
-      expect.any(Function),
-      undefined,
       { text: 'TEMPLATE: review current changes' },
-      '/review',
     );
     expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
       kind: 'user',
@@ -2125,6 +2252,13 @@ describe('agent store Codex history loading', () => {
       emitEvent?.(JSON.stringify({
         type: 'stream_event',
         session_id: session.id,
+        event: { type: 'content_block_stop', index: 0, content_block: { type: 'text' } },
+      }));
+      await vi.advanceTimersByTimeAsync(100);
+
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
         event: { type: 'content_block_start', content_block: { type: 'thinking' } },
       }));
       emitEvent?.(JSON.stringify({
@@ -2146,7 +2280,7 @@ describe('agent store Codex history loading', () => {
         event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'final answer' } },
       }));
 
-      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(250);
 
       expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
       expect(useAgentStore.getState().streamingText[session.id]).toBe('final answer');
@@ -2980,14 +3114,10 @@ describe('agent store Codex history loading', () => {
       .getState()
       .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, inputPayload, 'future-model-7');
 
-    expect(startSessionMock).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'inspect this',
-      'D:\\project\\ai-code\\codeMUX',
-      expect.any(Function),
-      undefined,
       inputPayload,
-      'inspect this',
     );
   });
 
@@ -3007,14 +3137,10 @@ describe('agent store Codex history loading', () => {
       .getState()
       .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, inputPayload, model);
 
-    expect(startSessionMock).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       'inspect this',
-      'D:\\project\\ai-code\\codeMUX',
-      expect.any(Function),
-      undefined,
       { text: 'inspect this' },
-      'inspect this',
     );
     expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
       kind: 'user',
@@ -3055,14 +3181,10 @@ describe('agent store Codex history loading', () => {
     expect(enrichAttachmentsMock).toHaveBeenCalledWith([
       expect.objectContaining({ type: 'image', name: 'screen.png' }),
     ]);
-    expect(startSessionMock).toHaveBeenCalledWith(
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
       session.id,
       expect.stringContaining('<attachment_context>'),
-      'D:\\project\\ai-code\\codeMUX',
-      expect.any(Function),
-      undefined,
       expect.objectContaining({ text: expect.stringContaining('inspect this') }),
-      'inspect this',
     );
   });
 
@@ -3774,24 +3896,27 @@ describe('agent store Codex history loading', () => {
       forceStopped: { [session.id]: true },
     });
 
-    let resolveHistory: ((events: Record<string, unknown>[]) => void) | undefined;
-    loadSessionEventsMock.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveHistory = resolve;
+    let resolveTimeline: ((page: { events: Record<string, unknown>[]; hasMore: boolean }) => void) | undefined;
+    getTimelineMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveTimeline = resolve;
     }));
 
     const staleLoad = useAgentStore.getState().loadSessionMessages(session.id);
     await useAgentStore.getState().rewindLastTurn(session.id);
     expect(useAgentStore.getState().events[session.id]).toEqual([]);
 
-    resolveHistory?.([
-      { type: 'user_message', session_id: session.id, content: prompt, event_id: 'stale-user' },
-      {
-        type: 'assistant_message',
-        session_id: session.id,
-        event_id: 'stale-assistant',
-        content: [{ type: 'text', text: '我先探索一下代码库架构，了解现有的模式，再设计定时任务方案。' }],
-      },
-    ]);
+    resolveTimeline?.({
+      events: [
+        { type: 'user_message', session_id: session.id, content: prompt, event_id: 'stale-user' },
+        {
+          type: 'assistant_message',
+          session_id: session.id,
+          event_id: 'stale-assistant',
+          content: [{ type: 'text', text: '我先探索一下代码库架构，了解现有的模式，再设计定时任务方案。' }],
+        },
+      ],
+      hasMore: false,
+    });
     await staleLoad;
 
     expect(useAgentStore.getState().events[session.id]).toEqual([]);

@@ -1,5 +1,7 @@
-import { agentApi } from './tauri';
+import { daemonFacade } from './facades/daemon-facade';
+import { isCodeMuxPersistedTimelineEvent } from './codeMuxProtocol';
 import { mapPersistedClaudeMessage } from '../stores/agentEventParsing';
+import { parseAgentEvent } from '../stores/agentStore';
 import type { AgentKind } from '../types/session';
 
 export function normalizeSessionTitle(text: string): string {
@@ -34,6 +36,16 @@ export function buildSessionTitleFromUserContent(content: string): string {
   return normalized || '未命名对话';
 }
 
+async function loadTimelineUserEvents(sessionId: string, agentKind: AgentKind) {
+  const page = await daemonFacade.getTimeline(sessionId, { direction: 'tail', limit: 200 });
+  return (page.events ?? []).map((raw) => {
+    const rawMsg = raw as Record<string, unknown>;
+    return isCodeMuxPersistedTimelineEvent(rawMsg)
+      ? parseAgentEvent(JSON.stringify(rawMsg))
+      : mapPersistedClaudeMessage(rawMsg, agentKind);
+  }).filter(Boolean);
+}
+
 export async function resolveSessionTitle(
   sessionId: string,
   agentKind: AgentKind,
@@ -45,9 +57,8 @@ export async function resolveSessionTitle(
   }
 
   try {
-    const rawEvents = await agentApi.loadSessionEvents(sessionId);
-    for (const raw of rawEvents) {
-      const event = mapPersistedClaudeMessage(raw, agentKind);
+    const events = await loadTimelineUserEvents(sessionId, agentKind);
+    for (const event of events) {
       if (event?.kind !== 'user') continue;
       const content = event.data.content.trim();
       if (!content) continue;

@@ -10,6 +10,52 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { SessionList } from './SessionList';
 
+const initDaemonClientMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const getDaemonStartupErrorMock = vi.hoisted(() => vi.fn(() => null as string | null));
+
+vi.mock('../../lib/daemon-bootstrap', () => ({
+  initDaemonClient: initDaemonClientMock,
+  getDaemonStartupError: () => getDaemonStartupErrorMock(),
+}));
+
+vi.mock('../../hooks/useCompanionStatus', () => ({
+  useCompanionStatus: () => ({
+    status: null,
+    loading: false,
+    busy: false,
+    error: null,
+    loadStatus: vi.fn(),
+    setEnabled: vi.fn(),
+    refreshPairingCode: vi.fn(),
+    setRelayEnabled: vi.fn(),
+    setRelayConfig: vi.fn(),
+  }),
+}));
+
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    listSessions: vi.fn(() => Promise.resolve([])),
+    listArchivedSessions: vi.fn(() => Promise.resolve([])),
+    listProjects: vi.fn(() => Promise.resolve([])),
+    createProject: vi.fn(),
+    deleteProject: vi.fn(),
+    renameProject: vi.fn(),
+    getInitError: vi.fn(() => null),
+    resetClient: vi.fn(),
+    ensureClient: vi.fn(() => Promise.resolve({})),
+  },
+  getDaemonClientInitError: vi.fn(() => null),
+  ensureDaemonClient: vi.fn(() => Promise.resolve({
+    listSessions: vi.fn(() => Promise.resolve([])),
+    listArchivedSessions: vi.fn(() => Promise.resolve([])),
+  })),
+  resetDaemonClient: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(() => Promise.resolve('test-token')),
+}));
+
 vi.mock('../../lib/tauri', () => ({
   agentApi: {
     deleteClaudeSessionFiles: vi.fn(),
@@ -283,5 +329,26 @@ describe('SessionList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'toggle-conversations-section' }));
 
     expect(screen.getByText('Active Session')).toBeTruthy();
+  });
+
+  it('retries daemon connection from the sidebar alert', async () => {
+    const { daemonFacade } = await import('../../lib/facades/daemon-facade');
+    getDaemonStartupErrorMock.mockReturnValue('连接失败');
+    useSessionStore.setState({
+      isLoading: false,
+      fetchSessions: vi.fn(async () => {}),
+      fetchArchivedSessions: vi.fn(async () => {}),
+    });
+    useProjectStore.setState({
+      fetchProjects: vi.fn(async () => {}),
+    });
+
+    renderSessionList();
+
+    expect(screen.getByText('连接失败')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重试连接 Daemon' }));
+
+    expect(vi.mocked(daemonFacade.resetClient)).toHaveBeenCalled();
+    expect(initDaemonClientMock).toHaveBeenCalled();
   });
 });

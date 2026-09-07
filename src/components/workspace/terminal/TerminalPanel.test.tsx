@@ -33,14 +33,16 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../../lib/tauri', () => ({
-  terminalApi: {
-    start: mocks.startMock,
-    attach: mocks.attachMock,
-    detach: mocks.detachMock,
-    close: mocks.closeMock,
-    write: mocks.writeMock,
-    resize: mocks.resizeMock,
+vi.mock('../../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    terminal: {
+      start: mocks.startMock,
+      attach: mocks.attachMock,
+      detach: mocks.detachMock,
+      close: mocks.closeMock,
+      write: mocks.writeMock,
+      resize: mocks.resizeMock,
+    },
   },
 }));
 

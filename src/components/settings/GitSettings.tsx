@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Cpu, GitCommitHorizontal, GitPullRequest } from 'lucide-react';
 
 import { resolveModelDisplayName } from '../../lib/providerModels';
-import { gitApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { Button } from '../ui/button';
@@ -31,7 +31,7 @@ export function GitSettings() {
   const [giteeSaving, setGiteeSaving] = useState(false);
 
   useEffect(() => {
-    void gitApi.getGiteeCredentialStatus()
+    void daemonFacade.git.getGiteeCredentialStatus()
       .then(setGiteeConfigured)
       .catch(() => setGiteeConfigured(false));
   }, []);
@@ -155,7 +155,7 @@ export function GitSettings() {
               onClick={() => {
                 setGiteeSaving(true);
                 setGiteeMessage(null);
-                void gitApi.setGiteeToken(giteeToken)
+                void daemonFacade.git.setGiteeToken(giteeToken)
                   .then(() => {
                     setGiteeToken('');
                     setGiteeConfigured(true);
@@ -177,7 +177,7 @@ export function GitSettings() {
                 onClick={() => {
                   setGiteeSaving(true);
                   setGiteeMessage(null);
-                  void gitApi.clearGiteeToken()
+                  void daemonFacade.git.clearGiteeToken()
                     .then(() => {
                       setGiteeConfigured(false);
                       setGiteeMessage('Gitee Token 已清除');

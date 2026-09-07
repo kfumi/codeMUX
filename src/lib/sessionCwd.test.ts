@@ -173,11 +173,16 @@ const gitApiMock = vi.hoisted(() => ({
   createWorktree: vi.fn(),
 }));
 
+vi.mock('./facades/daemon-facade', () => ({
+  daemonFacade: {
+    git: gitApiMock,
+  },
+}));
+
 vi.mock('./tauri', async () => {
   const actual = await vi.importActual<typeof import('./tauri')>('./tauri');
   return {
     ...actual,
-    gitApi: gitApiMock,
     appApi: {
       ...actual.appApi,
       getUserHomeDirectory: appApiMock.getUserHomeDirectory,

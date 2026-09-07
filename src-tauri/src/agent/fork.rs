@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::sync::oneshot;
 
 use crate::config::types::AgentKind;
@@ -749,4 +749,82 @@ mod tests {
 
         let _ = fs::remove_dir_all(&base);
     }
+}
+
+pub async fn fork_claude_session_for_companion(
+    app: &tauri::AppHandle,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    let state = app.state::<crate::AppState>();
+    let agent_state = app.state::<AgentState>();
+    fork_claude_session(
+        state,
+        agent_state,
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_codex_session_for_companion(
+    app: &tauri::AppHandle,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    fork_provider_turn_id: Option<String>,
+    fork_provider_turn_ordinal: Option<usize>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_codex_session(
+        app.state::<crate::AppState>(),
+        app.state::<AgentState>(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        fork_provider_turn_id,
+        fork_provider_turn_ordinal,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_opencode_session_for_companion(
+    app: &tauri::AppHandle,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_opencode_session(
+        app.state::<crate::AppState>(),
+        app.state::<AgentState>(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_pi_session_for_companion(
+    app: &tauri::AppHandle,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_pi_session(
+        app.state::<crate::AppState>(),
+        app.state::<AgentState>(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
 }

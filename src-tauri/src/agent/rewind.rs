@@ -902,6 +902,19 @@ pub async fn rewind_agent_session(
     Ok(RewindSessionResult { files_changed })
 }
 
+pub async fn rewind_agent_session_for_companion(
+    app: &tauri::AppHandle,
+    app_session_id: String,
+    agent_kind: String,
+    target: Option<RewindTarget>,
+    mode: Option<String>,
+) -> Result<RewindSessionResult, String> {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    let agent_state = app.state::<AgentState>();
+    rewind_agent_session(state, agent_state, app_session_id, agent_kind, target, mode).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

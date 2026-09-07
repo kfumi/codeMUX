@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandInput } from '../../lib/slashCommands';
 import { serializePermissionConfig } from '../../lib/agentPermissions';
-import { agentApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from '../../stores/newSessionStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -226,8 +226,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         showInfoDialog: () => {},
         createSession: async () => {},
         clearEvents,
-        resetSession: () => { agentApi.resetSession(NEW_SESSION_DRAFT_SESSION_ID); },
-        deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(NEW_SESSION_DRAFT_SESSION_ID),
+        resetSession: () => { daemonFacade.resetAgentSession(NEW_SESSION_DRAFT_SESSION_ID); },
+        deleteClaudeSessionFiles: () => daemonFacade.deleteClaudeSessionFiles(NEW_SESSION_DRAFT_SESSION_ID),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
       };

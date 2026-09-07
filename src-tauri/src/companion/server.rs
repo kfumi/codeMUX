@@ -20,8 +20,14 @@ use crate::companion::actions::{
     interrupt_companion_session, respond_companion_permission, send_companion_message,
     send_companion_tool_response, update_companion_settings, CompanionSettingsUpdate,
 };
-use crate::companion::local_daemon_token;
+use crate::companion::auth::{classify_local_daemon_token, local_daemon_device, LocalDaemonTokenDecision};
+use crate::companion::routes_app_config;
+use crate::companion::routes_history_import;
+use crate::companion::routes_agent_runtime;
+use crate::companion::routes_control_plane;
 use crate::companion::routes_extended;
+use crate::companion::routes_providers;
+use crate::companion::routes_terminal;
 use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
@@ -56,6 +62,8 @@ struct PairClaimResponse {
 struct SendMessageRequest {
     prompt: String,
     input_payload: Option<serde_json::Value>,
+    delivery: Option<String>,
+    request_id: Option<String>,
 }
 
 fn has_sendable_input(prompt: &str, input_payload: Option<&serde_json::Value>) -> bool {
@@ -148,6 +156,24 @@ pub async fn start_daemon_server(
     expose_lan: bool,
     lan_listen_address: String,
 ) -> Result<(), String> {
+    let app_for_status = app.clone();
+    let result =
+        start_daemon_server_body(app, port, expose_lan, lan_listen_address).await;
+    let companion_state = app_for_status.state::<CompanionState>().clone();
+    if let Err(error) = &result {
+        companion_state.set_daemon_error(Some(error.clone())).await;
+    } else {
+        companion_state.set_daemon_error(None).await;
+    }
+    result
+}
+
+async fn start_daemon_server_body(
+    app: AppHandle,
+    port: u16,
+    expose_lan: bool,
+    lan_listen_address: String,
+) -> Result<(), String> {
     let companion_state = app.state::<CompanionState>();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
 
@@ -155,7 +181,8 @@ pub async fn start_daemon_server(
 
     let app_state = app.state::<AppState>();
     let app_data_dir = app_state.app_data_dir.clone();
-    let _token = local_daemon_token::ensure_local_daemon_token(&app_data_dir, true)?;
+    let _token =
+        crate::companion::local_daemon_token::ensure_local_daemon_token(&app_data_dir, true)?;
 
     {
         let mut stored_port = companion_state.inner.port.write().await;
@@ -234,6 +261,11 @@ pub async fn stop_daemon_server(app: AppHandle) -> Result<(), String> {
     let companion_state = app.state::<CompanionState>();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
     stop_daemon_server_inner(&companion_state).await
+}
+
+pub async fn stop_daemon_for_state(companion_state: &CompanionState) -> Result<(), String> {
+    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
+    stop_daemon_server_inner(companion_state).await
 }
 
 pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
@@ -337,13 +369,23 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
             patch(update_session_settings),
         )
         .route("/sessions/{session_id}/interrupt", post(interrupt_session))
-        .route("/projects", get(list_projects))
+        .route("/projects", get(list_projects).post(create_project))
+        .route(
+            "/projects/{project_id}",
+            patch(rename_project).delete(delete_project),
+        )
         .route("/bootstrap", get(bootstrap))
         .route("/permissions/respond", post(permission_respond))
         .route("/interactive/user-input", post(user_input_respond))
         .route("/ws", get(ws_handler));
 
     let api = routes_extended::extend_api_router(api);
+    let api = routes_agent_runtime::extend_api_router(api);
+    let api = routes_history_import::extend_api_router(api);
+    let api = routes_app_config::extend_api_router(api);
+    let api = routes_control_plane::extend_api_router(api);
+    let api = routes_providers::extend_api_router(api);
+    let api = routes_terminal::extend_api_router(api);
 
     let index_file = static_dir.join("index.html");
     let static_service = ServeDir::new(static_dir).not_found_service(ServeFile::new(index_file));
@@ -596,6 +638,8 @@ async fn send_message(
         &session_id,
         body.prompt.trim(),
         body.input_payload,
+        body.delivery.as_deref(),
+        body.request_id.as_deref(),
     )
     .await
     .map_err(ApiError::bad_request)?;
@@ -675,6 +719,71 @@ async fn list_projects(
     let projects =
         operations::get_all_projects(&db).map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(projects))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectRequest {
+    name: String,
+    path: String,
+}
+
+async fn create_project(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CreateProjectRequest>,
+) -> Result<Json<operations::Project>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let app_state = ctx.app.state::<AppState>();
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let project = operations::create_project(&db, &body.name, &body.path)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(Json(project))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenameProjectRequest {
+    name: String,
+}
+
+async fn rename_project(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+    Json(body): Json<RenameProjectRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let app_state = ctx.app.state::<AppState>();
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    operations::rename_project(&db, &project_id, &body.name)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_project(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let app_state = ctx.app.state::<AppState>();
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    operations::delete_project(&db, &project_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn bootstrap(
@@ -838,7 +947,7 @@ fn authorize_device(
     authorize_token_device(ctx, &token, peer)
 }
 
-fn authorize_token(ctx: &ServerContext, token: &str, peer: Option<SocketAddr>) -> Result<(), ApiError> {
+pub(crate) fn authorize_token(ctx: &ServerContext, token: &str, peer: Option<SocketAddr>) -> Result<(), ApiError> {
     authorize_token_device(ctx, token, peer).map(|_| ())
 }
 
@@ -850,22 +959,22 @@ fn authorize_token_device(
     let app_state = ctx.app.state::<AppState>();
     let companion_state = ctx.app.state::<CompanionState>();
     let loopback = is_loopback_peer(peer);
-
-    if loopback {
-        if local_daemon_token::verify_local_daemon_token(&app_state.app_data_dir, token) {
-            return Ok(operations::PairedDevice {
-                id: "local-daemon".to_string(),
-                name: "Local Daemon".to_string(),
-                paired_at: String::new(),
-                last_seen_at: None,
-            });
+    match classify_local_daemon_token(
+        &app_state.app_data_dir,
+        token,
+        loopback,
+        companion_state.inner.is_lan_exposed(),
+    ) {
+        LocalDaemonTokenDecision::AcceptLoopback => return Ok(local_daemon_device()),
+        LocalDaemonTokenDecision::RejectCompanionDisabled => {
+            return Err(ApiError::unauthorized("Mobile companion is not enabled"));
         }
-    } else if !companion_state.inner.is_lan_exposed() {
-        return Err(ApiError::unauthorized("Mobile companion is not enabled"));
-    } else if local_daemon_token::verify_local_daemon_token(&app_state.app_data_dir, token) {
-        return Err(ApiError::unauthorized(
-            "Local daemon token is not accepted from non-loopback clients",
-        ));
+        LocalDaemonTokenDecision::RejectNonLoopback => {
+            return Err(ApiError::unauthorized(
+                "Local daemon token is not accepted from non-loopback clients",
+            ));
+        }
+        LocalDaemonTokenDecision::NotLocalToken => {}
     }
 
     let db = app_state
@@ -1033,5 +1142,47 @@ mod tests {
         assert_eq!(request.provider_id.as_deref(), Some("provider-1"));
         assert_eq!(request.permission_config["kind"], "codex");
         assert_eq!(request.plan_mode, "off");
+    }
+
+    #[test]
+    fn extract_bearer_token_reads_authorization_header() {
+        use super::extract_bearer_token;
+        use axum::http::{HeaderMap, HeaderValue};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer local-token"),
+        );
+        assert_eq!(
+            extract_bearer_token(&headers).as_deref(),
+            Some("local-token")
+        );
+    }
+
+    #[test]
+    fn extract_bearer_token_rejects_missing_header() {
+        use super::extract_bearer_token;
+        use axum::http::HeaderMap;
+
+        let headers = HeaderMap::new();
+        assert!(extract_bearer_token(&headers).is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_daemon_for_state_clears_loopback_and_lan_flags() {
+        use super::stop_daemon_for_state;
+        use crate::companion::CompanionState;
+
+        let companion_state = CompanionState::new();
+        companion_state.inner.set_loopback_running(true);
+        companion_state.inner.set_lan_exposed(true);
+
+        stop_daemon_for_state(&companion_state)
+            .await
+            .expect("stop without a running server should still clear flags");
+
+        assert!(!companion_state.inner.is_loopback_running());
+        assert!(!companion_state.inner.is_lan_exposed());
     }
 }

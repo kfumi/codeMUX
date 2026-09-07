@@ -3,14 +3,21 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fileApi } from '../../lib/tauri';
+
 import { useAgentStore } from '../../stores/agentStore';
 import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
 import { ProjectExplorer } from './ProjectExplorer';
 
-const invokeMock = vi.fn();
+const listDirectoryMock = vi.hoisted(() => vi.fn());
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    listDirectory: listDirectoryMock,
+  },
+}));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
@@ -31,7 +38,7 @@ const project: Project = {
 
 describe('ProjectExplorer', () => {
   beforeEach(() => {
-    invokeMock.mockReset();
+    listDirectoryMock.mockReset();
     useSessionStore.setState({ activeSessionId: 'session-1' });
     useNewSessionStore.setState({ isDraftOpen: false });
     useAgentStore.setState({ pendingComposerReferenceInsert: {} });
@@ -41,7 +48,7 @@ describe('ProjectExplorer', () => {
       },
     });
 
-    vi.spyOn(fileApi, 'listDirectory').mockImplementation(async (path, depth) => {
+    listDirectoryMock.mockImplementation(async (path, depth) => {
       if (path === project.path && depth === 5) {
         return [
           {
@@ -101,7 +108,7 @@ describe('ProjectExplorer', () => {
     expect(screen.queryByText('specs')).toBeNull();
 
     await waitFor(() => {
-      expect(fileApi.listDirectory).toHaveBeenCalledWith(
+      expect(listDirectoryMock).toHaveBeenCalledWith(
         `${project.path}/docs/superpowers`,
         1,
         project.path,
@@ -114,7 +121,7 @@ describe('ProjectExplorer', () => {
     fireEvent.click(screen.getByText('specs'));
 
     await waitFor(() => {
-      expect(fileApi.listDirectory).toHaveBeenCalledWith(
+      expect(listDirectoryMock).toHaveBeenCalledWith(
         `${project.path}/docs/superpowers/specs`,
         1,
         project.path,

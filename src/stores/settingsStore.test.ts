@@ -12,23 +12,26 @@ const setImmediateRunModeMock = vi.fn<(mode: string) => Promise<void>>();
 const setBrowserControlMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const getConfigMock = vi.fn(async () => structuredClone(baseConfig));
 
-vi.mock('../lib/tauri', () => ({
-  configApi: {
-    get: (...args: unknown[]) => getConfigMock(...args),
-    upsertModelProvider: vi.fn(),
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    getConfig: (...args: unknown[]) => getConfigMock(...args),
     deleteModelProvider: deleteModelProviderMock,
+    upsertModelProvider: vi.fn(),
     setActiveProvider: vi.fn(),
     setModelProviderEnabled: vi.fn(),
     instantiateBuiltinProviderTemplate: vi.fn(),
     testModelProvider: vi.fn(),
-    setTheme: vi.fn(),
-    testProvider: vi.fn(),
     setDefaultAgentKind: setDefaultAgentKindMock,
     updateAgentConfig: updateAgentConfigMock,
     setCompactAiOutput: setCompactAiOutputMock,
     setNotificationSettings: setNotificationSettingsMock,
     setDefaultOpenTarget: setDefaultOpenTargetMock,
     setImmediateRunMode: setImmediateRunModeMock,
+  },
+}));
+
+vi.mock('../lib/tauri', () => ({
+  configApi: {
     setBrowserControl: setBrowserControlMock,
   },
   agentApi: {

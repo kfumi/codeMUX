@@ -3,7 +3,7 @@ import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin,
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-import { agentApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -82,7 +82,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const copyAgentSessionValue = async (field: 'agentSessionId' | 'messagePath') => {
     if (!session) return;
-    const info = await agentApi.getSessionInfo(session.id, session.agent_kind);
+    const info = await daemonFacade.getSessionInfo(session.id, session.agent_kind);
     await copyText(info[field], field === 'messagePath' ? '未找到任务路径' : '未找到会话ID');
   };
 

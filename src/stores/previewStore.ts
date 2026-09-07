@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { fileApi, type FileTreeNode } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
+import type { FileTreeNode } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 
 const logger = createLogger('previewStore');
@@ -171,7 +172,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
     // Load file content from disk
     try {
-      const content = await fileApi.readFile(normalizedPath, state.projectPath ?? undefined);
+      const content = await daemonFacade.readFile(normalizedPath, state.projectPath ?? undefined);
       if (isDiffMode) {
         set((s) => ({
           diffFiles: s.diffFiles.map((f) =>
@@ -314,7 +315,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     try {
       // 深度 5（Rust 侧上限）：消息里相对路径的链接化依赖树里能找到深层文件，
       // 如 `lnwlcs\docs\research\xxx.md` 位于根下第 4 层
-      const nodes = await fileApi.listDirectory(rootPath, 5, rootPath);
+      const nodes = await daemonFacade.listDirectory(rootPath, 5, rootPath);
       set({ treeRoot: convertTree(nodes), treeRootPath: rootPath, fileTreeLoading: false });
     } catch (error) {
       logger.error('Failed to load file tree', { rootPath }, serializeError(error));

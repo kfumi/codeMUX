@@ -1,8 +1,8 @@
 import { ChevronDown, ChevronUp, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { daemonFacade } from '../../../lib/facades/daemon-facade';
 import {
-  gitApi,
   type CreatePullRequestResult,
   type GitPullRequestSuggestion,
   type GitRepositoryState,
@@ -81,9 +81,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setError(null);
     try {
       const [nextState, nextFiles, nextStagedFiles] = await Promise.all([
-        gitApi.getRepositoryState(projectPath),
-        gitApi.getStatusChanges(projectPath, area),
-        gitApi.getStatusChanges(projectPath, 'staged'),
+        daemonFacade.git.getRepositoryState(projectPath),
+        daemonFacade.git.getStatusChanges(projectPath, area),
+        daemonFacade.git.getStatusChanges(projectPath, 'staged'),
       ]);
       setRepositoryState(nextState);
       setFiles(nextFiles);
@@ -135,7 +135,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       ...current,
       [key]: { loading: true, error: null, change: null },
     }));
-    void gitApi.getStatusChangeDetail(projectPath, area, file.path)
+    void daemonFacade.git.getStatusChangeDetail(projectPath, area, file.path)
       .then((change) => {
         setFileDetails((current) => ({
           ...current,
@@ -157,9 +157,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setError(null);
     try {
       if (area === 'unstaged') {
-        await gitApi.stageStatusChanges(projectPath, filePath);
+        await daemonFacade.git.stageStatusChanges(projectPath, filePath);
       } else {
-        await gitApi.unstageStatusChanges(projectPath, filePath);
+        await daemonFacade.git.unstageStatusChanges(projectPath, filePath);
       }
       await load();
     } catch (err) {
@@ -176,7 +176,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setMutatingKey(key);
     setError(null);
     try {
-      await gitApi.revertStatusChanges(projectPath, area, filePath);
+      await daemonFacade.git.revertStatusChanges(projectPath, area, filePath);
       setExpandedPath(null);
       await load();
     } catch (err) {
@@ -192,7 +192,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setMutatingKey('commit:generate');
     setCommitError(null);
     try {
-      const suggestion = await gitApi.generateCommitMessage(projectPath);
+      const suggestion = await daemonFacade.git.generateCommitMessage(projectPath);
       setCommitMessage(suggestion.message);
     } catch (err) {
       setCommitError(String(err));
@@ -207,15 +207,15 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setCommitError(null);
     try {
       if (options.includeUnstaged) {
-        await gitApi.stageStatusChanges(projectPath);
+        await daemonFacade.git.stageStatusChanges(projectPath);
       }
       const message = commitMessage.trim()
         ? commitMessage
-        : (await gitApi.generateCommitMessage(projectPath)).message;
+        : (await daemonFacade.git.generateCommitMessage(projectPath)).message;
       setCommitMessage(message);
-      await gitApi.commitChanges(projectPath, message);
+      await daemonFacade.git.commitChanges(projectPath, message);
       if (options.pushAfter) {
-        await gitApi.pushBranch(projectPath);
+        await daemonFacade.git.pushBranch(projectPath);
       }
       setCommitMessage('');
       await load();
@@ -231,7 +231,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setMutatingKey('push');
     setCommitError(null);
     try {
-      await gitApi.pushBranch(projectPath);
+      await daemonFacade.git.pushBranch(projectPath);
       await load();
     } catch (err) {
       setCommitError(String(err));
@@ -245,7 +245,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setMutatingKey('pr:generate');
     setPrError(null);
     try {
-      const suggestion = await gitApi.generatePullRequestDescription(projectPath);
+      const suggestion = await daemonFacade.git.generatePullRequestDescription(projectPath);
       setPrSuggestion(suggestion);
       setPrBase((current) => current || suggestion.base);
     } catch (err) {
@@ -261,7 +261,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setPrCreateError(null);
     setPrResult(null);
     try {
-      setPrResult(await gitApi.createPullRequest({ projectPath, ...request }));
+      setPrResult(await daemonFacade.git.createPullRequest({ projectPath, ...request }));
     } catch (err) {
       setPrCreateError(String(err));
     } finally {

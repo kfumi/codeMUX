@@ -216,6 +216,10 @@ pub async fn test_agent_provider_profile(
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
+    get_config_for_companion(state.inner())
+}
+
+pub fn get_config_for_companion(state: &AppState) -> AppConfig {
     debug!(target: "provider", "Loading app config");
     redact_config_for_frontend(&state.config.lock().unwrap())
 }
@@ -253,10 +257,18 @@ pub fn set_default_agent_kind(
     app: AppHandle,
     agent_kind: String,
 ) -> Result<(), String> {
+    set_default_agent_kind_for_companion(state.inner(), &app, agent_kind)
+}
+
+pub fn set_default_agent_kind_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    agent_kind: String,
+) -> Result<(), String> {
     info!(target: "provider", "Setting default agent kind agent_kind={}", agent_kind);
     let mut config = state.config.lock().unwrap();
     config.agent_defaults.default_agent_kind = AgentKind::from_str(&agent_kind)?;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -267,16 +279,33 @@ pub fn update_agent_config(
     agent_kind: String,
     config: serde_json::Value,
 ) -> Result<(), String> {
+    update_agent_config_for_companion(state.inner(), &app, agent_kind, config)
+}
+
+pub fn update_agent_config_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    agent_kind: String,
+    config: serde_json::Value,
+) -> Result<(), String> {
     info!(target: "provider", "Updating agent config agent_kind={}", agent_kind);
     let mut app_config = state.config.lock().unwrap();
     apply_agent_config_update(&mut app_config, AgentKind::from_str(&agent_kind)?, config)?;
 
-    config::save_config(&app, &app_config)?;
+    config::save_config(app, &app_config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> Result<(), String> {
+    set_theme_for_companion(state.inner(), &app, theme)
+}
+
+pub fn set_theme_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    theme: String,
+) -> Result<(), String> {
     info!(target: "provider", "Setting theme theme={}", theme);
     let mut config = state.config.lock().unwrap();
     config.theme = match theme.as_str() {
@@ -284,7 +313,7 @@ pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> R
         "dark" => Theme::Dark,
         _ => Theme::System,
     };
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -294,10 +323,18 @@ pub fn set_compact_ai_output(
     app: AppHandle,
     enabled: bool,
 ) -> Result<(), String> {
+    set_compact_ai_output_for_companion(state.inner(), &app, enabled)
+}
+
+pub fn set_compact_ai_output_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
     info!(target: "provider", "Setting compact AI output enabled={}", enabled);
     let mut config = state.config.lock().unwrap();
     config.compact_ai_output = enabled;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -307,6 +344,14 @@ pub fn set_immediate_run_mode(
     app: AppHandle,
     mode: String,
 ) -> Result<(), String> {
+    set_immediate_run_mode_for_companion(state.inner(), &app, mode)
+}
+
+pub fn set_immediate_run_mode_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    mode: String,
+) -> Result<(), String> {
     if !matches!(mode.as_str(), "steer" | "interrupt") {
         return Err(format!("Unsupported immediate run mode: {}", mode));
     }
@@ -314,7 +359,7 @@ pub fn set_immediate_run_mode(
     info!(target: "provider", "Setting immediate run mode mode={}", mode);
     let mut config = state.config.lock().unwrap();
     config.immediate_run_mode = mode;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -322,6 +367,14 @@ pub fn set_immediate_run_mode(
 pub fn set_attachment_enrichment(
     state: State<'_, AppState>,
     app: AppHandle,
+    enrichment: AttachmentEnrichmentConfig,
+) -> Result<(), String> {
+    set_attachment_enrichment_for_companion(state.inner(), &app, enrichment)
+}
+
+pub fn set_attachment_enrichment_for_companion(
+    state: &AppState,
+    app: &AppHandle,
     mut enrichment: AttachmentEnrichmentConfig,
 ) -> Result<(), String> {
     info!(
@@ -341,7 +394,7 @@ pub fn set_attachment_enrichment(
     enrichment.api_key_configured = false;
     enrichment.provider_id = None;
     config.attachment_enrichment = enrichment;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -349,6 +402,14 @@ pub fn set_attachment_enrichment(
 pub fn set_notification_settings(
     state: State<'_, AppState>,
     app: AppHandle,
+    settings: NotificationSettings,
+) -> Result<(), String> {
+    set_notification_settings_for_companion(state.inner(), &app, settings)
+}
+
+pub fn set_notification_settings_for_companion(
+    state: &AppState,
+    app: &AppHandle,
     settings: NotificationSettings,
 ) -> Result<(), String> {
     if !matches!(
@@ -370,7 +431,7 @@ pub fn set_notification_settings(
     );
     let mut config = state.config.lock().unwrap();
     config.notifications = settings;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -378,6 +439,14 @@ pub fn set_notification_settings(
 pub fn set_default_open_target(
     state: State<'_, AppState>,
     app: AppHandle,
+    target: String,
+) -> Result<(), String> {
+    set_default_open_target_for_companion(state.inner(), &app, target)
+}
+
+pub fn set_default_open_target_for_companion(
+    state: &AppState,
+    app: &AppHandle,
     target: String,
 ) -> Result<(), String> {
     if !matches!(
@@ -390,7 +459,7 @@ pub fn set_default_open_target(
     info!(target: "provider", "Setting default open target target={}", target);
     let mut config = state.config.lock().unwrap();
     config.default_open_target = target;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
     Ok(())
 }
 
@@ -400,6 +469,14 @@ const MAX_GIT_INSTRUCTIONS_CHARS: usize = 8_000;
 pub fn set_git_settings(
     state: State<'_, AppState>,
     app: AppHandle,
+    settings: GitSettingsConfig,
+) -> Result<(), String> {
+    set_git_settings_for_companion(state.inner(), &app, settings)
+}
+
+pub fn set_git_settings_for_companion(
+    state: &AppState,
+    app: &AppHandle,
     mut settings: GitSettingsConfig,
 ) -> Result<(), String> {
     settings.commit_instructions = settings.commit_instructions.trim().to_string();
@@ -432,7 +509,57 @@ pub fn set_git_settings(
         }
     }
     config.git = settings;
-    config::save_config(&app, &config)?;
+    config::save_config(app, &config)?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchAppConfigRequest {
+    pub theme: Option<String>,
+    pub compact_ai_output: Option<bool>,
+    pub immediate_run_mode: Option<String>,
+    pub attachment_enrichment: Option<AttachmentEnrichmentConfig>,
+    pub notifications: Option<NotificationSettings>,
+    pub default_open_target: Option<String>,
+    pub git: Option<GitSettingsConfig>,
+    pub default_agent_kind: Option<String>,
+    pub agent_kind: Option<String>,
+    pub agent_config: Option<serde_json::Value>,
+}
+
+pub fn patch_app_config_for_companion(
+    state: &AppState,
+    app: &AppHandle,
+    patch: PatchAppConfigRequest,
+) -> Result<(), String> {
+    if let Some(theme) = patch.theme {
+        set_theme_for_companion(state, app, theme)?;
+    }
+    if let Some(enabled) = patch.compact_ai_output {
+        set_compact_ai_output_for_companion(state, app, enabled)?;
+    }
+    if let Some(mode) = patch.immediate_run_mode {
+        set_immediate_run_mode_for_companion(state, app, mode)?;
+    }
+    if let Some(enrichment) = patch.attachment_enrichment {
+        set_attachment_enrichment_for_companion(state, app, enrichment)?;
+    }
+    if let Some(settings) = patch.notifications {
+        set_notification_settings_for_companion(state, app, settings)?;
+    }
+    if let Some(target) = patch.default_open_target {
+        set_default_open_target_for_companion(state, app, target)?;
+    }
+    if let Some(settings) = patch.git {
+        set_git_settings_for_companion(state, app, settings)?;
+    }
+    if let Some(agent_kind) = patch.default_agent_kind {
+        set_default_agent_kind_for_companion(state, app, agent_kind)?;
+    }
+    if let (Some(agent_kind), Some(config)) = (patch.agent_kind, patch.agent_config) {
+        update_agent_config_for_companion(state, app, agent_kind, config)?;
+    }
     Ok(())
 }
 
@@ -479,6 +606,10 @@ const OPENCODE_FREE_MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
 
 #[tauri::command]
 pub async fn fetch_opencode_free_models() -> Result<Vec<ModelInfo>, String> {
+    fetch_opencode_free_models_for_companion().await
+}
+
+pub async fn fetch_opencode_free_models_for_companion() -> Result<Vec<ModelInfo>, String> {
     info!(target: "provider", "Fetching OpenCode free models from official catalog");
 
     let client = reqwest::Client::builder()
@@ -663,6 +794,13 @@ pub(crate) async fn probe_openai_models(
 
 #[tauri::command]
 pub async fn fetch_provider_models(
+    api_key: String,
+    base_url: String,
+) -> Result<Vec<ModelInfo>, String> {
+    fetch_provider_models_for_companion(api_key, base_url).await
+}
+
+pub async fn fetch_provider_models_for_companion(
     api_key: String,
     base_url: String,
 ) -> Result<Vec<ModelInfo>, String> {

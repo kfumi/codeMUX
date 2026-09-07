@@ -4,7 +4,9 @@
 
 ## Status
 
-accepted
+accepted — amended 2026-09 by [ADR 0011](./0011-daemon-authority-local-token.md)
+
+> **Amendment (daemon-boundary):** Companion Server 在桌面进程启动后于回环地址常开，不再仅随「移动伴侣」开关启动。`companion.enabled` 仅控制局域网/中继暴露与配对 UI；关闭移动伴侣不停回环、不停 Scheduled Task、不撤销 Local Daemon Token。桌面 Shell 经 Local Daemon Token 访问回环；手机仍用 Pairing Token。详见 ADR 0011。
 
 ## Context
 

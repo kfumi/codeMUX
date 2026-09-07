@@ -6,7 +6,7 @@ import {
   serializePermissionConfig,
   type AgentPermissionConfig,
 } from '../../lib/agentPermissions';
-import { scheduledTaskApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import {
   buildScheduledTaskDraftFromSettings,
   getAgentPermissionDefault,
@@ -147,7 +147,7 @@ export function AutomationEditor({
   }, []);
 
   useEffect(() => {
-    scheduledTaskApi.getTimezone().then(setTimezone).catch(() => setTimezone(''));
+    daemonFacade.scheduledTasks.getTimezone().then(setTimezone).catch(() => setTimezone(''));
   }, []);
 
   useEffect(() => {
@@ -180,7 +180,7 @@ export function AutomationEditor({
 
   useEffect(() => {
     if (!taskId) return;
-    scheduledTaskApi.get(taskId).then((task) => {
+    daemonFacade.scheduledTasks.get(taskId).then((task) => {
       if (!task) return;
       setDraft({
         title: task.title,

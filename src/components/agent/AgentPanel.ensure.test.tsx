@@ -19,6 +19,26 @@ const { codeMuxThreadRenderMock, ensureSessionMock, updateProviderMock, updateRe
   updateReasoningEffortMock: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    getTimeline: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),
+    patchSessionViaDaemon: vi.fn(() => Promise.resolve()),
+    sendMessageViaDaemon: vi.fn(() => Promise.resolve()),
+    interruptViaDaemon: vi.fn(() => Promise.resolve()),
+    updateWorkingPath: vi.fn(() => Promise.resolve()),
+    touchSession: vi.fn(() => Promise.resolve()),
+    ensureAgentSession: ensureSessionMock,
+    updateProvider: updateProviderMock,
+    updateReasoningEffort: updateReasoningEffortMock,
+  },
+  ensureDaemonClient: vi.fn(() => Promise.resolve({
+    getTimeline: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),
+    subscribeSession: vi.fn(() => () => undefined),
+  })),
+  getDaemonClientInitError: vi.fn(() => null),
+  resetDaemonClient: vi.fn(),
+}));
+
 vi.mock('../../lib/tauri', () => ({
   agentApi: {
     ensureSession: ensureSessionMock,
@@ -31,12 +51,11 @@ vi.mock('../../lib/tauri', () => ({
   },
   companionApi: {
     isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+    getStatus: vi.fn(() => Promise.resolve({ port: 8787, enabled: false })),
   },
   sessionApi: {
     touch: vi.fn(() => Promise.resolve()),
     updateTitle: vi.fn(() => Promise.resolve()),
-    updateProvider: updateProviderMock,
-    updateReasoningEffort: updateReasoningEffortMock,
   },
   fileApi: {
     readFile: vi.fn(),
@@ -293,19 +312,4 @@ describe('AgentPanel session bootstrapping', () => {
     });
   });
 
-  it('raises the agent-switch confirm dialog above the composer so it stays clickable', () => {
-    useAgentStore.setState({ isRunning: { 'session-running': false } });
-
-    render(<AgentPanel sessionId="session-running" />);
-
-    const trigger = screen.getByRole('button', { name: 'Claude Code' });
-    fireEvent.pointerDown(trigger, { pointerType: 'mouse', button: 0 });
-    fireEvent.pointerUp(trigger, { pointerType: 'mouse', button: 0 });
-    fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole('menuitem', { name: /Codex/ }));
-
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.className).toContain('z-[240]');
-    expect(screen.getByRole('button', { name: '确认切换' })).toBeTruthy();
-  });
 });

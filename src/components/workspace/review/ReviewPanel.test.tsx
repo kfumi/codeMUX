@@ -21,13 +21,11 @@ const gitApiMock = vi.hoisted(() => ({
   createPullRequest: vi.fn(),
 }));
 
-vi.mock('../../../lib/tauri', async () => {
-  const actual = await vi.importActual<typeof import('../../../lib/tauri')>('../../../lib/tauri');
-  return {
-    ...actual,
-    gitApi: gitApiMock,
-  };
-});
+vi.mock('../../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    git: gitApiMock,
+  },
+}));
 
 vi.mock('../../preview/DiffView', () => ({
   DiffView: () => <div data-testid="diff-view" />,

@@ -1,4 +1,6 @@
 import type { CompanionStatus } from '../../types/companion';
+import { createControlPlaneMethods, type ControlPlaneMethods } from './control-plane';
+import { createTerminalMethods, type TerminalMethods } from './terminal';
 
 export interface DaemonConnectionConfig {
   baseUrl: string;
@@ -11,7 +13,7 @@ export interface DaemonStatus {
   activeSessionCount: number;
 }
 
-export interface DaemonClient {
+interface DaemonClientCore {
   readonly config: DaemonConnectionConfig;
 
   health(): Promise<{ ok: boolean; loopback: boolean; lanExposed: boolean }>;
@@ -19,13 +21,16 @@ export interface DaemonClient {
   listSessions(): Promise<unknown[]>;
   listArchivedSessions(): Promise<unknown[]>;
   listProjects(): Promise<unknown[]>;
+  createProject(name: string, path: string): Promise<unknown>;
+  deleteProject(projectId: string): Promise<void>;
+  renameProject(projectId: string, name: string): Promise<void>;
   getBootstrap(): Promise<unknown>;
   getTimeline(
     sessionId: string,
     query?: { direction?: 'tail' | 'after' | 'before'; cursor?: number; limit?: number },
   ): Promise<{ events: unknown[]; hasMore: boolean; nextCursor?: number | null }>;
   createSession(body: Record<string, unknown>): Promise<unknown>;
-  sendMessage(sessionId: string, prompt: string, inputPayload?: unknown): Promise<void>;
+  sendMessage(sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }): Promise<void>;
   interruptSession(sessionId: string): Promise<void>;
   respondToPermission(sessionId: string, requestId: string, response: unknown): Promise<void>;
   respondToInteractive(sessionId: string, toolUseId: string, response: unknown): Promise<void>;
@@ -33,15 +38,38 @@ export interface DaemonClient {
   archiveSession(sessionId: string): Promise<void>;
   unarchiveSession(sessionId: string): Promise<void>;
   patchSession(sessionId: string, patch: Record<string, unknown>): Promise<unknown>;
+  forkSession(
+    sessionId: string,
+    body: {
+      agentKind?: string;
+      forkEventId: string;
+      forkProviderMessageId?: string;
+      forkProviderTurnId?: string;
+      forkProviderTurnOrdinal?: number;
+      title?: string;
+    },
+  ): Promise<unknown>;
+  deleteSession(sessionId: string): Promise<void>;
+  resyncSessionFromNative(sessionId: string): Promise<{ eventCount: number }>;
+  discoverHistoryImportCandidates(agentKind?: string): Promise<unknown[]>;
+  importHistorySessions(body: Record<string, unknown>): Promise<unknown>;
+  resetAgentSession(sessionId: string): Promise<void>;
+  shutdownAgent(sessionId: string): Promise<void>;
+  getAppConfig(): Promise<unknown>;
+  patchAppConfig(body: Record<string, unknown>): Promise<void>;
+  getSessionRuntimeState(sessionId: string): Promise<{ running: boolean }>;
   subscribeSession(
     sessionId: string,
     handlers: {
       onEvent: (event: unknown) => void;
       onState?: (running: boolean) => void;
       onReconnect?: () => void;
+      getInitialSequence?: () => number;
     },
   ): () => void;
 }
+
+export type DaemonClient = DaemonClientCore & ControlPlaneMethods & TerminalMethods;
 
 async function daemonFetch<T>(
   config: DaemonConnectionConfig,
@@ -79,6 +107,20 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
     listSessions: () => daemonFetch(config, '/api/sessions'),
     listArchivedSessions: () => daemonFetch(config, '/api/sessions/archived'),
     listProjects: () => daemonFetch(config, '/api/projects'),
+    createProject: (name, path) =>
+      daemonFetch(config, '/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name, path }),
+      }),
+    deleteProject: async (projectId) => {
+      await daemonFetch(config, `/api/projects/${projectId}`, { method: 'DELETE' });
+    },
+    renameProject: async (projectId, name) => {
+      await daemonFetch(config, `/api/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      });
+    },
     getBootstrap: () => daemonFetch(config, '/api/bootstrap'),
     getTimeline: (sessionId, query = {}) => {
       const params = new URLSearchParams();
@@ -90,10 +132,15 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
     },
     createSession: (body) =>
       daemonFetch(config, '/api/sessions', { method: 'POST', body: JSON.stringify(body) }),
-    sendMessage: async (sessionId, prompt, inputPayload) => {
+    sendMessage: async (sessionId, prompt, inputPayload, options) => {
       await daemonFetch(config, `/api/sessions/${sessionId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ prompt, inputPayload }),
+        body: JSON.stringify({
+          prompt,
+          inputPayload,
+          delivery: options?.delivery,
+          requestId: options?.requestId,
+        }),
       });
     },
     interruptSession: async (sessionId) => {
@@ -127,6 +174,45 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
+    forkSession: (sessionId, body) =>
+      daemonFetch(config, `/api/sessions/${sessionId}/fork`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteSession: async (sessionId) => {
+      await daemonFetch(config, `/api/sessions/${sessionId}`, { method: 'DELETE' });
+    },
+    resyncSessionFromNative: (sessionId) =>
+      daemonFetch<{ eventCount: number }>(config, `/api/sessions/${sessionId}/resync`, {
+        method: 'POST',
+        body: '{}',
+      }),
+    discoverHistoryImportCandidates: (agentKind) => {
+      const params = new URLSearchParams();
+      if (agentKind) params.set('agentKind', agentKind);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      return daemonFetch(config, `/api/sessions/import/candidates${suffix}`);
+    },
+    importHistorySessions: (body) =>
+      daemonFetch(config, '/api/sessions/import', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    resetAgentSession: async (sessionId) => {
+      await daemonFetch(config, `/api/sessions/${sessionId}/reset-agent`, { method: 'POST' });
+    },
+    shutdownAgent: async (sessionId) => {
+      await daemonFetch(config, `/api/sessions/${sessionId}/shutdown-agent`, { method: 'POST' });
+    },
+    getAppConfig: () => daemonFetch(config, '/api/config'),
+    patchAppConfig: async (body) => {
+      await daemonFetch(config, '/api/config', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+    },
+    getSessionRuntimeState: (sessionId) =>
+      daemonFetch(config, `/api/sessions/${sessionId}/state`),
     subscribeSession(sessionId, handlers) {
       const wsUrl = new URL('/api/ws', config.baseUrl.replace(/^http/, 'ws'));
       wsUrl.searchParams.set('token', config.token);
@@ -134,10 +220,11 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
 
       let socket: WebSocket | null = null;
       let closed = false;
-      let lastSequence = -1;
+      let lastSequence = handlers.getInitialSequence?.() ?? -1;
 
       const connect = () => {
         if (closed) return;
+        lastSequence = handlers.getInitialSequence?.() ?? lastSequence;
         socket = new WebSocket(wsUrl.toString());
         socket.onmessage = (message) => {
           try {
@@ -173,6 +260,13 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         socket?.close();
       };
     },
+
+    ...createControlPlaneMethods(config, (c, path, init) => daemonFetch(c, `/api${path}`, init)),
+    ...createTerminalMethods(
+      config,
+      (c, path, init) => daemonFetch(c, `/api${path}`, init),
+      async () => config,
+    ),
   };
 }
 

@@ -1,19 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../lib/tauri', () => ({
-  mcpApi: {
-    getAll: vi.fn(),
-    upsert: vi.fn(),
-    delete: vi.fn(),
-    toggleApp: vi.fn(),
-    probe: vi.fn(),
-    probeAll: vi.fn(),
-    importFromApps: vi.fn(),
+const mcpMocks = vi.hoisted(() => ({
+  getAll: vi.fn(),
+  upsert: vi.fn(),
+  delete: vi.fn(),
+  toggleApp: vi.fn(),
+  probe: vi.fn(),
+  probeAll: vi.fn(),
+  importFromApps: vi.fn(),
+}));
+
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    mcp: mcpMocks,
   },
 }));
 
 import { useMcpStore } from './mcpStore';
-import { mcpApi } from '../lib/tauri';
 
 describe('mcpStore', () => {
   beforeEach(() => {
@@ -33,7 +36,7 @@ describe('mcpStore', () => {
   });
 
   it('updates only one app flag when toggleApp succeeds', async () => {
-    vi.mocked(mcpApi.toggleApp).mockResolvedValue();
+    mcpMocks.toggleApp.mockResolvedValue(undefined);
 
     await useMcpStore.getState().toggleApp('fetch', 'codex', true);
 
@@ -47,7 +50,7 @@ describe('mcpStore', () => {
   });
 
   it('sets probe status to connected on successful probe', async () => {
-    vi.mocked(mcpApi.probe).mockResolvedValue({ connected: true });
+    mcpMocks.probe.mockResolvedValue({ connected: true });
 
     await useMcpStore.getState().probeServer('fetch');
 
@@ -55,7 +58,7 @@ describe('mcpStore', () => {
   });
 
   it('sets probe status to failed on unsuccessful probe', async () => {
-    vi.mocked(mcpApi.probe).mockResolvedValue({ connected: false });
+    mcpMocks.probe.mockResolvedValue({ connected: false });
 
     await useMcpStore.getState().probeServer('fetch');
 

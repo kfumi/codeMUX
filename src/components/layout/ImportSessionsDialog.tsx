@@ -3,7 +3,8 @@ import { AlertTriangle, Check, Download, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner';
 
 import { isImportCandidateForProject } from '../../lib/importSessionPaths';
-import { historyImportApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
+import type { ImportSessionsRequest, ImportSessionsResult } from '../../types/historyImport';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { AgentKind } from '../../types/session';
 import type { ImportCandidate } from '../../types/historyImport';
@@ -96,7 +97,7 @@ export function ImportSessionsDialog({
     setHasScanned(false);
     setError(null);
     try {
-      const items = await historyImportApi.discover(filter === 'all' ? undefined : filter);
+      const items = await daemonFacade.historyImport.discover(filter === 'all' ? undefined : filter);
       setCandidates(items);
       setSelected(new Set());
       setHasScanned(true);
@@ -132,12 +133,12 @@ export function ImportSessionsDialog({
     if (selected.size === 0) return;
     setImporting(true);
     try {
-      const result = await historyImportApi.import({
+      const result = await daemonFacade.historyImport.import({
         candidateKeys: [...selected],
         projectId,
         refreshExisting: true,
         agentKind: filter === 'all' ? undefined : filter,
-      });
+      }) as ImportSessionsResult;
       await Promise.all([fetchSessions(), fetchArchivedSessions()]);
       const count = result.importedCount + result.refreshedCount;
       if (result.errors.length > 0) {

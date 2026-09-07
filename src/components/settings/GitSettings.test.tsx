@@ -7,13 +7,17 @@ import type { AppConfig } from '../../types/provider';
 import { GitSettings } from './GitSettings';
 
 const setGitSettingsMock = vi.fn();
-const gitApiMock = vi.hoisted(() => ({
+const gitFacadeMock = vi.hoisted(() => ({
   getGiteeCredentialStatus: vi.fn(),
   setGiteeToken: vi.fn(),
   clearGiteeToken: vi.fn(),
 }));
 
-vi.mock('../../lib/tauri', () => ({ gitApi: gitApiMock }));
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    git: gitFacadeMock,
+  },
+}));
 
 const baseConfig: AppConfig = {
   providers: [],
@@ -74,9 +78,9 @@ describe('GitSettings', () => {
       config: structuredClone(baseConfig),
       setGitSettings: setGitSettingsMock,
     } as Partial<ReturnType<typeof useSettingsStore.getState>>);
-    gitApiMock.getGiteeCredentialStatus.mockResolvedValue(false);
-    gitApiMock.setGiteeToken.mockResolvedValue(undefined);
-    gitApiMock.clearGiteeToken.mockResolvedValue(undefined);
+    gitFacadeMock.getGiteeCredentialStatus.mockResolvedValue(false);
+    gitFacadeMock.setGiteeToken.mockResolvedValue(undefined);
+    gitFacadeMock.clearGiteeToken.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -102,7 +106,7 @@ describe('GitSettings', () => {
     fireEvent.change(tokenInput, { target: { value: 'gitee-secret' } });
     fireEvent.click(screen.getByTestId('gitee-token-save'));
 
-    expect(gitApiMock.setGiteeToken).toHaveBeenCalledWith('gitee-secret');
+    expect(gitFacadeMock.setGiteeToken).toHaveBeenCalledWith('gitee-secret');
   });
 
   it('saves commit instructions on blur when modified', () => {

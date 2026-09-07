@@ -29,6 +29,7 @@ import {
   type RuntimeInstallProgressEvent,
   type RuntimeProvider,
 } from '@/lib/tauri';
+import { daemonFacade } from '@/lib/facades/daemon-facade';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -164,7 +165,7 @@ export function RuntimeSettingsPanel({
     await Promise.all(
       providers.map(async (provider) => {
         try {
-          const versions = (await appApi.listManagedRuntimeVersions(provider)).filter(isStableVersion);
+          const versions = (await daemonFacade.managedRuntime.listVersions(provider)).filter(isStableVersion);
           if (versionLoadId.current !== requestId) return;
           setCheckResult((prev) => {
             if (!prev) return prev;
@@ -215,7 +216,7 @@ export function RuntimeSettingsPanel({
   const runCheck = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await appApi.checkManagedRuntimes();
+      const result = await daemonFacade.checkManagedRuntimes();
       setCheckResult(result);
       if (canInstallManagedRuntime(result.node)) {
         void loadVersionLists(result.runtimes.map((runtime) => runtime.provider));
@@ -252,7 +253,7 @@ export function RuntimeSettingsPanel({
     setLoading(true);
     const toastId = toast.loading('正在检测 Runtime...');
     try {
-      const result = await appApi.checkManagedRuntimes();
+      const result = await daemonFacade.checkManagedRuntimes();
       setCheckResult(result);
       if (canInstallManagedRuntime(result.node)) {
         void loadVersionLists(result.runtimes.map((runtime) => runtime.provider));
@@ -306,7 +307,7 @@ export function RuntimeSettingsPanel({
           toast.success(`${label} 无需${describeOperation(kind)}`, { id: toastId });
         }
         // 操作完成后刷新整体状态
-        const refreshed = await appApi.checkManagedRuntimes();
+        const refreshed = await daemonFacade.checkManagedRuntimes();
         setCheckResult(refreshed);
         if (canInstallManagedRuntime(refreshed.node)) {
           void loadVersionLists(refreshed.runtimes.map((runtime) => runtime.provider));
@@ -324,13 +325,13 @@ export function RuntimeSettingsPanel({
 
   const handleInstall = useCallback(
     (provider: RuntimeProvider, label: string, version?: string) =>
-      runOperation(provider, label, 'install', () => appApi.installManagedRuntime(provider, version)),
+      runOperation(provider, label, 'install', () => daemonFacade.managedRuntime.install(provider, version)),
     [runOperation],
   );
 
   const handleRepair = useCallback(
     (provider: RuntimeProvider, label: string) =>
-      runOperation(provider, label, 'repair', () => appApi.repairManagedRuntime(provider)),
+      runOperation(provider, label, 'repair', () => daemonFacade.managedRuntime.repair(provider)),
     [runOperation],
   );
 
@@ -342,9 +343,9 @@ export function RuntimeSettingsPanel({
       }));
       const toastId = toast.loading(`正在删除 ${label}...`);
       try {
-        await appApi.removeManagedRuntime(provider);
+        await daemonFacade.managedRuntime.remove(provider);
         toast.success(`${label} 已删除`, { id: toastId });
-        const refreshed = await appApi.checkManagedRuntimes();
+        const refreshed = await daemonFacade.checkManagedRuntimes();
         setCheckResult(refreshed);
       } catch (err) {
         toast.error(`删除失败：${err instanceof Error ? err.message : String(err)}`, { id: toastId });

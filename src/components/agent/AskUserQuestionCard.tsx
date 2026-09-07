@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Info } from 'lucide-react';
-import { agentApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -343,7 +343,7 @@ export function AskUserQuestionCard({
           logger.warn('Failed to persist elevated permissions before tool response', { sessionId }, serializeError(err));
         });
       }
-      await agentApi.sendToolResponse(sessionId, toolUseId, answers);
+      await daemonFacade.respondToInteractiveViaDaemon(sessionId, toolUseId, answers);
       setSubmittedAnswers(displayAnswers);
       setSubmitted(true);
       onSubmitted?.();
@@ -360,7 +360,7 @@ export function AskUserQuestionCard({
     setSubmitting(true);
 
     try {
-      await agentApi.sendToolResponse(sessionId, toolUseId, questions.map(() => '__cancelled__'));
+      await daemonFacade.respondToInteractiveViaDaemon(sessionId, toolUseId, questions.map(() => '__cancelled__'));
       setSubmittedAnswers(questions.map(() => ['已取消']));
       setSubmitted(true);
       onSubmitted?.();

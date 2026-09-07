@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getProjectRelativePath } from '@/lib/composerReferences';
 import { getOpenTargetOption } from '@/lib/openTargets';
-import { fileApi } from '@/lib/tauri';
+import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useSidePanelStore } from '@/stores/sidePanelStore';
 
@@ -35,7 +35,7 @@ async function copyText(value: string) {
 
 async function openWithTarget(path: string, target: 'file_explorer' | 'vscode') {
   try {
-    await fileApi.openProjectPath(path, target);
+    await shellFacade.openProjectPath(path, target);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import type { Project } from '../types/project';
-import { projectApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
 import { useAgentStore } from './agentStore';
 
@@ -74,7 +74,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   fetchProjects: async () => {
     set({ isLoading: true, error: null });
     try {
-      const projects = await projectApi.getAll();
+      const projects = await daemonFacade.listProjects();
       set({ projects, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -83,7 +83,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   createProject: async (name: string, path: string) => {
     set({ isLoading: true, error: null });
     try {
-      const project = await projectApi.create(name, path);
+      const project = await daemonFacade.createProject(name, path);
       // Remove from collapsed list if somehow present (new projects should be expanded)
       set((state) => {
         const newCollapsed = new Set(state.collapsedProjects);
@@ -116,7 +116,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
 
       // 删除 SQLite 中的项目及其下所有会话记录
-      await projectApi.delete(projectId);
+      await daemonFacade.deleteProject(projectId);
 
       // 从本地状态中移除该项目下的已归档 session
       useSessionStore.setState((state) => ({
@@ -134,7 +134,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
   renameProject: async (projectId: string, name: string) => {
     try {
-      await projectApi.rename(projectId, name);
+      await daemonFacade.renameProject(projectId, name);
       set((state) => ({
         projects: state.projects.map((p) => p.id === projectId ? { ...p, name } : p),
       }));

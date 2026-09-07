@@ -4,14 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
 
-const startSessionMock = vi.fn<
-  (
-    sessionId: string,
-    prompt: string,
-    cwd: string,
-    onEvent: (event: string) => void,
-  ) => Promise<void>
+const sendMessageViaDaemonMock = vi.fn<
+  (sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }) => Promise<void>
 >();
+let sessionHandler: ((raw: string) => void) | undefined;
 
 vi.mock('sonner', () => ({
   toast: {
@@ -20,9 +16,20 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('../lib/daemon-session-bridge', () => ({
+  registerDaemonSessionHandler: vi.fn((_sessionId: string, handler: (raw: string) => void) => {
+    sessionHandler = handler;
+  }),
+  unregisterDaemonSessionHandler: vi.fn(),
+  getLastEventSequence: vi.fn(() => -1),
+  setLastEventSequence: vi.fn(),
+  catchUpTimelineAfterSequence: vi.fn(),
+  teardownDaemonSession: vi.fn(),
+  resetDaemonSessionBridge: vi.fn(),
+}));
+
 vi.mock('../lib/tauri', () => ({
   agentApi: {
-    startSession: startSessionMock,
     interrupt: vi.fn(),
     shutdown: vi.fn(),
     resetSession: vi.fn(),
@@ -59,6 +66,7 @@ vi.mock('../lib/tauri', () => ({
   },
   companionApi: {
     isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+    getStatus: vi.fn(() => Promise.resolve({ port: 8787, enabled: false })),
   },
   gitApi: {},
   mcpApi: {},
@@ -66,14 +74,41 @@ vi.mock('../lib/tauri', () => ({
   appApi: {},
 }));
 
+vi.mock('../lib/facades/daemon-facade', () => ({
+  ensureDaemonClient: vi.fn(() => Promise.resolve({
+    sendMessage: sendMessageViaDaemonMock,
+    subscribeSession: vi.fn(() => () => undefined),
+  })),
+  daemonFacade: {
+    sendMessageViaDaemon: sendMessageViaDaemonMock,
+    patchSessionViaDaemon: vi.fn(() => Promise.resolve()),
+    getTimeline: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),
+    interruptViaDaemon: vi.fn(),
+    respondToPermissionViaDaemon: vi.fn(),
+    respondToInteractiveViaDaemon: vi.fn(),
+    updateWorkingPath: vi.fn(() => Promise.resolve()),
+    touchSession: vi.fn(() => Promise.resolve()),
+    listSessions: vi.fn(() => Promise.resolve([])),
+    listArchivedSessions: vi.fn(() => Promise.resolve([])),
+    listProjects: vi.fn(() => Promise.resolve([])),
+    ensureClient: vi.fn(),
+  },
+  getDaemonClientInitError: vi.fn(() => null),
+  resetDaemonClient: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(() => Promise.resolve('test-token')),
+}));
+
 describe('agentStore subagent event routing', () => {
-  let onEvent: ((event: string) => void) | undefined;
   const sessionId = 'session-subagent-routing';
 
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    onEvent = undefined;
+    sessionHandler = undefined;
+    sendMessageViaDaemonMock.mockResolvedValue(undefined);
   });
 
   async function prime() {
@@ -101,10 +136,6 @@ describe('agentStore subagent event routing', () => {
       error: null,
     });
 
-    startSessionMock.mockImplementation(async (_id, _prompt, _cwd, eventSink) => {
-      onEvent = eventSink;
-    });
-
     return { useAgentStore, useSubagentStore };
   }
 
@@ -112,9 +143,9 @@ describe('agentStore subagent event routing', () => {
     const { useAgentStore, useSubagentStore } = await prime();
 
     await useAgentStore.getState().startQuery(sessionId, 'launch agent', 'D:\\workspace');
-    expect(onEvent).toBeDefined();
+    expect(sessionHandler).toBeDefined();
 
-    onEvent?.(JSON.stringify({
+    sessionHandler?.(JSON.stringify({
       type: 'subagent_upsert',
       session_id: sessionId,
       subagent_id: 'toolu_1',
@@ -124,14 +155,14 @@ describe('agentStore subagent event routing', () => {
       tool_call_id: 'toolu_1',
       event_id: 'u1',
     }));
-    onEvent?.(JSON.stringify({
+    sessionHandler?.(JSON.stringify({
       type: 'subagent_timeline',
       session_id: sessionId,
       subagent_id: 'toolu_1',
       event: { type: 'tool_started', tool_use_id: 'c1', name: 'Grep', input: {}, event_id: 'e1', sequence: 0 },
       event_id: 'env-1',
     }));
-    onEvent?.(JSON.stringify({
+    sessionHandler?.(JSON.stringify({
       type: 'sidecar_query_done',
     }));
 
@@ -150,7 +181,7 @@ describe('agentStore subagent event routing', () => {
 
     await useAgentStore.getState().startQuery(sessionId, 'hello', 'D:\\workspace');
 
-    onEvent?.(JSON.stringify({
+    sessionHandler?.(JSON.stringify({
       type: 'assistant',
       uuid: 'a-sidechain',
       session_id: 'claude-native',
@@ -158,7 +189,7 @@ describe('agentStore subagent event routing', () => {
       parent_tool_use_id: 'toolu_1',
       message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain chatter' }] },
     }));
-    onEvent?.(JSON.stringify({ type: 'sidecar_query_done' }));
+    sessionHandler?.(JSON.stringify({ type: 'sidecar_query_done' }));
 
     const parentEvents = useAgentStore.getState().events[sessionId] ?? [];
     // The sidechain assistant message must not enter the parent timeline.

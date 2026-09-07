@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ImportableSkill, Skill, SkillApps } from '../types/skill';
-import { skillApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 
 interface SkillStore {
   installedSkills: Skill[];
@@ -25,7 +25,7 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
   fetchInstalled: async () => {
     set({ isLoading: true, error: null });
     try {
-      const skills = await skillApi.listInstalled();
+      const skills = await daemonFacade.skills.listInstalled();
       set({ installedSkills: skills, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -33,12 +33,12 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
   },
 
   listImportable: async () => {
-    return skillApi.listImportable();
+    return daemonFacade.skills.listImportable();
   },
 
   uninstallSkill: async (id: string) => {
     try {
-      await skillApi.uninstall(id);
+      await daemonFacade.skills.uninstall(id);
       set((state) => ({
         installedSkills: state.installedSkills.filter((s) => s.id !== id),
       }));
@@ -50,7 +50,7 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
 
   toggleApp: async (id: string, app: keyof SkillApps, enabled: boolean) => {
     try {
-      await skillApi.toggleApp(id, app, enabled);
+      await daemonFacade.skills.toggleApp(id, app, enabled);
       set((state) => ({
         installedSkills: state.installedSkills.map((s) =>
           s.id === id ? { ...s, apps: { ...s.apps, [app]: enabled } } : s
@@ -64,7 +64,7 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
 
   importFromApps: async (selected?: string[] | null) => {
     try {
-      const result = await skillApi.importFromApps(selected);
+      const result = await daemonFacade.skills.importFromApps(selected);
       if (result.total > 0) {
         await get().fetchInstalled();
       }
@@ -76,12 +76,12 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
   },
 
   getSkillContent: async (id: string) => {
-    return skillApi.getContent(id);
+    return daemonFacade.skills.getContent(id);
   },
 
   syncBuiltins: async () => {
     try {
-      await skillApi.syncBuiltins();
+      await daemonFacade.skills.syncBuiltins();
       await get().fetchInstalled();
     } catch (error) {
       set({ error: String(error) });
@@ -90,7 +90,7 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
 
   registerFromDisk: async (name: string) => {
     try {
-      const skill = await skillApi.registerFromDisk(name);
+      const skill = await daemonFacade.skills.registerFromDisk(name);
       set((state) => {
         const exists = state.installedSkills.some((s) => s.id === skill.id);
         const installedSkills = exists

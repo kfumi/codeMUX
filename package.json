@@ -15,7 +15,10 @@
     "release:local": "node scripts/release-local.mjs",
     "relay:configure": "node scripts/relay/configure-desktop.mjs",
     "relay:pack-vps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-for-vps.ps1",
-    "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1"
+    "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1",
+    "test": "vitest run",
+    "test:sidecar": "cd src-tauri/sidecar && npm run test",
+    "test:mobile": "cd src-mobile && npm run test"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",

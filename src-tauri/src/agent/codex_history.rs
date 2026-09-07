@@ -1108,10 +1108,17 @@ pub async fn delete_codex_session_files(
     state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<String>, String> {
+    delete_codex_session_files_for_companion(state.inner(), app_session_id).await
+}
+
+pub async fn delete_codex_session_files_for_companion(
+    state: &crate::AppState,
+    app_session_id: String,
+) -> Result<Vec<String>, String> {
     use std::fs;
 
     let Some(codex_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+        get_agent_session_id(state, &app_session_id, AgentKind::Codex)?
     else {
         debug!(target: "agent", "No Codex session mapping found for session_id={}", app_session_id);
         return Ok(vec![]);

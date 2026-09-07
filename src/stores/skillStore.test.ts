@@ -10,16 +10,19 @@ const toggleAppMock = vi.fn<
 >();
 const importFromAppsMock = vi.fn<(selected?: string[] | null) => Promise<{ total: number }>>();
 
-vi.mock('../lib/tauri', () => ({
-  skillApi: {
-    listInstalled: listInstalledMock,
-    listImportable: listImportableMock,
-    uninstall: vi.fn(),
-    toggleApp: toggleAppMock,
-    getContent: vi.fn(),
-    syncBuiltins: vi.fn(),
-    registerFromDisk: vi.fn(),
-    importFromApps: importFromAppsMock,
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    skills: {
+      listInstalled: listInstalledMock,
+      listImportable: listImportableMock,
+      uninstall: vi.fn(),
+      toggleApp: toggleAppMock,
+      getContent: vi.fn(),
+      syncBuiltins: vi.fn(),
+      registerFromDisk: vi.fn(),
+      importFromApps: importFromAppsMock,
+      listProject: vi.fn(),
+    },
   },
 }));
 

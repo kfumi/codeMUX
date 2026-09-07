@@ -144,11 +144,18 @@ pub async fn delete_claude_session_files(
     state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<String>, String> {
+    delete_claude_session_files_for_companion(state.inner(), app_session_id).await
+}
+
+pub async fn delete_claude_session_files_for_companion(
+    state: &crate::AppState,
+    app_session_id: String,
+) -> Result<Vec<String>, String> {
     use std::fs;
     let claude_dir = home_dir()?.join(".claude");
 
     let Some(claude_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
+        get_agent_session_id(state, &app_session_id, AgentKind::ClaudeCode)?
     else {
         debug!(target: "agent", "No Claude session mapping found for session_id={}", app_session_id);
         return Ok(vec![]);

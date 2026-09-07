@@ -1,9 +1,11 @@
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { agentApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { isCodeMuxPersistedTimelineEvent } from '../../lib/codeMuxProtocol';
 import { cn } from '../../lib/utils';
 import { mapPersistedClaudeMessage } from '../../stores/agentEventParsing';
+import { parseAgentEvent } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
@@ -215,10 +217,13 @@ export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSe
 
 async function loadFirstUserMessage(session: Session): Promise<string> {
   try {
-    const rawEvents = await agentApi.loadSessionEvents(session.id);
+    const page = await daemonFacade.getTimeline(session.id, { direction: 'tail', limit: 200 });
 
-    for (const raw of rawEvents) {
-      const event = mapPersistedClaudeMessage(raw, session.agent_kind);
+    for (const raw of page.events ?? []) {
+      const rawMsg = raw as Record<string, unknown>;
+      const event = isCodeMuxPersistedTimelineEvent(rawMsg)
+        ? parseAgentEvent(JSON.stringify(rawMsg))
+        : mapPersistedClaudeMessage(rawMsg, session.agent_kind);
       if (event?.kind === 'user') {
         return truncatePreview(event.data.content);
       }

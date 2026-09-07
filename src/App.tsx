@@ -14,7 +14,7 @@ import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, r
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
-import { appApi, sessionApi } from './lib/tauri';
+import { daemonFacade } from './lib/facades/daemon-facade';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSessionStore';
@@ -308,7 +308,7 @@ function App() {
       }
 
       if (isProviderAgent(selectedAgentKind)) {
-        const runtimeCheck = await appApi.checkManagedRuntimes();
+        const runtimeCheck = await daemonFacade.checkManagedRuntimes();
         const runtime = runtimeCheck.runtimes.find((entry) => entry.provider === selectedAgentKind);
         if (!runtime || (runtime.status !== 'ready' && runtime.status !== 'outdated')) {
           throw new Error(runtime?.message ?? `${runtime?.label ?? selectedAgentKind} Runtime 未安装或不可用，请先在设置中安装`);
@@ -326,10 +326,10 @@ function App() {
       );
       createdSessionId = session.id;
       useAgentStore.getState().setSessionWorkingPath(session.id, cwd);
-      await sessionApi.updateWorkingPath(session.id, cwd);
+      await daemonFacade.updateWorkingPath(session.id, cwd);
 
       if (selectedProviderId && selectedModel) {
-        await sessionApi.updateProvider(
+        await daemonFacade.updateProvider(
           session.id,
           selectedProviderId,
           selectedModel,
@@ -346,7 +346,7 @@ function App() {
             : entry),
         }));
       }
-      await sessionApi.updateReasoningEffort(session.id, selectedReasoningEffort);
+      await daemonFacade.updateReasoningEffort(session.id, selectedReasoningEffort);
       useSessionStore.setState((state) => ({
         sessions: state.sessions.map((entry) => entry.id === session.id
           ? { ...entry, reasoning_effort: selectedReasoningEffort }

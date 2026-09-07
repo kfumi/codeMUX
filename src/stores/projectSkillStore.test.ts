@@ -3,7 +3,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSkill } from '../types/skill';
 
-const listProjectMock = vi.fn<(root: string, agentKind: string) => Promise<ProjectSkill[]>>();
+const listProjectMock = vi.fn<(root: string, agentKind: string, force?: boolean) => Promise<ProjectSkill[]>>();
+
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    skills: {
+      listProject: listProjectMock,
+    },
+  },
+}));
 
 vi.mock('../lib/tauri', () => ({
   skillApi: {

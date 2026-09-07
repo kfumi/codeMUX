@@ -46,11 +46,33 @@ pub fn resolve_session_cwd(state: &AppState, session_id: &str) -> Result<String,
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActiveSidecarSendDecision {
+    Steer,
+    Enqueue,
+    StartTurn,
+}
+
+pub(crate) fn decide_active_sidecar_send(
+    delivery: Option<&str>,
+    turn_active: bool,
+) -> ActiveSidecarSendDecision {
+    if delivery == Some("steer") {
+        return ActiveSidecarSendDecision::Steer;
+    }
+    if turn_active {
+        return ActiveSidecarSendDecision::Enqueue;
+    }
+    ActiveSidecarSendDecision::StartTurn
+}
+
 pub async fn send_companion_message(
     app: &AppHandle,
     session_id: &str,
     prompt: &str,
     input_payload: Option<serde_json::Value>,
+    delivery: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<(), String> {
     let app_state = app.state::<AppState>();
     let agent_state = app.state::<AgentState>();
@@ -64,10 +86,24 @@ pub async fn send_companion_message(
     };
 
     if sidecar_running {
-        if companion_state.is_turn_active(session_id) {
-            companion_state.enqueue_message(session_id, prompt.to_string(), input_payload);
-            return Ok(());
-        }
+        match decide_active_sidecar_send(delivery, companion_state.is_turn_active(session_id)) {
+            ActiveSidecarSendDecision::Steer => {
+            let mut cmd =
+                OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
+            if let Some(input_payload) = input_payload {
+                cmd["inputPayload"] = input_payload;
+            }
+            cmd["delivery"] = serde_json::Value::String("steer".to_string());
+            if let Some(request_id) = request_id {
+                cmd["requestId"] = serde_json::Value::String(request_id.to_string());
+            }
+            return send_command_to_session(&agent_state, session_id, cmd).await;
+            }
+            ActiveSidecarSendDecision::Enqueue => {
+                companion_state.enqueue_message(session_id, prompt.to_string(), input_payload);
+                return Ok(());
+            }
+            ActiveSidecarSendDecision::StartTurn => {
         companion_state.mark_turn_active(session_id);
         let mut cmd = OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
         if let Some(input_payload) = input_payload {
@@ -78,6 +114,8 @@ pub async fn send_companion_message(
             let _ = companion_state.finish_turn(session_id);
         }
         return result;
+            }
+        }
     }
 
     companion_state.mark_turn_active(session_id);
@@ -252,14 +290,71 @@ pub fn resolve_static_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_companion_agent_kind;
+    use super::{
+        decide_active_sidecar_send, validate_companion_agent_kind, ActiveSidecarSendDecision,
+    };
     use crate::config::types::AgentKind;
+
+    #[test]
+    fn concurrent_client_send_queues_when_turn_is_active() {
+        assert_eq!(
+            decide_active_sidecar_send(None, true),
+            ActiveSidecarSendDecision::Enqueue
+        );
+    }
+
+    #[test]
+    fn idle_sidecar_starts_a_new_turn() {
+        assert_eq!(
+            decide_active_sidecar_send(None, false),
+            ActiveSidecarSendDecision::StartTurn
+        );
+    }
+
+    #[test]
+    fn steer_delivery_bypasses_queue() {
+        assert_eq!(
+            decide_active_sidecar_send(Some("steer"), true),
+            ActiveSidecarSendDecision::Steer
+        );
+    }
 
     #[test]
     fn rejects_companion_agent_kind_changes() {
         assert_eq!(
             validate_companion_agent_kind(AgentKind::ClaudeCode, AgentKind::Codex),
             Err("会话创建后不能更换智能体种类".to_string())
+        );
+    }
+
+    #[test]
+    fn dual_client_send_keeps_one_active_turn_then_drains_queue() {
+        use super::ActiveSidecarSendDecision;
+        use crate::companion::CompanionState;
+
+        let state = CompanionState::new();
+        let session_id = "session-1";
+
+        assert_eq!(
+            decide_active_sidecar_send(None, state.is_turn_active(session_id)),
+            ActiveSidecarSendDecision::StartTurn
+        );
+        state.mark_turn_active(session_id);
+
+        assert_eq!(
+            decide_active_sidecar_send(None, state.is_turn_active(session_id)),
+            ActiveSidecarSendDecision::Enqueue
+        );
+        state.enqueue_message(session_id, "cli message".to_string(), None);
+
+        let queued = state.finish_turn(session_id);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].prompt, "cli message");
+        assert!(!state.is_turn_active(session_id));
+
+        assert_eq!(
+            decide_active_sidecar_send(None, state.is_turn_active(session_id)),
+            ActiveSidecarSendDecision::StartTurn
         );
     }
 

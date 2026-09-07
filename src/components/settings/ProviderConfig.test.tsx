@@ -104,8 +104,8 @@ vi.mock('@/stores/settingsStore', () => ({
   }),
 }));
 
-vi.mock('@/lib/tauri', () => ({
-  configApi: {
+vi.mock('@/lib/facades/daemon-facade', () => ({
+  daemonFacade: {
     listBuiltinProviderTemplates: listTemplates,
     fetchProviderModels,
   },

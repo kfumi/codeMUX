@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { fileApi } from '../lib/tauri';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import type { SubagentStatus } from '../lib/codeMuxProtocol';
 import { useBrowserStore } from './browserStore';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
@@ -354,7 +354,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     recordNavigation(get());
 
     try {
-      const content = await fileApi.readFile(filePath, projectPath);
+      const content = await daemonFacade.readFile(filePath, projectPath);
       set((state) => ({
         tabs: state.tabs.map((entry) => (
           entry.id === id
@@ -415,7 +415,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     }));
 
     try {
-      await fileApi.writeFile(tab.filePath, contentToSave, tab.projectPath);
+      await daemonFacade.writeFile(tab.filePath, contentToSave, tab.projectPath);
       set((state) => ({
         tabs: state.tabs.map((entry) => (
           entry.id === tabId

@@ -99,6 +99,8 @@ pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> Ta
         &session.id,
         &payload.instruction,
         None,
+        None,
+        None,
     )
     .await
     {

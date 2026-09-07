@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 
-import { fileApi } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { getProjectRelativePath } from '../../lib/composerReferences';
 import { getOpenTargetOption } from '../../lib/openTargets';
 import { useAgentStore } from '../../stores/agentStore';
@@ -44,7 +44,7 @@ async function openInExplorer(path: string) {
 
 async function openWithTarget(path: string, target: 'file_explorer' | 'vscode') {
   try {
-    await fileApi.openProjectPath(path, target);
+    await shellFacade.openProjectPath(path, target);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   }

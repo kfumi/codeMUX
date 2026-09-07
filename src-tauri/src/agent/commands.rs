@@ -36,8 +36,8 @@ pub use super::session_lifecycle::{
 };
 
 pub use super::session_lifecycle::{
-    ensure_agent_session_for_companion, interrupt_agent_session_for_companion,
-    send_permission_update_to_session,
+    ensure_agent_session_for_companion, get_agent_session_info_for_companion,
+    interrupt_agent_session_for_companion, send_permission_update_to_session,
 };
 
 pub(crate) use super::session_lifecycle::{
@@ -92,7 +92,8 @@ pub(crate) use super::opencode_history::delete_opencode_native_session;
 // --- Rewind -------------------------------------------------------------------
 
 pub use super::rewind::{
-    __cmd__rewind_agent_session, __tauri_command_name_rewind_agent_session, rewind_agent_session,
+    __cmd__rewind_agent_session, __tauri_command_name_rewind_agent_session,
+    rewind_agent_session, rewind_agent_session_for_companion,
 };
 
 // --- Fork ----------------------------------------------------------------------
@@ -101,8 +102,8 @@ pub use super::fork::{
     __cmd__fork_claude_session, __cmd__fork_codex_session, __cmd__fork_opencode_session,
     __cmd__fork_pi_session, __tauri_command_name_fork_claude_session,
     __tauri_command_name_fork_codex_session, __tauri_command_name_fork_opencode_session,
-    __tauri_command_name_fork_pi_session, fork_claude_session, fork_codex_session,
-    fork_opencode_session, fork_pi_session,
+    __tauri_command_name_fork_pi_session, fork_claude_session, fork_claude_session_for_companion,
+    fork_codex_session, fork_opencode_session, fork_pi_session,
 };
 
 // --- Codex proxy -----------------------------------------------------------------

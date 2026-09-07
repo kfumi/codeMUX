@@ -10,7 +10,7 @@ use crate::db::operations::{self, NativeSessionRef};
 use crate::AppState;
 use log::{info, warn};
 use std::str::FromStr;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -372,4 +372,94 @@ pub(crate) async fn cleanup_native_sessions_best_effort(
             }
         }
     }
+}
+
+pub async fn delete_session_for_companion(
+    app: &AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let agent_state = app.state::<AgentState>();
+    delete_session(app.clone(), state, agent_state, session_id).await
+}
+
+pub async fn delete_session_with_agent_cleanup_for_companion(
+    app: &AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let skip_cleanup = {
+        let db = state.db.lock().unwrap();
+        operations::get_session(&db, &session_id)
+            .map_err(|error| error.to_string())?
+            .map(|session| session.origin == "imported" || session.is_read_only)
+            .unwrap_or(true)
+    };
+    if !skip_cleanup {
+        let _ = crate::agent::session_lifecycle::shutdown_agent(
+            app.state::<AppState>(),
+            app.state::<AgentState>(),
+            session_id.clone(),
+        )
+        .await;
+        let _ = crate::agent::session_lifecycle::reset_agent_session(
+            app.state::<AppState>(),
+            app.state::<AgentState>(),
+            session_id.clone(),
+        )
+        .await;
+    }
+    delete_session_for_companion(app, session_id).await
+}
+
+pub fn update_session_working_path_for_companion(
+    app: &AppHandle,
+    session_id: String,
+    working_path: String,
+) -> Result<operations::Session, String> {
+    update_session_working_path(app.state::<AppState>(), session_id, working_path)
+}
+
+pub fn touch_session_for_companion(app: &AppHandle, session_id: String) -> Result<(), String> {
+    touch_session(app.state::<AppState>(), session_id)
+}
+
+pub fn update_session_provider_for_companion(
+    app: &AppHandle,
+    session_id: String,
+    provider_id: Option<String>,
+    model: String,
+    reasoning_effort: Option<String>,
+) -> Result<(), String> {
+    update_session_provider(
+        app.state::<AppState>(),
+        session_id,
+        provider_id,
+        model,
+        reasoning_effort,
+    )
+}
+
+pub fn update_session_reasoning_effort_for_companion(
+    app: &AppHandle,
+    session_id: String,
+    reasoning_effort: String,
+) -> Result<(), String> {
+    update_session_reasoning_effort(app.state::<AppState>(), session_id, reasoning_effort)
+}
+
+pub async fn update_session_permissions_for_companion(
+    app: &AppHandle,
+    session_id: String,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
+) -> Result<(), String> {
+    update_session_permissions(
+        app.state::<AppState>(),
+        app.state::<AgentState>(),
+        session_id,
+        permission_config,
+        plan_mode,
+    )
+    .await
 }

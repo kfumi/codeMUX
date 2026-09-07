@@ -11,9 +11,9 @@ const { updateSessionPermissions } = vi.hoisted(() => ({
   updateSessionPermissions: vi.fn(),
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {
-    sendToolResponse,
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    respondToInteractiveViaDaemon: sendToolResponse,
   },
 }));
 

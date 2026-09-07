@@ -8,13 +8,13 @@ import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
 import { ChatSearchDialog } from './ChatSearchDialog';
 
-const { loadSessionEventsMock } = vi.hoisted(() => ({
-  loadSessionEventsMock: vi.fn(),
+const { getTimelineMock } = vi.hoisted(() => ({
+  getTimelineMock: vi.fn(),
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {
-    loadSessionEvents: loadSessionEventsMock,
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    getTimeline: getTimelineMock,
   },
 }));
 
@@ -45,8 +45,8 @@ function renderDialog(props: Partial<React.ComponentProps<typeof ChatSearchDialo
 
 describe('ChatSearchDialog', () => {
   beforeEach(() => {
-    loadSessionEventsMock.mockReset();
-    loadSessionEventsMock.mockResolvedValue([]);
+    getTimelineMock.mockReset();
+    getTimelineMock.mockResolvedValue({ events: [], hasMore: false });
 
     useSessionStore.setState({
       sessions: [
@@ -123,16 +123,19 @@ describe('ChatSearchDialog', () => {
         makeSession({ id: 'preview-miss', title: 'Other', updated_at: '2026-01-02T00:00:00.000Z' }),
       ],
     });
-    loadSessionEventsMock.mockImplementation((sessionId: string) => Promise.resolve(
+    getTimelineMock.mockImplementation((sessionId: string) => Promise.resolve(
       sessionId === 'preview-hit'
-        ? [{
-            type: 'user',
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: '梳理 Node 依赖并评估内置方案' }],
-            },
-          }]
-        : [],
+        ? {
+            events: [{
+              type: 'user',
+              message: {
+                role: 'user',
+                content: [{ type: 'text', text: '梳理 Node 依赖并评估内置方案' }],
+              },
+            }],
+            hasMore: false,
+          }
+        : { events: [], hasMore: false },
     ));
 
     renderDialog();
@@ -194,7 +197,7 @@ describe('ChatSearchDialog', () => {
   });
 
   it('keeps sessions with no history searchable by title', async () => {
-    loadSessionEventsMock.mockResolvedValue([]);
+    getTimelineMock.mockResolvedValue({ events: [], hasMore: false });
     useSessionStore.setState({
       sessions: [
         makeSession({ id: 'empty-history', title: 'No history yet', updated_at: '2026-01-03T00:00:00.000Z' }),
@@ -204,7 +207,7 @@ describe('ChatSearchDialog', () => {
     renderDialog();
 
     await waitFor(() => {
-      expect(loadSessionEventsMock).toHaveBeenCalledWith('empty-history');
+      expect(getTimelineMock).toHaveBeenCalledWith('empty-history', { direction: 'tail', limit: 200 });
     });
 
     fireEvent.change(screen.getByPlaceholderText('搜索聊天或运行命令'), { target: { value: 'history' } });

@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 
 import type { SubagentStatus } from '../../../lib/codeMuxProtocol';
-import { gitApi, type GitRepositoryState, type GitStatusChange } from '../../../lib/tauri';
+import { daemonFacade } from '../../../lib/facades/daemon-facade';
+import type { GitRepositoryState, GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -422,8 +423,8 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
     setUnavailableMessage(null);
     try {
       const [nextState, files] = await Promise.all([
-        gitApi.getRepositoryState(projectPath),
-        gitApi.getStatusChanges(projectPath, 'unstaged').catch(() => []),
+        daemonFacade.git.getRepositoryState(projectPath),
+        daemonFacade.git.getStatusChanges(projectPath, 'unstaged').catch(() => []),
       ]);
       setRepositoryState(nextState);
       setTotals(getTotals(files));
@@ -461,7 +462,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
     setBranchLoading(true);
     setBranchError(null);
     try {
-      await gitApi.checkoutBranch(projectPath, branchName);
+      await daemonFacade.git.checkoutBranch(projectPath, branchName);
       setBranchOpen(false);
       await load();
     } catch (err) {
@@ -476,7 +477,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
     setBranchLoading(true);
     setBranchError(null);
     try {
-      await gitApi.createBranch(projectPath, branchName, checkout);
+      await daemonFacade.git.createBranch(projectPath, branchName, checkout);
       setBranchDialogOpen(false);
       setBranchOpen(false);
       await load();

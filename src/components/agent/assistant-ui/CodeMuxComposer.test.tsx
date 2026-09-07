@@ -167,13 +167,16 @@ vi.mock('./CodeMuxLexicalComposerInput', () => ({
   }),
 }));
 
-vi.mock('../../../lib/tauri', () => ({
-  agentApi: {
-    sendToolResponse: sendToolResponseMock,
-  },
-  sessionApi: {
+vi.mock('../../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
     updatePermissions: updatePermissionsMock,
+    respondToInteractiveViaDaemon: sendToolResponseMock,
   },
+}));
+
+vi.mock('../../../lib/tauri', () => ({
+  agentApi: {},
+  sessionApi: {},
   fileApi: {
     listDirectory: vi.fn().mockResolvedValue([]),
   },

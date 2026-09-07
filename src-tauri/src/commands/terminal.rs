@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 const TERMINAL_OUTPUT_BUFFER_LIMIT: usize = 256 * 1024;
@@ -70,17 +71,24 @@ impl TerminalOutputBuffer {
 
 struct TerminalOutputState {
     channel: Option<tauri::ipc::Channel<String>>,
+    broadcast_tx: broadcast::Sender<String>,
     buffer: TerminalOutputBuffer,
     exit_event: Option<TerminalEvent>,
 }
 
 impl TerminalOutputState {
-    fn new(channel: tauri::ipc::Channel<String>) -> Self {
+    fn new(channel: Option<tauri::ipc::Channel<String>>) -> Self {
+        let (broadcast_tx, _) = broadcast::channel(512);
         Self {
-            channel: Some(channel),
+            channel,
+            broadcast_tx,
             buffer: TerminalOutputBuffer::new(TERMINAL_OUTPUT_BUFFER_LIMIT),
             exit_event: None,
         }
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<String> {
+        self.broadcast_tx.subscribe()
     }
 }
 
@@ -155,6 +163,9 @@ fn publish_event(output: &Arc<Mutex<TerminalOutputState>>, event: TerminalEvent)
     }
     if matches!(&event, TerminalEvent::Exit { .. }) {
         output.exit_event = Some(event.clone());
+    }
+    if let Ok(payload) = serde_json::to_string(&event) {
+        let _ = output.broadcast_tx.send(payload);
     }
     if let Some(channel) = output.channel.as_ref() {
         send_event(channel, event);
@@ -237,7 +248,7 @@ pub fn start_terminal_session(
         .map_err(|e| format!("Failed to open terminal input: {}", e))?;
 
     let terminal_id = Uuid::new_v4().to_string();
-    let output = Arc::new(Mutex::new(TerminalOutputState::new(channel)));
+    let output = Arc::new(Mutex::new(TerminalOutputState::new(Some(channel))));
     let session = TerminalSession {
         master: Arc::new(Mutex::new(pair.master)),
         writer: Arc::new(Mutex::new(writer)),
@@ -444,6 +455,188 @@ impl Drop for TerminalState {
     }
 }
 
+pub fn start_terminal_for_companion(
+    state: &TerminalState,
+    project_path: String,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    let cwd = normalize_windows_verbatim_path(PathBuf::from(&project_path));
+    let canonical_cwd = cwd
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    if !canonical_cwd.is_dir() {
+        return Err(format!("Not a directory: {}", cwd.display()));
+    }
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Failed to open PTY: {}", e))?;
+
+    let (program, args) = default_shell();
+    let mut command = CommandBuilder::new(program);
+    for arg in args {
+        command.arg(arg);
+    }
+    command.cwd(cwd);
+
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|e| format!("Failed to start terminal: {}", e))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Failed to read terminal output: {}", e))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("Failed to open terminal input: {}", e))?;
+
+    let terminal_id = Uuid::new_v4().to_string();
+    let output = Arc::new(Mutex::new(TerminalOutputState::new(None)));
+    let session = TerminalSession {
+        master: Arc::new(Mutex::new(pair.master)),
+        writer: Arc::new(Mutex::new(writer)),
+        child: Arc::new(Mutex::new(child)),
+        output: output.clone(),
+    };
+
+    state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state poisoned".to_string())?
+        .insert(terminal_id.clone(), session);
+
+    let output_id = terminal_id.clone();
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    publish_event(
+                        &output,
+                        TerminalEvent::Output {
+                            terminal_id: output_id.clone(),
+                            data,
+                        },
+                    );
+                }
+                Err(error) => {
+                    publish_event(
+                        &output,
+                        TerminalEvent::Error {
+                            terminal_id: output_id.clone(),
+                            error: error.to_string(),
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+        publish_event(
+            &output,
+            TerminalEvent::Exit {
+                terminal_id: output_id,
+                code: None,
+            },
+        );
+    });
+
+    Ok(terminal_id)
+}
+
+pub fn subscribe_terminal_for_companion(
+    state: &TerminalState,
+    terminal_id: &str,
+) -> Result<(broadcast::Receiver<String>, Option<String>), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state poisoned".to_string())?;
+    let session = sessions
+        .get(terminal_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?;
+    let output = session
+        .output
+        .lock()
+        .map_err(|_| "Terminal output state poisoned".to_string())?;
+    let replay = output.buffer.snapshot();
+    Ok((
+        output.subscribe(),
+        if replay.is_empty() {
+            None
+        } else {
+            Some(replay)
+        },
+    ))
+}
+
+pub fn write_terminal_for_companion(
+    state: &TerminalState,
+    terminal_id: &str,
+    data: &str,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state poisoned".to_string())?;
+    let session = sessions
+        .get(terminal_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?;
+    session
+        .writer
+        .lock()
+        .map_err(|_| "Terminal writer poisoned".to_string())?
+        .write_all(data.as_bytes())
+        .map_err(|error| format!("Failed to write to terminal: {}", error))?;
+    Ok(())
+}
+
+pub fn resize_terminal_for_companion(
+    state: &TerminalState,
+    terminal_id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state poisoned".to_string())?;
+    let master = sessions
+        .get(terminal_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?
+        .master
+        .clone();
+    resize_master(&master, cols, rows)
+}
+
+pub fn close_terminal_for_companion(state: &TerminalState, terminal_id: &str) -> Result<(), String> {
+    let session = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state poisoned".to_string())?
+        .remove(terminal_id);
+
+    if let Some(session) = session {
+        let _ = session
+            .child
+            .lock()
+            .map_err(|_| "Terminal child poisoned".to_string())?
+            .kill();
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -474,7 +667,7 @@ mod tests {
     #[test]
     fn rejects_io_when_the_terminal_is_detached() {
         let output = Arc::new(Mutex::new(TerminalOutputState::new(
-            tauri::ipc::Channel::new(|_| Ok(())),
+            Some(tauri::ipc::Channel::new(|_| Ok(()))),
         )));
 
         detach_output_channel(&output).unwrap();
@@ -493,7 +686,7 @@ mod tests {
             initial_received.lock().unwrap().push(payload);
             Ok(())
         });
-        let output = Arc::new(Mutex::new(TerminalOutputState::new(initial_channel)));
+        let output = Arc::new(Mutex::new(TerminalOutputState::new(Some(initial_channel))));
 
         publish_event(
             &output,

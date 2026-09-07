@@ -338,10 +338,21 @@ fn send_agent_notification_command(
     send_agent_notification_impl(app, title, body, session_id)
 }
 
-fn handle_tray_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_id: &str) {
+fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     match event_id {
         TRAY_OPEN_ID => show_main_window(app),
-        TRAY_QUIT_ID => app.exit(0),
+        TRAY_QUIT_ID => {
+            let companion_state = {
+                let state = app.state::<companion::CompanionState>();
+                state.clone()
+            };
+            tauri::async_runtime::block_on(async {
+                if let Err(error) = companion::stop_daemon_for_state(&companion_state).await {
+                    warn!(target: "app", "Failed to stop daemon on tray quit: {}", error);
+                }
+            });
+            app.exit(0);
+        }
         _ => {}
     }
 }
@@ -688,7 +699,7 @@ pub fn run() {
 mod tests {
     use super::{
         should_activate_main_window_for_second_instance, should_hide_to_tray,
-        should_register_single_instance_plugin,
+        should_register_single_instance_plugin, TRAY_OPEN_ID, TRAY_QUIT_ID,
     };
 
     #[test]
@@ -707,5 +718,35 @@ mod tests {
     fn registers_single_instance_only_for_production_builds() {
         assert!(!should_register_single_instance_plugin(true));
         assert!(should_register_single_instance_plugin(false));
+    }
+
+    #[test]
+    fn tray_quit_menu_id_is_stable_for_daemon_shutdown_hook() {
+        assert_eq!(TRAY_QUIT_ID, "tray_quit");
+        assert_eq!(TRAY_OPEN_ID, "tray_open");
+    }
+
+    #[test]
+    fn hide_to_tray_does_not_stop_daemon() {
+        let source = include_str!("lib.rs");
+        let hide_fn = source
+            .find("fn hide_window_to_tray")
+            .expect("hide_window_to_tray");
+        let body = &source[hide_fn..hide_fn + 200];
+        assert!(!body.contains("stop_daemon"));
+    }
+
+    #[test]
+    fn tray_quit_stops_daemon_before_process_exit() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn handle_tray_menu_event")
+            .expect("handle_tray_menu_event");
+        let body = &source[start..start + 900];
+        let stop = body
+            .find("stop_daemon_for_state")
+            .expect("tray quit stops daemon");
+        let exit = body.find("app.exit").expect("tray quit exits app");
+        assert!(stop < exit);
     }
 }

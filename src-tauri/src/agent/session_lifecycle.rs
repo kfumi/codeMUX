@@ -1418,8 +1418,16 @@ pub async fn get_agent_session_info(
     app_session_id: String,
     agent_kind: String,
 ) -> Result<AgentSessionInfo, String> {
+    get_agent_session_info_for_companion(state.inner(), app_session_id, agent_kind)
+}
+
+pub fn get_agent_session_info_for_companion(
+    state: &crate::AppState,
+    app_session_id: String,
+    agent_kind: String,
+) -> Result<AgentSessionInfo, String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
-    let agent_session_id = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?;
+    let agent_session_id = get_agent_session_id(state, &app_session_id, agent_kind)?;
     if agent_session_id.is_none() {
         let db = state.db.lock().unwrap();
         let source = db
@@ -1654,16 +1662,24 @@ pub async fn shutdown_agent(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    reject_read_only_session(&state, &session_id)?;
-    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    shutdown_agent_for_companion(state.inner(), agent_state.inner(), &session_id).await
+}
+
+pub async fn shutdown_agent_for_companion(
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    session_id: &str,
+) -> Result<(), String> {
+    reject_read_only_session(state, session_id)?;
+    let ctx = crate::log_ctx::LogCtx::with_session(session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Shutdown requested");
-        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let lifecycle_lock = session_lifecycle_lock(agent_state, session_id).await;
         let _lifecycle_guard = lifecycle_lock.lock().await;
-        invalidate_session_generation(agent_state.inner(), &session_id).await;
+        invalidate_session_generation(agent_state, session_id).await;
         let sidecar = {
             let mut sidecars = agent_state.sidecars.lock().await;
-            sidecars.remove(&session_id)
+            sidecars.remove(session_id)
         };
         if let Some(mut handle) = sidecar {
             handle.shutdown().await;
@@ -1733,19 +1749,27 @@ pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    reject_read_only_session(&state, &session_id)?;
-    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    reset_agent_session_for_companion(state.inner(), agent_state.inner(), &session_id).await
+}
+
+pub async fn reset_agent_session_for_companion(
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    session_id: &str,
+) -> Result<(), String> {
+    reject_read_only_session(state, session_id)?;
+    let ctx = crate::log_ctx::LogCtx::with_session(session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Reset requested");
-        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let lifecycle_lock = session_lifecycle_lock(agent_state, session_id).await;
         let _lifecycle_guard = lifecycle_lock.lock().await;
-        let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
-        invalidate_session_generation(agent_state.inner(), &session_id).await;
-        let cmd = OpenCodeRuntime::reset_session_command(&session_id);
+        let agent_kind = resolve_session_agent_kind(state, session_id)?;
+        invalidate_session_generation(agent_state, session_id).await;
+        let cmd = OpenCodeRuntime::reset_session_command(session_id);
 
         let command_sender = {
             let sidecars = agent_state.sidecars.lock().await;
-            sidecars.get(&session_id).map(SidecarHandle::command_sender)
+            sidecars.get(session_id).map(SidecarHandle::command_sender)
         };
         if let Some(command_sender) = command_sender {
             command_sender
@@ -1756,9 +1780,9 @@ pub async fn reset_agent_session(
             crate::log_ctx!(info, target: "agent", "Reset skipped; no active sidecar");
         }
 
-        if agent_kind == "opencode" && !is_imported_session(&state, &session_id)? {
+        if agent_kind == "opencode" && !is_imported_session(state, session_id)? {
             let db = state.db.lock().unwrap();
-            operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode)
+            operations::delete_agent_session_mapping(&db, session_id, AgentKind::Opencode)
                 .map_err(|error| {
                     format!(
                         "Failed to clear OpenCode session mapping for session_id={}: {}",

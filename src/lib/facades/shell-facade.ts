@@ -19,15 +19,10 @@ export const shellFacade = {
   checkAgentRuntimes: appApi.checkAgentRuntimes,
   upgradeAgentRuntime: appApi.upgradeAgentRuntime,
   probeAgentInstallations: appApi.probeAgentInstallations,
-  checkManagedRuntimes: appApi.checkManagedRuntimes,
-  listManagedRuntimeVersions: appApi.listManagedRuntimeVersions,
-  refreshManagedRuntime: appApi.refreshManagedRuntime,
-  installManagedRuntime: appApi.installManagedRuntime,
-  upgradeManagedRuntime: appApi.upgradeManagedRuntime,
-  repairManagedRuntime: appApi.repairManagedRuntime,
-  removeManagedRuntime: appApi.removeManagedRuntime,
   openProjectPath: (path: string, target: OpenTarget): Promise<void> =>
     import('./invoke-backend').then(({ fileApi }) => fileApi.openProjectPath(path, target)),
+  readHomeFile: (relativePath: string): Promise<string> =>
+    import('./invoke-backend').then(({ fileApi }) => fileApi.readHomeFile(relativePath)),
 };
 
 export type ShellFacade = typeof shellFacade;

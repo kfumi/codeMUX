@@ -1122,27 +1122,35 @@ pub fn verify_pairing_token(conn: &Connection, token: &str) -> Result<Option<Pai
     Ok(None)
 }
 
+fn timeline_event_with_sequence(sequence: i64, raw: &str) -> Result<Value> {
+    let mut event: Value = serde_json::from_str(raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })?;
+    if let Some(object) = event.as_object_mut() {
+        object.insert("sequence".to_string(), serde_json::json!(sequence));
+    }
+    Ok(event)
+}
+
 pub fn get_session_events_after(
     conn: &Connection,
     session_id: &str,
     after_sequence: i64,
 ) -> Result<Vec<Value>> {
     let mut stmt = conn.prepare(
-        "SELECT event_json FROM session_event_snapshots WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
+        "SELECT sequence, event_json FROM session_event_snapshots WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
     )?;
     let rows = stmt.query_map(params![session_id, after_sequence], |row| {
-        row.get::<_, String>(0)
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut events = Vec::new();
-    for raw in rows {
-        let raw = raw?;
-        events.push(serde_json::from_str(&raw).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                Box::new(error),
-            )
-        })?);
+    for row in rows {
+        let (sequence, raw) = row?;
+        events.push(timeline_event_with_sequence(sequence, &raw)?);
     }
     Ok(events)
 }
@@ -1270,15 +1278,7 @@ pub fn fetch_session_timeline(
 
     let events = rows
         .iter()
-        .map(|(_, raw)| {
-            serde_json::from_str(raw).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    0,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })
-        })
+        .map(|(sequence, raw)| timeline_event_with_sequence(*sequence, raw))
         .collect::<Result<Vec<_>>>()?;
     let seq_start = rows[0].0;
     let seq_end = rows[rows.len() - 1].0;
@@ -1337,6 +1337,9 @@ pub fn append_timeline_events(
             }
         }
         let sequence = next_sequence + offset as i64;
+        if let Some(object) = snapshot_event.as_object_mut() {
+            object.insert("sequence".to_string(), serde_json::json!(sequence));
+        }
         let event_id = snapshot_event
             .get("event_id")
             .and_then(Value::as_str)
@@ -2535,6 +2538,10 @@ mod tests {
         assert_eq!(before.seq_end, 2);
         assert!(before.has_older);
         assert!(before.has_newer);
+
+        for (index, event) in tail.events.iter().enumerate() {
+            assert_eq!(event.get("sequence").and_then(Value::as_i64), Some((3 + index) as i64));
+        }
     }
 
     #[test]

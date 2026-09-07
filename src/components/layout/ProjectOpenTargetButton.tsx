@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { fileApi } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -19,7 +19,7 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
   const DefaultIcon = defaultOption.Icon;
 
   const openProject = (target: OpenTarget) => {
-    void fileApi.openProjectPath(projectPath, target).catch(() => {
+    void shellFacade.openProjectPath(projectPath, target).catch(() => {
       toast.error('打开项目失败');
     });
   };

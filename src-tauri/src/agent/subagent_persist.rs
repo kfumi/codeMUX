@@ -52,10 +52,9 @@ pub(crate) fn handle_sidecar_subagent_event(state: &crate::AppState, raw_event: 
 /// Load descriptors + per-subagent timelines. Reconciles stale `running`
 /// descriptors to `failed` — but only when no live sidecar owns the session,
 /// so switching between sessions never fails children that are still running.
-#[tauri::command]
-pub async fn load_session_subagents(
-    app: tauri::AppHandle,
-    state: State<'_, crate::AppState>,
+pub async fn load_session_subagents_for_companion(
+    app: &tauri::AppHandle,
+    state: &crate::AppState,
     app_session_id: String,
 ) -> Result<SessionSubagentsPayload, String> {
     use tauri::Manager;
@@ -88,4 +87,13 @@ pub async fn load_session_subagents(
         subagents,
         timelines,
     })
+}
+
+#[tauri::command]
+pub async fn load_session_subagents(
+    app: tauri::AppHandle,
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<SessionSubagentsPayload, String> {
+    load_session_subagents_for_companion(&app, state.inner(), app_session_id).await
 }

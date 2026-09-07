@@ -2155,19 +2155,28 @@ pub async fn delete_opencode_session(
     agent_state: State<'_, AgentState>,
     app_session_id: String,
 ) -> Result<(), String> {
+    delete_opencode_session_for_companion(&app, state.inner(), agent_state.inner(), app_session_id).await
+}
+
+pub async fn delete_opencode_session_for_companion(
+    app: &AppHandle,
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    app_session_id: String,
+) -> Result<(), String> {
     debug!(target: "agent", "Deleting OpenCode session through the official SDK for app_session_id={}", app_session_id);
-    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &app_session_id).await;
+    let lifecycle_lock = session_lifecycle_lock(agent_state, &app_session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
-    invalidate_session_generation(agent_state.inner(), &app_session_id).await;
+    invalidate_session_generation(agent_state, &app_session_id).await;
     let Some(opencode_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+        get_agent_session_id(state, &app_session_id, AgentKind::Opencode)?
     else {
         return Ok(());
     };
     delete_opencode_native_session(
-        &app,
-        state.inner(),
-        agent_state.inner(),
+        app,
+        state,
+        agent_state,
         &app_session_id,
         &opencode_session_id,
     )

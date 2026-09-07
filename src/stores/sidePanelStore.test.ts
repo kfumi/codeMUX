@@ -14,8 +14,14 @@ const browserApiMock = vi.hoisted(() => ({
   hide: vi.fn(),
 }));
 
+vi.mock('../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    readFile: fileApiMock.readFile,
+    writeFile: fileApiMock.writeFile,
+  },
+}));
+
 vi.mock('../lib/tauri', () => ({
-  fileApi: fileApiMock,
   browserApi: browserApiMock,
 }));
 

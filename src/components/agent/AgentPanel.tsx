@@ -12,7 +12,7 @@ import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
-import { agentApi, sessionApi } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useAgentStore } from '../../stores/agentStore';
 import type { AgentMessage } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -245,7 +245,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     ensuredSessionsRef.current.add(ensureKey);
-    agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
+    daemonFacade.ensureAgentSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
   }, [
@@ -314,12 +314,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       )),
     }));
     try {
-      await sessionApi.updateProvider(sessionId, providerId, suffixedModel);
+      await daemonFacade.updateProvider(sessionId, providerId, suffixedModel);
       // Re-ensure immediately so Codex resumes the same thread with the new
       // model before the next send, instead of waiting for startSession.
       if (!isRunning) {
         const effectiveCwd = workingPath ?? cwd;
-        await agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort);
+        await daemonFacade.ensureAgentSession(sessionId, effectiveCwd, undefined, reasoningEffort);
       }
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
@@ -357,7 +357,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }));
 
     try {
-      await sessionApi.updateReasoningEffort(sessionId, nextEffort);
+      await daemonFacade.updateReasoningEffort(sessionId, nextEffort);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
@@ -425,8 +425,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         showInfoDialog,
         createSession: async () => { await createSession('新对话', 'agent'); },
         clearEvents,
-        resetSession: () => { agentApi.resetSession(sessionId); },
-        deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(sessionId),
+        resetSession: () => { daemonFacade.resetAgentSession(sessionId); },
+        deleteClaudeSessionFiles: () => daemonFacade.deleteClaudeSessionFiles(sessionId),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
       };

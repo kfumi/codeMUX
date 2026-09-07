@@ -16,7 +16,8 @@ import {
   getBranchPickerLabel,
   getWorktreeTriggerLabel,
 } from '../../lib/draftWorkspacePicker';
-import { gitApi, type GitRepositoryState, type GitWorktree } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
+import type { GitRepositoryState, GitWorktree } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -96,8 +97,8 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
     setGitLoading(true);
     try {
       const [state, nextWorktrees] = await Promise.all([
-        gitApi.getRepositoryState(statePath),
-        gitApi.listWorktrees(draftProject.path),
+        daemonFacade.git.getRepositoryState(statePath),
+        daemonFacade.git.listWorktrees(draftProject.path),
       ]);
       setRepositoryState(state);
       setWorktrees(nextWorktrees);

@@ -40,6 +40,14 @@ pub async fn enrich_attachments(
     state: State<'_, crate::AppState>,
     attachments: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    enrich_attachments_for_companion(&app, state.inner(), attachments).await
+}
+
+pub async fn enrich_attachments_for_companion(
+    app: &AppHandle,
+    state: &crate::AppState,
+    attachments: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     if attachments.is_empty() {
         return Ok(serde_json::json!({ "blocks": [] }));
     }

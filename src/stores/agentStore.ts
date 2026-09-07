@@ -5,8 +5,12 @@ import {
   shouldPreferLocalEventsOnHistoryLoad,
 } from '../lib/attachToActiveTurn';
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
-import { agentApi, companionApi, fileApi } from '../lib/tauri';
 import { daemonFacade } from '../lib/facades/daemon-facade';
+import {
+  getLastEventSequence,
+  registerDaemonSessionHandler,
+  setLastEventSequence,
+} from '../lib/daemon-session-bridge';
 import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
 import { supportsCapability } from '../components/agent/agentCapabilities';
 import { createLogger, serializeError } from '../lib/logger';
@@ -1884,7 +1888,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const droppedImages = attachments.length > 0 && !shouldSendImages && !enrichmentEnabled;
     const userContent = displayContent ?? originalPayload.text;
 
-    logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
+    logger.info('MODEL_TRACE startQuery dispatching via Daemon Client', {
       sessionId,
       cwd,
       displayModel: modelForVision || 'default',
@@ -1944,7 +1948,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     try {
       if (attachments.length > 0 && !supportsVision && enrichmentEnabled) {
         try {
-          const enrichmentResponse = await agentApi.enrichAttachments(attachments);
+          const enrichmentResponse = await daemonFacade.enrichAttachments(attachments);
           const blocks = enrichmentResponse.blocks ?? [];
           const successfulBlocks = filterSuccessfulEnrichmentBlocks(blocks);
           const failureCount = countEnrichmentFailures(blocks);
@@ -2180,7 +2184,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
                   setSessionStreamPhase(sessionId, 'answer');
                   // Pi 等运行时在最终 assistant_message 到达前不会把思考写入事件；
                   // 进入 answer 阶段时保留 streamingThinking，避免正文流式输出时思考面板消失。
-                  if (hasThinkingContent && (hasCommittedThinking || isOpencodeLikeAgent(sessionId))) {
+                  if (hasThinkingContent && (
+                    hasCommittedThinking
+                    || isOpencodeLikeAgent(sessionId)
+                    || (
+                      getSessionStreamPhase(sessionId) === 'answer'
+                      && getSessionAgentKind(sessionId) === 'claude_code'
+                    )
+                  )) {
                     clearStreamingTextField(sessionId, 'streamingThinking', set, get);
                   }
                 }
@@ -2302,7 +2313,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
                 if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
                   const filePath = parsedInput.file_path as string;
                   const projectPath = usePreviewStore.getState().projectPath || undefined;
-                  fileApi.readFile(filePath, projectPath).then((original) => {
+                  daemonFacade.readFile(filePath, projectPath).then((original) => {
                     set((s) => {
                       const sessionOriginals = preserveFirstOriginalSnapshot(
                         s.fileOriginals[sessionId] || {},
@@ -2757,7 +2768,24 @@ export const useAgentStore = create<AgentState>((set, get) => {
           }
         }
       };
-      await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, reasoningEffort, payloadForModel, userContent);
+      registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
+        if (!running) return;
+        set((s) => {
+          if (s.isRunning[sessionId]) return {};
+          return {
+            isRunning: { ...s.isRunning, [sessionId]: true },
+            queryStartTime: {
+              ...s.queryStartTime,
+              [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+            },
+          };
+        });
+      });
+      await daemonFacade.sendMessageViaDaemon(
+        sessionId,
+        payloadForModel.text,
+        payloadForModel,
+      );
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, displayModel: modelForVision }, serializeError(err));
       set((s) => {
@@ -2783,7 +2811,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }));
     await get().loadSessionMessages(sessionId, { force: true });
 
-    const companionTurnActive = await companionApi.isSessionTurnActive(sessionId);
+    const companionTurnActive = await daemonFacade.isSessionTurnActive(sessionId);
     if (!shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
       stopBackgroundPoll(sessionId);
       set((s) => {
@@ -2808,14 +2836,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
       void get().completeBackgroundLiveIfIdle(sessionId);
     }, 1000));
 
-    await agentApi.ensureSession(sessionId, cwd, undefined, reasoningEffort);
+    await daemonFacade.ensureAgentSession(sessionId, cwd, undefined, reasoningEffort);
     return get().isRunning[sessionId] ?? false;
   },
 
   completeBackgroundLiveIfIdle: async (sessionId: string) => {
     if (!get().backgroundLive[sessionId]) return;
     await get().loadSessionMessages(sessionId, { force: true });
-    const companionTurnActive = await companionApi.isSessionTurnActive(sessionId);
+    const companionTurnActive = await daemonFacade.isSessionTurnActive(sessionId);
     if (shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
       return;
     }
@@ -2953,11 +2981,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
       get().removeQueuedQuery(sessionId, queryId);
       inflightSteerRequests.set(requestId, { sessionId, query });
       try {
-        await agentApi.sendInput(
+        await daemonFacade.sendMessageViaDaemon(
           sessionId,
           query.prompt,
           query.inputPayload,
-          query.displayContent,
           { delivery: 'steer', requestId },
         );
       } catch (error) {
@@ -3065,7 +3092,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     });
 
     try {
-      const rawUsage = await agentApi.loadLatestTokenUsage(sessionId, agentKind, freshness);
+      const rawUsage = await daemonFacade.loadLatestTokenUsage(sessionId, agentKind, freshness);
       const normalized = normalizeThreadTokenUsage(rawUsage);
       set((state) => {
         if (state.tokenUsageRefreshRequests[sessionId] !== requestId) {
@@ -3104,8 +3131,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     // Hydrate the subagent tracks in parallel with the parent timeline.
     const subagentsFetch: Promise<{ subagents: unknown[]; timelines: Record<string, unknown[]> } | null> =
-      typeof agentApi.loadSessionSubagents === 'function'
-        ? agentApi.loadSessionSubagents(sessionId)
+      typeof daemonFacade.loadSessionSubagents === 'function'
+        ? daemonFacade.loadSessionSubagents(sessionId)
             .then((payload) => {
               useSubagentStore.getState().replaceSession(sessionId, payload);
               return payload;
@@ -3121,13 +3148,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const loadEpoch = getSessionHistoryEpoch(sessionId);
 
       try {
-        const historyMessages = typeof agentApi.loadSessionEvents === 'function'
-          ? await agentApi.loadSessionEvents(sessionId)
-          : agentKind === 'codex'
-            ? await agentApi.loadCodexSessionEvents(sessionId)
-            : agentKind === 'opencode'
-              ? await agentApi.loadOpenCodeSessionEvents(sessionId)
-              : await agentApi.loadClaudeSessionEvents(sessionId);
+        const timelinePage = await daemonFacade.getTimeline(sessionId, {
+          direction: 'tail',
+          limit: 500,
+        });
+        const historyMessages = timelinePage.events ?? [];
+        const seqEnd = (timelinePage as { seqEnd?: number }).seqEnd;
+        if (typeof seqEnd === 'number' && seqEnd >= 0) {
+          setLastEventSequence(sessionId, Math.max(seqEnd, getLastEventSequence(sessionId)));
+        }
 
         if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
           logger.info('Discarding stale session history load after rewind', {
@@ -3157,6 +3186,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
+          const sequence = typeof rawMsg.sequence === 'number' ? rawMsg.sequence : null;
+          if (sequence !== null) {
+            setLastEventSequence(sessionId, Math.max(sequence, getLastEventSequence(sessionId)));
+          }
           let ts = typeof rawMsg.timestamp === 'string'
             ? new Date(rawMsg.timestamp).getTime() || 0
             : typeof rawMsg.timestamp === 'number'
@@ -3236,9 +3269,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // hydration, so an empty first fetch may have raced it — re-fetch once.
         const firstSubagents = await subagentsFetch;
         if ((firstSubagents == null || firstSubagents.subagents.length === 0)
-          && typeof agentApi.loadSessionSubagents === 'function') {
+          && typeof daemonFacade.loadSessionSubagents === 'function') {
           try {
-            const payload = await agentApi.loadSessionSubagents(sessionId);
+            const payload = await daemonFacade.loadSessionSubagents(sessionId);
             useSubagentStore.getState().replaceSession(sessionId, payload);
           } catch (error) {
             logger.warn('Failed to reload session subagents after history load', { sessionId }, serializeError(error));
@@ -3279,7 +3312,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       await pending;
     }
 
-    const result = await agentApi.resyncSessionFromNative(sessionId);
+    const result = await daemonFacade.resyncSessionFromNative(sessionId);
     get().clearEvents(sessionId);
     await get().loadSessionMessages(sessionId);
     logger.info('Resynced session history from CLI provider file', {
@@ -3390,7 +3423,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const invokeRewind = async (
       rewindTarget: AgentUserMessageLocator | undefined,
     ) => {
-      const result = await agentApi.rewindSession(sessionId, agentKind, rewindTarget, mode);
+      const result = await daemonFacade.rewindSession(sessionId, agentKind, rewindTarget, mode) as {
+        filesChanged?: number;
+      };
       if (result && typeof result.filesChanged === 'number') {
         filesChanged = result.filesChanged;
       }

@@ -10,13 +10,11 @@ const gitApiMock = vi.hoisted(() => ({
   createWorktree: vi.fn(),
 }));
 
-vi.mock('../../lib/tauri', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/tauri')>('../../lib/tauri');
-  return {
-    ...actual,
-    gitApi: gitApiMock,
-  };
-});
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    git: gitApiMock,
+  },
+}));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),

@@ -4,7 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import { terminalApi, type TerminalEvent } from '../../../lib/tauri';
+import { daemonFacade } from '../../../lib/facades/daemon-facade';
+import type { TerminalEvent } from '../../../lib/daemon-client/terminal';
 import { useAppearanceStore } from '../../../stores/appearanceStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -61,7 +62,7 @@ function getOrStartTerminal(
     return { promise: pending, reusedPendingStart: true };
   }
 
-  const promise = terminalApi.start(projectPath, cols, rows, onEvent).then(
+  const promise = daemonFacade.terminal.start(projectPath, cols, rows, onEvent).then(
     (connectedTerminalId) => {
       if (pendingTerminalStarts.get(tabId) === promise) {
         pendingTerminalStarts.delete(tabId);
@@ -267,10 +268,10 @@ export function TerminalPanel({
     let disposed = false;
     const handleEvent = (event: TerminalEvent) => {
       if (disposed) return;
-      if (event.type === 'output') {
+      if (event.type === 'output' && event.data != null) {
         terminal.write(event.data);
       } else if (event.type === 'error') {
-        setError(event.error);
+        setError(event.error ?? '终端错误');
       } else if (event.type === 'exit') {
         terminal.writeln('');
         terminal.writeln(`[进程已退出${event.code == null ? '' : `: ${event.code}`}]`);
@@ -291,7 +292,7 @@ export function TerminalPanel({
           return;
         }
         lastSynchronizedSizeRef.current = size;
-        void terminalApi.resize(size.terminalId, size.cols, size.rows).catch((error) => {
+        void daemonFacade.terminal.resize(size.terminalId, size.cols, size.rows).catch((error) => {
           if (lastSynchronizedSizeRef.current === size) {
             lastSynchronizedSizeRef.current = null;
           }
@@ -302,7 +303,7 @@ export function TerminalPanel({
 
     const disposeTerminalSession = (connectedTerminalId: string) => {
       const shouldClose = !useSidePanelStore.getState().isTabPresent(tabId);
-      return shouldClose ? terminalApi.close(connectedTerminalId) : Promise.resolve();
+      return shouldClose ? daemonFacade.terminal.close(connectedTerminalId) : Promise.resolve();
     };
 
     const connect = async () => {
@@ -311,12 +312,12 @@ export function TerminalPanel({
       try {
         if (connectedTerminalId) {
           try {
-            await terminalApi.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
+            await daemonFacade.terminal.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
           } catch (attachError) {
             if (!isTerminalNotFoundError(attachError) || disposed) {
               throw attachError;
             }
-            connectedTerminalId = await terminalApi.start(projectPath, terminal.cols || 100, terminal.rows || 30, handleEvent);
+            connectedTerminalId = await daemonFacade.terminal.start(projectPath, terminal.cols || 100, terminal.rows || 30, handleEvent);
           }
         } else {
           const pendingStart = getOrStartTerminal(
@@ -330,11 +331,11 @@ export function TerminalPanel({
           if (pendingStart.reusedPendingStart) {
             if (disposed) {
               if (!useSidePanelStore.getState().isTabPresent(tabId)) {
-                await terminalApi.close(connectedTerminalId);
+                await daemonFacade.terminal.close(connectedTerminalId);
               }
               return;
             }
-            await terminalApi.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
+            await daemonFacade.terminal.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
           }
         }
 
@@ -350,7 +351,7 @@ export function TerminalPanel({
 
         if (disposed) {
           if (!useSidePanelStore.getState().isTabPresent(tabId)) {
-            await terminalApi.close(connectedTerminalId);
+            await daemonFacade.terminal.close(connectedTerminalId);
           }
         }
       } catch (err) {
@@ -362,7 +363,7 @@ export function TerminalPanel({
 
     const dataDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (connectedRef.current && terminalId) void terminalApi.write(terminalId, data).catch(reportError);
+      if (connectedRef.current && terminalId) void daemonFacade.terminal.write(terminalId, data).catch(reportError);
     });
 
     const resizeObserver = new ResizeObserver(resizeConnectedTerminal);

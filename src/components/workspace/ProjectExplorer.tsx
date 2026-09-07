@@ -1,7 +1,8 @@
 import { ArrowLeft, ChevronDown, ChevronRight, FileWarning, Folder, FolderOpen, Loader2, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fileApi, type FileTreeNode } from '../../lib/tauri';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
+import type { FileTreeNode } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
 import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -70,7 +71,7 @@ function TreeNode({
     setLoading(true);
     setLoadError(null);
     try {
-      const fetched = await fileApi.listDirectory(node.path, 1, projectPath, true);
+      const fetched = await daemonFacade.listDirectory(node.path, 1, projectPath, true);
       setChildren(fetched);
       setChildrenLoaded(true);
     } catch (error) {
@@ -191,7 +192,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextNodes = await fileApi.listDirectory(project.path, 5, project.path, true);
+      const nextNodes = await daemonFacade.listDirectory(project.path, 5, project.path, true);
       setNodes(nextNodes);
     } catch (loadError) {
       setNodes([]);

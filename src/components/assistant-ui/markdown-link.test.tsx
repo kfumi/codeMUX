@@ -18,6 +18,13 @@ import {
 const readFile = vi.fn();
 const openExternal = vi.fn();
 
+vi.mock('@/lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    readFile: (...args: unknown[]) => readFile(...args),
+    writeFile: vi.fn(),
+  },
+}));
+
 vi.mock('@/lib/tauri', () => ({
   fileApi: {
     readFile: (...args: unknown[]) => readFile(...args),
