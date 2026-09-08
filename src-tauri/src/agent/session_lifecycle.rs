@@ -520,19 +520,19 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
-                    crate::agent::timeline_persist::handle_sidecar_timeline_event(
-                        app_state.inner(),
-                        &event,
-                    );
+                    let broadcast_events =
+                        crate::agent::timeline_persist::handle_sidecar_timeline_event(
+                            app_state.inner(),
+                            &event,
+                        );
                     crate::agent::subagent_persist::handle_sidecar_subagent_event(
                         app_state.inner(),
                         &event,
                     );
                     let app_for_companion = app_handle.clone();
-                    let event_for_companion = event.clone();
                     crate::companion::handle_sidecar_event_for_companion(
                         &app_for_companion,
-                        &event_for_companion,
+                        broadcast_events,
                     );
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&event) {
                         let session_id = value

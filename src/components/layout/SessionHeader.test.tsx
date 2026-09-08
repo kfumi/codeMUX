@@ -140,7 +140,7 @@ describe('SessionHeader', () => {
     expect(screen.getByText('在资源管理器中打开')).toBeTruthy();
     expect(screen.getByText('复制路径')).toBeTruthy();
     expect(screen.getByText('复制任务路径')).toBeTruthy();
-    expect(screen.getByText('复制会话ID')).toBeTruthy();
+    expect(screen.getByText('复制原生会话ID')).toBeTruthy();
   });
 
   it('syncs history from CLI through the session menu', async () => {
@@ -216,7 +216,7 @@ describe('SessionHeader', () => {
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('C:\\Users\\me\\.codex\\sessions\\session.jsonl'));
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
-    fireEvent.click(screen.getByText('复制会话ID'));
+    fireEvent.click(screen.getByText('复制原生会话ID'));
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex-session-1'));
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
@@ -243,7 +243,17 @@ describe('SessionHeader', () => {
     openMenu();
 
     expect(screen.queryByText('复制任务路径')).toBeNull();
-    expect(screen.getByText('复制会话ID')).toBeTruthy();
+    expect(screen.getByText('复制原生会话ID')).toBeTruthy();
+  });
+
+  it('shows an error toast instead of failing silently when agent info lookup rejects', async () => {
+    mocks.getSessionInfo.mockRejectedValue(new Error('Daemon request failed: 400'));
+
+    openMenu();
+    fireEvent.click(screen.getByText('复制原生会话ID'));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('复制失败：Daemon request failed: 400'));
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('closes the rename dialog without leaving a blocking overlay', async () => {

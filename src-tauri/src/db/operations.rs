@@ -470,6 +470,26 @@ pub fn clear_session_timeline(conn: &Connection, session_id: &str) -> Result<()>
     Ok(())
 }
 
+/// Sessions whose persisted timeline still carries legacy artifacts: streaming
+/// delta rows saved before deltas stopped being persisted, or event_ids written
+/// more than once by the pre-fix double-persistence hooks. Used by the one-time
+/// startup cleanup to pick rebuild candidates.
+pub fn sessions_with_legacy_timeline_artifacts(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT session_id FROM session_event_snapshots
+         WHERE event_json LIKE '%\"type\":\"text_delta\"%'
+            OR event_json LIKE '%\"type\":\"reasoning_delta\"%'
+            OR event_json LIKE '%\"type\":\"tool_input_delta\"%'
+         UNION
+         SELECT session_id FROM session_event_snapshots
+         GROUP BY session_id, event_id HAVING COUNT(*) > 1",
+    )?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 pub fn replace_session_timeline(
     conn: &mut Connection,
     session_id: &str,
@@ -1163,7 +1183,10 @@ pub enum TimelineDirection {
 }
 
 pub const DEFAULT_SESSION_TIMELINE_LIMIT: usize = 200;
-pub const MAX_SESSION_TIMELINE_LIMIT: usize = 500;
+/// Defensive ceiling for one timeline page. Timelines no longer persist
+/// streaming deltas, so a page of 5000 covers full conversations; sessions
+/// beyond it load the newest page and the frontend logs the omission.
+pub const MAX_SESSION_TIMELINE_LIMIT: usize = 5000;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1307,13 +1330,16 @@ fn session_timeline_bounds(
     Ok((row.get(0)?, row.get(1)?))
 }
 
+/// Append events to the session timeline and return the sequence assigned to
+/// the first event (subsequent events get consecutive sequences). Callers that
+/// only need the append can ignore the return value.
 pub fn append_timeline_events(
     conn: &mut Connection,
     session_id: &str,
     events: &[Value],
-) -> Result<()> {
+) -> Result<i64> {
     if events.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let resolved_session_id = resolve_app_session_id_for_timeline(conn, session_id)?;
     let tx = conn.transaction()?;
@@ -1358,7 +1384,41 @@ pub fn append_timeline_events(
             ],
         )?;
     }
-    tx.commit()
+    tx.commit()?;
+    Ok(next_sequence)
+}
+
+/// Indexes into `events` of entries whose event_id is not yet present in the
+/// session timeline. Entries without an event_id are always treated as new.
+/// Live event streams can reach this table through more than one hook, so the
+/// persistence owner dedupes on the sidecar-assigned event_id before appending.
+pub fn filter_new_timeline_event_indexes(
+    conn: &Connection,
+    session_id: &str,
+    events: &[Value],
+) -> Result<Vec<usize>> {
+    let mut stmt = conn.prepare(
+        "SELECT 1 FROM session_event_snapshots WHERE session_id = ?1 AND event_id = ?2 LIMIT 1",
+    )?;
+    let mut new_indexes = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        let Some(event_id) = event
+            .get("event_id")
+            .or_else(|| event.get("uuid"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            new_indexes.push(index);
+            continue;
+        };
+        let exists = stmt
+            .query_row(params![session_id, event_id], |_| Ok(()))
+            .is_ok();
+        if !exists {
+            new_indexes.push(index);
+        }
+    }
+    Ok(new_indexes)
 }
 
 pub fn resolve_app_session_id_for_timeline(conn: &Connection, session_id: &str) -> Result<String> {
@@ -1693,14 +1753,14 @@ pub fn reconcile_running_session_subagents(conn: &Connection, session_id: &str) 
 mod tests {
     use super::{
         append_timeline_events, archive_session, clear_session_timeline, create_forked_session,
-        delete_agent_session_mapping, fetch_session_timeline, get_agent_distribution,
-        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        get_model_distribution, get_session, get_session_events_after, get_session_timeline,
-        get_usage_heatmap, get_usage_overview, import_session_snapshot,
-        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline, set_session_pinned,
-        set_session_read_only, unarchive_session, update_session_provider,
-        update_session_reasoning_effort, update_session_settings, upsert_agent_session_mapping,
-        ImportedSessionSnapshot,
+        delete_agent_session_mapping, fetch_session_timeline, filter_new_timeline_event_indexes,
+        get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
+        get_all_sessions, get_model_distribution, get_session, get_session_events_after,
+        get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
+        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline,
+        sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
+        unarchive_session, update_session_provider, update_session_reasoning_effort,
+        update_session_settings, upsert_agent_session_mapping, ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -2436,13 +2496,77 @@ mod tests {
 
         let first =
             serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" });
-        append_timeline_events(&mut conn, "session-1", &[first]).unwrap();
+        let first_sequence = append_timeline_events(&mut conn, "session-1", &[first]).unwrap();
         let second =
             serde_json::json!({ "type": "assistant_message", "event_id": "e2", "content": [] });
-        append_timeline_events(&mut conn, "session-1", &[second]).unwrap();
+        let second_sequence = append_timeline_events(&mut conn, "session-1", &[second]).unwrap();
 
         let events = get_session_events_after(&conn, "session-1", -1).unwrap();
         assert_eq!(events.len(), 2);
+        assert_eq!(first_sequence, 0);
+        assert_eq!(second_sequence, 1);
+    }
+
+    #[test]
+    fn filter_new_timeline_event_indexes_skips_existing_event_ids() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" })],
+        )
+        .unwrap();
+
+        let candidates = vec![
+            serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" }),
+            serde_json::json!({ "type": "turn_finished", "event_id": "e2" }),
+            serde_json::json!({ "type": "diagnostic", "content": "no id" }),
+        ];
+        let new_indexes =
+            filter_new_timeline_event_indexes(&conn, "session-1", &candidates).unwrap();
+        assert_eq!(new_indexes, vec![1, 2]);
+    }
+
+    #[test]
+    fn sessions_with_legacy_timeline_artifacts_flags_delta_and_duplicate_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-delta", "pi");
+        insert_test_session(&conn, "session-dup", "opencode");
+        insert_test_session(&conn, "session-clean", "claude_code");
+
+        append_timeline_events(
+            &mut conn,
+            "session-delta",
+            &[serde_json::json!({
+                "type": "reasoning_delta",
+                "event_id": "d1",
+                "text": "thinking"
+            })],
+        )
+        .unwrap();
+        append_timeline_events(
+            &mut conn,
+            "session-dup",
+            &[
+                serde_json::json!({ "type": "user_message", "event_id": "dup-1", "content": "hi" }),
+                serde_json::json!({ "type": "user_message", "event_id": "dup-1", "content": "hi" }),
+            ],
+        )
+        .unwrap();
+        append_timeline_events(
+            &mut conn,
+            "session-clean",
+            &[serde_json::json!({ "type": "user_message", "event_id": "ok-1", "content": "hi" })],
+        )
+        .unwrap();
+
+        let mut flagged = sessions_with_legacy_timeline_artifacts(&conn).unwrap();
+        flagged.sort();
+        assert_eq!(flagged, vec!["session-delta", "session-dup"]);
     }
 
     #[test]

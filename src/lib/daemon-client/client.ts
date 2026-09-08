@@ -28,7 +28,14 @@ interface DaemonClientCore {
   getTimeline(
     sessionId: string,
     query?: { direction?: 'tail' | 'after' | 'before'; cursor?: number; limit?: number },
-  ): Promise<{ events: unknown[]; hasMore: boolean; nextCursor?: number | null }>;
+  ): Promise<{
+    events: unknown[];
+    seqStart?: number | null;
+    seqEnd?: number | null;
+    hasOlder: boolean;
+    hasNewer: boolean;
+    historyComplete: boolean;
+  }>;
   createSession(body: Record<string, unknown>): Promise<unknown>;
   sendMessage(sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }): Promise<void>;
   interruptSession(sessionId: string): Promise<void>;

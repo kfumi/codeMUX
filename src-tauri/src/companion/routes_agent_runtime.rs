@@ -126,6 +126,7 @@ async fn enrich_attachments(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AgentInfoQuery {
     agent_kind: String,
 }
@@ -149,6 +150,7 @@ async fn agent_info(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TokenUsageQuery {
     agent_kind: String,
     freshness: Option<String>,
@@ -192,6 +194,7 @@ async fn subagents(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DeleteNativeFilesQuery {
     agent_kind: String,
 }

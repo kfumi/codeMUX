@@ -480,6 +480,11 @@ pub fn run() {
                 }
             });
 
+            let cleanup_app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                agent::history_import::cleanup_legacy_timeline_artifacts(&cleanup_app_handle).await;
+            });
+
             let tray_menu = MenuBuilder::new(app)
                 .text(TRAY_OPEN_ID, "打开 CodeMUX")
                 .separator()

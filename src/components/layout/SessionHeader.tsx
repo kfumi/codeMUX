@@ -82,8 +82,12 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const copyAgentSessionValue = async (field: 'agentSessionId' | 'messagePath') => {
     if (!session) return;
-    const info = await daemonFacade.getSessionInfo(session.id, session.agent_kind);
-    await copyText(info[field], field === 'messagePath' ? '未找到任务路径' : '未找到会话ID');
+    try {
+      const info = await daemonFacade.getSessionInfo(session.id, session.agent_kind);
+      await copyText(info[field], field === 'messagePath' ? '未找到任务路径' : '未找到原生会话ID');
+    } catch (error) {
+      toast.error(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const handleArchive = async () => {
@@ -204,7 +208,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
             </DropdownMenuItem>
           )}
           <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('agentSessionId')}>
-            复制会话ID
+            复制原生会话ID
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

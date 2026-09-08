@@ -3150,12 +3150,18 @@ export const useAgentStore = create<AgentState>((set, get) => {
       try {
         const timelinePage = await daemonFacade.getTimeline(sessionId, {
           direction: 'tail',
-          limit: 500,
+          limit: 5000,
         });
         const historyMessages = timelinePage.events ?? [];
         const seqEnd = (timelinePage as { seqEnd?: number }).seqEnd;
         if (typeof seqEnd === 'number' && seqEnd >= 0) {
           setLastEventSequence(sessionId, Math.max(seqEnd, getLastEventSequence(sessionId)));
+        }
+        if (timelinePage.hasOlder) {
+          logger.warn('Session timeline exceeds the defensive load limit; oldest events omitted', {
+            sessionId,
+            limit: 5000,
+          });
         }
 
         if (getSessionHistoryEpoch(sessionId) !== loadEpoch) {
@@ -3183,9 +3189,19 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
 
         const loadedTimeline: Array<{ event: AgentMessage; ts: number }> = [];
+        // 存量快照里同一条事件可能被写入过多次（历史双写持久化 bug），按
+        // event_id 去重，避免刷新后同一消息渲染成两个气泡。
+        const seenEventIds = new Set<string>();
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
+          const eventId = typeof rawMsg.event_id === 'string' ? rawMsg.event_id : null;
+          if (eventId) {
+            if (seenEventIds.has(eventId)) {
+              continue;
+            }
+            seenEventIds.add(eventId);
+          }
           const sequence = typeof rawMsg.sequence === 'number' ? rawMsg.sequence : null;
           if (sequence !== null) {
             setLastEventSequence(sessionId, Math.max(sequence, getLastEventSequence(sessionId)));

@@ -932,6 +932,44 @@ describe('agent store Codex history loading', () => {
     });
   });
 
+  it('dedupes persisted timeline rows that share an event_id when reloading history', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('opencode');
+    loadSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user_message',
+        sequence: 0,
+        session_id: session.id,
+        event_id: 'dup-user',
+        content: '你好',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        type: 'user_message',
+        sequence: 1,
+        session_id: session.id,
+        event_id: 'dup-user',
+        content: '你好',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        type: 'assistant_message',
+        sequence: 2,
+        session_id: session.id,
+        event_id: 'dup-assistant',
+        content: [{ type: 'text', text: 'reply' }],
+        timestamp: '2026-01-01T00:00:01.000Z',
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    const messages = useAgentStore.getState().events[session.id] ?? [];
+    expect(messages[0]).toMatchObject({ kind: 'user', data: { content: '你好' } });
+    expect(messages[1]).toMatchObject({ kind: 'assistant' });
+    expect(messages.filter((entry) => entry.kind === 'user')).toHaveLength(1);
+  });
+
   it('resyncSessionFromNative replaces cached history from CLI and reloads UI state', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');

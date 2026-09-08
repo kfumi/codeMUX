@@ -398,6 +398,103 @@ pub(crate) async fn reload_session_timeline_from_native(
     Ok(())
 }
 
+/// One-time repair for timelines persisted before the daemon single-owner
+/// migration: live capture stored every streaming delta as its own snapshot row
+/// and a double-persist hook wrote each event twice. Affected sessions are
+/// rebuilt from their native provider history when a mapping exists; anything
+/// else is left to the load-time event_id dedupe. Guarded by
+/// `PRAGMA user_version` so the scan and rebuilds run at most once.
+pub async fn cleanup_legacy_timeline_artifacts(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<crate::AppState>();
+    let done: i64 = {
+        let db = state.db.lock().expect("db mutex poisoned");
+        db.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap_or(0)
+    };
+    if done >= 1 {
+        return;
+    }
+
+    let affected = {
+        let db = state.db.lock().expect("db mutex poisoned");
+        operations::sessions_with_legacy_timeline_artifacts(&db)
+    };
+    let affected = match affected {
+        Ok(affected) => affected,
+        Err(error) => {
+            log::warn!(
+                target: "agent",
+                "Legacy timeline cleanup skipped: failed to scan snapshots: {}",
+                error
+            );
+            return;
+        }
+    };
+    log::info!(
+        target: "agent",
+        "Legacy timeline cleanup: {} session(s) flagged for rebuild",
+        affected.len()
+    );
+
+    for session_id in affected {
+        let session = {
+            let db = state.db.lock().expect("db mutex poisoned");
+            operations::get_session(&db, &session_id).ok().flatten()
+        };
+        let Some(session) = session else {
+            continue;
+        };
+        if session.is_read_only {
+            continue;
+        }
+        let has_mapping = {
+            let db = state.db.lock().expect("db mutex poisoned");
+            has_native_mapping(&db, &session_id, session.agent_kind).unwrap_or(false)
+        };
+        if !has_mapping {
+            log::warn!(
+                target: "agent",
+                "Legacy timeline cleanup: no native mapping for app_session_id={}, leaving snapshot as-is",
+                session_id
+            );
+            continue;
+        }
+        match load_native_session_events(state.clone(), &session_id, session.agent_kind).await {
+            Ok(native_events) if !native_events.is_empty() => {
+                let mut db = state.db.lock().expect("db mutex poisoned");
+                match operations::replace_session_timeline(&mut db, &session_id, &native_events) {
+                    Ok(()) => log::info!(
+                        target: "agent",
+                        "Legacy timeline cleanup: rebuilt app_session_id={} from native history ({} events)",
+                        session_id,
+                        native_events.len()
+                    ),
+                    Err(error) => log::warn!(
+                        target: "agent",
+                        "Legacy timeline cleanup: failed to replace timeline for app_session_id={}: {}",
+                        session_id,
+                        error
+                    ),
+                }
+            }
+            Ok(_) => log::warn!(
+                target: "agent",
+                "Legacy timeline cleanup: native history unavailable for app_session_id={}, leaving snapshot as-is",
+                session_id
+            ),
+            Err(error) => log::warn!(
+                target: "agent",
+                "Legacy timeline cleanup: failed to load native history for app_session_id={}: {}",
+                session_id,
+                error
+            ),
+        }
+    }
+
+    let db = state.db.lock().expect("db mutex poisoned");
+    let _ = db.execute("PRAGMA user_version = 1", []);
+}
+
 async fn load_native_session_events(
     state: State<'_, crate::AppState>,
     app_session_id: &str,
