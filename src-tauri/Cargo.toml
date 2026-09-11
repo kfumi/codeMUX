@@ -1,26 +1,15 @@
 [package]
 name = "codemux"
 version = "0.3.1"
-description = "CodeMUX - AI 编码工具聚合平台"
+description = "CodeMUX - AI 编码工具聚合平台(daemon)"
 authors = ["you"]
 edition = "2021"
 
 [lib]
 name = "codemux_lib"
-crate-type = ["lib", "cdylib", "staticlib"]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+crate-type = ["lib"]
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "unstable", "devtools"] }
-tauri-plugin-shell = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-process = "2"
-tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-window-state = "2.4.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -31,7 +20,6 @@ socket2 = "0.5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 toml_edit = "0.22"
 futures = "0.3"
-tauri-plugin-log = "2.8.0"
 log = "0.4"
 async-trait = "0.1"
 portable-pty = "0.8"
@@ -58,9 +46,7 @@ similar = "2.7"
 
 [target.'cfg(windows)'.dependencies]
 junction = "1"
-tauri-winrt-notification = "0.7.3"
-windows-sys = { version = "0.61", features = ["Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-winreg = "0.52"
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [features]
 default = []

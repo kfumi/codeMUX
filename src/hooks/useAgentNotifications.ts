@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
-
 import { buildAgentNotificationCandidate } from '../lib/agentNotifications';
-import { desktopBridge, isElectronDesktop } from '../lib/desktop-bridge';
+import { desktopBridge } from '../lib/desktop-bridge';
 import { createLogger } from '../lib/logger';
-import { appApi } from '../lib/tauri';
+import { shellFacade } from '../lib/facades/shell-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -46,7 +44,8 @@ function useAppInactive(): boolean {
 
 async function sendNativeAgentNotification(candidate: { title: string; body: string; sessionId: string }): Promise<void> {
   try {
-    await appApi.sendAgentNotification({
+    // 桌面壳通知(工单 09):main 进程 Notification,点击经 onAgentNotificationClicked 回流。
+    await shellFacade.sendAgentNotification({
       title: candidate.title,
       body: candidate.body,
       sessionId: candidate.sessionId,
@@ -69,7 +68,8 @@ function playNotificationSound(sound: NotificationSound) {
 }
 
 async function showAppSession(sessionId: string) {
-  await appApi.showMainWindow();
+  // 桌面壳:唤起主窗口(最小化/隐藏到托盘时)再聚焦会话。
+  await shellFacade.showMainWindow();
   let sessions = useSessionStore.getState().sessions;
   if (!sessions.some((session) => session.id === sessionId)) {
     await useSessionStore.getState().fetchSessions();
@@ -147,7 +147,6 @@ export function useAgentNotifications() {
   );
 
   useEffect(() => {
-    let disposed = false;
     let unregister: (() => void) | undefined;
 
     const activateSession = (payload: unknown) => {
@@ -157,33 +156,14 @@ export function useAgentNotifications() {
       }
     };
 
-    if (isElectronDesktop() && desktopBridge) {
-      // Electron 壳(工单 05):main 进程 Notification click 经 preload 转发;
-      // 载荷契约与 Tauri emit 一致({ sessionId })。
+    // 桌面壳(工单 09):main 进程通知点击经 preload onAgentNotificationClicked 转发;
+    // 载荷契约与原 Tauri emit 一致({ sessionId })。桥缺失(纯 Web)时无原生通知可点,跳过订阅。
+    if (desktopBridge) {
       unregister = desktopBridge.onAgentNotificationClicked(activateSession);
-      return () => {
-        disposed = true;
-        unregister?.();
-      };
     }
 
-    void listen('agent-notification-clicked', (event) => {
-      activateSession(event.payload);
-    })
-      .then((unlisten) => {
-        if (disposed) {
-          unlisten();
-          return;
-        }
-        unregister = unlisten;
-      })
-      .catch(() => {
-        logger.debug('Agent notification click listener setup failed');
-      });
-
     return () => {
-      disposed = true;
-      void unregister?.();
+      unregister?.();
     };
   }, []);
 

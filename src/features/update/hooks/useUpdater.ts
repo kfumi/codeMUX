@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { relaunch as relaunchApp } from '@tauri-apps/plugin-process';
-import { check as checkForTauriUpdate } from '@tauri-apps/plugin-updater';
 
 import { desktopBridge, isElectronDesktop } from '../../../lib/desktop-bridge';
 import { createLogger, serializeError } from '../../../lib/logger';
-import { createElectronUpdaterAdapters } from '../electronUpdaterAdapter';
+import { createElectronUpdaterAdapters, UPDATER_UNAVAILABLE_MESSAGE } from '../electronUpdaterAdapter';
 
 const logger = createLogger('updater');
 const LATEST_STAGE_VISIBLE_MS = 2000;
@@ -76,21 +74,23 @@ const loadUpdaterAdapters = async (): Promise<UpdaterAdapters> => {
     return testAdapters;
   }
 
-  // Electron 壳(工单 06):electron-updater 桥(进度事件映射 DownloadEvent)。
-  if (isElectronDesktop() && desktopBridge) {
+  // Electron 壳(工单 06/09 终态):electron-updater 桥是更新器唯一后端;
+  // Tauri plugin-updater 通道随壳退役移除。桥缺失时由调用方报"环境不支持"。
+  if (desktopBridge) {
     return createElectronUpdaterAdapters(desktopBridge);
   }
 
   return {
-    check: checkForTauriUpdate as UpdaterAdapters['check'],
-    relaunch: relaunchApp,
+    check: async () => {
+      throw new Error(UPDATER_UNAVAILABLE_MESSAGE);
+    },
+    relaunch: async () => {
+      throw new Error(UPDATER_UNAVAILABLE_MESSAGE);
+    },
   };
 };
 
-const isTauriRuntime = () => (
-  typeof window !== 'undefined'
-  && typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined'
-);
+const isUpdaterSupported = () => isElectronDesktop() || testAdapters != null;
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error && error.message) {
@@ -158,9 +158,9 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
     const announceNoUpdate = checkOptions.announceNoUpdate ?? interactive;
     const throwOnError = checkOptions.throwOnError ?? false;
 
-    // 平台分流(工单 06):Tauri 壳与 Electron 壳都支持;纯 Web 不支持。
-    // DEV 模式一律禁用(与 Tauri 行为一致);打包态 Electron 由壳侧更新器接管。
-    if (!enabled || import.meta.env.DEV || (!isTauriRuntime() && !isElectronDesktop())) {
+    // 平台分流(工单 09 终态):仅 Electron 壳支持(测试适配器注入时放行);
+    // DEV 模式一律禁用;打包态 Electron 由壳侧更新器接管。
+    if (!enabled || import.meta.env.DEV || !isUpdaterSupported()) {
       if (interactive) {
         setState({
           stage: 'error',

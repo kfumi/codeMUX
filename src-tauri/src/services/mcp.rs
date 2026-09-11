@@ -3,10 +3,8 @@ use crate::mcp::types::McpServer;
 use crate::AppState;
 use log::{debug, info, warn};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::Mutex;
 
-use tauri::State;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 
@@ -31,20 +29,10 @@ fn get_mcp_servers_from_db(db: &Mutex<rusqlite::Connection>) -> Result<Vec<McpSe
     db::get_all_mcp_servers(&conn).map_err(|e| format!("Failed to get MCP servers: {}", e))
 }
 
-#[tauri::command]
-pub fn get_mcp_servers(state: State<'_, Arc<AppState>>) -> Result<Vec<McpServer>, String> {
-    get_mcp_servers_impl(state.inner())
-}
-
 pub fn get_mcp_servers_impl(state: &AppState) -> Result<Vec<McpServer>, String> {
     let servers = get_mcp_servers_from_db(&state.db)?;
     log::info!(target: "mcp_fetch", "get_mcp_servers returning {} entries", servers.len());
     Ok(servers)
-}
-
-#[tauri::command]
-pub fn upsert_mcp_server(state: State<'_, Arc<AppState>>, server: McpServer) -> Result<(), String> {
-    upsert_mcp_server_impl(state.inner(), server)
 }
 
 pub fn upsert_mcp_server_impl(state: &AppState, server: McpServer) -> Result<(), String> {
@@ -53,25 +41,10 @@ pub fn upsert_mcp_server_impl(state: &AppState, server: McpServer) -> Result<(),
     Ok(())
 }
 
-#[tauri::command]
-pub fn delete_mcp_server(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    delete_mcp_server_impl(state.inner(), id)
-}
-
 pub fn delete_mcp_server_impl(state: &AppState, id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     db::delete_mcp_server(&db, &id).map_err(|e| format!("Failed to delete MCP server: {}", e))?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn toggle_mcp_app(
-    state: State<'_, Arc<AppState>>,
-    server_id: String,
-    app: String,
-    enabled: bool,
-) -> Result<(), String> {
-    toggle_mcp_app_impl(state.inner(), server_id, app, enabled)
 }
 
 pub fn toggle_mcp_app_impl(
@@ -81,11 +54,6 @@ pub fn toggle_mcp_app_impl(
     enabled: bool,
 ) -> Result<(), String> {
     crate::mcp::service::toggle_app(state, &server_id, &app, enabled)
-}
-
-#[tauri::command]
-pub async fn import_mcp_from_apps(state: State<'_, Arc<AppState>>) -> Result<ImportResult, String> {
-    import_mcp_from_apps_impl(state.inner())
 }
 
 pub fn import_mcp_from_apps_impl(state: &AppState) -> Result<ImportResult, String> {
@@ -469,13 +437,6 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult
     results
 }
 
-#[tauri::command]
-pub async fn probe_all_mcp_servers(
-    state: State<'_, Arc<AppState>>,
-) -> Result<HashMap<String, bool>, String> {
-    probe_all_mcp_servers_impl(state.inner()).await
-}
-
 pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<String, bool>, String> {
     let servers = {
         let db = state.db.lock().unwrap();
@@ -483,14 +444,6 @@ pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<Stri
     };
     let results = probe_servers(&servers).await;
     Ok(results.into_iter().map(|(k, v)| (k, v.connected)).collect())
-}
-
-#[tauri::command]
-pub async fn probe_mcp_server(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<ProbeResult, String> {
-    probe_mcp_server_impl(state.inner(), id).await
 }
 
 pub async fn probe_mcp_server_impl(state: &AppState, id: String) -> Result<ProbeResult, String> {

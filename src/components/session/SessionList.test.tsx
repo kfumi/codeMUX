@@ -52,35 +52,6 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
   resetDaemonClient: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(() => Promise.resolve('test-token')),
-}));
-
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {
-    deleteClaudeSessionFiles: vi.fn(),
-    deleteCodexSessionFiles: vi.fn(),
-    resetSession: vi.fn(),
-    shutdown: vi.fn(),
-  },
-  projectApi: {
-    create: vi.fn(),
-    delete: vi.fn(),
-    getAll: vi.fn().mockResolvedValue([]),
-    rename: vi.fn(),
-  },
-  sessionApi: {
-    archive: vi.fn(),
-    create: vi.fn(),
-    delete: vi.fn(),
-    getAll: vi.fn().mockResolvedValue([]),
-    getArchived: vi.fn().mockResolvedValue([]),
-    setPinned: vi.fn(),
-    touch: vi.fn(),
-    unarchive: vi.fn(),
-    updateTitle: vi.fn(),
-  },
-}));
 
 function makeSession(overrides: Partial<Session>): Session {
   return {

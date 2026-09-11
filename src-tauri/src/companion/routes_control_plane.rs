@@ -7,8 +7,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-use crate::commands::scheduled_tasks::ScheduledTaskInput;
 use crate::companion::server::{authorize, ApiError, ServerContext};
+use crate::services::scheduled_tasks::ScheduledTaskInput;
 
 pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
@@ -128,7 +128,7 @@ async fn list_mcp(
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
     let servers =
-        crate::commands::mcp::get_mcp_servers_impl(&state).map_err(ApiError::bad_request)?;
+        crate::services::mcp::get_mcp_servers_impl(&state).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(servers)))
 }
 
@@ -140,7 +140,7 @@ async fn upsert_mcp(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::mcp::upsert_mcp_server_impl(&state, server).map_err(ApiError::bad_request)?;
+    crate::services::mcp::upsert_mcp_server_impl(&state, server).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -152,7 +152,7 @@ async fn delete_mcp(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::mcp::delete_mcp_server_impl(&state, id).map_err(ApiError::bad_request)?;
+    crate::services::mcp::delete_mcp_server_impl(&state, id).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -172,7 +172,7 @@ async fn toggle_mcp_app(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::mcp::toggle_mcp_app_impl(&state, id, body.app, body.enabled)
+    crate::services::mcp::toggle_mcp_app_impl(&state, id, body.app, body.enabled)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -185,7 +185,7 @@ async fn probe_mcp(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::mcp::probe_mcp_server_impl(&state, id)
+    let result = crate::services::mcp::probe_mcp_server_impl(&state, id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
@@ -198,7 +198,7 @@ async fn probe_all_mcp(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let results = crate::commands::mcp::probe_all_mcp_servers_impl(&state)
+    let results = crate::services::mcp::probe_all_mcp_servers_impl(&state)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(results).unwrap_or_default()))
@@ -212,7 +212,7 @@ async fn import_mcp(
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
     let result =
-        crate::commands::mcp::import_mcp_from_apps_impl(&state).map_err(ApiError::bad_request)?;
+        crate::services::mcp::import_mcp_from_apps_impl(&state).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
@@ -373,7 +373,7 @@ async fn list_scheduled_tasks(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let tasks = crate::commands::scheduled_tasks::list_scheduled_tasks_impl(&state)
+    let tasks = crate::services::scheduled_tasks::list_scheduled_tasks_impl(&state)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(tasks)))
 }
@@ -386,7 +386,7 @@ async fn get_scheduled_task(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let task = crate::commands::scheduled_tasks::get_scheduled_task_impl(&state, task_id)
+    let task = crate::services::scheduled_tasks::get_scheduled_task_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -399,7 +399,7 @@ async fn create_scheduled_task(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let task = crate::commands::scheduled_tasks::create_scheduled_task_impl(&state, input)
+    let task = crate::services::scheduled_tasks::create_scheduled_task_impl(&state, input)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -413,7 +413,7 @@ async fn update_scheduled_task(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let task = crate::commands::scheduled_tasks::update_scheduled_task_impl(&state, task_id, input)
+    let task = crate::services::scheduled_tasks::update_scheduled_task_impl(&state, task_id, input)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -426,7 +426,7 @@ async fn delete_scheduled_task(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::scheduled_tasks::delete_scheduled_task_impl(&state, task_id)
+    crate::services::scheduled_tasks::delete_scheduled_task_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -446,7 +446,7 @@ async fn set_scheduled_enabled(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let task = crate::commands::scheduled_tasks::set_scheduled_task_enabled_impl(
+    let task = crate::services::scheduled_tasks::set_scheduled_task_enabled_impl(
         &state,
         task_id,
         body.enabled,
@@ -463,7 +463,7 @@ async fn list_scheduled_runs(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let runs = crate::commands::scheduled_tasks::list_scheduled_task_runs_impl(&state, task_id)
+    let runs = crate::services::scheduled_tasks::list_scheduled_task_runs_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(runs)))
 }
@@ -489,7 +489,7 @@ async fn delete_scheduled_run(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::scheduled_tasks::delete_scheduled_task_run_impl(&state, run_id)
+    crate::services::scheduled_tasks::delete_scheduled_task_run_impl(&state, run_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -500,7 +500,7 @@ async fn get_scheduled_timezone(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let timezone = crate::commands::scheduled_tasks::get_scheduled_task_timezone();
+    let timezone = crate::services::scheduled_tasks::get_scheduled_task_timezone();
     Ok(Json(serde_json::json!({ "timezone": timezone })))
 }
 
@@ -520,7 +520,7 @@ async fn read_workspace_file(
     Json(body): Json<ReadFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let content = crate::commands::file::read_file(body.path, body.base_path)
+    let content = crate::services::file::read_file(body.path, body.base_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "content": content })))
 }
@@ -540,7 +540,7 @@ async fn write_workspace_file(
     Json(body): Json<WriteFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::file::write_file(body.path, body.content, body.base_path)
+    crate::services::file::write_file(body.path, body.content, body.base_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -559,7 +559,7 @@ async fn delete_workspace_file(
     Json(body): Json<DeleteFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::file::delete_file(body.path, body.base_path).map_err(ApiError::bad_request)?;
+    crate::services::file::delete_file(body.path, body.base_path).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -579,7 +579,7 @@ async fn list_workspace_directory(
     Json(body): Json<ListDirectoryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let nodes = crate::commands::file::list_directory(
+    let nodes = crate::services::file::list_directory(
         body.path,
         body.base_path,
         body.depth,
@@ -611,7 +611,7 @@ async fn git_changed_files(
     Json(body): Json<GitChangedFilesRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let files = crate::commands::git::get_git_changed_files(body.project_path, body.baseline_tree)
+    let files = crate::services::git::get_git_changed_files(body.project_path, body.baseline_tree)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(files)))
 }
@@ -623,7 +623,7 @@ async fn git_changed_files_since_head(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let files = crate::commands::git::get_git_changed_files_since_head(body.project_path)
+    let files = crate::services::git::get_git_changed_files_since_head(body.project_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(files)))
 }
@@ -635,7 +635,7 @@ async fn git_repository_state(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let repo = crate::commands::git::get_git_repository_state(body.project_path)
+    let repo = crate::services::git::get_git_repository_state(body.project_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(repo)))
 }
@@ -655,15 +655,15 @@ async fn git_status_changes(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let area = parse_git_status_area(&body.area)?;
-    let changes = crate::commands::git::get_git_status_changes(body.project_path, area)
+    let changes = crate::services::git::get_git_status_changes(body.project_path, area)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(changes)))
 }
 
-fn parse_git_status_area(area: &str) -> Result<crate::commands::git::GitStatusArea, ApiError> {
+fn parse_git_status_area(area: &str) -> Result<crate::services::git::GitStatusArea, ApiError> {
     match area.to_ascii_lowercase().as_str() {
-        "unstaged" => Ok(crate::commands::git::GitStatusArea::Unstaged),
-        "staged" => Ok(crate::commands::git::GitStatusArea::Staged),
+        "unstaged" => Ok(crate::services::git::GitStatusArea::Unstaged),
+        "staged" => Ok(crate::services::git::GitStatusArea::Staged),
         _ => Err(ApiError::bad_request(format!(
             "Unsupported git status area: {}",
             area
@@ -688,7 +688,7 @@ async fn git_status_change_detail(
     authorize(&ctx, &headers, Some(peer))?;
     let area = parse_git_status_area(&body.area)?;
     let change =
-        crate::commands::git::get_git_status_change_detail(body.project_path, area, body.file_path)
+        crate::services::git::get_git_status_change_detail(body.project_path, area, body.file_path)
             .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(change)))
 }
@@ -707,7 +707,7 @@ async fn git_stage(
     Json(body): Json<GitStageRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::stage_git_status_changes(body.project_path, body.file_path)
+    crate::services::git::stage_git_status_changes(body.project_path, body.file_path)
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -719,7 +719,7 @@ async fn git_unstage(
     Json(body): Json<GitStageRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::unstage_git_status_changes(body.project_path, body.file_path)
+    crate::services::git::unstage_git_status_changes(body.project_path, body.file_path)
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -740,7 +740,7 @@ async fn git_revert(
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let area = parse_git_status_area(&body.area)?;
-    crate::commands::git::revert_git_status_changes(body.project_path, area, body.file_path)
+    crate::services::git::revert_git_status_changes(body.project_path, area, body.file_path)
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -760,7 +760,7 @@ async fn git_create_branch(
     Json(body): Json<GitCreateBranchRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::create_git_branch(body.project_path, body.branch_name, body.checkout)
+    crate::services::git::create_git_branch(body.project_path, body.branch_name, body.checkout)
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -779,7 +779,7 @@ async fn git_checkout_branch(
     Json(body): Json<GitCheckoutBranchRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::checkout_git_branch(body.project_path, body.branch_name)
+    crate::services::git::checkout_git_branch(body.project_path, body.branch_name)
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -791,7 +791,7 @@ async fn git_list_worktrees(
     Query(body): Query<GitProjectRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let worktrees = crate::commands::git::list_git_worktrees(body.project_path)
+    let worktrees = crate::services::git::list_git_worktrees(body.project_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(worktrees)))
 }
@@ -811,7 +811,7 @@ async fn git_create_worktree(
     Json(body): Json<GitCreateWorktreeRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let worktree = crate::commands::git::create_git_worktree(
+    let worktree = crate::services::git::create_git_worktree(
         body.project_path,
         body.branch_name,
         body.base_branch,
@@ -834,7 +834,7 @@ async fn git_commit(
     Json(body): Json<GitCommitRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let commit = crate::commands::git::commit_git_changes(body.project_path, body.message)
+    let commit = crate::services::git::commit_git_changes(body.project_path, body.message)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "commit": commit })))
 }
@@ -846,7 +846,7 @@ async fn git_push(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::push_git_branch(body.project_path).map_err(ApiError::bad_request)?;
+    crate::services::git::push_git_branch(body.project_path).map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -859,7 +859,7 @@ async fn git_generate_commit_message(
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
     let config = state.config.lock().unwrap().clone();
-    let suggestion = crate::commands::git::generate_git_commit_message_in_project(
+    let suggestion = crate::services::git::generate_git_commit_message_in_project(
         std::path::Path::new(&body.project_path),
         &config,
     )
@@ -877,7 +877,7 @@ async fn git_generate_pr_description(
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
     let config = state.config.lock().unwrap().clone();
-    let suggestion = crate::commands::git::generate_pull_request_description_in_project(
+    let suggestion = crate::services::git::generate_pull_request_description_in_project(
         std::path::Path::new(&body.project_path),
         &config,
     )
@@ -894,7 +894,7 @@ async fn git_create_pull_request(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::forge::create_pull_request_impl(&state, request)
+    let result = crate::services::forge::create_pull_request_impl(&state, request)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -907,7 +907,7 @@ async fn gitee_credentials(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     Ok(Json(serde_json::json!({
-        "configured": crate::commands::forge::get_gitee_credential_status(),
+        "configured": crate::services::forge::get_gitee_credential_status(),
     })))
 }
 
@@ -924,7 +924,7 @@ async fn set_gitee_token(
     Json(body): Json<SetGiteeTokenRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::forge::set_gitee_token(body.token).map_err(ApiError::bad_request)?;
+    crate::services::forge::set_gitee_token(body.token).map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -934,7 +934,7 @@ async fn clear_gitee_token(
     headers: HeaderMap,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::forge::clear_gitee_token().map_err(ApiError::bad_request)?;
+    crate::services::forge::clear_gitee_token().map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -947,7 +947,7 @@ async fn check_managed_runtimes(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::runtime::check_managed_runtimes_impl(&state)
+    let result = crate::services::runtime::check_managed_runtimes_impl(&state)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -961,7 +961,7 @@ async fn list_managed_runtime_versions(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let versions = crate::commands::runtime::list_managed_runtime_versions_impl(&state, provider)
+    let versions = crate::services::runtime::list_managed_runtime_versions_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(versions)))
@@ -975,7 +975,7 @@ async fn refresh_managed_runtime(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::runtime::refresh_managed_runtime_impl(&state, provider)
+    let result = crate::services::runtime::refresh_managed_runtime_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -998,11 +998,11 @@ async fn install_managed_runtime(
     let state = ctx.daemon.app.clone();
     let provider = crate::runtime::types::Provider::from_str(&body.provider)
         .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
-    let result = crate::commands::runtime::install_managed_runtime_impl(
+    let result = crate::services::runtime::install_managed_runtime_impl(
         &state,
         body.provider,
         body.version,
-        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+        std::sync::Arc::new(crate::services::runtime::RuntimeProgressReporter::new(
             ctx.daemon.ui_events.clone(),
             provider,
         )),
@@ -1022,10 +1022,10 @@ async fn upgrade_managed_runtime(
     let state = ctx.daemon.app.clone();
     let provider = crate::runtime::types::Provider::from_str(&body.provider)
         .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
-    let result = crate::commands::runtime::upgrade_managed_runtime_impl(
+    let result = crate::services::runtime::upgrade_managed_runtime_impl(
         &state,
         body.provider,
-        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+        std::sync::Arc::new(crate::services::runtime::RuntimeProgressReporter::new(
             ctx.daemon.ui_events.clone(),
             provider,
         )),
@@ -1045,10 +1045,10 @@ async fn repair_managed_runtime(
     let state = ctx.daemon.app.clone();
     let provider = crate::runtime::types::Provider::from_str(&body.provider)
         .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
-    let result = crate::commands::runtime::repair_managed_runtime_impl(
+    let result = crate::services::runtime::repair_managed_runtime_impl(
         &state,
         body.provider,
-        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+        std::sync::Arc::new(crate::services::runtime::RuntimeProgressReporter::new(
             ctx.daemon.ui_events.clone(),
             provider,
         )),
@@ -1066,7 +1066,7 @@ async fn remove_managed_runtime(
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    crate::commands::runtime::remove_managed_runtime_impl(&state, provider)
+    crate::services::runtime::remove_managed_runtime_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
@@ -1087,7 +1087,7 @@ async fn get_usage_stats(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::usage::get_usage_stats_impl(&state, query.agent_kind, query.days)
+    let result = crate::services::usage::get_usage_stats_impl(&state, query.agent_kind, query.days)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
 }
@@ -1100,7 +1100,7 @@ async fn get_usage_token_breakdown(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let state = ctx.daemon.app.clone();
-    let result = crate::commands::usage::get_usage_token_breakdown_impl(
+    let result = crate::services::usage::get_usage_token_breakdown_impl(
         &state,
         query.agent_kind,
         query.days,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { desktopBridge } from '@/lib/desktop-bridge';
 import {
   CheckCircle2,
   ChevronDown,
@@ -15,20 +15,22 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import {
-  appApi,
-  type AgentRuntimeCheck,
-  type AgentRuntimeCheckResult,
-  type AgentRuntimeStatus,
-  type ManagedNodeInfo,
-  type ManagedRuntimeCheckResult,
-  type ManagedRuntimeInfo,
-  type ManagedRuntimeOperationResult,
-  type ManagedRuntimeStatus,
-  type RuntimeInstallProgress,
-  type RuntimeInstallProgressEvent,
-  type RuntimeProvider,
-} from '@/lib/tauri';
+import { shellFacade } from '@/lib/facades/shell-facade';
+import type {
+  AgentRuntimeCheck,
+  AgentRuntimeCheckResult,
+  AgentRuntimeStatus,
+} from '@/lib/desktop-bridge';
+import type {
+  ManagedNodeInfo,
+  ManagedRuntimeCheckResult,
+  ManagedRuntimeInfo,
+  ManagedRuntimeOperationResult,
+  ManagedRuntimeStatus,
+  RuntimeInstallProgress,
+  RuntimeInstallProgressEvent,
+  RuntimeProvider,
+} from '@/lib/runtimeTypes';
 import { daemonFacade } from '@/lib/facades/daemon-facade';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -232,20 +234,18 @@ export function RuntimeSettingsPanel({
     void runCheck();
   }, [runCheck]);
 
-  // 监听所有 Provider 的安装进度事件
+  // 监听所有 Provider 的安装进度事件(daemon 桌面 UI 事件出口,同名同形)
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<RuntimeInstallProgressEvent>('runtime-install-progress', (event) => {
-      const { provider, progress } = event.payload;
+    const handleProgress = (payload: unknown) => {
+      const { provider, progress } = (payload ?? {}) as RuntimeInstallProgressEvent;
       setOperations((prev) => ({
         ...prev,
         [provider]: { kind: prev[provider]?.kind ?? 'install', progress },
       }));
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    };
+    const unsubscribe = desktopBridge?.onDesktopEvent('runtime-install-progress', handleProgress);
     return () => {
-      unlisten?.();
+      unsubscribe?.();
     };
   }, []);
 
@@ -759,7 +759,7 @@ function ExternalCliSection() {
   const handleCheck = useCallback(async () => {
     setChecking(true);
     try {
-      const res = await appApi.checkAgentRuntimes();
+      const res = await shellFacade.checkAgentRuntimes();
       setResult(res);
     } catch (err) {
       toast.error(`检测失败：${err instanceof Error ? err.message : String(err)}`);

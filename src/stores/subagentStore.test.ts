@@ -5,13 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSidePanelStore } from './sidePanelStore';
 import { useSubagentStore } from './subagentStore';
 
-vi.mock('../lib/tauri', () => ({
-  agentApi: {},
-  fileApi: {
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
 
 describe('subagentStore', () => {
   beforeEach(() => {

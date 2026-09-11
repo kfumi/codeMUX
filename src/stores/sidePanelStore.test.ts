@@ -21,8 +21,8 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../lib/tauri', () => ({
-  browserApi: browserApiMock,
+vi.mock('../lib/browser/electronBrowserHost', () => ({
+  electronBrowserHost: browserApiMock,
 }));
 
 describe('side panel store', () => {

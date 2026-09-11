@@ -157,11 +157,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             id: "siliconflow".to_string(),
             name: "硅基流动".to_string(),
             endpoints: vec![
-                endpoint(
-                    Protocol::Anthropic,
-                    "https://api.siliconflow.cn/v1",
-                    None,
-                ),
+                endpoint(Protocol::Anthropic, "https://api.siliconflow.cn/v1", None),
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://api.siliconflow.cn/v1",
@@ -272,11 +268,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             id: "opencode-go".to_string(),
             name: "OpenCode Go".to_string(),
             endpoints: vec![
-                endpoint(
-                    Protocol::Anthropic,
-                    "https://opencode.ai/zen/go/v1",
-                    None,
-                ),
+                endpoint(Protocol::Anthropic, "https://opencode.ai/zen/go/v1", None),
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://opencode.ai/zen/go/v1",
@@ -462,12 +454,10 @@ mod tests {
             .expect("zhipu template should expose an Anthropic endpoint");
         assert_eq!(anthropic.base_url, "https://open.bigmodel.cn/api/anthropic");
 
-        assert!(
-            !template
-                .endpoints
-                .iter()
-                .any(|item| item.protocol == Protocol::OpenaiResponses)
-        );
+        assert!(!template
+            .endpoints
+            .iter()
+            .any(|item| item.protocol == Protocol::OpenaiResponses));
 
         let chat = template
             .endpoints
@@ -528,12 +518,10 @@ mod tests {
                 .map(|item| item.codex_needs_proxy),
             Some(Some(true))
         );
-        assert!(
-            !template
-                .endpoints
-                .iter()
-                .any(|item| item.protocol == Protocol::OpenaiResponses)
-        );
+        assert!(!template
+            .endpoints
+            .iter()
+            .any(|item| item.protocol == Protocol::OpenaiResponses));
         assert!(template.default_codex_needs_proxy);
     }
 

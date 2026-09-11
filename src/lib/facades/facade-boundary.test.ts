@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -24,6 +24,25 @@ import {
 } from './daemon-facade';
 import { shellFacade } from './shell-facade';
 
+/** 已退役的 Tauri JS 集成包名(拼接构造,避免守卫文件自身命中全仓 grep 门)。 */
+const RETIRED_TAURI_PKG = `@${'tauri-apps'}`;
+const RETIRED_INVOKE_HELPER = ['invoke', 'Logged'].join('');
+
+/** 递归收集 src 下全部 ts/tsx 源文件(守卫用,与 store-double-write 同法)。 */
+function listSrcSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      files.push(...listSrcSourceFiles(full));
+      continue;
+    }
+    if (!/\.(ts|tsx)$/.test(full)) continue;
+    files.push(full);
+  }
+  return files;
+}
+
 describe('facade boundary', () => {
   it('classifies every spec capability as daemon or shell', () => {
     expect(CAPABILITY_MANIFEST.length).toBeGreaterThan(10);
@@ -47,6 +66,34 @@ describe('facade boundary', () => {
         `${method}` in daemonFacade;
       expect(hasMethod).toBe(true);
     }
+  });
+
+  it('binds shell manifest entries to real renderer-facing methods (工单 09 终态)', () => {
+    const shellIds = new Set(SHELL_CAPABILITIES.map((entry) => entry.id));
+    const facade = shellFacade as unknown as Record<string, unknown>;
+
+    expect(shellIds.has('browser.host')).toBe(true);
+    expect(facade.browser).toBeDefined();
+
+    // window.manage:窗口命令全量在壳门面上(自绘标题栏走这组方法)。
+    for (const method of ['minimizeWindow', 'toggleMaximizeWindow', 'closeWindow', 'isWindowMaximized']) {
+      expect(typeof facade[method]).toBe('function');
+    }
+
+    // open.external:外链统一走壳门面。
+    expect(typeof facade.openExternal).toBe('function');
+
+    // 其余 shell 归属(tray 等)在 main 进程,无渲染层方法面,仅要求条目在册。
+    expect(shellIds.has('tray.manage')).toBe(true);
+    expect(shellIds.has('updater')).toBe(true);
+    expect(shellIds.has('dialog.file')).toBe(true);
+    expect(shellIds.has('dialog.directory')).toBe(true);
+  });
+
+  it('keeps browser control config on the daemon side', () => {
+    const entry = CAPABILITY_MANIFEST.find((item) => item.id === 'browser.control');
+    expect(entry?.owner).toBe('daemon');
+    expect(entry?.companionRoute).toBe('PATCH /api/config');
   });
 
   it('keeps browser host on shell facade only', () => {
@@ -113,5 +160,40 @@ describe('facade boundary', () => {
       );
       expect(body, `protocol-backed ${method} must not invoke Tauri APIs`).not.toMatch(invokeBackedPattern);
     }
+  });
+});
+
+describe('no invoke backend (工单 09:Tauri 壳退役终态)', () => {
+  const FACADE_DIR = dirname(fileURLToPath(import.meta.url));
+
+  it('facade layer sources carry no Tauri backend remnants', () => {
+    const guarded = ['shell-facade.ts', 'daemon-facade.ts', 'capability-manifest.ts', '../desktop-bridge.ts', '../desktopDialogs.ts'];
+    for (const relative of guarded) {
+      const content = readFileSync(join(FACADE_DIR, relative), 'utf8');
+      expect(content, `${relative} must not reference ${RETIRED_TAURI_PKG}`).not.toMatch(new RegExp(RETIRED_TAURI_PKG));
+      expect(content, `${relative} must not reference ${RETIRED_INVOKE_HELPER}`).not.toMatch(new RegExp(`\\b${RETIRED_INVOKE_HELPER}\\b`));
+      expect(content, `${relative} must not call invoke(`).not.toMatch(/[^a-zA-Z]invoke\s*\(/);
+    }
+  });
+
+  it('shell facade routes every shell command through requireDesktopBridge (no platform branching)', () => {
+    const content = readFileSync(join(FACADE_DIR, 'shell-facade.ts'), 'utf8');
+    expect(content).not.toMatch(/\bisElectronDesktop\b/);
+    expect(content).not.toMatch(/__TAURI_INTERNALS__/);
+    const requireCount = content.match(/requireDesktopBridge\(\)/g)?.length ?? 0;
+    // 每个壳方法都以 requireDesktopBridge() 断言开头(浏览器宿主对象除外)。
+    expect(requireCount).toBeGreaterThanOrEqual(17);
+  });
+
+  it('src tree imports no deleted tauri backend module anywhere', () => {
+    const srcDir = join(FACADE_DIR, '..', '..');
+    const violations: string[] = [];
+    for (const file of listSrcSourceFiles(srcDir)) {
+      const content = readFileSync(file, 'utf8');
+      if (new RegExp(RETIRED_TAURI_PKG).test(content) || /from\s+['"][^'"]*\blib\/tauri['"]/.test(content)) {
+        violations.push(file);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });

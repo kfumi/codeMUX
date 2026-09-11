@@ -21,6 +21,8 @@
 import http from 'node:http';
 import WebSocket from 'ws';
 
+import { parseDesktopUiEvent } from './desktop-events';
+
 /** 四种受控自动化操作。 */
 export type AutomationOp = 'eval' | 'screenshot' | 'input' | 'cdp';
 
@@ -65,6 +67,12 @@ export interface BrowserAutomationDeps {
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** 重连退避基值(ms),指数翻倍,上限 10s;测试注入更小值。 */
   reconnectBaseDelayMs?: number;
+  /**
+   * 桌面 UI 事件出口(工单 09):daemon 经控制面 WS 广播的 ui-event 帧
+   * (sessions-changed / scheduled-tasks-changed / runtime-install-progress*)
+   * 以同名事件名转发渲染层(main 用 webContents.send)。缺省不转发。
+   */
+  onUiEvent?: (name: string, payload: unknown) => void;
 }
 
 export interface BrowserAutomationService {
@@ -262,8 +270,19 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
 
   function handleMessage(raw: string): void {
     const request = parseAutomationRequest(raw);
-    if (!request) return;
-    enqueue(request);
+    if (request) {
+      enqueue(request);
+      return;
+    }
+    // 桌面 UI 事件(工单 09):同一控制面连接上的 ui-event 帧转发渲染层。
+    const uiEvent = parseDesktopUiEvent(raw);
+    if (uiEvent) {
+      try {
+        deps.onUiEvent?.(uiEvent.name, uiEvent.payload);
+      } catch (error) {
+        log('warn', `ui-event 转发异常(name=${uiEvent.name}): ${String(error)}`);
+      }
+    }
   }
 
   function scheduleConnect(delayMs: number): void {

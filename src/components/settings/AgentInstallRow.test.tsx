@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentInstallation } from '../../lib/tauri';
+import type { AgentInstallation } from '../../lib/desktop-bridge';
 import { AgentInstallRow } from './AgentInstallRow';
 
 const { toastSuccess, toastError } = vi.hoisted(() => ({

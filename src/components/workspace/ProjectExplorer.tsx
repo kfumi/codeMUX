@@ -2,7 +2,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, FileWarning, Folder, FolderOpen, 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { daemonFacade } from '../../lib/facades/daemon-facade';
-import type { FileTreeNode } from '../../lib/tauri';
+import type { FileTreeNode } from '../../lib/workspaceTypes';
 import { cn } from '../../lib/utils';
 import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';

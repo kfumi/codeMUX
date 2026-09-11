@@ -85,11 +85,3 @@ pub async fn load_session_subagents_for_companion(
         timelines,
     })
 }
-
-#[tauri::command]
-pub async fn load_session_subagents(
-    daemon: tauri::State<'_, Arc<crate::daemon::DaemonState>>,
-    app_session_id: String,
-) -> Result<SessionSubagentsPayload, String> {
-    load_session_subagents_for_companion(&daemon.agent, &daemon.app, app_session_id).await
-}

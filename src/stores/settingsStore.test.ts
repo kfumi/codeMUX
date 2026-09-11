@@ -31,11 +31,6 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../lib/tauri', () => ({
-  agentApi: {
-    stopProxy: vi.fn(),
-  },
-}));
 
 const sampleProvider = (id: string): ModelProvider => ({
   id,

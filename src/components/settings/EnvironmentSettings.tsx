@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Terminal, TriangleAlert } from 'lucide-react';
 
-import { appApi, type DevelopmentEnvironmentCheck, type EnvironmentCheckStatus, type EnvironmentToolCheck } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
+import type {
+  DevelopmentEnvironmentCheck,
+  EnvironmentCheckStatus,
+  EnvironmentToolCheck,
+} from '../../lib/desktop-bridge';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 
@@ -37,7 +42,7 @@ export function EnvironmentSettings() {
     setLoading(true);
     setError(null);
     try {
-      const result = await appApi.checkDevelopmentEnvironment();
+      const result = await shellFacade.checkDevelopmentEnvironment();
       setCheck(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

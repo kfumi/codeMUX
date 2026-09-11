@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bot, GitCommitHorizontal, UploadCloud } from 'lucide-react';
 
-import type { GitRepositoryState } from '../../../lib/tauri';
+import type { GitRepositoryState } from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { Button } from '../../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';

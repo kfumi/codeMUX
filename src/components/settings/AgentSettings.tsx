@@ -18,13 +18,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import {
-  appApi,
-  type AgentInstallationReport,
-  type AgentRuntimeCheck,
-  type AgentRuntimeStatus,
-  type AgentRuntimeUpgradeResult,
-} from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
+import type {
+  AgentInstallationReport,
+  AgentRuntimeCheck,
+  AgentRuntimeStatus,
+  AgentRuntimeUpgradeResult,
+} from '../../lib/desktop-bridge';
 import {
   codexWorkflowModeToExecutionMode,
   mapExecutionModeToPermissionConfig,
@@ -158,7 +158,7 @@ export function AgentSettingsPanel() {
     setChecking(true);
     setCheckError(null);
     try {
-      const result = await appApi.checkAgentRuntimes();
+      const result = await shellFacade.checkAgentRuntimes();
       setRuntimeResult(result.runtimes);
       setCheckedAt(result.checkedAt);
     } catch (err) {
@@ -196,7 +196,7 @@ export function AgentSettingsPanel() {
 
   const diagnoseInstallations = useCallback(async (agentKind: string, silent: boolean) => {
     try {
-      const report = await appApi.probeAgentInstallations(agentKind);
+      const report = await shellFacade.probeAgentInstallations(agentKind);
       setInstallationReports((prev) => ({ ...prev, [agentKind]: report }));
     } catch (err) {
       if (!silent) {
@@ -219,7 +219,7 @@ export function AgentSettingsPanel() {
       const actionLabel = action === 'install' ? '安装' : '升级';
       const toastId = toast.loading(`正在${actionLabel} ${label}...`);
       try {
-        const result = await appApi.upgradeAgentRuntime(agentKind);
+        const result = await shellFacade.upgradeAgentRuntime(agentKind);
         // 按 outcome 分级展示 toast
         handleUpgradeToast(result, toastId, action);
         // 升级后补诊(静默),结果写入对应卡片
@@ -243,7 +243,7 @@ export function AgentSettingsPanel() {
       setUpgradingKind(agentKind);
       try {
         // 升级/安装前先检测多处安装,决定是否需要用户确认
-        const report = await appApi.probeAgentInstallations(agentKind);
+        const report = await shellFacade.probeAgentInstallations(agentKind);
         if (report.needsConfirmation) {
           setPendingUpgrade({ agentKind, label, report, action });
           setConfirmDialogOpen(true);

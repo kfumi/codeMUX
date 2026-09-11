@@ -51,7 +51,6 @@ pub fn read_local_daemon_token(app_data_dir: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
-    use tempfile::TempDir;
 
     fn temp_app_data() -> PathBuf {
         static COUNTER: OnceLock<Mutex<u64>> = OnceLock::new();

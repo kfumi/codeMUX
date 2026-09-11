@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bot, Check, Copy } from 'lucide-react';
 
-import type { CreatePullRequestResult, GitBranch, GitPullRequestSuggestion } from '../../../lib/tauri';
+import type { CreatePullRequestResult, GitBranch, GitPullRequestSuggestion } from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { Button } from '../../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';

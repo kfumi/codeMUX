@@ -16,8 +16,9 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: vi.fn(),
+vi.mock('../../lib/desktopDialogs', () => ({
+  openDialog: vi.fn(async () => null),
+  saveDialog: vi.fn(async () => null),
 }));
 
 import { useNewSessionStore } from '../../stores/newSessionStore';

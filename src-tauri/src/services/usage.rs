@@ -5,9 +5,6 @@ use std::str::FromStr;
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
-use tauri::State;
 
 use crate::agent::commands::{find_claude_session_jsonl, find_codex_session_jsonl, home_dir};
 use crate::agent::opencode_history;
@@ -22,15 +19,6 @@ pub struct UsageStatsResponse {
     pub overview: operations::UsageOverview,
     pub agent_distribution: Vec<operations::AgentDistribution>,
     pub model_distribution: Vec<operations::ModelDistribution>,
-}
-
-#[tauri::command]
-pub fn get_usage_stats(
-    state: State<'_, Arc<AppState>>,
-    agent_kind: Option<String>,
-    days: Option<u32>,
-) -> Result<UsageStatsResponse, String> {
-    get_usage_stats_impl(state.inner(), agent_kind, days)
 }
 
 pub fn get_usage_stats_impl(
@@ -143,15 +131,6 @@ fn read_u64(value: Option<&serde_json::Value>) -> u64 {
         Some(serde_json::Value::String(text)) => text.parse::<u64>().unwrap_or(0),
         _ => 0,
     }
-}
-
-#[tauri::command]
-pub async fn get_usage_token_breakdown(
-    state: State<'_, Arc<AppState>>,
-    agent_kind: Option<String>,
-    days: Option<u32>,
-) -> Result<TokenBreakdownResponse, String> {
-    get_usage_token_breakdown_impl(state.inner(), agent_kind, days).await
 }
 
 pub async fn get_usage_token_breakdown_impl(

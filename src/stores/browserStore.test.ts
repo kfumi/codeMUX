@@ -16,8 +16,8 @@ const browserApiMock = vi.hoisted(() => ({
   setZoom: vi.fn(),
 }));
 
-vi.mock('../lib/tauri', () => ({
-  browserApi: browserApiMock,
+vi.mock('../lib/browser/electronBrowserHost', () => ({
+  electronBrowserHost: browserApiMock,
 }));
 
 import { useBrowserStore } from './browserStore';

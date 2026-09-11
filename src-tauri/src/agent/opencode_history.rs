@@ -1,7 +1,7 @@
 use log::{debug, info};
 use rusqlite::Connection;
 use serde_json::Value;
-use tauri::State;
+
 use tokio::sync::oneshot;
 
 use super::history_events::normalize_history_events;
@@ -2127,14 +2127,6 @@ pub(crate) fn timestamp_string(timestamp: i64) -> String {
         .unwrap_or_else(|| timestamp.to_string())
 }
 
-#[tauri::command]
-pub async fn load_opencode_session_events(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<Value>, String> {
-    load_opencode_session_events_impl(state.inner(), app_session_id).await
-}
-
 pub(crate) async fn load_opencode_session_events_impl(
     state: &crate::AppState,
     app_session_id: String,
@@ -2153,15 +2145,6 @@ pub(crate) async fn load_opencode_session_events_impl(
     .await
     .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))??;
     Ok(normalize_history_events(events, &app_session_id))
-}
-
-#[tauri::command]
-pub async fn delete_opencode_session(
-    daemon: tauri::State<'_, std::sync::Arc<crate::daemon::DaemonState>>,
-    app_session_id: String,
-) -> Result<(), String> {
-    delete_opencode_session_for_companion(&daemon.roots, &daemon.app, &daemon.agent, app_session_id)
-        .await
 }
 
 pub async fn delete_opencode_session_for_companion(

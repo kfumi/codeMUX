@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { browserApi } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { normalizeBrowserControl } from '../../lib/browserControl';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
@@ -26,7 +26,7 @@ export function BrowserControlSettings() {
     }
     setClearing(scope);
     try {
-      await browserApi.clearData(scope);
+      await shellFacade.browser.clearData(scope);
     } finally {
       setClearing(null);
     }

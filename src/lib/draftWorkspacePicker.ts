@@ -1,6 +1,6 @@
 import { createNameId } from 'mnemonic-id';
 
-import type { GitRepositoryState } from './tauri';
+import type { GitRepositoryState } from './gitTypes';
 
 export type DraftWorkspaceSelection =
   | { kind: 'local' }

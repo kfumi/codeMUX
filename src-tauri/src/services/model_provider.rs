@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::config::types::AppConfig;
 use crate::daemon::DaemonState;
 use crate::model_providers::{
@@ -7,7 +5,6 @@ use crate::model_providers::{
     validate_provider, validate_provider_for_enable, BuiltinProviderTemplate, ModelProvider,
 };
 use crate::AppState;
-use tauri::State;
 
 fn find_provider_mut<'a>(
     config: &'a mut AppConfig,
@@ -20,17 +17,8 @@ fn find_provider_mut<'a>(
         .ok_or_else(|| format!("供应商不存在: {provider_id}"))
 }
 
-#[tauri::command]
 pub fn list_builtin_provider_templates() -> Vec<BuiltinProviderTemplate> {
     builtin_templates()
-}
-
-#[tauri::command]
-pub fn instantiate_builtin_provider_template(
-    daemon: State<'_, Arc<DaemonState>>,
-    template_id: String,
-) -> Result<ModelProvider, String> {
-    instantiate_builtin_provider_template_impl(daemon.inner(), template_id)
 }
 
 pub fn instantiate_builtin_provider_template_impl(
@@ -41,14 +29,6 @@ pub fn instantiate_builtin_provider_template_impl(
     let provider = instantiate_template(&template_id, provider_id)?;
     upsert_model_provider_inner(&daemon.app, &daemon.roots, provider.clone())?;
     Ok(provider)
-}
-
-#[tauri::command]
-pub fn upsert_model_provider(
-    daemon: State<'_, Arc<DaemonState>>,
-    provider: ModelProvider,
-) -> Result<(), String> {
-    upsert_model_provider_impl(daemon.inner(), provider)
 }
 
 pub fn upsert_model_provider_impl(
@@ -128,14 +108,6 @@ fn upsert_model_provider_inner(
     Ok(())
 }
 
-#[tauri::command]
-pub fn delete_model_provider(
-    daemon: State<'_, Arc<DaemonState>>,
-    provider_id: String,
-) -> Result<(), String> {
-    delete_model_provider_impl(daemon.inner(), provider_id)
-}
-
 pub fn delete_model_provider_impl(daemon: &DaemonState, provider_id: String) -> Result<(), String> {
     let mut config = daemon.app.config.lock().unwrap();
     let before = config.model_providers.len();
@@ -150,14 +122,6 @@ pub fn delete_model_provider_impl(daemon: &DaemonState, provider_id: String) -> 
     }
     crate::config::save_config(&daemon.roots, &config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_active_model_provider(
-    daemon: State<'_, Arc<DaemonState>>,
-    provider_id: String,
-) -> Result<(), String> {
-    set_active_model_provider_impl(daemon.inner(), provider_id)
 }
 
 pub fn set_active_model_provider_impl(
@@ -177,15 +141,6 @@ pub fn set_active_model_provider_impl(
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_model_provider_enabled(
-    daemon: State<'_, Arc<DaemonState>>,
-    provider_id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    set_model_provider_enabled_impl(daemon.inner(), provider_id, enabled)
-}
-
 pub fn set_model_provider_enabled_impl(
     daemon: &DaemonState,
     provider_id: String,
@@ -202,7 +157,7 @@ pub fn set_model_provider_enabled_impl(
 }
 
 /// Test connection with the currently entered API key + Base URL (OpenAI-compatible GET …/models).
-#[tauri::command]
+
 pub async fn test_model_provider(api_key: String, base_url: String) -> Result<String, String> {
     if api_key.trim().is_empty() {
         return Err("请先填写 API Key".to_string());
@@ -210,17 +165,8 @@ pub async fn test_model_provider(api_key: String, base_url: String) -> Result<St
     if base_url.trim().is_empty() {
         return Err("请先填写 API 地址".to_string());
     }
-    let (models, url) = crate::commands::provider::probe_openai_models(&api_key, &base_url).await?;
+    let (models, url) = crate::services::provider::probe_openai_models(&api_key, &base_url).await?;
     Ok(format!("连接成功：GET {}（{} 个模型）", url, models.len()))
-}
-
-#[tauri::command]
-pub fn provider_usable_for_agent(
-    daemon: State<'_, Arc<DaemonState>>,
-    provider_id: String,
-    agent_kind: crate::config::types::AgentKind,
-) -> Result<bool, String> {
-    provider_usable_for_agent_impl(daemon.inner(), provider_id, agent_kind)
 }
 
 pub fn provider_usable_for_agent_impl(

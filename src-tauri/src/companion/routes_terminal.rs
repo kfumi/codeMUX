@@ -36,7 +36,7 @@ async fn start_terminal(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let terminal_state = ctx.daemon.terminal.clone();
-    let terminal_id = crate::commands::terminal::start_terminal_for_companion(
+    let terminal_id = crate::terminal::start_terminal_for_companion(
         &terminal_state,
         body.project_path,
         body.cols,
@@ -60,12 +60,8 @@ async fn write_terminal(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let terminal_state = ctx.daemon.terminal.clone();
-    crate::commands::terminal::write_terminal_for_companion(
-        &terminal_state,
-        &terminal_id,
-        &body.data,
-    )
-    .map_err(ApiError::bad_request)?;
+    crate::terminal::write_terminal_for_companion(&terminal_state, &terminal_id, &body.data)
+        .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -85,7 +81,7 @@ async fn resize_terminal(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let terminal_state = ctx.daemon.terminal.clone();
-    crate::commands::terminal::resize_terminal_for_companion(
+    crate::terminal::resize_terminal_for_companion(
         &terminal_state,
         &terminal_id,
         body.cols,
@@ -103,7 +99,7 @@ async fn close_terminal(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let terminal_state = ctx.daemon.terminal.clone();
-    crate::commands::terminal::close_terminal_for_companion(&terminal_state, &terminal_id)
+    crate::terminal::close_terminal_for_companion(&terminal_state, &terminal_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -128,26 +124,24 @@ pub(crate) async fn terminal_ws_handler(
 
 async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, terminal_id: String) {
     let terminal_state = ctx.daemon.terminal.clone();
-    let (mut rx, replay) = match crate::commands::terminal::subscribe_terminal_for_companion(
-        &terminal_state,
-        &terminal_id,
-    ) {
-        Ok(subscription) => subscription,
-        Err(error) => {
-            let _ = socket
-                .send(Message::Text(
-                    serde_json::json!({
-                        "type": "error",
-                        "terminalId": terminal_id,
-                        "error": error,
-                    })
-                    .to_string()
-                    .into(),
-                ))
-                .await;
-            return;
-        }
-    };
+    let (mut rx, replay) =
+        match crate::terminal::subscribe_terminal_for_companion(&terminal_state, &terminal_id) {
+            Ok(subscription) => subscription,
+            Err(error) => {
+                let _ = socket
+                    .send(Message::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "terminalId": terminal_id,
+                            "error": error,
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await;
+                return;
+            }
+        };
 
     if let Some(replay) = replay {
         let payload = serde_json::json!({
@@ -172,7 +166,7 @@ async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, termi
                         if let Ok(body) = serde_json::from_str::<serde_json::Value>(&text) {
                             if body.get("type").and_then(|v| v.as_str()) == Some("write") {
                                 let data = body.get("data").and_then(|v| v.as_str()).unwrap_or("");
-                                let _ = crate::commands::terminal::write_terminal_for_companion(
+                                let _ = crate::terminal::write_terminal_for_companion(
                                     &terminal_state,
                                     &terminal_id,
                                     data,
@@ -180,7 +174,7 @@ async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, termi
                             } else if body.get("type").and_then(|v| v.as_str()) == Some("resize") {
                                 let cols = body.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
                                 let rows = body.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
-                                let _ = crate::commands::terminal::resize_terminal_for_companion(
+                                let _ = crate::terminal::resize_terminal_for_companion(
                                     &terminal_state,
                                     &terminal_id,
                                     cols,

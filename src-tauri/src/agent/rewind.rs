@@ -685,27 +685,6 @@ async fn rewind_pi_conversation(
     })
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn rewind_agent_session(
-    state: tauri::State<'_, std::sync::Arc<crate::AppState>>,
-    agent_state: tauri::State<'_, std::sync::Arc<AgentState>>,
-    app_session_id: String,
-    agent_kind: String,
-    target: Option<RewindTarget>,
-    mode: Option<String>,
-) -> Result<RewindSessionResult, String> {
-    rewind_agent_session_impl(
-        state.inner().clone(),
-        agent_state.inner().clone(),
-        app_session_id,
-        agent_kind,
-        target,
-        mode,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn rewind_agent_session_impl(
     state: std::sync::Arc<crate::AppState>,

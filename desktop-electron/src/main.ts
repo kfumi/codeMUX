@@ -225,6 +225,14 @@ function createMainWindow(): BrowserWindow {
     window.hide();
   });
 
+  // 窗口最大化状态变化 → 渲染层(TitleBar 自绘窗口控制按钮据此切换图标,
+  // 行为对齐 Tauri getCurrentWindow().onResized)。
+  const sendMaximizeState = () => {
+    sendToRenderer('window-maximize-changed', window.isMaximized());
+  };
+  window.on('maximize', sendMaximizeState);
+  window.on('unmaximize', sendMaximizeState);
+
   window.once('ready-to-show', () => {
     window.show();
   });
@@ -355,11 +363,15 @@ if (!gotLock) {
     }
     // 浏览器自动化接缝(工单 08):main 进程 WS 客户端连 daemon 控制面,
     // 端口来自 supervisor(supervisor 出口/daemonStatus 同源)。连接失败仅
-    // 退避重连,不崩溃(降级为无自动化能力)。
+    // 退避重连,不崩溃(降级为无自动化能力)。同一连接上的 daemon ui-event
+    // 帧(工单 09:sessions-changed / scheduled-tasks-changed /
+    // runtime-install-progress*)以同名事件名转发渲染层 —— Tauri 壳删除后
+    // 这些事件的原投递方(app.emit)由本 sink 接管。
     automation = createBrowserAutomationService({
       getPort: () => supervisor?.getPort() ?? null,
       readToken: readLocalDaemonToken,
       resolveTarget: (browserId) => guests.resolveTarget(browserId),
+      onUiEvent: (name, payload) => sendToRenderer(name, payload),
     });
     automation.start();
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);

@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use log::{debug, info};
-use tauri::State;
 
 use crate::config::types::AgentKind;
 
@@ -1058,14 +1057,6 @@ pub(crate) fn read_codex_interactive_events_from_dir(
     read_json_stream_values(&path)
 }
 
-#[tauri::command]
-pub async fn load_codex_session_events(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    load_codex_session_events_impl(state.inner(), app_session_id).await
-}
-
 pub(crate) async fn load_codex_session_events_impl(
     state: &crate::AppState,
     app_session_id: String,
@@ -1107,14 +1098,6 @@ pub(crate) async fn load_codex_session_events_impl(
 
     info!(target: "agent", "Loaded {} CodeMUX events from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
-}
-
-#[tauri::command]
-pub async fn delete_codex_session_files(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<String>, String> {
-    delete_codex_session_files_for_companion(state.inner(), app_session_id).await
 }
 
 pub async fn delete_codex_session_files_for_companion(

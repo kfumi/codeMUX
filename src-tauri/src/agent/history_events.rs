@@ -230,12 +230,10 @@ fn normalize_system(raw: Value) -> Vec<Value> {
 fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
     let tool_use_id = first_string(block, &["id", "tool_use_id"])?;
     let name = first_string(block, &["name", "tool_name"]).unwrap_or_else(|| "unknown".to_string());
-    let input = block.get("input").cloned().unwrap_or_else(|| {
-        block
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}))
-    });
+    let input = block
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| block.get("arguments").cloned().unwrap_or_else(|| json!({})));
     let input = if input.is_object() {
         input
     } else {
@@ -267,7 +265,11 @@ fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
 fn is_ask_user_question_tool_name(name: &str) -> bool {
     matches!(
         name,
-        "AskUserQuestion" | "askUserQuestion" | "ask_user_question" | "request_user_input" | "question"
+        "AskUserQuestion"
+            | "askUserQuestion"
+            | "ask_user_question"
+            | "request_user_input"
+            | "question"
     )
 }
 
@@ -614,6 +616,9 @@ mod tests {
             vec!["user_input_requested", "tool_finished"]
         );
         assert_eq!(events[0]["tool_use_id"], "call-1");
-        assert_eq!(events[0]["questions"][0]["question"], "你更喜欢哪种编程语言？");
+        assert_eq!(
+            events[0]["questions"][0]["question"],
+            "你更喜欢哪种编程语言？"
+        );
     }
 }

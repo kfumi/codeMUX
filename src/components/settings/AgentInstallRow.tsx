@@ -2,7 +2,7 @@ import { useCallback, type HTMLAttributes } from 'react';
 import { Copy } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { AgentInstallation, InstallSource } from '@/lib/tauri';
+import type { AgentInstallation, InstallSource } from '@/lib/desktop-bridge';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { TooltipHint } from '@/components/ui/tooltip';

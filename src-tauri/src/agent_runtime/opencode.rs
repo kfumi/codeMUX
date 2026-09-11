@@ -174,7 +174,6 @@ mod tests {
             api_key: Some("secret".to_string()),
             base_url: Some("https://example.test".to_string()),
             model: Some("open-code-model".to_string()),
-            channel: tauri::ipc::Channel::new(|_| Ok(())),
         }
     }
 

@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 
 use log::{debug, info};
-use tauri::State;
 
 use crate::config::types::AgentKind;
 
@@ -67,14 +66,6 @@ pub(crate) fn is_terminal_claude_stop_reason(reason: &str) -> bool {
         reason,
         "end_turn" | "stop_sequence" | "max_tokens" | "refusal"
     )
-}
-
-#[tauri::command]
-pub async fn load_claude_session_events(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    load_claude_session_events_impl(state.inner(), app_session_id).await
 }
 
 pub(crate) async fn load_claude_session_events_impl(
@@ -144,14 +135,6 @@ pub(crate) async fn load_claude_session_events_impl(
         .map_err(|error| format!("Failed to join Claude history loader: {}", error))??;
     info!(target: "agent", "Loaded {} CodeMUX events from Claude JSONL for app_session_id={}", normalized.len(), app_session_id);
     Ok(normalized)
-}
-
-#[tauri::command]
-pub async fn delete_claude_session_files(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<String>, String> {
-    delete_claude_session_files_for_companion(state.inner(), app_session_id).await
 }
 
 pub async fn delete_claude_session_files_for_companion(

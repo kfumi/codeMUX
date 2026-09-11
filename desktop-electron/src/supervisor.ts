@@ -12,8 +12,7 @@
 //!
 //! 本文件不 import electron,便于在纯 Node(vitest)下做契约测试。
 
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import {
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';import {
   mkdirSync,
   openSync,
   closeSync,
@@ -250,6 +249,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
   };
 
   let child: ChildProcess | null = null;
+  let childPid: number | null = null;
   let port: number | null = null;
   /** 主动 stop 期间置位:watcher 据此区分「我们杀的」与「意外退出」。 */
   let stopping = false;
@@ -260,6 +260,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       // 只处理仍是当前托管 child 的退出(restart 换上的新 child 继续被守望)。
       if (child !== target) return;
       child = null;
+    childPid = null;
       if (stopping) {
         // 主动 stop/restart 杀掉的:预期退出,不惊扰前端(stopManaged 负责清 run-state)。
         return;
@@ -300,6 +301,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
         /* spawn 失败通过就绪轮询的 exit/超时路径上报 */
       });
       child = spawned;
+      childPid = spawned.pid ?? null;
       watchChild(spawned);
     } catch (error) {
       closeSync(logFd);
@@ -316,6 +318,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     while (true) {
       if (childExited(currentChild)) {
         child = null;
+    childPid = null;
         closeSync(logFd);
         const reason = currentChild.exitCode !== null ? `exit code ${currentChild.exitCode}` : `signal ${currentChild.signalCode}`;
         throw new Error(`daemon exited during startup: ${reason}`);
@@ -338,6 +341,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
           // ignore
         }
         child = null;
+    childPid = null;
         closeSync(logFd);
         throw new Error(`daemon did not become ready within ${Math.round(timeouts.readyTimeoutMs / 1000)}s`);
       }
@@ -346,10 +350,37 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
   }
 
   /**
-   * 强杀旧 daemon:优先我们持有的 child 句柄(先摘除引用再 SIGKILL,并等退出 ——
+   * 强杀 daemon 及其整棵子进程树(sidecar 一并收尾):Windows 用
+   * taskkill /F /T;unix 仅 SIGKILL daemon 本体(sidecar 由 init 收养,
+   * unix 树收尾待办)。resolve pid 的存活探测保持 run_state 同语义。
+   */
+  function killDaemonTree(pid: number): void {
+    if (process.platform === 'win32') {
+      try {
+        nodeSpawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+      } catch {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * 强杀旧 daemon:优先我们持有的 child 句柄(先摘除引用再整树强杀,并等退出 ——
    * 对齐 Rust kill_old_daemon 的 child.kill()+child.wait(),避免旧进程仍占端口),
-   * 否则按 pid 系统强杀(Windows 上 signal 参数被忽略,等价 TerminateProcess;
-   * unix 用 SIGKILL 对齐 Rust 的 kill -9)。
+   * 否则按 pid 系统强杀。
    */
   async function killOldDaemon(runState: DaemonRunState): Promise<void> {
     const managed = child;
@@ -357,6 +388,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       // 先摘除引用:watchChild 的守卫(child !== target)保证这次主动击杀
       // 不会被当成意外退出上报。
       child = null;
+    childPid = null;
       const exited = new Promise<void>((resolve) => {
         if (childExited(managed)) {
           resolve();
@@ -368,19 +400,11 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
         };
         managed.on('exit', onExit);
       });
-      try {
-        managed.kill('SIGKILL');
-      } catch {
-        // ignore
-      }
+      killDaemonTree(managed.pid ?? runState.pid);
       await exited;
       return;
     }
-    try {
-      process.kill(runState.pid, 'SIGKILL');
-    } catch {
-      // 已死或无权限:继续 spawn(Rust 版同样仅告警)。
-    }
+    killDaemonTree(runState.pid);
   }
 
   /** Restarted 路径:强杀旧 daemon(等退出)→ 清 run-state → spawn 新 daemon。 */
@@ -436,13 +460,17 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       target.on('exit', onExit);
     });
     try {
-      // 对齐 Rust Child::kill(SIGKILL/TerminateProcess):stop/restart 都是强杀。
-      target.kill('SIGKILL');
+      // 对齐 Rust Child::kill:stop/restart 都是强杀,且整树收尾(含 sidecar)。
+      const targetPid = childPid;
+      if (targetPid !== null) {
+        killDaemonTree(targetPid);
+      }
     } catch {
       // ignore
     }
     await exited;
     child = null;
+    childPid = null;
     clearRunState(appDataDir);
     port = null;
     // 标记用完即复位:之后 restart→spawn 的新 child 崩溃仍要被当作意外上报。
@@ -476,6 +504,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     disposed = true;
     // 'exit' 监听挂在 child 上,Node 进程退出时自然回收;这里仅阻断后续事件。
     child = null;
+    childPid = null;
   }
 
   return {

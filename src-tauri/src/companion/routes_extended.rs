@@ -12,14 +12,14 @@ use crate::agent::fork::{
 };
 use crate::agent::history_import::resync_session_from_native_for_companion;
 use crate::agent::rewind::{rewind_agent_session_for_companion, RewindTarget};
-use crate::commands::session::{
+use crate::companion::server::{authorize, ApiError, ServerContext};
+use crate::config::types::AgentKind;
+use crate::db::operations;
+use crate::services::session::{
     delete_session_with_agent_cleanup_for_companion, update_session_permissions_for_companion,
     update_session_provider_for_companion, update_session_reasoning_effort_for_companion,
     update_session_working_path_for_companion,
 };
-use crate::companion::server::{authorize, ApiError, ServerContext};
-use crate::config::types::AgentKind;
-use crate::db::operations;
 
 pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router

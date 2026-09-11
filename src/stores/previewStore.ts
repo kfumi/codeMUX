@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { daemonFacade } from '../lib/facades/daemon-facade';
-import type { FileTreeNode } from '../lib/tauri';
+import type { FileTreeNode } from '../lib/workspaceTypes';
 import { createLogger, serializeError } from '../lib/logger';
 
 const logger = createLogger('previewStore');

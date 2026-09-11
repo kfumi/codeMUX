@@ -250,26 +250,6 @@ fn install_claude_fork_child_history(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn fork_claude_session(
-    state: tauri::State<'_, Arc<crate::AppState>>,
-    agent_state: tauri::State<'_, Arc<AgentState>>,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_claude_session_impl(
-        state.inner().clone(),
-        agent_state.inner().clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
-}
-
 pub async fn fork_claude_session_impl(
     state: Arc<crate::AppState>,
     agent_state: Arc<AgentState>,
@@ -386,31 +366,6 @@ pub async fn fork_claude_session_impl(
     })
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn fork_codex_session(
-    state: tauri::State<'_, Arc<crate::AppState>>,
-    agent_state: tauri::State<'_, Arc<AgentState>>,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    fork_provider_turn_id: Option<String>,
-    fork_provider_turn_ordinal: Option<usize>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_codex_session_impl(
-        state.inner().clone(),
-        agent_state.inner().clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        fork_provider_turn_id,
-        fork_provider_turn_ordinal,
-        title,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn fork_codex_session_impl(
     state: Arc<crate::AppState>,
@@ -502,26 +457,6 @@ pub async fn fork_codex_session_impl(
         &child_title,
     )
     .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn fork_opencode_session(
-    state: tauri::State<'_, Arc<crate::AppState>>,
-    agent_state: tauri::State<'_, Arc<AgentState>>,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_opencode_session_impl(
-        state.inner().clone(),
-        agent_state.inner().clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
 }
 
 pub async fn fork_opencode_session_impl(
@@ -631,26 +566,6 @@ pub async fn fork_opencode_session_impl(
 /// pi Fork：整卷拷贝原生会话文件（sidecar 侧完成），新 mapping 指向副本。
 /// 与 OpenCode 的「fork 到指定消息」不同，pi 无树导航接入，fork 语义为
 /// 整会话副本；fork_event_id / provider message id 仅透传记录。
-#[tauri::command]
-pub async fn fork_pi_session(
-    state: tauri::State<'_, Arc<crate::AppState>>,
-    agent_state: tauri::State<'_, Arc<AgentState>>,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_pi_session_impl(
-        state.inner().clone(),
-        agent_state.inner().clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
-}
-
 pub async fn fork_pi_session_impl(
     state: Arc<crate::AppState>,
     agent_state: Arc<AgentState>,

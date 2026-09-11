@@ -4,7 +4,6 @@ use std::process::Command;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-#[tauri::command]
 pub fn get_system_fonts() -> Result<Vec<String>, String> {
     let fonts = enumerate_system_fonts().map_err(|error| error.to_string())?;
     Ok(standardize_fonts(fonts))

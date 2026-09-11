@@ -12,7 +12,7 @@ import {
 
 import type { SubagentStatus } from '../../../lib/codeMuxProtocol';
 import { daemonFacade } from '../../../lib/facades/daemon-facade';
-import type { GitRepositoryState, GitStatusChange } from '../../../lib/tauri';
+import type { GitRepositoryState, GitStatusChange } from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';

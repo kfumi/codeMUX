@@ -1,4 +1,4 @@
-import type { FileTreeNode } from '../../lib/tauri';
+import type { FileTreeNode } from '../../lib/workspaceTypes';
 
 /** True when a directory node's children were returned by the backend (including empty folders). */
 export function hasLoadedChildren(node: FileTreeNode): boolean {

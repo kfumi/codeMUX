@@ -232,13 +232,14 @@ input[type='password']::-ms-reveal {
   display: none;
 }
 
-*[data-tauri-drag-region] {
+/* 自绘标题栏拖拽区(Electron 壳,工单 09):接替原 Tauri 壳的拖拽区属性。 */
+*[data-app-drag-region] {
   -webkit-app-region: drag;
 }
 
-*[data-tauri-drag-region] button,
-*[data-tauri-drag-region] a,
-*[data-tauri-drag-region] input {
+*[data-app-drag-region] button,
+*[data-app-drag-region] a,
+*[data-app-drag-region] input {
   -webkit-app-region: no-drag;
 }
 

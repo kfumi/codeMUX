@@ -1,10 +1,7 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri::State;
 
-use crate::daemon::DaemonState;
 use crate::scheduled_tasks::{
     create_task, delete_task, get_task, list_runs, list_tasks, local_timezone_label,
     set_task_enabled, update_task, ScheduleKind, ScheduledTask, ScheduledTaskUpsert, TaskRun,
@@ -63,25 +60,12 @@ pub fn list_scheduled_tasks_impl(state: &AppState) -> Result<Vec<ScheduledTask>,
     list_tasks(&conn).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn list_scheduled_tasks(state: State<'_, Arc<AppState>>) -> Result<Vec<ScheduledTask>, String> {
-    list_scheduled_tasks_impl(&state)
-}
-
 pub fn get_scheduled_task_impl(
     state: &AppState,
     task_id: String,
 ) -> Result<Option<ScheduledTask>, String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     get_task(&conn, &task_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn get_scheduled_task(
-    state: State<'_, Arc<AppState>>,
-    task_id: String,
-) -> Result<Option<ScheduledTask>, String> {
-    get_scheduled_task_impl(&state, task_id)
 }
 
 pub fn create_scheduled_task_impl(
@@ -94,14 +78,6 @@ pub fn create_scheduled_task_impl(
     }
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     create_task(&conn, &upsert).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn create_scheduled_task(
-    state: State<'_, Arc<AppState>>,
-    input: ScheduledTaskInput,
-) -> Result<ScheduledTask, String> {
-    create_scheduled_task_impl(&state, input)
 }
 
 pub fn update_scheduled_task_impl(
@@ -117,26 +93,9 @@ pub fn update_scheduled_task_impl(
     update_task(&conn, &task_id, &upsert).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn update_scheduled_task(
-    state: State<'_, Arc<AppState>>,
-    task_id: String,
-    input: ScheduledTaskInput,
-) -> Result<ScheduledTask, String> {
-    update_scheduled_task_impl(&state, task_id, input)
-}
-
 pub fn delete_scheduled_task_impl(state: &AppState, task_id: String) -> Result<(), String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     delete_task(&conn, &task_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn delete_scheduled_task(
-    state: State<'_, Arc<AppState>>,
-    task_id: String,
-) -> Result<(), String> {
-    delete_scheduled_task_impl(&state, task_id)
 }
 
 pub fn set_scheduled_task_enabled_impl(
@@ -148,15 +107,6 @@ pub fn set_scheduled_task_enabled_impl(
     set_task_enabled(&conn, &task_id, enabled).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn set_scheduled_task_enabled(
-    state: State<'_, Arc<AppState>>,
-    task_id: String,
-    enabled: bool,
-) -> Result<ScheduledTask, String> {
-    set_scheduled_task_enabled_impl(&state, task_id, enabled)
-}
-
 pub fn list_scheduled_task_runs_impl(
     state: &AppState,
     task_id: String,
@@ -165,36 +115,11 @@ pub fn list_scheduled_task_runs_impl(
     list_runs(&conn, &task_id).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn list_scheduled_task_runs(
-    state: State<'_, Arc<AppState>>,
-    task_id: String,
-) -> Result<Vec<TaskRun>, String> {
-    list_scheduled_task_runs_impl(&state, task_id)
-}
-
-#[tauri::command]
 pub fn get_scheduled_task_timezone() -> String {
     local_timezone_label()
-}
-
-#[tauri::command]
-pub async fn run_scheduled_task_now(
-    state: State<'_, Arc<DaemonState>>,
-    task_id: String,
-) -> Result<TaskRun, String> {
-    crate::scheduled_tasks::run_task_now(&state, &task_id).await
 }
 
 pub fn delete_scheduled_task_run_impl(state: &AppState, run_id: String) -> Result<(), String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     crate::scheduled_tasks::delete_run(&conn, &run_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn delete_scheduled_task_run(
-    state: State<'_, Arc<AppState>>,
-    run_id: String,
-) -> Result<(), String> {
-    delete_scheduled_task_run_impl(&state, run_id)
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { GitRepositoryState } from './tauri';
+import type { GitRepositoryState } from './gitTypes';
 import {
   createDefaultDraftWorkspace,
   defaultBaseRef,

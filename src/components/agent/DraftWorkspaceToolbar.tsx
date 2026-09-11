@@ -18,7 +18,7 @@ import {
 // 工单 06:平台分流 —— Electron 走壳桥 dialog,Tauri 走 plugin-dialog。
 import { openDialog } from '../../lib/desktopDialogs';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
-import type { GitRepositoryState, GitWorktree } from '../../lib/tauri';
+import type { GitRepositoryState, GitWorktree } from '../../lib/gitTypes';
 import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen, RefreshCw } from 'lucide-react';
-import { appApi, openInExplorer } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { Button } from '../ui/button';
 
 export function LogSettings() {
@@ -14,7 +14,7 @@ export function LogSettings() {
 
   const loadLatestLog = useCallback(async () => {
     try {
-      const [files, dir] = await Promise.all([appApi.getLogFiles(), appApi.getLogDirectory()]);
+      const [files, dir] = await Promise.all([shellFacade.getLogFiles(), shellFacade.getLogDirectory()]);
       setLogDir(dir);
 
       // Find the latest codemux log file (match .log extension to avoid picking up crash dumps, etc.)
@@ -25,7 +25,7 @@ export function LogSettings() {
         return;
       }
 
-      const content = await appApi.readLogFile(codemuxLog.name);
+      const content = await shellFacade.readLogFile(codemuxLog.name);
 
       // Check if user is near the bottom before updating
       const el = contentRef.current;
@@ -67,7 +67,7 @@ export function LogSettings() {
 
   const handleOpenLogDir = () => {
     if (!logDir) return;
-    openInExplorer(logDir).catch(() => {});
+    shellFacade.openInExplorer(logDir).catch(() => {});
   };
 
   const getLineClass = (line: string) => {

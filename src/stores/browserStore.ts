@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { browserApi } from '../lib/tauri';
+import { electronBrowserHost as browserApi } from '../lib/browser/electronBrowserHost';
 import { normalizeBrowserUrl } from '../lib/browserUrl';
 import { createBrowserId } from '../lib/browserPage';
 import { browserViewportBounds, hostBoundsForViewportTransition, type BrowserViewportMode } from '../lib/browserViewport';

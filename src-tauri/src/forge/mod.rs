@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
 
-use crate::commands::git;
 use crate::config::types::AppConfig;
+use crate::services::git;
 
 mod gitee;
 mod github;

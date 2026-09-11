@@ -1144,11 +1144,7 @@ pub fn verify_pairing_token(conn: &Connection, token: &str) -> Result<Option<Pai
 
 fn timeline_event_with_sequence(sequence: i64, raw: &str) -> Result<Value> {
     let mut event: Value = serde_json::from_str(raw).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
     })?;
     if let Some(object) = event.as_object_mut() {
         object.insert("sequence".to_string(), serde_json::json!(sequence));
@@ -2664,7 +2660,10 @@ mod tests {
         assert!(before.has_newer);
 
         for (index, event) in tail.events.iter().enumerate() {
-            assert_eq!(event.get("sequence").and_then(Value::as_i64), Some((3 + index) as i64));
+            assert_eq!(
+                event.get("sequence").and_then(Value::as_i64),
+                Some((3 + index) as i64)
+            );
         }
     }
 

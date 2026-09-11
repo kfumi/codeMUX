@@ -10,7 +10,7 @@ pub struct TokioConsoleInfo {
 }
 
 /// 返回 tokio-console 监听信息。未编译 tokio-console feature 时 enabled=false。
-#[tauri::command]
+
 pub fn get_tokio_console_info() -> TokioConsoleInfo {
     #[cfg(feature = "tokio-console")]
     {
@@ -29,7 +29,7 @@ pub fn get_tokio_console_info() -> TokioConsoleInfo {
 }
 
 /// 将性能快照 JSON 写到指定绝对路径（开发期诊断用）。
-#[tauri::command]
+
 pub fn export_perf_snapshot(path: String, content: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if let Some(parent) = target.parent() {
@@ -40,7 +40,7 @@ pub fn export_perf_snapshot(path: String, content: String) -> Result<(), String>
 }
 
 /// 条件初始化 tracing subscriber。无 feature 时为空操作。
-/// 必须在 tauri::Builder::default() 之前调用，避免 subscriber/logger 冲突。
+/// 进程启动早期调用一次，避免 subscriber/logger 冲突。
 pub fn init_tracing() {
     #[cfg(feature = "tokio-console")]
     {

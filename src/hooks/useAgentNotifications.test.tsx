@@ -9,27 +9,17 @@ import { useSettingsStore } from '../stores/settingsStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
 
+const bridgeState = vi.hoisted(() => ({ present: true }));
+
 const {
-  sendNotificationMock,
-  requestPermissionMock,
-  isPermissionGrantedMock,
-  onActionMock,
-  listenMock,
-  showMainWindowMock,
   sendAgentNotificationMock,
+  showMainWindowMock,
   audioPlayMock,
-  isElectronDesktopMock,
   onAgentNotificationClickedBridgeMock,
 } = vi.hoisted(() => ({
-  sendNotificationMock: vi.fn(),
-  requestPermissionMock: vi.fn(async () => 'granted'),
-  isPermissionGrantedMock: vi.fn(async () => true),
-  onActionMock: vi.fn(async () => ({ unregister: vi.fn(async () => {}) })),
-  listenMock: vi.fn(async () => vi.fn()),
-  showMainWindowMock: vi.fn(async () => {}),
   sendAgentNotificationMock: vi.fn(async () => {}),
+  showMainWindowMock: vi.fn(async () => {}),
   audioPlayMock: vi.fn(async () => {}),
-  isElectronDesktopMock: vi.fn(() => false),
   onAgentNotificationClickedBridgeMock: vi.fn(),
 }));
 
@@ -37,35 +27,20 @@ vi.mock('../lib/desktop-bridge', async () => {
   const actual = await vi.importActual<typeof import('../lib/desktop-bridge')>('../lib/desktop-bridge');
   return {
     ...actual,
-    desktopBridge: { onAgentNotificationClicked: onAgentNotificationClickedBridgeMock },
-    isElectronDesktop: isElectronDesktopMock,
-  };
-});
-
-const notificationInstances: Array<{ title: string; options?: NotificationOptions; onclick: (() => void) | null }> = [];
-
-vi.mock('@tauri-apps/plugin-notification', () => ({
-  isPermissionGranted: () => isPermissionGrantedMock(),
-  requestPermission: () => requestPermissionMock(),
-  sendNotification: (payload: unknown) => sendNotificationMock(payload),
-  onAction: (callback: unknown) => onActionMock(callback),
-}));
-
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: (event: string, callback: unknown) => listenMock(event, callback),
-}));
-
-vi.mock('../lib/tauri', async () => {
-  const actual = await vi.importActual<typeof import('../lib/tauri')>('../lib/tauri');
-  return {
-    ...actual,
-    appApi: {
-      ...actual.appApi,
-      showMainWindow: showMainWindowMock,
-      sendAgentNotification: sendAgentNotificationMock,
+    get desktopBridge() {
+      return bridgeState.present ? { onAgentNotificationClicked: onAgentNotificationClickedBridgeMock } : undefined;
     },
   };
 });
+
+vi.mock('../lib/facades/shell-facade', () => ({
+  shellFacade: {
+    sendAgentNotification: sendAgentNotificationMock,
+    showMainWindow: showMainWindowMock,
+  },
+}));
+
+const notificationInstances: Array<{ title: string; options?: NotificationOptions; onclick: (() => void) | null }> = [];
 
 const baseConfig: AppConfig = {
   providers: [],
@@ -559,7 +534,7 @@ describe('useAgentNotifications', () => {
     });
   });
 
-  it('does not use the JS notification plugin path for desktop agent notifications', async () => {
+  it('desktop agent notifications dispatch only through the shell bridge, never the renderer Notification API', async () => {
     render(<Harness />);
 
     useAgentStore.setState({
@@ -574,29 +549,11 @@ describe('useAgentNotifications', () => {
         sessionId: 'session-1',
       });
     });
-    expect(sendNotificationMock).not.toHaveBeenCalled();
-    expect(onActionMock).not.toHaveBeenCalled();
+    // 渲染层 Notification 构造器不得被使用(原生通知归属 main 进程,工单 09)。
+    expect(notificationInstances).toHaveLength(0);
   });
 
-  it('opens the app and switches to the session when the backend notification click event arrives', async () => {
-    const setActiveSession = vi.fn();
-    useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
-    render(<Harness />);
-
-    await waitFor(() => {
-      expect(listenMock).toHaveBeenCalledWith('agent-notification-clicked', expect.any(Function));
-    });
-
-    const clickCallback = listenMock.mock.calls[0]?.[1] as ((event: { payload: unknown }) => void) | undefined;
-    clickCallback?.({ payload: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      expect(showMainWindowMock).toHaveBeenCalled();
-      expect(setActiveSession).toHaveBeenCalledWith('session-1');
-    });
-  });
-
-  it('subscribes notification clicks via the Electron preload bridge instead of the tauri event API', async () => {
+  it('subscribes notification clicks via the Electron preload bridge (工单 09 终态)', async () => {
     const setActiveSession = vi.fn();
     useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
     let clickCallback: ((payload: unknown) => void) | null = null;
@@ -607,29 +564,36 @@ describe('useAgentNotifications', () => {
       clickCallback = callback;
       return unsubscribe;
     });
-    isElectronDesktopMock.mockReturnValue(true);
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(onAgentNotificationClickedBridgeMock).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    clickCallback?.({ sessionId: 'session-1' });
+
+    await waitFor(() => {
+      expect(showMainWindowMock).toHaveBeenCalled();
+      expect(setActiveSession).toHaveBeenCalledWith('session-1');
+    });
+
+    cleanup();
+    expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it('desktop bridge 缺失时跳过点击订阅,不抛错也不唤起主窗口', async () => {
+    const setActiveSession = vi.fn();
+    useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
+    onAgentNotificationClickedBridgeMock.mockClear();
+    bridgeState.present = false;
 
     try {
+      // 桥缺失:订阅跳过(无原生通知可点),其余通知逻辑照常运行。
       render(<Harness />);
-
-      await waitFor(() => {
-        expect(onAgentNotificationClickedBridgeMock).toHaveBeenCalledWith(expect.any(Function));
-      });
-      // Electron 壳内不得再走 tauri 事件 API 订阅同一事件(避免双订阅)。
-      expect(listenMock).not.toHaveBeenCalledWith('agent-notification-clicked', expect.any(Function));
-
-      clickCallback?.({ sessionId: 'session-1' });
-
-      await waitFor(() => {
-        expect(showMainWindowMock).toHaveBeenCalled();
-        expect(setActiveSession).toHaveBeenCalledWith('session-1');
-      });
-
-      cleanup();
-      expect(unsubscribe).toHaveBeenCalled();
+      expect(onAgentNotificationClickedBridgeMock).not.toHaveBeenCalled();
     } finally {
-      isElectronDesktopMock.mockReturnValue(false);
-      onAgentNotificationClickedBridgeMock.mockReset();
+      bridgeState.present = true;
     }
   });
 });

@@ -443,7 +443,7 @@ fn reveal_in_explorer(path: &str) -> Result<(), String> {
 }
 
 /// Open a directory in the system file explorer, or reveal a file in its parent folder.
-#[tauri::command]
+
 pub fn open_in_explorer(path: String) -> Result<(), String> {
     let trimmed = path.trim();
     if std::path::Path::new(trimmed)
@@ -480,7 +480,6 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub fn open_project_path(path: String, target: String) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -510,7 +509,6 @@ pub fn open_project_path(path: String, target: String) -> Result<(), String> {
     spawn_open_project_commands(commands)
 }
 
-#[tauri::command]
 pub fn read_file(path: String, base_path: Option<String>) -> Result<String, String> {
     let canonical = resolve_secure_path(&path, base_path)?;
     debug!(target: "file", "Reading file path={}", canonical.display());
@@ -518,7 +516,7 @@ pub fn read_file(path: String, base_path: Option<String>) -> Result<String, Stri
 }
 
 /// Write content to a file. Creates the file if it doesn't exist.
-#[tauri::command]
+
 pub fn write_file(path: String, content: String, base_path: Option<String>) -> Result<(), String> {
     let full_path = resolve_secure_path_for_write(&path, base_path)?;
     info!(target: "file", "Writing file path={} bytes={}", full_path.display(), content.len());
@@ -531,7 +529,7 @@ pub fn write_file(path: String, content: String, base_path: Option<String>) -> R
 }
 
 /// Delete a file from disk.
-#[tauri::command]
+
 pub fn delete_file(path: String, base_path: Option<String>) -> Result<(), String> {
     let canonical = resolve_secure_path(&path, base_path)?;
     if !canonical.is_file() {
@@ -551,7 +549,7 @@ pub struct FileNode {
 
 /// List directory contents as a tree structure.
 /// Excludes common large directories. Hidden entries can be included by the caller.
-#[tauri::command]
+
 pub fn list_directory(
     path: String,
     base_path: Option<String>,
@@ -689,7 +687,7 @@ fn list_dir_recursive(
 
 /// Read a file from the user's home directory.
 /// `relative_path` is relative to ~ (e.g. ".codex/models_cache.json").
-#[tauri::command]
+
 pub fn read_home_file(relative_path: String) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
     let path = resolve_secure_home_path(&relative_path, &home)?;

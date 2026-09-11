@@ -64,41 +64,6 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../lib/tauri', () => ({
-  agentApi: {
-    shutdown: vi.fn(),
-    deleteClaudeSessionFiles: vi.fn(),
-    deleteCodexSessionFiles: vi.fn(),
-    deleteOpenCodeSession: vi.fn(),
-    resetSession: vi.fn(),
-  },
-  configApi: {
-    get: vi.fn(),
-    updateProvider: vi.fn(),
-    deleteProvider: vi.fn(),
-    setActiveProvider: vi.fn(),
-    setDefaultAgentKind: vi.fn(),
-    updateAgentConfig: vi.fn(),
-    setTheme: vi.fn(),
-    fetchModels: vi.fn(),
-    testProvider: vi.fn(),
-  },
-  sessionApi: {
-    create: vi.fn(),
-    getAll: vi.fn(),
-    getArchived: vi.fn(),
-    delete: vi.fn(),
-    archive: vi.fn(),
-    unarchive: vi.fn(),
-    updateTitle: vi.fn(),
-    updatePermissions: vi.fn(),
-    touch: vi.fn(),
-    forkClaude: vi.fn(),
-    forkCodex: vi.fn(),
-    forkOpenCode: vi.fn(),
-  },
-}));
-
 describe('session store createSession', () => {
   beforeEach(async () => {
     vi.clearAllMocks();

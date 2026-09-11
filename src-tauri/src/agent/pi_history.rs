@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, info};
 use serde_json::{json, Value};
-use tauri::State;
 
 use crate::config::types::AgentKind;
 
@@ -666,14 +665,6 @@ pub(crate) fn resolve_pi_agent_session_info(
     }
 }
 
-#[tauri::command]
-pub async fn load_pi_session_events(
-    state: tauri::State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<Value>, String> {
-    load_pi_session_events_impl(state.inner(), &app_session_id).await
-}
-
 async fn load_pi_session_events_impl(
     state: &crate::AppState,
     app_session_id: &str,
@@ -684,8 +675,7 @@ async fn load_pi_session_events_impl(
         app_session_id
     );
 
-    let Some(session_file) = get_agent_session_id(state, app_session_id, AgentKind::Pi)?
-    else {
+    let Some(session_file) = get_agent_session_id(state, app_session_id, AgentKind::Pi)? else {
         info!(
             target: "agent",
             "No pi mapping found for app_session_id={}",
@@ -1189,9 +1179,8 @@ mod tests {
     fn resolves_pi_agent_session_info_from_jsonl_mapping_path() {
         let home = test_home("resolve-info");
         fs::create_dir_all(&home).unwrap();
-        let session_file = home.join(
-            "2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl",
-        );
+        let session_file =
+            home.join("2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl");
         fs::write(
             &session_file,
             concat!(
@@ -1215,9 +1204,8 @@ mod tests {
     fn resolves_pi_agent_session_info_from_filename_when_session_header_missing() {
         let home = test_home("resolve-filename");
         fs::create_dir_all(&home).unwrap();
-        let session_file = home.join(
-            "2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl",
-        );
+        let session_file =
+            home.join("2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl");
         fs::write(&session_file, "{}\n").unwrap();
 
         let stored = session_file.to_string_lossy().to_string();

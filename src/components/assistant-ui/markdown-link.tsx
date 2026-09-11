@@ -1,8 +1,8 @@
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
-import { open } from '@tauri-apps/plugin-shell';
 import { defaultRehypePlugins } from 'streamdown';
 import type { StreamdownProps } from 'streamdown';
 
+import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/stores/projectStore';
 import { usePreviewStore, type FileTreeNodeData } from '@/stores/previewStore';
@@ -62,7 +62,8 @@ export function CodeMuxMarkdownLink({
     }
 
     if (!filePath) {
-      void open(href);
+      // 外链走壳桥 openExternal(main 侧 shell.openExternal,仅 http/https)。
+      void shellFacade.openExternal(href).catch(() => {});
       return;
     }
 

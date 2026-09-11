@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react';
 
-import type { AgentInstallationReport } from '@/lib/tauri';
+import type { AgentInstallationReport } from '@/lib/desktop-bridge';
 import {
   Dialog,
   DialogContent,

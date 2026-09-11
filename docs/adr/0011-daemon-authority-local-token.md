@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted(过渡条款已被 ADR 0012 取代)
 
 ## Context
 
@@ -22,4 +22,6 @@ CodeMUX previously conflated「移动伴侣」开关与 Companion Server 是否�
 
 - 修订 ADR 0008 中「Companion Server 仅随移动同步开启」的表述。
 - 桌面、手机、CLI 共享 CodeMUX Event 与 Companion REST/WS；换桌面壳只需替换 Browser Host 适配器。
-- 迁移期允许 Daemon 与 Tauri 壳同进程；物理拆进程留到换壳时。
+- ~~迁移期允许 Daemon 与 Tauri 壳同进程；物理拆进程留到换壳时。~~
+  该过渡条款已由 [ADR 0012](0012-daemon-process-electron-shell.md) 兑现并取代:
+  Daemon 为独立进程(`codemux-daemon`),桌面壳为 Electron Supervisor,Tauri 壳退役。

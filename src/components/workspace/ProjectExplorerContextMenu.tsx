@@ -1,7 +1,6 @@
-import { openInExplorer as openInExplorerShell } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { toast } from 'sonner';
 
-import { shellFacade } from '../../lib/facades/shell-facade';
 import { getProjectRelativePath } from '../../lib/composerReferences';
 import { getOpenTargetOption } from '../../lib/openTargets';
 import { useAgentStore } from '../../stores/agentStore';
@@ -36,7 +35,7 @@ async function copyText(value: string) {
 
 async function openInExplorer(path: string) {
   try {
-    await openInExplorerShell(path);
+    await shellFacade.openInExplorer(path);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   }

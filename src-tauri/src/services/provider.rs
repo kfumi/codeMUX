@@ -7,10 +7,6 @@ use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
 use std::str::FromStr;
-use std::sync::Arc;
-
-use crate::daemon::DaemonState;
-use tauri::State;
 
 const AGENT_PROVIDER_PROFILE_RETIRED: &str =
     "AgentProviderProfile 已退役（ADR 0005）。请使用模型供应商（Model Provider）配置。";
@@ -136,12 +132,10 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     redacted
 }
 
-#[tauri::command]
 pub fn upsert_agent_provider_profile(_profile: serde_json::Value) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn activate_agent_provider_profile(
     _agent_kind: String,
     _profile_id: String,
@@ -149,22 +143,18 @@ pub fn activate_agent_provider_profile(
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn activate_default_claude_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn activate_default_codex_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn activate_default_opencode_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn set_active_agent_profile_model(
     _agent_kind: String,
     _default_model: String,
@@ -172,12 +162,10 @@ pub fn set_active_agent_profile_model(
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn delete_agent_provider_profile(_profile_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn fetch_agent_profile_models(
     _agent_kind: String,
     _profile_id: String,
@@ -185,7 +173,6 @@ pub fn fetch_agent_profile_models(
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub async fn test_agent_provider_profile(
     _agent_kind: String,
     _profile_id: String,
@@ -193,37 +180,21 @@ pub async fn test_agent_provider_profile(
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
-pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
-    get_config_for_companion(state.inner())
-}
-
 pub fn get_config_for_companion(state: &AppState) -> AppConfig {
     debug!(target: "provider", "Loading app config");
     redact_config_for_frontend(&state.config.lock().unwrap())
 }
 
-#[tauri::command]
 pub fn update_provider(_provider: Provider) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn delete_provider(_provider_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
-#[tauri::command]
 pub fn set_active_provider(_provider_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
-}
-
-#[tauri::command]
-pub fn set_default_agent_kind(
-    daemon: State<'_, Arc<DaemonState>>,
-    agent_kind: String,
-) -> Result<(), String> {
-    set_default_agent_kind_for_companion(&daemon.app, &daemon.roots, agent_kind)
 }
 
 pub fn set_default_agent_kind_for_companion(
@@ -238,15 +209,6 @@ pub fn set_default_agent_kind_for_companion(
     Ok(())
 }
 
-#[tauri::command]
-pub fn update_agent_config(
-    daemon: State<'_, Arc<DaemonState>>,
-    agent_kind: String,
-    config: serde_json::Value,
-) -> Result<(), String> {
-    update_agent_config_for_companion(&daemon.app, &daemon.roots, agent_kind, config)
-}
-
 pub fn update_agent_config_for_companion(
     state: &AppState,
     roots: &crate::paths::PathRoots,
@@ -259,11 +221,6 @@ pub fn update_agent_config_for_companion(
 
     crate::config::save_config(roots, &app_config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_theme(daemon: State<'_, Arc<DaemonState>>, theme: String) -> Result<(), String> {
-    set_theme_for_companion(&daemon.app, &daemon.roots, theme)
 }
 
 pub fn set_theme_for_companion(
@@ -282,14 +239,6 @@ pub fn set_theme_for_companion(
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_compact_ai_output(
-    daemon: State<'_, Arc<DaemonState>>,
-    enabled: bool,
-) -> Result<(), String> {
-    set_compact_ai_output_for_companion(&daemon.app, &daemon.roots, enabled)
-}
-
 pub fn set_compact_ai_output_for_companion(
     state: &AppState,
     roots: &crate::paths::PathRoots,
@@ -300,14 +249,6 @@ pub fn set_compact_ai_output_for_companion(
     config.compact_ai_output = enabled;
     crate::config::save_config(roots, &config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_immediate_run_mode(
-    daemon: State<'_, Arc<DaemonState>>,
-    mode: String,
-) -> Result<(), String> {
-    set_immediate_run_mode_for_companion(&daemon.app, &daemon.roots, mode)
 }
 
 pub fn set_immediate_run_mode_for_companion(
@@ -324,14 +265,6 @@ pub fn set_immediate_run_mode_for_companion(
     config.immediate_run_mode = mode;
     crate::config::save_config(roots, &config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_attachment_enrichment(
-    daemon: State<'_, Arc<DaemonState>>,
-    enrichment: AttachmentEnrichmentConfig,
-) -> Result<(), String> {
-    set_attachment_enrichment_for_companion(&daemon.app, &daemon.roots, enrichment)
 }
 
 pub fn set_attachment_enrichment_for_companion(
@@ -360,14 +293,6 @@ pub fn set_attachment_enrichment_for_companion(
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_notification_settings(
-    daemon: State<'_, Arc<DaemonState>>,
-    settings: NotificationSettings,
-) -> Result<(), String> {
-    set_notification_settings_for_companion(&daemon.app, &daemon.roots, settings)
-}
-
 pub fn set_notification_settings_for_companion(
     state: &AppState,
     roots: &crate::paths::PathRoots,
@@ -394,14 +319,6 @@ pub fn set_notification_settings_for_companion(
     config.notifications = settings;
     crate::config::save_config(roots, &config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_default_open_target(
-    daemon: State<'_, Arc<DaemonState>>,
-    target: String,
-) -> Result<(), String> {
-    set_default_open_target_for_companion(&daemon.app, &daemon.roots, target)
 }
 
 pub fn set_default_open_target_for_companion(
@@ -439,14 +356,6 @@ pub fn set_browser_control_for_companion(
     config.browser = settings;
     crate::config::save_config(roots, &config)?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_git_settings(
-    daemon: State<'_, Arc<DaemonState>>,
-    settings: GitSettingsConfig,
-) -> Result<(), String> {
-    set_git_settings_for_companion(&daemon.app, &daemon.roots, settings)
 }
 
 pub fn set_git_settings_for_companion(
@@ -583,7 +492,6 @@ fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
 
 const OPENCODE_FREE_MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
 
-#[tauri::command]
 pub async fn fetch_opencode_free_models() -> Result<Vec<ModelInfo>, String> {
     fetch_opencode_free_models_for_companion().await
 }
@@ -771,7 +679,6 @@ pub(crate) async fn probe_openai_models(
     }
 }
 
-#[tauri::command]
 pub async fn fetch_provider_models(
     api_key: String,
     base_url: String,
@@ -789,46 +696,6 @@ pub async fn fetch_provider_models_for_companion(
 }
 
 /// Test a provider by sending a streaming request. Returns model name on success.
-#[tauri::command]
-pub async fn test_provider(
-    state: State<'_, Arc<AppState>>,
-    provider_id: String,
-) -> Result<String, String> {
-    info!(target: "provider", "Testing provider provider_id={}", provider_id);
-    let provider = {
-        let config = state.config.lock().unwrap();
-        config
-            .providers
-            .iter()
-            .find(|p| p.id == provider_id)
-            .cloned()
-            .ok_or("供应商不存在")?
-    };
-
-    let max_retries = 2;
-    let mut last_error = String::new();
-
-    for attempt in 0..=max_retries {
-        match test_provider_once(&provider).await {
-            Ok(model) => return Ok(model),
-            Err(e) => {
-                last_error = e;
-                // Only retry on timeout-like errors
-                if (last_error.contains("超时")
-                    || last_error.contains("timeout")
-                    || last_error.contains("连接"))
-                    && attempt < max_retries
-                {
-                    continue;
-                }
-                return Err(last_error);
-            }
-        }
-    }
-
-    Err(last_error)
-}
-
 /// Single test attempt: try Anthropic endpoint first, then OpenAI.
 async fn test_provider_once(provider: &Provider) -> Result<String, String> {
     let model = if provider.default_model.is_empty() {

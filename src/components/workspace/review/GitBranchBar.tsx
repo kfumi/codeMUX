@@ -15,7 +15,7 @@ import type {
   GitPullRequestSuggestion,
   GitRepositoryState,
   GitStatusArea,
-} from '../../../lib/tauri';
+} from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../../ui/dropdown-menu';
 import { TooltipHint } from '../../ui/tooltip';

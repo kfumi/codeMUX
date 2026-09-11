@@ -179,16 +179,11 @@ vi.mock('./facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('./tauri', async () => {
-  const actual = await vi.importActual<typeof import('./tauri')>('./tauri');
-  return {
-    ...actual,
-    appApi: {
-      ...actual.appApi,
-      getUserHomeDirectory: appApiMock.getUserHomeDirectory,
-    },
-  };
-});
+vi.mock('./desktop-bridge', () => ({
+  requireDesktopBridge: () => ({
+    getUserHomeDirectory: appApiMock.getUserHomeDirectory,
+  }),
+}));
 
 const worktreeProjects: Project[] = [
   {

@@ -8,7 +8,7 @@ import {
   type GitRepositoryState,
   type GitStatusArea,
   type GitStatusChange,
-} from '../../../lib/tauri';
+} from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { ConfirmDialog } from '../../ui/confirm-dialog';

@@ -69,13 +69,6 @@ vi.mock('./lib/slashCommands', () => ({
   registerSkillCommands: vi.fn(),
 }));
 
-vi.mock('./lib/tauri', () => ({
-  sessionApi: {
-    updateProvider: vi.fn(),
-    updateReasoningEffort: vi.fn(),
-  },
-}));
-
 vi.mock('./stores/agentStore', () => ({
   useAgentStore: (selector: (state: {
     startQuery: ReturnType<typeof vi.fn>;

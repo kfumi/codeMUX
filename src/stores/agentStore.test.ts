@@ -83,85 +83,6 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('../lib/tauri', () => ({
-  agentApi: {
-    ensureSession: vi.fn(),
-    sendInput: vi.fn(),
-    enrichAttachments: enrichAttachmentsMock,
-    startSession: startSessionMock,
-    interrupt: vi.fn(),
-    shutdown: vi.fn(),
-    resetSession: vi.fn(),
-    sendToolResponse: vi.fn(),
-    respondToAgentPermission: respondToAgentPermissionMock,
-    deleteClaudeSessionFiles: vi.fn(),
-    saveEvents: saveEventsMock,
-    getEvents: getEventsMock,
-    loadClaudeSessionEvents: loadClaudeSessionEventsMock,
-    loadCodexSessionEvents: loadCodexSessionEventsMock,
-    loadSessionEvents: loadSessionEventsMock,
-    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
-    resyncSessionFromNative: resyncSessionFromNativeMock,
-    loadLatestTokenUsage: loadLatestTokenUsageMock,
-    rewindSession: rewindSessionMock,
-    startProxy: vi.fn(),
-    stopProxy: vi.fn(),
-    getProxyPort: vi.fn(),
-  },
-  sessionApi: {
-    create: vi.fn(),
-    getAll: vi.fn(),
-    delete: vi.fn(),
-    updateTitle: vi.fn(),
-    updateProvider: vi.fn(),
-    updatePermissions: vi.fn(() => Promise.resolve()),
-    updateWorkingPath: vi.fn(() => Promise.resolve()),
-    touch: vi.fn(() => Promise.resolve()),
-    getMessages: vi.fn(),
-  },
-  configApi: {
-    get: vi.fn(),
-    updateProvider: vi.fn(),
-    deleteProvider: vi.fn(),
-    setActiveProvider: vi.fn(),
-    setDefaultAgentKind: vi.fn(),
-    updateAgentConfig: vi.fn(),
-    setTheme: vi.fn(),
-    fetchModels: vi.fn(),
-    testProvider: vi.fn(),
-  },
-  fileApi: {
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-    deleteFile: vi.fn(),
-    listDirectory: vi.fn(),
-  },
-  companionApi: {
-    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
-  },
-  gitApi: {},
-  mcpApi: {
-    getAll: vi.fn(),
-    upsert: vi.fn(),
-    delete: vi.fn(),
-    toggle: vi.fn(),
-    probeAll: vi.fn(),
-  },
-  skillApi: {
-    listInstalled: vi.fn(),
-    listImportable: vi.fn(),
-    uninstall: vi.fn(),
-    toggleApp: vi.fn(),
-    getContent: vi.fn(),
-    syncBuiltins: vi.fn(),
-    registerFromDisk: vi.fn(),
-    importFromApps: vi.fn(),
-  },
-  appApi: {
-    getLogDirectory: vi.fn(),
-  },
-}));
-
 vi.mock('../lib/daemon-session-bridge', () => ({
   registerDaemonSessionHandler: vi.fn((sessionId: string, handler: (raw: string) => void) => {
     sessionHandlers.set(sessionId, handler);
@@ -394,7 +315,6 @@ describe('agent store Codex history loading', () => {
 
   it('queues pi follow-ups during a running turn instead of sending them immediately', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('pi');
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -417,7 +337,6 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow steers a running pi turn and keeps the remaining queue', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('pi');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -435,7 +354,6 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
-    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
     expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
@@ -482,7 +400,6 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow steers the active Codex turn without interrupting', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
@@ -498,7 +415,6 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
-    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
     expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     expect(startSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
@@ -516,7 +432,6 @@ describe('agent store Codex history loading', () => {
 
   it('keeps isRunning true after runQueuedQueryNow steers the queued message', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
@@ -542,7 +457,6 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow interrupts a slash command instead of steering', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -579,7 +493,6 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow interrupts agents that cannot steer', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('gemini_cli');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -616,7 +529,6 @@ describe('agent store Codex history loading', () => {
   it('runQueuedQueryNow interrupts when the user prefers interrupt over steer', async () => {
     const { useAgentStore } = await import('./agentStore');
     const { useSettingsStore } = await import('./settingsStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -658,7 +570,6 @@ describe('agent store Codex history loading', () => {
 
   it('falls back to interrupt when steer_result reports unavailable', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -811,7 +722,6 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow promotes the chosen message without interrupting when nothing is running', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const { agentApi } = await import('../lib/tauri');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -826,7 +736,6 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().runQueuedQueryNow(session.id, 'queued-b');
 
-    expect(vi.mocked(agentApi.interrupt)).not.toHaveBeenCalled();
     expect(interruptViaDaemonMock).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(startSessionMock.mock.calls.map((call) => call[1])).toEqual(['beta', 'alpha']);

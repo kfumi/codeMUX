@@ -1,8 +1,9 @@
 //! Daemon 核心的注入式环境根。
 //!
-//! 权威侧模块(db、config、agent sidecar 拉起、移动端静态资源)不直接依赖
-//! Tauri 路径 API,而是消费调用方构造并注入的 [`PathRoots`]。Tauri 壳经
-//! [`PathRoots::from_app`] 构造;独立 daemon(后续工单)将改为从启动参数构造。
+//! 权威侧模块(db、config、agent sidecar 拉起、移动端静态资源)不直接
+//! 依赖具体进程环境,而是消费调用方构造并注入的 [`PathRoots`]。
+//! `codemux-daemon` 二进制从启动参数/环境变量构造;Electron 壳的
+//! supervisor spawn 时显式传入。
 
 use std::path::PathBuf;
 
@@ -13,19 +14,6 @@ pub struct PathRoots {
 }
 
 impl PathRoots {
-    pub fn from_app(app: &tauri::AppHandle) -> Result<Self, String> {
-        use tauri::Manager;
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-        let resource_dir = app.path().resource_dir().ok();
-        Ok(Self {
-            app_data_dir,
-            resource_dir,
-        })
-    }
-
     pub fn database_path(&self) -> PathBuf {
         self.app_data_dir.join("codemux.db")
     }

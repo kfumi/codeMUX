@@ -1,26 +1,34 @@
 import type { AgentKind, Session, SessionMode } from '../../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../agentPermissions';
+import type { AgentInputAttachment, EnrichmentBlockResult } from '../../types/agentInput';
+import type { AppConfig, Provider, ModelProvider } from '../../types/provider';
 import type { CompanionStatus } from '../../types/companion';
-
-import {
-  agentApi,
-  companionApi,
-  configApi,
-  fileApi,
-  gitApi,
-  historyImportApi,
-  mcpApi,
-  sessionApi,
-  usageApi,
-} from './invoke-backend';
+import type { ImportCandidate, ImportSessionsRequest, ImportSessionsResult } from '../../types/historyImport';
+import type { UsageStatsResponse, TokenBreakdownResponse } from '../../types/usage';
 import type { Project } from '../../types/project';
 import type { McpServer } from '../../types/mcp';
 import type { ImportableSkill, ProjectSkill, Skill } from '../../types/skill';
 import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../../types/scheduledTask';
-import type { FileTreeNode } from '../tauri';
+import type {
+  GitChangedFile,
+  GitStatusArea,
+  GitStatusChange,
+  GitRepositoryState,
+  GitWorktree,
+  GitCommitMessageSuggestion,
+  GitPullRequestSuggestion,
+  CreatePullRequestRequest,
+  CreatePullRequestResult,
+} from '../gitTypes';
+import type { FileTreeNode } from '../workspaceTypes';
+import type {
+  ManagedRuntimeCheckResult,
+  ManagedRuntimeInfo,
+  ManagedRuntimeOperationResult,
+} from '../runtimeTypes';
 import type { DaemonClient, DaemonConnectionConfig } from '../daemon-client/client';
-import { createDaemonClient, resolveDesktopDaemonConfig } from '../daemon-client/client';
-import { desktopBridge, isElectronDesktop } from '../desktop-bridge';
+import { createDaemonClient } from '../daemon-client/client';
+import { desktopBridge } from '../desktop-bridge';
 
 let activeClient: DaemonClient | null = null;
 let clientInitPromise: Promise<DaemonClient> | null = null;
@@ -33,6 +41,7 @@ export function getDaemonClientInitError(): string | null {
 async function resolveElectronDaemonConfig(): Promise<DaemonConnectionConfig> {
   // Electron 壳(工单 05):token 读 app-data-dir/local-daemon-token,
   // 端口来自 main 侧 supervisor(run-state / spawn 结果)。
+  // 工单 09:Tauri 壳退役,桥缺失(纯 Web)即显式报错,不再有 invoke 回退。
   const bridge = desktopBridge;
   if (!bridge) {
     throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
@@ -48,12 +57,8 @@ export async function ensureDaemonClient(): Promise<DaemonClient> {
   if (activeClient) return activeClient;
   if (!clientInitPromise) {
     clientInitPromise = (async () => {
-      const config = isElectronDesktop()
-        ? await resolveElectronDaemonConfig()
-        : await resolveDesktopDaemonConfig(
-          () => invokeLocalDaemonToken(),
-          () => companionApi.getStatus(),
-        );
+      // 工单 09:Tauri 壳退役,daemon 配置只能来自 Electron 壳桥。
+      const config = await resolveElectronDaemonConfig();
       const health = await fetch(`${config.baseUrl}/api/health`);
       if (!health.ok) {
         throw new Error('本机 Daemon 未就绪，请稍后重试或重启应用。');
@@ -73,15 +78,6 @@ export async function ensureDaemonClient(): Promise<DaemonClient> {
 export function resetDaemonClient(): void {
   activeClient = null;
   clientInitPromise = null;
-}
-
-async function invokeLocalDaemonToken(): Promise<string> {
-  if (isElectronDesktop() && desktopBridge) {
-    // Electron 壳(工单 05):读 app-data-dir/local-daemon-token(preload 桥)。
-    return desktopBridge.getLocalDaemonToken();
-  }
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('get_local_daemon_token');
 }
 
 /** Protocol-backed reads — issue 03+ */
@@ -150,7 +146,7 @@ async function forkSessionViaDaemon(
 
 export const mcpViaDaemon = {
   getAll: async () => (await ensureDaemonClient()).mcpList() as Promise<McpServer[]>,
-  upsert: async (server: Parameters<typeof mcpApi.upsert>[0]) => {
+  upsert: async (server: McpServer) => {
     await (await ensureDaemonClient()).mcpUpsert(server);
   },
   delete: async (id: string) => {
@@ -209,20 +205,21 @@ export const scheduledTasksViaDaemon = {
 
 export const gitViaDaemon = {
   getChangedFiles: async (projectPath: string, baselineTree: string) =>
-    (await ensureDaemonClient()).gitChangedFiles(projectPath, baselineTree),
+    (await ensureDaemonClient()).gitChangedFiles(projectPath, baselineTree) as Promise<GitChangedFile[]>,
   getChangedFilesSinceHead: async (projectPath: string) =>
-    (await ensureDaemonClient()).gitChangedFilesSinceHead(projectPath),
+    (await ensureDaemonClient()).gitChangedFilesSinceHead(projectPath) as Promise<GitChangedFile[]>,
   getRepositoryState: async (projectPath: string) =>
-    (await ensureDaemonClient()).gitRepositoryState(projectPath),
+    (await ensureDaemonClient()).gitRepositoryState(projectPath) as Promise<GitRepositoryState>,
   getStatusChanges: async (
     projectPath: string,
-    area: Parameters<typeof gitApi.getStatusChanges>[1],
-  ) => (await ensureDaemonClient()).gitStatusChanges(projectPath, area),
+    area: GitStatusArea,
+  ) => (await ensureDaemonClient()).gitStatusChanges(projectPath, area) as Promise<GitStatusChange[]>,
   getStatusChangeDetail: async (
     projectPath: string,
-    area: Parameters<typeof gitApi.getStatusChangeDetail>[1],
+    area: GitStatusArea,
     filePath: string,
-  ) => (await ensureDaemonClient()).gitStatusChangeDetail(projectPath, area, filePath),
+  ) =>
+    (await ensureDaemonClient()).gitStatusChangeDetail(projectPath, area, filePath) as Promise<GitStatusChange>,
   stageStatusChanges: async (projectPath: string, filePath?: string) => {
     await (await ensureDaemonClient()).gitStage(projectPath, filePath);
   },
@@ -231,7 +228,7 @@ export const gitViaDaemon = {
   },
   revertStatusChanges: async (
     projectPath: string,
-    area: Parameters<typeof gitApi.revertStatusChanges>[1],
+    area: GitStatusArea,
     filePath?: string,
   ) => {
     await (await ensureDaemonClient()).gitRevert(projectPath, area, filePath);
@@ -243,12 +240,12 @@ export const gitViaDaemon = {
     await (await ensureDaemonClient()).gitCheckoutBranch(projectPath, branchName);
   },
   listWorktrees: async (projectPath: string) =>
-    (await ensureDaemonClient()).gitListWorktrees(projectPath),
+    (await ensureDaemonClient()).gitListWorktrees(projectPath) as Promise<GitWorktree[]>,
   createWorktree: async (
     projectPath: string,
     branchName: string,
     baseBranch?: string | null,
-  ) => (await ensureDaemonClient()).gitCreateWorktree(projectPath, branchName, baseBranch),
+  ) => (await ensureDaemonClient()).gitCreateWorktree(projectPath, branchName, baseBranch) as Promise<GitWorktree>,
   commitChanges: async (projectPath: string, message: string) => {
     const result = await (await ensureDaemonClient()).gitCommit(projectPath, message);
     return result.commit;
@@ -257,11 +254,11 @@ export const gitViaDaemon = {
     await (await ensureDaemonClient()).gitPush(projectPath);
   },
   generateCommitMessage: async (projectPath: string) =>
-    (await ensureDaemonClient()).gitGenerateCommitMessage(projectPath),
+    (await ensureDaemonClient()).gitGenerateCommitMessage(projectPath) as Promise<GitCommitMessageSuggestion>,
   generatePullRequestDescription: async (projectPath: string) =>
-    (await ensureDaemonClient()).gitGeneratePullRequestDescription(projectPath),
-  createPullRequest: async (request: Parameters<typeof gitApi.createPullRequest>[0]) =>
-    (await ensureDaemonClient()).gitCreatePullRequest(request),
+    (await ensureDaemonClient()).gitGeneratePullRequestDescription(projectPath) as Promise<GitPullRequestSuggestion>,
+  createPullRequest: async (request: CreatePullRequestRequest) =>
+    (await ensureDaemonClient()).gitCreatePullRequest(request) as Promise<CreatePullRequestResult>,
   getGiteeCredentialStatus: async () => {
     const result = await (await ensureDaemonClient()).gitGiteeCredentialStatus();
     return result.configured;
@@ -272,13 +269,13 @@ export const gitViaDaemon = {
   clearGiteeToken: async () => {
     await (await ensureDaemonClient()).gitClearGiteeToken();
   },
-} as typeof gitApi;
+};
 
 export const providersViaDaemon = {
   listBuiltinProviderTemplates: async () => (await ensureDaemonClient()).providersTemplates(),
   instantiateBuiltinProviderTemplate: async (templateId: string) =>
     (await ensureDaemonClient()).providersInstantiateTemplate(templateId),
-  upsertModelProvider: async (provider: Parameters<typeof configApi.upsertModelProvider>[0]) => {
+  upsertModelProvider: async (provider: Provider | ModelProvider) => {
     await (await ensureDaemonClient()).providersUpsert(provider);
   },
   deleteModelProvider: async (providerId: string) => {
@@ -305,6 +302,21 @@ export const providersViaDaemon = {
 };
 
 export type { TerminalEvent } from '../daemon-client/terminal';
+
+export const companionViaDaemon = {
+  // Companion(移动伴侣配对):走 daemon client 的 /api/companion/* 面
+  // (daemon 路由未落地前调用以显式错误失败,UI 走既有降级路径)。
+  getStatus: async (): Promise<CompanionStatus> =>
+    (await ensureDaemonClient()).companionGetStatus() as Promise<CompanionStatus>,
+  setEnabled: async (enabled: boolean): Promise<CompanionStatus> =>
+    (await ensureDaemonClient()).companionSetEnabled(enabled) as Promise<CompanionStatus>,
+  refreshPairingCode: async (): Promise<CompanionStatus> =>
+    (await ensureDaemonClient()).companionRefreshPairingCode() as Promise<CompanionStatus>,
+  setRelayEnabled: async (enabled: boolean): Promise<CompanionStatus> =>
+    (await ensureDaemonClient()).companionSetRelayEnabled(enabled) as Promise<CompanionStatus>,
+  setRelayConfig: async (endpoint: string, useTls: boolean): Promise<CompanionStatus> =>
+    (await ensureDaemonClient()).companionSetRelayConfig(endpoint, useTls) as Promise<CompanionStatus>,
+};
 
 export const terminalViaDaemon = {
   start: async (
@@ -398,7 +410,7 @@ export const daemonFacade = {
       permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
       planMode: planMode ?? null,
       model: model ?? null,
-    }) as Session,
+    }) as unknown as Session,
   deleteSession: async (sessionId: string) => {
     await (await ensureDaemonClient()).deleteSession(sessionId);
   },
@@ -471,9 +483,9 @@ export const daemonFacade = {
   ) => {
     await (await ensureDaemonClient()).ensureAgentSession(sessionId, cwd, reasoningEffort);
   },
-  enrichAttachments: async (attachments: Parameters<typeof agentApi.enrichAttachments>[0]) => {
+  enrichAttachments: async (attachments: AgentInputAttachment[]): Promise<{ blocks: EnrichmentBlockResult[] }> => {
     const response = await (await ensureDaemonClient()).enrichAttachments(attachments);
-    return response as Awaited<ReturnType<typeof agentApi.enrichAttachments>>;
+    return response as { blocks: EnrichmentBlockResult[] };
   },
   interruptAgent: async (sessionId: string) => {
     await (await ensureDaemonClient()).interruptSession(sessionId);
@@ -490,7 +502,7 @@ export const daemonFacade = {
   respondToAgentPermission: async (
     sessionId: string,
     requestId: string,
-    response: Parameters<typeof agentApi.respondToAgentPermission>[2],
+    response: 'once' | 'always' | 'reject',
   ) => {
     await (await ensureDaemonClient()).respondToPermission(sessionId, requestId, response);
   },
@@ -520,7 +532,10 @@ export const daemonFacade = {
   },
   loadSessionSubagents: async (sessionId: string) => {
     const payload = await (await ensureDaemonClient()).loadSessionSubagents(sessionId);
-    return payload as Awaited<ReturnType<typeof agentApi.loadSessionSubagents>>;
+    return payload as {
+      subagents: Array<Record<string, unknown>>;
+      timelines: Record<string, Array<Record<string, unknown>>>;
+    };
   },
   resyncSessionFromNative: async (sessionId: string) =>
     (await ensureDaemonClient()).resyncSessionFromNative(sessionId),
@@ -552,7 +567,8 @@ export const daemonFacade = {
       mode,
     }),
 
-  getConfig: async () => (await ensureDaemonClient()).getAppConfig() as Awaited<ReturnType<typeof configApi.get>>,
+  getConfig: async (): Promise<AppConfig> =>
+    (await ensureDaemonClient()).getAppConfig() as Promise<AppConfig>,
   setActiveProvider: providersViaDaemon.setActiveModelProvider,
   listBuiltinProviderTemplates: providersViaDaemon.listBuiltinProviderTemplates,
   instantiateBuiltinProviderTemplate: providersViaDaemon.instantiateBuiltinProviderTemplate,
@@ -629,55 +645,53 @@ export const daemonFacade = {
   skills: skillsViaDaemon,
   scheduledTasks: scheduledTasksViaDaemon,
   historyImport: {
-    discover: async (agentKind?: AgentKind) => {
+    discover: async (agentKind?: AgentKind): Promise<ImportCandidate[]> => {
       const client = await ensureDaemonClient();
-      return client.discoverHistoryImportCandidates(agentKind) as ReturnType<
-        typeof historyImportApi.discover
-      >;
+      return client.discoverHistoryImportCandidates(agentKind) as Promise<ImportCandidate[]>;
     },
-    import: async (request: Parameters<typeof historyImportApi.import>[0]) => {
+    import: async (request: ImportSessionsRequest): Promise<ImportSessionsResult> => {
       const client = await ensureDaemonClient();
-      return client.importHistorySessions(request) as ReturnType<typeof historyImportApi.import>;
+      return client.importHistorySessions(request as Record<string, unknown>) as Promise<ImportSessionsResult>;
     },
   },
   usage: {
-    getStats: async (agentKind?: string, days?: number) =>
-      (await ensureDaemonClient()).usageGetStats(agentKind, days) as Awaited<
-        ReturnType<typeof usageApi.getStats>
-      >,
-    getTokenBreakdown: async (agentKind?: string, days?: number) =>
-      (await ensureDaemonClient()).usageGetTokenBreakdown(agentKind, days) as Awaited<
-        ReturnType<typeof usageApi.getTokenBreakdown>
-      >,
+    getStats: async (agentKind?: string, days?: number): Promise<UsageStatsResponse> =>
+      (await ensureDaemonClient()).usageGetStats(agentKind, days) as Promise<UsageStatsResponse>,
+    getTokenBreakdown: async (agentKind?: string, days?: number): Promise<TokenBreakdownResponse> =>
+      (await ensureDaemonClient()).usageGetTokenBreakdown(agentKind, days) as Promise<TokenBreakdownResponse>,
   },
 
-  checkManagedRuntimes: async () => (await ensureDaemonClient()).checkManagedRuntimes(),
+  checkManagedRuntimes: async (): Promise<ManagedRuntimeCheckResult> =>
+    (await ensureDaemonClient()).checkManagedRuntimes() as Promise<ManagedRuntimeCheckResult>,
 
   managedRuntime: {
-    listVersions: async (provider: string) =>
-      (await ensureDaemonClient()).managedRuntimeListVersions(provider),
-    refresh: async (provider: string) =>
-      (await ensureDaemonClient()).managedRuntimeRefresh(provider),
-    install: async (provider: string, version?: string) =>
-      (await ensureDaemonClient()).managedRuntimeInstall(provider, version),
-    upgrade: async (provider: string) =>
-      (await ensureDaemonClient()).managedRuntimeUpgrade(provider),
-    repair: async (provider: string) =>
-      (await ensureDaemonClient()).managedRuntimeRepair(provider),
+    listVersions: async (provider: string): Promise<string[]> =>
+      (await ensureDaemonClient()).managedRuntimeListVersions(provider) as Promise<string[]>,
+    refresh: async (provider: string): Promise<ManagedRuntimeInfo> =>
+      (await ensureDaemonClient()).managedRuntimeRefresh(provider) as Promise<ManagedRuntimeInfo>,
+    install: async (provider: string, version?: string): Promise<ManagedRuntimeOperationResult> =>
+      (await ensureDaemonClient()).managedRuntimeInstall(provider, version) as Promise<ManagedRuntimeOperationResult>,
+    upgrade: async (provider: string): Promise<ManagedRuntimeOperationResult | null> =>
+      (await ensureDaemonClient()).managedRuntimeUpgrade(provider) as Promise<ManagedRuntimeOperationResult | null>,
+    repair: async (provider: string): Promise<ManagedRuntimeOperationResult | null> =>
+      (await ensureDaemonClient()).managedRuntimeRepair(provider) as Promise<ManagedRuntimeOperationResult | null>,
     remove: async (provider: string) => {
       await (await ensureDaemonClient()).managedRuntimeRemove(provider);
     },
   },
 
-  getCompanionStatus: (): Promise<CompanionStatus> => companionApi.getStatus(),
-  setCompanionEnabled: (...args: Parameters<typeof companionApi.setEnabled>) =>
-    companionApi.setEnabled(...args),
-  refreshCompanionPairingCode: (...args: Parameters<typeof companionApi.refreshPairingCode>) =>
-    companionApi.refreshPairingCode(...args),
-  setCompanionRelayEnabled: (...args: Parameters<typeof companionApi.setRelayEnabled>) =>
-    companionApi.setRelayEnabled(...args),
-  setCompanionRelayConfig: (...args: Parameters<typeof companionApi.setRelayConfig>) =>
-    companionApi.setRelayConfig(...args),
+  // Companion(移动伴侣配对):走 daemon client 的 /api/companion/* 面
+  // (daemon 路由未落地前调用以显式错误失败,UI 走既有降级路径)。
+  getCompanionStatus: (): Promise<CompanionStatus> =>
+    companionViaDaemon.getStatus(),
+  setCompanionEnabled: (enabled: boolean): Promise<CompanionStatus> =>
+    companionViaDaemon.setEnabled(enabled),
+  refreshCompanionPairingCode: (): Promise<CompanionStatus> =>
+    companionViaDaemon.refreshPairingCode(),
+  setCompanionRelayEnabled: (enabled: boolean): Promise<CompanionStatus> =>
+    companionViaDaemon.setRelayEnabled(enabled),
+  setCompanionRelayConfig: (endpoint: string, useTls: boolean): Promise<CompanionStatus> =>
+    companionViaDaemon.setRelayConfig(endpoint, useTls),
 };
 
 export type DaemonFacade = typeof daemonFacade;

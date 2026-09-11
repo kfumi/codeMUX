@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { companionApi } from '../lib/tauri';
+import { companionViaDaemon } from '../lib/facades/daemon-facade';
 import type { CompanionStatus } from '../types/companion';
 
 interface UseCompanionStatusOptions {
@@ -19,7 +19,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setLoading(true);
     setError(null);
     try {
-      const next = await companionApi.getStatus();
+      const next = await companionViaDaemon.getStatus();
       setStatus(next);
     } catch (err) {
       setError(String(err));
@@ -44,7 +44,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setBusy(true);
     setError(null);
     try {
-      const next = await companionApi.setEnabled(enabled);
+      const next = await companionViaDaemon.setEnabled(enabled);
       setStatus(next);
       return next;
     } catch (err) {
@@ -59,7 +59,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setBusy(true);
     setError(null);
     try {
-      const next = await companionApi.refreshPairingCode();
+      const next = await companionViaDaemon.refreshPairingCode();
       setStatus(next);
       return next;
     } catch (err) {
@@ -74,7 +74,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setBusy(true);
     setError(null);
     try {
-      const next = await companionApi.setRelayEnabled(enabled);
+      const next = await companionViaDaemon.setRelayEnabled(enabled);
       setStatus(next);
       return next;
     } catch (err) {
@@ -89,7 +89,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setBusy(true);
     setError(null);
     try {
-      const next = await companionApi.setRelayConfig(endpoint, useTls);
+      const next = await companionViaDaemon.setRelayConfig(endpoint, useTls);
       setStatus(next);
       return next;
     } catch (err) {

@@ -53,6 +53,20 @@ function onBrowserNewWindow(callback: (payload: unknown) => void): () => void {
   };
 }
 
+/**
+ * 桌面 UI 事件订阅(工单 09):daemon 控制面 WS 广播的 ui-event 帧
+ * (sessions-changed / scheduled-tasks-changed / runtime-install-progress*)
+ * 经 main 按同名事件名转发;返回取消订阅函数。事件名白名单校验在 main 侧
+ * (desktop-events.ts),preload 只做按名转发。
+ */
+function onDesktopEvent(name: string, callback: (payload: unknown) => void): () => void {
+  const listener = (_event: IpcRendererEvent, payload: unknown) => callback(payload);
+  ipcRenderer.on(name, listener);
+  return () => {
+    ipcRenderer.off(name, listener);
+  };
+}
+
 const bridge = {
   // token / 目录 / 日志
   getLocalDaemonToken: () => invoke<string>('getLocalDaemonToken'),
@@ -66,6 +80,15 @@ const bridge = {
   // 资源管理器 / 项目打开
   openInExplorer: (path: string, reveal?: boolean) => invoke<void>('openInExplorer', { path, reveal }),
   openProjectPath: (path: string, target: string) => invoke<void>('openProjectPath', { path, target }),
+
+  // 外链(工单 09:main 仅放行 http/https,shell.openExternal)
+  openExternal: (url: string) => invoke<void>('openExternal', url),
+
+  // 窗口控制(工单 09:自绘标题栏;close = 隐藏到托盘)
+  minimizeWindow: () => invoke<void>('windowMinimize'),
+  toggleMaximizeWindow: () => invoke<void>('windowToggleMaximize'),
+  closeWindow: () => invoke<void>('windowClose'),
+  isWindowMaximized: () => invoke<boolean>('windowIsMaximized'),
 
   // 文件/目录对话框(工单 06;options 形状对齐 @tauri-apps/plugin-dialog,
   // 取消/关闭返回 null,multiple 为 string[])
@@ -88,6 +111,9 @@ const bridge = {
   checkAgentRuntimes: () => invoke('checkAgentRuntimes'),
   probeAgentInstallations: (agentKind: string) => invoke('probeAgentInstallations', agentKind),
   upgradeAgentRuntime: (agentKind: string) => invoke('upgradeAgentRuntime', agentKind),
+
+  // 系统字体清单(工单 09:main 侧常见字体常量清单)
+  listSystemFonts: () => invoke<string[]>('getSystemFonts'),
 
   // browser.*(工单 07):页面托管已迁移到渲染层 <webview>;桥面保留「清资料」
   // 与「guest 登记」数据面,其余通道为契约占位(几何 no-op,其余 reject 兜底,
@@ -122,6 +148,7 @@ const bridge = {
   onAgentNotificationClicked,
   onUpdaterEvent,
   onBrowserNewWindow,
+  onDesktopEvent,
 };
 
 contextBridge.exposeInMainWorld('codemuxDesktop', bridge);

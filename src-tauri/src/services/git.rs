@@ -1,5 +1,4 @@
 use crate::config::types::{AppConfig, Provider};
-use crate::AppState;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -8,7 +7,6 @@ use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tauri::State;
 
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
@@ -1731,7 +1729,6 @@ pub fn read_git_changed_files_for_tree(
     Ok(changed_files)
 }
 
-#[tauri::command]
 pub fn get_git_changed_files(
     project_path: String,
     baseline_tree: String,
@@ -1739,7 +1736,6 @@ pub fn get_git_changed_files(
     read_git_changed_files_for_tree(Path::new(&project_path), &baseline_tree)
 }
 
-#[tauri::command]
 pub fn get_git_changed_files_since_head(
     project_path: String,
 ) -> Result<Vec<GitChangedFile>, String> {
@@ -1761,7 +1757,6 @@ pub fn get_git_changed_files_since_head(
     read_git_changed_files_for_tree(&root, &head_tree)
 }
 
-#[tauri::command]
 pub fn get_git_status_changes(
     project_path: String,
     area: GitStatusArea,
@@ -1769,7 +1764,6 @@ pub fn get_git_status_changes(
     read_git_status_changes(Path::new(&project_path), area)
 }
 
-#[tauri::command]
 pub fn get_git_status_change_detail(
     project_path: String,
     area: GitStatusArea,
@@ -1778,7 +1772,6 @@ pub fn get_git_status_change_detail(
     read_git_status_change_detail(Path::new(&project_path), area, &file_path)
 }
 
-#[tauri::command]
 pub fn stage_git_status_changes(
     project_path: String,
     file_path: Option<String>,
@@ -1786,7 +1779,6 @@ pub fn stage_git_status_changes(
     stage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 
-#[tauri::command]
 pub fn unstage_git_status_changes(
     project_path: String,
     file_path: Option<String>,
@@ -1794,12 +1786,10 @@ pub fn unstage_git_status_changes(
     unstage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 
-#[tauri::command]
 pub fn get_git_repository_state(project_path: String) -> Result<GitRepositoryState, String> {
     read_git_repository_state(Path::new(&project_path))
 }
 
-#[tauri::command]
 pub fn create_git_branch(
     project_path: String,
     branch_name: String,
@@ -1808,17 +1798,14 @@ pub fn create_git_branch(
     create_git_branch_in_project(Path::new(&project_path), &branch_name, checkout)
 }
 
-#[tauri::command]
 pub fn checkout_git_branch(project_path: String, branch_name: String) -> Result<(), String> {
     checkout_git_branch_in_project(Path::new(&project_path), &branch_name)
 }
 
-#[tauri::command]
 pub fn list_git_worktrees(project_path: String) -> Result<Vec<GitWorktree>, String> {
     list_git_worktrees_in_project(Path::new(&project_path))
 }
 
-#[tauri::command]
 pub fn create_git_worktree(
     project_path: String,
     branch_name: String,
@@ -1833,7 +1820,6 @@ pub fn create_git_worktree(
     )
 }
 
-#[tauri::command]
 pub fn revert_git_status_changes(
     project_path: String,
     area: GitStatusArea,
@@ -1842,32 +1828,12 @@ pub fn revert_git_status_changes(
     revert_git_status_changes_in_project(Path::new(&project_path), area, file_path.as_deref())
 }
 
-#[tauri::command]
 pub fn commit_git_changes(project_path: String, message: String) -> Result<String, String> {
     commit_git_changes_in_project(Path::new(&project_path), &message)
 }
 
-#[tauri::command]
 pub fn push_git_branch(project_path: String) -> Result<(), String> {
     push_git_branch_in_project(Path::new(&project_path))
-}
-
-#[tauri::command]
-pub async fn generate_git_commit_message(
-    state: State<'_, std::sync::Arc<AppState>>,
-    project_path: String,
-) -> Result<GitCommitMessageSuggestion, String> {
-    let config = state.config.lock().unwrap().clone();
-    generate_git_commit_message_in_project(Path::new(&project_path), &config).await
-}
-
-#[tauri::command]
-pub async fn generate_pull_request_description(
-    state: State<'_, std::sync::Arc<AppState>>,
-    project_path: String,
-) -> Result<GitPullRequestSuggestion, String> {
-    let config = state.config.lock().unwrap().clone();
-    generate_pull_request_description_in_project(Path::new(&project_path), &config).await
 }
 
 #[cfg(test)]

@@ -6,22 +6,18 @@ import { toast } from 'sonner';
 
 import { AgentPreferencesPanel, AgentSettingsPanel, RuntimeCard } from './AgentSettings';
 import { useSettingsStore } from '../../stores/settingsStore';
-import type { AgentInstallationReport, AgentRuntimeCheck } from '../../lib/tauri';
+import type { AgentInstallationReport, AgentRuntimeCheck } from '../../lib/desktop-bridge';
 
 const checkAgentRuntimesMock = vi.fn();
 const upgradeAgentRuntimeMock = vi.fn();
 const probeAgentInstallationsMock = vi.fn();
 
-vi.mock('../../lib/tauri', () => ({
-  appApi: {
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
     checkAgentRuntimes: (...args: unknown[]) => checkAgentRuntimesMock(...args),
     upgradeAgentRuntime: (...args: unknown[]) => upgradeAgentRuntimeMock(...args),
     probeAgentInstallations: (...args: unknown[]) => probeAgentInstallationsMock(...args),
   },
-}));
-
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('sonner', () => ({

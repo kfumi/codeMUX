@@ -1,4 +1,4 @@
-//! Runtime 管理 Tauri 命令。
+//! Runtime 管理服务(供 companion 控制面路由调用)。
 //!
 //! 提供统一的 Runtime 检测、安装、升级、修复、删除和重新检测入口，
 //! 与外部 CLI 诊断（`agent_runtime_check`）完全分离。
@@ -8,8 +8,6 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use std::sync::Arc;
-
-use tauri::{AppHandle, Emitter, State};
 
 use crate::runtime::infra::{detect_system_node, detect_system_npm, SystemNodeResolver};
 use crate::runtime::npm::NpmRuntimeManager;
@@ -122,13 +120,6 @@ impl ProgressReporter for RuntimeProgressReporter {
     }
 }
 
-#[tauri::command]
-pub async fn check_managed_runtimes(
-    state: State<'_, Arc<AppState>>,
-) -> Result<ManagedRuntimeCheckResult, String> {
-    check_managed_runtimes_impl(state.inner()).await
-}
-
 pub async fn check_managed_runtimes_impl(
     state: &AppState,
 ) -> Result<ManagedRuntimeCheckResult, String> {
@@ -151,14 +142,6 @@ pub async fn check_managed_runtimes_impl(
 ///
 /// 这个命令与本地状态检测分开，避免首次打开设置页被 registry 请求阻塞；
 /// 前端会在页面加载后并行调用三个 Provider，并把结果填入对应卡片。
-#[tauri::command]
-pub async fn list_managed_runtime_versions(
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-) -> Result<Vec<String>, String> {
-    list_managed_runtime_versions_impl(state.inner(), provider).await
-}
-
 pub async fn list_managed_runtime_versions_impl(
     state: &AppState,
     provider: String,
@@ -173,14 +156,6 @@ pub async fn list_managed_runtime_versions_impl(
 }
 
 /// 重新检测指定 Provider 的 Runtime 状态。
-#[tauri::command]
-pub async fn refresh_managed_runtime(
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-) -> Result<ManagedRuntimeInfo, String> {
-    refresh_managed_runtime_impl(state.inner(), provider).await
-}
-
 pub async fn refresh_managed_runtime_impl(
     state: &AppState,
     provider: String,
@@ -265,28 +240,6 @@ fn build_status_message(
 }
 
 /// 安装指定 Provider 的最新版本 Runtime。
-#[tauri::command]
-pub async fn install_managed_runtime(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-    version: Option<String>,
-) -> Result<ManagedRuntimeOperationResult, String> {
-    let provider =
-        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let progress = Arc::new(RuntimeProgressReporter::new(
-        Arc::new(crate::shell::TauriUiEventSink::new(app)),
-        provider,
-    ));
-    install_managed_runtime_impl(
-        state.inner(),
-        provider.as_str().to_string(),
-        version,
-        progress,
-    )
-    .await
-}
-
 pub async fn install_managed_runtime_impl(
     state: &AppState,
     provider: String,
@@ -310,21 +263,6 @@ pub async fn install_managed_runtime_impl(
 }
 
 /// 升级指定 Provider 到最新版本。
-#[tauri::command]
-pub async fn upgrade_managed_runtime(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-) -> Result<Option<ManagedRuntimeOperationResult>, String> {
-    let provider =
-        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let progress = Arc::new(RuntimeProgressReporter::new(
-        Arc::new(crate::shell::TauriUiEventSink::new(app)),
-        provider,
-    ));
-    upgrade_managed_runtime_impl(state.inner(), provider.as_str().to_string(), progress).await
-}
-
 pub async fn upgrade_managed_runtime_impl(
     state: &AppState,
     provider: String,
@@ -341,21 +279,6 @@ pub async fn upgrade_managed_runtime_impl(
 }
 
 /// 修复指定 Provider 的当前版本（若完整性失败则重新下载安装）。
-#[tauri::command]
-pub async fn repair_managed_runtime(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-) -> Result<Option<ManagedRuntimeOperationResult>, String> {
-    let provider =
-        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let progress = Arc::new(RuntimeProgressReporter::new(
-        Arc::new(crate::shell::TauriUiEventSink::new(app)),
-        provider,
-    ));
-    repair_managed_runtime_impl(state.inner(), provider.as_str().to_string(), progress).await
-}
-
 pub async fn repair_managed_runtime_impl(
     state: &AppState,
     provider: String,
@@ -372,14 +295,6 @@ pub async fn repair_managed_runtime_impl(
 }
 
 /// 删除指定 Provider 的 Runtime。
-#[tauri::command]
-pub async fn remove_managed_runtime(
-    state: State<'_, Arc<AppState>>,
-    provider: String,
-) -> Result<(), String> {
-    remove_managed_runtime_impl(state.inner(), provider).await
-}
-
 pub async fn remove_managed_runtime_impl(state: &AppState, provider: String) -> Result<(), String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;

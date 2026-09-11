@@ -11,7 +11,6 @@ import type {
   BrowserControlSettings,
   ImmediateRunMode,
 } from '../types/provider';
-import { agentApi } from '../lib/tauri';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
@@ -371,7 +370,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (get().proxyToggling) return;
     set({ proxyToggling: true });
     try {
-      await agentApi.stopProxy();
+      // 工单 09:stop_codex_proxy 壳命令随 Tauri 退役,代理生命周期由 daemon
+      // 自管;此处仅复位本地状态(此前 UI 也无该入口,保持签名兼容)。
       set({ proxyRunning: false, proxyUrl: null });
     } catch (error) {
       set({ error: String(error) });

@@ -1,11 +1,11 @@
 "use client";
 
 import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
-import { invoke } from '@tauri-apps/api/core';
 import { Check, Copy, Bug, GitFork, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
+import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { TooltipHint } from '@/components/ui/tooltip';
 
@@ -101,7 +101,7 @@ function DebugCopyButton({ sessionId, sourceUuid }: { sessionId: string; sourceU
   const [isCopied, setIsCopied] = useState(false);
 
   const copyDebugPrompt = async () => {
-    const logDirectory = await invoke<string>('get_log_directory');
+    const logDirectory = await shellFacade.getLogDirectory();
     await navigator.clipboard.writeText(
       `请排查 CodeMUX 的问题。\n会话ID: ${sessionId}\n本轮对话ID: ${sourceUuid ?? '未知'}\n日志目录: ${logDirectory}`,
     );

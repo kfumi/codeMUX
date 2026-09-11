@@ -1,9 +1,8 @@
 import { Gauge } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { saveDialog } from '../../lib/desktopDialogs';
-import { toggleDevtools, exportPerfSnapshot } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { usePerfStore } from '../../stores/perfStore';
 import { TooltipHint } from '../ui/tooltip';
 import './PerfOverlay.css';
@@ -123,23 +122,9 @@ export function PerfOverlay() {
   const openDevtools = useCallback(async () => {
     try {
       // 工单 05:平台分流 —— Electron 走 webContents.toggleDevTools,Tauri 走原命令。
-      await toggleDevtools();
+      await shellFacade.toggleDevtools();
     } catch (error) {
       console.warn('[PerfOverlay] open devtools failed:', error);
-    }
-  }, []);
-
-  const openConsole = useCallback(async () => {
-    try {
-      const info = await invoke<{ enabled: boolean; addr: string }>('get_tokio_console_info');
-      if (info.enabled) {
-        await navigator.clipboard.writeText(info.addr);
-        toast.success(`已复制 tokio-console gRPC 地址：${info.addr}（浏览器打不开，请在终端运行 \`tokio-console\`）`);
-      } else {
-        toast.info('tokio-console 未启用，请运行: $env:RUSTFLAGS="--cfg tokio_unstable"; npm run tauri dev -- --features tokio-console');
-      }
-    } catch {
-      toast.error('获取 tokio-console 信息失败');
     }
   }, []);
 
@@ -155,7 +140,7 @@ export function PerfOverlay() {
         return;
       }
       // 工单 05:平台分流 —— Electron 由主进程写文件;Tauri 走原命令。
-      await exportPerfSnapshot(filePath, JSON.stringify(snap, null, 2));      toast.success('快照已保存');
+      await shellFacade.exportPerfSnapshot(filePath, JSON.stringify(snap, null, 2));      toast.success('快照已保存');
     } catch {
       toast.error('保存失败');
     }
@@ -236,7 +221,6 @@ export function PerfOverlay() {
 
       <div className="perf-overlay__actions">
         <button onClick={openDevtools}>DevTools</button>
-        <button onClick={openConsole}>Console</button>
         <button onClick={exportSnapshot}>快照</button>
       </div>
     </div>

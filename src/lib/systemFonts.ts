@@ -1,4 +1,8 @@
-import { invoke } from '@tauri-apps/api/core';
+/**
+ * 系统字体清单(工单 09):经壳桥 listSystemFonts 获取;
+ * main 侧返回常见字体常量清单。桥缺失(纯 Web)时降级为空清单。
+ */
+import { desktopBridge } from './desktop-bridge';
 
 let cachedFonts: string[] | null = null;
 let pendingLoad: Promise<string[]> | null = null;
@@ -14,7 +18,9 @@ function normalizeFontName(name: string): string {
 export async function loadSystemFonts(): Promise<string[]> {
   if (cachedFonts) return cachedFonts;
   if (!pendingLoad) {
-    pendingLoad = invoke<string[]>('get_system_fonts')
+    pendingLoad = (desktopBridge
+      ? desktopBridge.listSystemFonts()
+      : Promise.reject(new Error('codemuxDesktop 桥不可用(Electron preload 未注入)')))
       .then((fonts) => {
         cachedFonts = fonts.map(normalizeFontName).filter(Boolean);
         return cachedFonts;

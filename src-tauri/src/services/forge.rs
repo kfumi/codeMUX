@@ -1,7 +1,4 @@
 use keyring::Entry;
-use std::sync::Arc;
-
-use tauri::State;
 
 use crate::forge::{self, CreatePullRequestRequest, CreatePullRequestResult};
 use crate::AppState;
@@ -21,14 +18,6 @@ fn read_gitee_token() -> Option<String> {
         .filter(|token| !token.trim().is_empty())
 }
 
-#[tauri::command]
-pub async fn create_pull_request(
-    state: State<'_, Arc<AppState>>,
-    request: CreatePullRequestRequest,
-) -> Result<CreatePullRequestResult, String> {
-    create_pull_request_impl(state.inner(), request).await
-}
-
 pub async fn create_pull_request_impl(
     state: &AppState,
     request: CreatePullRequestRequest,
@@ -39,12 +28,10 @@ pub async fn create_pull_request_impl(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 pub fn get_gitee_credential_status() -> bool {
     read_gitee_token().is_some()
 }
 
-#[tauri::command]
 pub fn set_gitee_token(token: String) -> Result<(), String> {
     let token = token.trim();
     if token.is_empty() {
@@ -55,7 +42,6 @@ pub fn set_gitee_token(token: String) -> Result<(), String> {
         .map_err(|error| format!("保存 Gitee Token 失败：{}", error))
 }
 
-#[tauri::command]
 pub fn clear_gitee_token() -> Result<(), String> {
     let entry = gitee_entry()?;
     match entry.delete_credential() {

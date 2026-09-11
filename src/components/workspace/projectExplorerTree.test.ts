@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FileTreeNode } from '../../lib/tauri';
+import type { FileTreeNode } from '../../lib/workspaceTypes';
 import { hasLoadedChildren, needsLazyLoad } from './projectExplorerTree';
 
 function dir(name: string, children?: FileTreeNode[] | null): FileTreeNode {

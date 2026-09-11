@@ -1,7 +1,7 @@
 //! Sidecar 事件投递的进程内抽象。
 //!
 //! daemon 核心只把原始 JSON 行交给 [`SidecarEventBinding`],事件去向由壳侧
-//! 决定(Tauri IPC Channel,见 `shell::IpcChannelSink`)。未绑定或绑定了
+//! 决定(交互会话由前端事件绑定;companion 场景事件不投前端)。未绑定或绑定了
 //! [`NullSidecarSink`] 时事件被丢弃,对应附件增强、历史清理等一次性辅助
 //! sidecar:它们的事件只在本模块内的等待器/解析路径消费,不需要前端投递。
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub trait SidecarEventSink: Send + Sync + 'static {
-    /// 投递一条原始事件行。失败静默,与原 Tauri Channel 的调用侧行为一致。
+    /// 投递一条原始事件行。失败静默,调用方不依赖投递结果。
     fn send(&self, event: String);
 }
 

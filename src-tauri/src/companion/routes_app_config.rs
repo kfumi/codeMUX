@@ -6,11 +6,11 @@ use axum::routing::get;
 use axum::{Json, Router};
 use std::net::SocketAddr;
 
-use crate::commands::provider::{
-    get_config_for_companion, patch_app_config_for_companion, PatchAppConfigRequest,
-};
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::config::types::AppConfig;
+use crate::services::provider::{
+    get_config_for_companion, patch_app_config_for_companion, PatchAppConfigRequest,
+};
 
 pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router.route("/config", get(get_config).patch(patch_config))

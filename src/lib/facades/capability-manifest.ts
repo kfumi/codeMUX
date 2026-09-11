@@ -53,13 +53,16 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'workspace.git', owner: 'daemon', companionRoute: 'GET|POST /api/workspace/git', daemonMethod: 'git' },
   { id: 'terminal.pty', owner: 'daemon', companionRoute: 'WS /api/ws (terminal frames)', daemonMethod: 'terminal' },
 
-  // Shell-only(dialog:工单 06 落地 —— lib/desktopDialogs.ts 按平台分流到壳桥)
+  // Shell-only(dialog:工单 09 终态 —— lib/desktopDialogs.ts 直连壳桥,桥缺失显式报错)
   { id: 'browser.host', owner: 'shell', shellMethod: 'browser' },
   { id: 'dialog.file', owner: 'shell', shellMethod: 'openDialog' },
   { id: 'dialog.directory', owner: 'shell', shellMethod: 'openDialog' },
-  { id: 'window.manage', owner: 'shell', shellMethod: 'window' },
+  // window.manage(工单 09 终态):窗口命令在 shellFacade(minimizeWindow 等),
+  // 最大化态经 desktopBridge.onDesktopEvent('window-maximize-changed') 订阅。
+  { id: 'window.manage', owner: 'shell', shellMethod: 'minimizeWindow' },
+  // tray.manage:main 进程托盘,无渲染层方法面(托盘菜单/行为全在壳侧)。
   { id: 'tray.manage', owner: 'shell', shellMethod: 'tray' },
-  // updater(工单 06 落地 —— features/update/hooks/useUpdater.ts 按平台分流到壳桥)
+  // updater(工单 09 终态:features/update/electronUpdaterAdapter.ts 直连壳桥更新器通道)
   { id: 'updater', owner: 'shell', shellMethod: 'updater' },
   { id: 'open.external', owner: 'shell', shellMethod: 'openExternal' },
   // browser.control 的「配置写入」走 daemon PATCH /api/config;浏览器宿主

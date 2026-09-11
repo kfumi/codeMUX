@@ -42,7 +42,6 @@ pub struct RuntimeRequest {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
-    pub channel: tauri::ipc::Channel<String>,
 }
 
 impl std::fmt::Debug for RuntimeRequest {
@@ -55,7 +54,6 @@ impl std::fmt::Debug for RuntimeRequest {
             .field("api_key", &self.api_key.as_ref().map(|_| "***"))
             .field("base_url", &self.base_url)
             .field("model", &self.model)
-            .field("channel", &"<Channel>")
             .finish()
     }
 }

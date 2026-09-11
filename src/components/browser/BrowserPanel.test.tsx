@@ -22,12 +22,15 @@ const browserApiMock = vi.hoisted(() => ({
 
 const openMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../../lib/tauri', () => ({
-  browserApi: browserApiMock,
+vi.mock('../../lib/browser/electronBrowserHost', () => ({
+  bindElectronBrowserContainer: vi.fn(() => () => {}),
+  electronBrowserHost: browserApiMock,
 }));
 
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: openMock,
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
+    openExternal: openMock,
+  },
 }));
 
 vi.mock('sonner', () => ({

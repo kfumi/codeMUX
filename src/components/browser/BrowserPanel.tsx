@@ -8,7 +8,6 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { open } from '@tauri-apps/plugin-shell';
 import { toast } from 'sonner';
 
 import {
@@ -18,7 +17,8 @@ import {
 } from '../../lib/elementSelector';
 import { bindElectronBrowserContainer } from '../../lib/browser/electronBrowserHost';
 import { isElectronDesktop } from '../../lib/desktop-bridge';
-import { browserApi } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
+import { electronBrowserHost as browserApi } from '../../lib/browser/electronBrowserHost';
 import { cn } from '../../lib/utils';
 import { useBrowserElementStore } from '../../stores/browserElementStore';
 import { useBrowserStore } from '../../stores/browserStore';
@@ -341,7 +341,7 @@ function BrowserToolbar({
   const openInDefaultBrowser = async () => {
     if (!pageUrl) return;
     try {
-      await open(pageUrl);
+      await shellFacade.openExternal(pageUrl);
     } catch {
       toast.error('无法在默认浏览器中打开');
     }

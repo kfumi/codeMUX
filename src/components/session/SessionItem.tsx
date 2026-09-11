@@ -3,7 +3,7 @@ import { Archive, Loader2, LockKeyhole, FolderOpen, Pencil, Pin, PinOff, Trash2,
 import { toast } from 'sonner';
 
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
-import { openInExplorer } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
@@ -167,7 +167,7 @@ export function SessionItem({
       return;
     }
     try {
-      await openInExplorer(workingPath);
+      await shellFacade.openInExplorer(workingPath);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }

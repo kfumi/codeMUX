@@ -3,8 +3,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../lib/tauri', () => ({
-  appApi: {
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
     getAppDataDirectory: vi.fn(async () => 'D:/codeMUX'),
     checkDevelopmentEnvironment: vi.fn(async () => ({
       checkedAt: '2026-06-27T00:00:00Z',

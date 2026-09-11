@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { openInExplorer } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
@@ -134,7 +134,7 @@ export function ProjectGroup({
               </DropdownMenuItem>
               <DropdownMenuItem
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
-                onClick={() => openInExplorer(project.path)}
+                onClick={() => shellFacade.openInExplorer(project.path)}
               >
                 在资源管理器中打开
               </DropdownMenuItem>

@@ -174,13 +174,6 @@ vi.mock('../../../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../../../lib/tauri', () => ({
-  agentApi: {},
-  sessionApi: {},
-  fileApi: {
-    listDirectory: vi.fn().mockResolvedValue([]),
-  },
-}));
 
 const pendingQuestionEvents: AgentMessage[] = [
   {

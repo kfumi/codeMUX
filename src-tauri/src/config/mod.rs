@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn load_and_save_config_through_injected_roots_without_tauri_app() {
+    fn load_and_save_config_through_injected_roots() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let roots = crate::paths::PathRoots {
             app_data_dir: temp_dir.path().to_path_buf(),

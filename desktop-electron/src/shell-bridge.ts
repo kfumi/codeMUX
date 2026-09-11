@@ -17,6 +17,7 @@ import {
   Notification,
   dialog,
   ipcMain,
+  shell,
   type OpenDialogOptions,
   type SaveDialogOptions,
   type WebContents,
@@ -283,6 +284,80 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     deps.showMainWindow();
   });
 
+  // --- 外链(工单 09:接替 @tauri-apps/plugin-shell open) --------------------
+  // 仅放行 http/https;main 侧 shell.openExternal(浏览器/系统处理)。
+  handle('openExternal', (payload: unknown) => {
+    if (typeof payload !== 'string' || !payload) {
+      throw new Error('openExternal 需要 url 字符串');
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(payload);
+    } catch {
+      throw new Error(`openExternal: 非法 URL: ${payload}`);
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`openExternal: 仅支持 http/https,收到: ${parsed.protocol}`);
+    }
+    return shell.openExternal(parsed.toString());
+  });
+
+  // --- 窗口控制(工单 09:接替 @tauri-apps/api/window;自绘标题栏) ----------
+  // 关闭 = 隐藏到托盘(main.ts close 事件语义一致),真正退出走托盘菜单。
+  handle('windowMinimize', () => {
+    deps.getMainWindow()?.minimize();
+  });
+  handle('windowToggleMaximize', () => {
+    const window = deps.getMainWindow();
+    if (!window) return;
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+  });
+  handle('windowClose', () => {
+    deps.getMainWindow()?.hide();
+  });
+  handle('windowIsMaximized', () => {
+    return deps.getMainWindow()?.isMaximized() ?? false;
+  });
+
+  // --- 系统字体清单(工单 09:接替 get_system_fonts 壳命令) ------------------
+  // 简化实现:返回 Windows 常见字体常量清单(不做系统枚举;Tauri 版经
+  // font-kit 枚举,daemon 无此面,UI 只需可选项列表)。
+  handle('getSystemFonts', () => [
+    'Segoe UI',
+    'Segoe UI Variable',
+    'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    '微软雅黑',
+    'SimSun',
+    '宋体',
+    'SimHei',
+    'KaiTi',
+    'DengXian',
+    'Arial',
+    'Calibri',
+    'Cambria',
+    'Candara',
+    'Consolas',
+    'Constantia',
+    'Corbel',
+    'Courier New',
+    'Georgia',
+    'Impact',
+    'Malgun Gothic',
+    'Meiryo',
+    'Microsoft JhengHei',
+    'Palatino Linotype',
+    'Roboto',
+    'Tahoma',
+    'Times New Roman',
+    'Trebuchet MS',
+    'Verdana',
+  ]);
+
   // --- 环境与运行时检测(agent-checks.ts 最小面;工单 06 完善) ---------------
   handle('checkDevelopmentEnvironment', () => checkDevelopmentEnvironment());
   handle('checkAgentRuntimes', () => checkAgentRuntimes());
@@ -389,6 +464,12 @@ export const SHELL_BRIDGE_CHANNELS = [
   'readHomeFile',
   'openInExplorer',
   'openProjectPath',
+  'openExternal',
+  'windowMinimize',
+  'windowToggleMaximize',
+  'windowClose',
+  'windowIsMaximized',
+  'getSystemFonts',
   'showDialogOpen',
   'showDialogSave',
   'sendAgentNotification',

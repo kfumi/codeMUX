@@ -1,74 +1,77 @@
 /**
- * Electron 壳桥(工单 05/06/07):渲染层探测与类型定义。
+ * Electron 壳桥(工单 05/06/07/09):渲染层探测与类型定义。
  *
  * - `desktopBridge`:`window.codemuxDesktop`(preload 经 contextBridge 暴露);
- *   非 Electron 环境(Tauri 壳 / 纯 Web)下为 undefined。
- * - `isElectronDesktop()`:平台分流判据;所有壳方法调用方必须先判它再走
- *   desktopBridge,否则回退既有 Tauri invoke(所有适配必须带回退)。
+ *   非 Electron 环境下为 undefined,壳方法调用方必须显式处理缺失(报错/降级)。
+ * - `isElectronDesktop()`:平台分流判据。
  * - browser.*:工单 07 起页面由渲染层 `<webview>` 托管(见
  *   src/lib/browser/electronBrowserHost.ts);桥面仅保留清资料 / guest 登记,
  *   几何与导航通道为契约占位(见 desktop-electron/src/shell-bridge.ts)。
+ * - 本文件同时是壳载荷类型的唯一归属(工单 09:Tauri 壳退役后,
+ *   原 src/lib/tauri.ts 的日志/环境/agent 运行时检测契约迁入,消除双份定义)。
  */
 import type { BrowserDataScope, BrowserPageBounds } from './browserHost';
 import type { OpenTarget } from './openTargets';
 
 // ---------------------------------------------------------------------------
-// 结果类型:与 src/lib/tauri.ts 的壳能力返回形状逐一对应(双实现一致性)。
+// 壳命令载荷契约(与 desktop-electron/src/agent-checks.ts、shell-bridge.ts 对齐)。
 // ---------------------------------------------------------------------------
 
-export interface DesktopLogFileInfo {
+export interface LogFileInfo {
   name: string;
   path: string;
   size: number;
   modified: string;
 }
 
-export type DesktopEnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
+export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
 
-export interface DesktopEnvironmentToolCheck {
+export type EnvironmentToolName = 'node' | 'npm' | 'git';
+
+export interface EnvironmentToolCheck {
   name: 'Node.js' | 'npm' | 'Git';
-  command: 'node' | 'npm' | 'git';
-  status: DesktopEnvironmentCheckStatus;
+  command: EnvironmentToolName;
+  status: EnvironmentCheckStatus;
   version: string | null;
   path: string | null;
   message: string;
 }
 
-export interface DesktopDevelopmentEnvironmentCheck {
+export interface DevelopmentEnvironmentCheck {
   checkedAt: string;
-  tools: DesktopEnvironmentToolCheck[];
+  tools: EnvironmentToolCheck[];
 }
 
-export type DesktopAgentRuntimeStatus = 'ok' | 'outdated' | 'missing' | 'error';
+export type AgentRuntimeStatus = 'ok' | 'outdated' | 'missing' | 'error';
 
-export type DesktopInstallSource =
+export type InstallSource =
   | 'nvm' | 'homebrew' | 'volta' | 'fnm' | 'mise'
   | 'bun' | 'pnpm' | 'scoop' | 'system' | 'unknown';
 
-export interface DesktopAgentInstallation {
+export interface AgentInstallation {
   path: string;
   real: string;
   version: string | null;
   runnable: boolean;
   error: string | null;
-  source: DesktopInstallSource;
+  source: InstallSource;
   isPathDefault: boolean;
 }
 
-export interface DesktopAgentInstallationReport {
+export interface AgentInstallationReport {
   agentKind: string;
-  installs: DesktopAgentInstallation[];
+  installs: AgentInstallation[];
   isConflict: boolean;
   needsConfirmation: boolean;
   anchored: boolean;
   command: string | null;
 }
 
-export interface DesktopAgentRuntimeCheck {
+export interface AgentRuntimeCheck {
   agentKind: string;
   label: string;
   command: string;
-  status: DesktopAgentRuntimeStatus;
+  status: AgentRuntimeStatus;
   currentVersion: string | null;
   latestVersion: string | null;
   executablePath: string | null;
@@ -78,18 +81,28 @@ export interface DesktopAgentRuntimeCheck {
   installedButBroken: boolean;
 }
 
-export interface DesktopAgentRuntimeCheckResult {
+export interface AgentRuntimeCheckResult {
   checkedAt: string;
-  runtimes: DesktopAgentRuntimeCheck[];
+  runtimes: AgentRuntimeCheck[];
 }
 
-export interface DesktopAgentRuntimeUpgradeResult {
+export type UpgradeOutcome =
+  | 'success'
+  | 'soft_version_unchanged'
+  | 'soft_not_runnable'
+  | 'hard_failure';
+
+export interface AgentRuntimeUpgradeResult {
   agentKind: string;
   success: boolean;
-  outcome: 'success' | 'soft_version_unchanged' | 'soft_not_runnable' | 'hard_failure';
+  outcome: UpgradeOutcome;
   message: string;
   newVersion: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// 事件 / 更新器 / 对话框载荷(壳桥私有契约)。
+// ---------------------------------------------------------------------------
 
 /** supervisor 经 preload 转发的 daemon 生命周期事件(与 daemonLifecycleBridge 同形)。 */
 export interface DesktopDaemonLifecycleEvent {
@@ -114,7 +127,7 @@ export interface DesktopDaemonInfo {
 }
 
 // ---------------------------------------------------------------------------
-// 对话框(工单 06):options/返回形状对齐 @tauri-apps/plugin-dialog
+// 对话框(工单 06):options/返回形状对齐原 Tauri plugin-dialog 契约
 // (取消/关闭一律 null;multiple 为 string[];单选为 string | null)。
 // ---------------------------------------------------------------------------
 
@@ -165,6 +178,9 @@ export interface DesktopBrowserNewWindowPayload {
   url?: string;
 }
 
+/** window-maximize-changed 事件载荷(main 窗口 maximize/unmaximize 转发)。 */
+export type DesktopWindowMaximizePayload = boolean;
+
 /** window.codemuxDesktop 的完整方法面(与 desktop-electron/src/preload.ts 对齐)。 */
 export interface CodemuxDesktopBridge {
   // token / 目录 / 日志
@@ -172,7 +188,7 @@ export interface CodemuxDesktopBridge {
   getAppDataDirectory(): Promise<string>;
   getUserHomeDirectory(): Promise<string>;
   getLogDirectory(): Promise<string>;
-  getLogFiles(): Promise<DesktopLogFileInfo[]>;
+  getLogFiles(): Promise<LogFileInfo[]>;
   readLogFile(fileName: string): Promise<string>;
   readHomeFile(relativePath: string): Promise<string>;
 
@@ -180,7 +196,17 @@ export interface CodemuxDesktopBridge {
   openInExplorer(path: string, reveal?: boolean): Promise<void>;
   openProjectPath(path: string, target: OpenTarget): Promise<void>;
 
-  // 文件/目录对话框(工单 06;返回形状对齐 @tauri-apps/plugin-dialog)
+  // 外链(工单 09:接替原 plugin-shell open;main 仅放行 http/https)
+  openExternal(url: string): Promise<void>;
+
+  // 窗口控制(工单 09:接替原 Tauri window API;自绘标题栏;
+  // 关闭 = 隐藏到托盘,最大化态经 onDesktopEvent('window-maximize-changed') 订阅)
+  minimizeWindow(): Promise<void>;
+  toggleMaximizeWindow(): Promise<void>;
+  closeWindow(): Promise<void>;
+  isWindowMaximized(): Promise<boolean>;
+
+  // 文件/目录对话框(工单 06;返回形状对齐原 Tauri plugin-dialog 契约)
   showDialogOpen(options?: DesktopOpenDialogOptions): Promise<string | string[] | null>;
   showDialogSave(options?: DesktopSaveDialogOptions): Promise<string | null>;
 
@@ -195,10 +221,13 @@ export interface CodemuxDesktopBridge {
   currentVersion(): Promise<string>;
 
   // 环境与运行时检测
-  checkDevelopmentEnvironment(): Promise<DesktopDevelopmentEnvironmentCheck>;
-  checkAgentRuntimes(): Promise<DesktopAgentRuntimeCheckResult>;
-  probeAgentInstallations(agentKind: string): Promise<DesktopAgentInstallationReport>;
-  upgradeAgentRuntime(agentKind: string): Promise<DesktopAgentRuntimeUpgradeResult>;
+  checkDevelopmentEnvironment(): Promise<DevelopmentEnvironmentCheck>;
+  checkAgentRuntimes(): Promise<AgentRuntimeCheckResult>;
+  probeAgentInstallations(agentKind: string): Promise<AgentInstallationReport>;
+  upgradeAgentRuntime(agentKind: string): Promise<AgentRuntimeUpgradeResult>;
+
+  // 系统字体清单(工单 09:main 侧返回常见字体常量清单,后续可增强为系统枚举)
+  listSystemFonts(): Promise<string[]>;
 
   // browser.*(工单 07:渲染层 <webview> 托管;桥面保留清资料 + guest 登记,
   // 其余通道为契约占位 —— 几何 no-op,其余 reject 兜底,渲染层不再调用)
@@ -231,6 +260,10 @@ export interface CodemuxDesktopBridge {
   onAgentNotificationClicked(callback: (payload: DesktopAgentNotificationClickPayload) => void): () => void;
   onUpdaterEvent(callback: (event: DesktopUpdaterEvent) => void): () => void;
   onBrowserNewWindow(callback: (payload: DesktopBrowserNewWindowPayload) => void): () => void;
+  /** daemon 桌面 UI 事件(工单 09:sessions-changed / scheduled-tasks-changed /
+   * runtime-install-progress* / window-maximize-changed),main 按同名事件转发;
+   * 返回取消订阅。 */
+  onDesktopEvent(name: string, callback: (payload: unknown) => void): () => void;
 }
 
 /**
@@ -242,5 +275,16 @@ export const desktopBridge =
     ? (window as unknown as { codemuxDesktop?: CodemuxDesktopBridge }).codemuxDesktop
     : undefined;
 
-/** 平台分流判据:Electron 壳内为 true;Tauri 壳/纯 Web 为 false(走既有 invoke)。 */
+/** 平台分流判据:Electron 壳内为 true。 */
 export const isElectronDesktop = (): boolean => !!desktopBridge;
+
+/**
+ * 壳方法共用断言(工单 09):desktopBridge 缺失(非 Electron 壳/preload 未注入)
+ * 时统一抛出明确错误 —— 不再存在 Tauri invoke 回退。
+ */
+export function requireDesktopBridge(): CodemuxDesktopBridge {
+  if (!desktopBridge) {
+    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
+  }
+  return desktopBridge;
+}

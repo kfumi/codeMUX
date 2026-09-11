@@ -30,6 +30,7 @@ import {
 } from '@/lib/inputModalities';
 import { enrichFetchedModels, resolveModelDisplayName } from '@/lib/providerModels';
 import { daemonFacade } from '@/lib/facades/daemon-facade';
+import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type {
@@ -800,9 +801,7 @@ export function ProviderConfigPanel() {
                     type="button"
                     className="inline-flex items-center gap-1 text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
                     onClick={() => {
-                      void import('@tauri-apps/plugin-shell')
-                        .then(({ open }) => open(apiKeyUrl))
-                        .catch(() => {});
+                      void shellFacade.openExternal(apiKeyUrl).catch(() => {});
                     }}
                   >
                     获取密钥

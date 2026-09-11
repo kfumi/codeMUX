@@ -13,11 +13,6 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../lib/tauri', () => ({
-  skillApi: {
-    listProject: listProjectMock,
-  },
-}));
 
 const projectSkill: ProjectSkill = {
   name: 'review',

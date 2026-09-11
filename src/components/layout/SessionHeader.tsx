@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { daemonFacade } from '../../lib/facades/daemon-facade';
-import { openInExplorer } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -74,7 +74,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       return;
     }
     try {
-      await openInExplorer(workingPath);
+      await shellFacade.openInExplorer(workingPath);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -120,7 +120,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   return (
     <>
-      <span className="min-w-0 truncate text-ui-title font-semibold text-foreground/88" data-tauri-drag-region>
+      <span className="min-w-0 truncate text-ui-title font-semibold text-foreground/88" data-app-drag-region>
         {session?.title || '新对话'}
       </span>
       {session?.origin === 'scheduled' && (

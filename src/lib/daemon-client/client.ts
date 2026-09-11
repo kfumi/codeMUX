@@ -1,4 +1,3 @@
-import type { CompanionStatus } from '../../types/companion';
 import { createControlPlaneMethods, type ControlPlaneMethods } from './control-plane';
 import { createTerminalMethods, type TerminalMethods } from './terminal';
 
@@ -274,17 +273,5 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
       (c, path, init) => daemonFetch(c, `/api${path}`, init),
       async () => config,
     ),
-  };
-}
-
-export async function resolveDesktopDaemonConfig(
-  getToken: () => Promise<string>,
-  getCompanionStatus: () => Promise<CompanionStatus>,
-): Promise<DaemonConnectionConfig> {
-  const [token, status] = await Promise.all([getToken(), getCompanionStatus()]);
-  const port = status.port;
-  return {
-    baseUrl: `http://127.0.0.1:${port}`,
-    token,
   };
 }

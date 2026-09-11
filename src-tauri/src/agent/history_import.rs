@@ -9,7 +9,6 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::str::FromStr;
-use tauri::State;
 
 use crate::agent::claude_subagent_history::load_claude_session_subagent_history;
 use crate::agent::codex_subagent_history::load_codex_session_subagent_history;
@@ -20,9 +19,6 @@ use crate::agent::history_events::normalize_history_events;
 use crate::agent::opencode_history;
 use crate::agent::opencode_subagent_history::load_opencode_session_subagent_history;
 use crate::agent::pi_history::{convert_pi_history_values_to_events, pi_native_sessions_root};
-use crate::agent::turn_artifact_summary::{
-    backfill_turn_artifact_summaries, supports_turn_artifact_summary_backfill,
-};
 use crate::config::types::AgentKind;
 use crate::db::operations;
 
@@ -72,14 +68,6 @@ struct DiscoveredSnapshot {
     events: Vec<Value>,
 }
 
-#[tauri::command]
-pub async fn discover_importable_sessions(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    agent_kind: Option<String>,
-) -> Result<Vec<ImportCandidate>, String> {
-    discover_importable_sessions_for_companion(state.inner(), agent_kind).await
-}
-
 pub async fn discover_importable_sessions_for_companion(
     state: &crate::AppState,
     agent_kind: Option<String>,
@@ -108,14 +96,6 @@ pub async fn discover_importable_sessions_for_companion(
             }
         })
         .collect())
-}
-
-#[tauri::command]
-pub fn import_sessions(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    request: ImportSessionsRequest,
-) -> Result<ImportSessionsResult, String> {
-    import_sessions_for_companion(state.inner(), request)
 }
 
 pub fn import_sessions_for_companion(
@@ -184,120 +164,10 @@ pub fn import_sessions_for_companion(
     Ok(result)
 }
 
-#[tauri::command]
-pub async fn load_session_events(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<Vec<Value>, String> {
-    let session = {
-        let db = state.db.lock().unwrap();
-        operations::get_session(&db, &app_session_id).map_err(|error| error.to_string())?
-    };
-
-    let agent_kind = session
-        .as_ref()
-        .map(|session| session.agent_kind)
-        .unwrap_or(AgentKind::ClaudeCode);
-
-    let timeline = {
-        let db = state.db.lock().unwrap();
-        operations::get_session_timeline(&db, &app_session_id).map_err(|error| error.to_string())?
-    };
-
-    let has_mapping = {
-        let db = state.db.lock().unwrap();
-        has_native_mapping(&db, &app_session_id, agent_kind)?
-    };
-
-    if timeline.as_ref().is_some_and(|events| !events.is_empty()) {
-        let mut events = timeline.unwrap_or_default();
-        if supports_turn_artifact_summary_backfill(agent_kind)
-            && backfill_turn_artifact_summaries(&mut events)
-        {
-            let mut db = state.db.lock().unwrap();
-            if let Err(error) =
-                operations::replace_session_timeline(&mut db, &app_session_id, &events)
-            {
-                log::warn!(
-                    target: "agent",
-                    "Failed to persist turn artifact summaries for app_session_id={}: {}",
-                    app_session_id,
-                    error
-                );
-            }
-        }
-
-        if agent_kind == AgentKind::Pi && has_mapping {
-            if let Ok(native_events) =
-                load_native_session_events(state.inner().clone(), &app_session_id, agent_kind).await
-            {
-                if persisted_timeline_missing_tool_steps(&events, &native_events) {
-                    log::info!(
-                        target: "agent",
-                        "Repairing lossy pi session timeline from native history for app_session_id={}",
-                        app_session_id
-                    );
-                    let mut db = state.db.lock().unwrap();
-                    if let Err(error) = operations::replace_session_timeline(
-                        &mut db,
-                        &app_session_id,
-                        &native_events,
-                    ) {
-                        log::warn!(
-                            target: "agent",
-                            "Failed to repair pi session timeline for app_session_id={}: {}",
-                            app_session_id,
-                            error
-                        );
-                    } else {
-                        events = native_events;
-                    }
-                }
-            }
-        }
-
-        return Ok(events);
-    }
-
-    let should_hydrate = session
-        .as_ref()
-        .map(|session| should_hydrate_timeline_from_native(session, &timeline, has_mapping))
-        .unwrap_or(false);
-
-    if should_hydrate {
-        let native_events =
-            load_native_session_events(state.inner().clone(), &app_session_id, agent_kind).await?;
-        if !native_events.is_empty() {
-            let mut db = state.db.lock().unwrap();
-            operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
-                .map_err(|error| error.to_string())?;
-            if let Err(error) = backfill_subagent_history(&mut db, &app_session_id, agent_kind) {
-                log::warn!(
-                    target: "agent",
-                    "Failed to backfill subagent history for app_session_id={}: {}",
-                    app_session_id,
-                    error
-                );
-            }
-            return Ok(native_events);
-        }
-    }
-
-    Ok(timeline.unwrap_or_default())
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResyncSessionFromNativeResult {
     pub event_count: usize,
-}
-
-#[tauri::command]
-pub async fn resync_session_from_native(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    app_session_id: String,
-) -> Result<ResyncSessionFromNativeResult, String> {
-    resync_session_from_native_impl(state.inner().clone(), app_session_id).await
 }
 
 pub async fn resync_session_from_native_impl(
@@ -531,7 +401,8 @@ async fn load_native_session_events(
         }
         AgentKind::Pi => {
             super::pi_history::load_pi_session_events_internal(state.clone(), app_session_id).await
-        }        AgentKind::GeminiCli => Ok(Vec::new()),
+        }
+        AgentKind::GeminiCli => Ok(Vec::new()),
     }
 }
 
@@ -871,21 +742,6 @@ fn persisted_timeline_missing_tool_steps(
     native_events: &[Value],
 ) -> bool {
     count_tool_started_events(native_events) > count_tool_started_events(existing_events)
-}
-
-#[tauri::command]
-pub fn fetch_session_timeline(
-    state: State<'_, std::sync::Arc<crate::AppState>>,
-    session_id: String,
-    direction: Option<String>,
-    cursor: Option<i64>,
-    limit: Option<usize>,
-) -> Result<operations::SessionTimelinePage, String> {
-    let db = state.db.lock().unwrap();
-    let direction = operations::parse_timeline_direction(direction.as_deref());
-    let limit = limit.unwrap_or(operations::DEFAULT_SESSION_TIMELINE_LIMIT);
-    operations::fetch_session_timeline(&db, &session_id, direction, cursor, limit)
-        .map_err(|error| error.to_string())
 }
 
 fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, String> {

@@ -59,7 +59,7 @@ async fn list_provider_templates(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let templates = crate::commands::model_provider::list_builtin_provider_templates();
+    let templates = crate::services::model_provider::list_builtin_provider_templates();
     Ok(Json(serde_json::json!(templates)))
 }
 
@@ -70,7 +70,7 @@ async fn instantiate_template(
     Path(template_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let provider = crate::commands::model_provider::instantiate_builtin_provider_template_impl(
+    let provider = crate::services::model_provider::instantiate_builtin_provider_template_impl(
         &ctx.daemon,
         template_id,
     )
@@ -85,7 +85,7 @@ async fn upsert_provider(
     Json(provider): Json<ModelProvider>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::model_provider::upsert_model_provider_impl(&ctx.daemon, provider)
+    crate::services::model_provider::upsert_model_provider_impl(&ctx.daemon, provider)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -97,7 +97,7 @@ async fn delete_provider(
     Path(provider_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::model_provider::delete_model_provider_impl(&ctx.daemon, provider_id)
+    crate::services::model_provider::delete_model_provider_impl(&ctx.daemon, provider_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -109,7 +109,7 @@ async fn set_active_provider(
     Path(provider_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::model_provider::set_active_model_provider_impl(&ctx.daemon, provider_id)
+    crate::services::model_provider::set_active_model_provider_impl(&ctx.daemon, provider_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -128,7 +128,7 @@ async fn set_provider_enabled(
     Json(body): Json<SetProviderEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::model_provider::set_model_provider_enabled_impl(
+    crate::services::model_provider::set_model_provider_enabled_impl(
         &ctx.daemon,
         provider_id,
         body.enabled,
@@ -153,7 +153,7 @@ async fn provider_usable(
     authorize(&ctx, &headers, Some(peer))?;
     let agent_kind = crate::config::types::AgentKind::from_str(&query.agent_kind)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let usable = crate::commands::model_provider::provider_usable_for_agent_impl(
+    let usable = crate::services::model_provider::provider_usable_for_agent_impl(
         &ctx.daemon,
         provider_id,
         agent_kind,
@@ -177,7 +177,7 @@ async fn test_provider(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let _ = ctx;
-    let message = crate::commands::model_provider::test_model_provider(body.api_key, body.base_url)
+    let message = crate::services::model_provider::test_model_provider(body.api_key, body.base_url)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "message": message })))
@@ -191,7 +191,7 @@ async fn fetch_provider_models_route(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let models =
-        crate::commands::provider::fetch_provider_models_for_companion(body.api_key, body.base_url)
+        crate::services::provider::fetch_provider_models_for_companion(body.api_key, body.base_url)
             .await
             .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(models)))
@@ -203,7 +203,7 @@ async fn fetch_opencode_free_models_route(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let models = crate::commands::provider::fetch_opencode_free_models_for_companion()
+    let models = crate::services::provider::fetch_opencode_free_models_for_companion()
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(models)))

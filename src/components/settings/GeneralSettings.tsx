@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, FolderOpen, Check } from 'lucide-react';
 
-import { appApi, openInExplorer } from '../../lib/tauri';
+import { shellFacade } from '../../lib/facades/shell-facade';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
 import { normalizeImmediateRunMode } from '../../lib/agentSteer';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -22,7 +22,7 @@ export function GeneralSettings() {
   const setDefaultOpenTarget = useSettingsStore((state) => state.setDefaultOpenTarget);
 
   useEffect(() => {
-    appApi.getAppDataDirectory().then(setConfigDir).catch(() => {});
+    shellFacade.getAppDataDirectory().then(setConfigDir).catch(() => {});
   }, []);
 
   const sep = configDir.includes('\\') ? '\\' : '/';
@@ -41,7 +41,7 @@ export function GeneralSettings() {
 
   const handleOpenDir = () => {
     if (!configDir) return;
-    openInExplorer(configDir).catch(() => {});
+    shellFacade.openInExplorer(configDir).catch(() => {});
   };
 
   return (

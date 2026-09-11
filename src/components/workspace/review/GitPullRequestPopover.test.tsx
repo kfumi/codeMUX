@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { GitPullRequestSuggestion } from '../../../lib/tauri';
+import type { GitPullRequestSuggestion } from '../../../lib/gitTypes';
 import { GitPullRequestPopover } from './GitPullRequestPopover';
 
 const suggestion: GitPullRequestSuggestion = {

@@ -1,4 +1,10 @@
-import { attachConsole, debug, error, info, trace, warn } from '@tauri-apps/plugin-log';
+/**
+ * 纯前端 logger(工单 09:Tauri 壳退役,原 plugin-log 通道移除)。
+ *
+ * - 输出统一走 console(Electron 渲染层 console 已由 main 进程聚合,
+ *   打包态日志落盘由壳侧负责,渲染层不再做 IPC 转发)。
+ * - 保留客户端级别门槛:高频流式事件期间避免低级别日志开销。
+ */
 
 type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 type LogContext = Record<string, unknown>;
@@ -11,10 +17,8 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 4,
 };
 
-// Client-side level gate: short-circuits low-level logs BEFORE the IPC call.
-// Tauri's @tauri-apps/plugin-log has no JS-side filtering — every debug()/trace()
-// call crosses the IPC bridge even if the Rust side drops it. During high-frequency
-// streaming events this saturates the IPC channel and freezes the app.
+// Client-side level gate: short-circuits low-level logs BEFORE formatting.
+// During high-frequency streaming events this keeps debug/trace overhead near zero.
 let minLevel: LogLevel = import.meta.env.DEV ? 'debug' : 'info';
 
 export function setMinLogLevel(level: LogLevel) {
@@ -34,13 +38,6 @@ type Logger = {
 };
 
 let loggingInitialized = false;
-
-function isTauriRuntime() {
-  return (
-    typeof window !== 'undefined' &&
-    typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined'
-  );
-}
 
 function stringifyValue(value: unknown): string {
   if (value == null) return '';
@@ -83,43 +80,12 @@ function formatConsolePayload(scope: string, message: string, context?: LogConte
   return [`[${scope}] ${message}`, context, err].filter((value) => value !== undefined);
 }
 
-async function emit(level: LogLevel, scope: string, message: string, context?: LogContext, err?: unknown) {
+function emit(level: LogLevel, scope: string, message: string, context?: LogContext, err?: unknown) {
   if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[minLevel]) return;
 
-  const scopedMessage = `[${scope}] ${message}`;
-  const keyValues = normalizeContext(context, err);
-
-  if (isTauriRuntime()) {
-    const options = keyValues ? { keyValues } : undefined;
-
-    try {
-      switch (level) {
-        case 'trace':
-          await trace(scopedMessage, options);
-          return;
-        case 'debug':
-          await debug(scopedMessage, options);
-          return;
-        case 'info':
-          await info(scopedMessage, options);
-          return;
-        case 'warn':
-          await warn(scopedMessage, options);
-          return;
-        case 'error':
-          await error(scopedMessage, options);
-          return;
-      }
-    } catch (logError) {
-      console.error('[logger] Failed to write Tauri log', logError);
-    }
-  }
-
-  const payload = formatConsolePayload(scope, message, context, err);
+  const payload = formatConsolePayload(scope, message, normalizeContext(context, err));
   switch (level) {
     case 'trace':
-      console.debug(...payload);
-      break;
     case 'debug':
       console.debug(...payload);
       break;
@@ -138,19 +104,19 @@ async function emit(level: LogLevel, scope: string, message: string, context?: L
 export function createLogger(scope: string): Logger {
   return {
     trace(message, context) {
-      void emit('trace', scope, message, context);
+      emit('trace', scope, message, context);
     },
     debug(message, context) {
-      void emit('debug', scope, message, context);
+      emit('debug', scope, message, context);
     },
     info(message, context) {
-      void emit('info', scope, message, context);
+      emit('info', scope, message, context);
     },
     warn(message, context, err) {
-      void emit('warn', scope, message, context, err);
+      emit('warn', scope, message, context, err);
     },
     error(message, context, err) {
-      void emit('error', scope, message, context, err);
+      emit('error', scope, message, context, err);
     },
   };
 }
@@ -163,12 +129,6 @@ export function initLogging() {
   }
 
   loggingInitialized = true;
-
-  if (isTauriRuntime() && import.meta.env.DEV) {
-    void attachConsole().catch((err) => {
-      console.error('[logger] Failed to attach webview console', err);
-    });
-  }
 
   if (typeof window !== 'undefined') {
     window.addEventListener('error', (event) => {
@@ -189,7 +149,9 @@ export function initLogging() {
   }
 
   logger.info('Logging initialized', {
-    runtime: isTauriRuntime() ? 'tauri' : 'web',
+    runtime: typeof window !== 'undefined' && (window as typeof window & { codemuxDesktop?: unknown }).codemuxDesktop
+      ? 'electron'
+      : 'web',
     mode: import.meta.env.MODE,
   });
 }

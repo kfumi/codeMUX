@@ -75,11 +75,11 @@ pub fn toggle_app(
 
 pub fn import_from_apps(
     state: &crate::AppState,
-) -> Result<crate::commands::mcp::ImportResult, String> {
+) -> Result<crate::services::mcp::ImportResult, String> {
     use crate::mcp::adapters::all_apps;
     use log::info;
 
-    let mut result = crate::commands::mcp::ImportResult {
+    let mut result = crate::services::mcp::ImportResult {
         claude: 0,
         codex: 0,
         gemini: 0,

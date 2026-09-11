@@ -143,7 +143,7 @@ fn configure_sidecar_command(command: &mut Command) -> &mut Command {
 }
 
 /// Strip Windows extended-length prefixes before passing paths to Node.js.
-/// Tauri resource paths often use `\\?\`; Node's module loader mishandles them
+/// Packaged resource paths often use `\\?\`; Node's module loader mishandles them
 /// and fails with `EISDIR: lstat 'D:'`.
 fn normalize_windows_verbatim_path(path: PathBuf) -> PathBuf {
     #[cfg(target_os = "windows")]

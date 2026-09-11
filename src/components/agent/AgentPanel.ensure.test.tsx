@@ -39,29 +39,6 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
   resetDaemonClient: vi.fn(),
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {
-    ensureSession: ensureSessionMock,
-    getProxyPort: vi.fn(() => Promise.resolve(null)),
-    deleteClaudeSessionFiles: vi.fn(),
-    resetSession: vi.fn(),
-    loadClaudeSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadCodexSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadSessionEvents: vi.fn(() => Promise.resolve([])),
-  },
-  companionApi: {
-    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
-    getStatus: vi.fn(() => Promise.resolve({ port: 8787, enabled: false })),
-  },
-  sessionApi: {
-    touch: vi.fn(() => Promise.resolve()),
-    updateTitle: vi.fn(() => Promise.resolve()),
-  },
-  fileApi: {
-    readFile: vi.fn(),
-  },
-}));
-
 vi.mock('../assistant-ui/context-display', () => ({
   ContextDisplay: () => null,
 }));

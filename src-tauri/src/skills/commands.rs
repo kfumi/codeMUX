@@ -5,9 +5,6 @@ use super::types::{Skill, SkillApps};
 use crate::config::types::AgentKind;
 use crate::AppState;
 use std::str::FromStr;
-use std::sync::Arc;
-
-use tauri::State;
 
 fn skills_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
@@ -215,19 +212,9 @@ fn scan_plugin_skills(db_guard: &rusqlite::Connection) -> Vec<Skill> {
     result
 }
 
-#[tauri::command]
-pub fn list_installed_skills(state: State<'_, Arc<AppState>>) -> Result<Vec<Skill>, String> {
-    list_installed_skills_impl(state.inner())
-}
-
 pub fn list_installed_skills_impl(state: &AppState) -> Result<Vec<Skill>, String> {
     let db = state.db.lock().unwrap();
     db::list_skills(&db).map_err(|e| format!("Failed to list skills: {}", e))
-}
-
-#[tauri::command]
-pub fn uninstall_skill(state: State<'_, Arc<AppState>>, id: String) -> Result<bool, String> {
-    uninstall_skill_impl(state.inner(), id)
 }
 
 pub fn uninstall_skill_impl(state: &AppState, id: String) -> Result<bool, String> {
@@ -276,27 +263,6 @@ pub fn uninstall_skill_impl(state: &AppState, id: String) -> Result<bool, String
     Ok(deleted)
 }
 
-#[tauri::command]
-pub fn toggle_skill(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-    enabled: bool,
-) -> Result<bool, String> {
-    // Legacy wrapper — delegates to toggle_skill_app with app="claude"
-    super::service::toggle_app(state.inner(), &id, "claude", enabled)?;
-    Ok(enabled)
-}
-
-#[tauri::command]
-pub fn toggle_skill_app(
-    state: State<'_, Arc<AppState>>,
-    skill_id: String,
-    app: String,
-    enabled: bool,
-) -> Result<(), String> {
-    toggle_skill_app_impl(state.inner(), skill_id, app, enabled)
-}
-
 pub fn toggle_skill_app_impl(
     state: &AppState,
     skill_id: String,
@@ -306,25 +272,10 @@ pub fn toggle_skill_app_impl(
     super::service::toggle_app(state, &skill_id, &app, enabled)
 }
 
-#[tauri::command]
-pub fn list_importable_skills(
-    state: State<'_, Arc<AppState>>,
-) -> Result<Vec<super::types::ImportableSkill>, String> {
-    list_importable_skills_impl(state.inner())
-}
-
 pub fn list_importable_skills_impl(
     state: &AppState,
 ) -> Result<Vec<super::types::ImportableSkill>, String> {
     super::service::list_importable(state)
-}
-
-#[tauri::command]
-pub fn import_skills_from_apps(
-    state: State<'_, Arc<AppState>>,
-    selected: Option<Vec<String>>,
-) -> Result<super::service::ImportResult, String> {
-    import_skills_from_apps_impl(state.inner(), selected)
 }
 
 pub fn import_skills_from_apps_impl(
@@ -332,11 +283,6 @@ pub fn import_skills_from_apps_impl(
     selected: Option<Vec<String>>,
 ) -> Result<super::service::ImportResult, String> {
     super::service::import_from_apps(state, selected)
-}
-
-#[tauri::command]
-pub fn get_skill_content(state: State<'_, Arc<AppState>>, id: String) -> Result<String, String> {
-    get_skill_content_impl(state.inner(), id)
 }
 
 pub fn get_skill_content_impl(state: &AppState, id: String) -> Result<String, String> {
@@ -365,11 +311,6 @@ pub fn get_skill_content_impl(state: &AppState, id: String) -> Result<String, St
         }
     }
     Ok(String::new())
-}
-
-#[tauri::command]
-pub fn scan_disk_skills(state: State<'_, Arc<AppState>>) -> Result<Vec<Skill>, String> {
-    scan_disk_skills_impl(state.inner())
 }
 
 pub fn scan_disk_skills_impl(state: &AppState) -> Result<Vec<Skill>, String> {
@@ -421,14 +362,6 @@ pub fn scan_disk_skills_impl(state: &AppState) -> Result<Vec<Skill>, String> {
     db::list_skills(&db_guard).map_err(|e| format!("Failed to list skills: {}", e))
 }
 
-#[tauri::command]
-pub fn register_skill_from_disk(
-    state: State<'_, Arc<AppState>>,
-    name: String,
-) -> Result<Skill, String> {
-    register_skill_from_disk_impl(state.inner(), name)
-}
-
 pub fn register_skill_from_disk_impl(state: &AppState, name: String) -> Result<Skill, String> {
     let db_guard = state.db.lock().unwrap();
     // Search both directories
@@ -438,14 +371,6 @@ pub fn register_skill_from_disk_impl(state: &AppState, name: String) -> Result<S
         .map_err(|e| format!("Failed to register skill from disk: {}", e))
 }
 
-#[tauri::command]
-pub fn get_enabled_skill_names(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
-    let db_guard = state.db.lock().unwrap();
-    db::get_enabled_skill_names(&db_guard)
-        .map_err(|e| format!("Failed to get enabled skills: {}", e))
-}
-
-#[tauri::command]
 pub async fn list_project_skills(
     project_root: String,
     agent_kind: String,

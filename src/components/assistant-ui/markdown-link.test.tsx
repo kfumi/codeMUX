@@ -25,14 +25,10 @@ vi.mock('@/lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('@/lib/tauri', () => ({
-  fileApi: {
-    readFile: (...args: unknown[]) => readFile(...args),
+vi.mock('@/lib/facades/shell-facade', () => ({
+  shellFacade: {
+    openExternal: (...args: unknown[]) => openExternal(...args),
   },
-}));
-
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: (...args: unknown[]) => openExternal(...args),
 }));
 
 describe('normalizeLocalMarkdownHref', () => {
@@ -204,7 +200,8 @@ describe('CodeMuxMarkdownLink', () => {
     });
   });
 
-  it('keeps external links opening through the shell', () => {
+  it('keeps external links opening through the shell bridge', async () => {
+    openExternal.mockResolvedValue(undefined);
     render(<CodeMuxMarkdownLink href="https://example.com/docs">外部文档</CodeMuxMarkdownLink>);
 
     fireEvent.click(screen.getByRole('link', { name: '外部文档' }));

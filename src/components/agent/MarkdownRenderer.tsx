@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
-import { open } from '@tauri-apps/plugin-shell';
+import { shellFacade } from '../../lib/facades/shell-facade';
 
 interface MarkdownRendererProps {
   content: string;
@@ -123,7 +123,8 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
               className="text-[hsl(var(--primary))] hover:underline underline-offset-2"
               onClick={(e) => {
                 e.preventDefault();
-                if (href) open(href);
+                // 外链走壳桥 openExternal(main 侧 shell.openExternal,仅 http/https)。
+                if (href) void shellFacade.openExternal(href).catch(() => {});
               }}
               {...props}
             >

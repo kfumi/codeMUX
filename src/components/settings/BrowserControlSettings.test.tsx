@@ -18,8 +18,10 @@ vi.mock('../../stores/settingsStore', () => ({
   }),
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  browserApi: { clearData },
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
+    browser: { clearData },
+  },
 }));
 
 import { BrowserControlSettings } from './BrowserControlSettings';

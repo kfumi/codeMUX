@@ -1,23 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const listenMock = vi.hoisted(() => vi.fn());
-const isElectronMock = vi.hoisted(() => vi.fn((): boolean => false));
+const bridgeState = vi.hoisted(() => ({
+  bridge: undefined as { onBrowserNewWindow: ReturnType<typeof vi.fn> } | undefined,
+}));
 const electronBusMocks = vi.hoisted(() => ({
   page: vi.fn(),
   newWindow: vi.fn(),
-  onBrowserNewWindow: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: listenMock,
-}));
-
-vi.mock('./desktop-bridge', () => ({
-  desktopBridge: {
-    onBrowserNewWindow: electronBusMocks.onBrowserNewWindow,
-  },
-  isElectronDesktop: isElectronMock,
-}));
+vi.mock('./desktop-bridge', async () => {
+  const actual = await vi.importActual<typeof import('./desktop-bridge')>('./desktop-bridge');
+  return {
+    ...actual,
+    get desktopBridge() {
+      return bridgeState.bridge;
+    },
+  };
+});
 
 vi.mock('./browser/electronBrowserHost', () => ({
   onElectronBrowserPage: (listener: unknown) => {
@@ -32,64 +31,26 @@ vi.mock('./browser/electronBrowserHost', () => ({
 
 import { initBrowserHostBridge } from './browserHostBridge';
 import type { BrowserPagePatch } from './browserHost';
-import { BROWSER_NEW_WINDOW_EVENT, BROWSER_PAGE_EVENT } from './browserHost';
 import { useBrowserStore } from '../stores/browserStore';
 import { useSidePanelStore } from '../stores/sidePanelStore';
 
 describe('browserHostBridge', () => {
   beforeEach(() => {
-    listenMock.mockReset();
-    listenMock.mockResolvedValue(() => {});
-    isElectronMock.mockReturnValue(false);
+    bridgeState.bridge = { onBrowserNewWindow: vi.fn(() => () => {}) };
     electronBusMocks.page.mockClear();
     electronBusMocks.newWindow.mockClear();
-    electronBusMocks.onBrowserNewWindow.mockReset();
-    electronBusMocks.onBrowserNewWindow.mockReturnValue(() => {});
     useBrowserStore.getState().reset();
     useSidePanelStore.getState().reset();
   });
 
-  it('registers page and new-window listeners', () => {
-    initBrowserHostBridge();
-    expect(listenMock).toHaveBeenCalledWith(BROWSER_PAGE_EVENT, expect.any(Function));
-    expect(listenMock).toHaveBeenCalledWith(BROWSER_NEW_WINDOW_EVENT, expect.any(Function));
-  });
-
-  it('opens a browser tab in the source scope when a new window is requested', async () => {
-    initBrowserHostBridge();
-    const newWindowHandler = listenMock.mock.calls.find(([event]) => event === BROWSER_NEW_WINDOW_EVENT)?.[1];
-    expect(newWindowHandler).toBeTypeOf('function');
-
-    useSidePanelStore.getState().setScope('session-a');
-    const sourceTabId = useSidePanelStore.getState().openBrowserTab();
-    const pageId = useBrowserStore.getState().ensureBlankPage(sourceTabId);
-
-    newWindowHandler?.({
-      payload: {
-        sourceBrowserId: pageId,
-        url: 'https://example.com/docs',
-      },
-    });
-
-    const state = useSidePanelStore.getState();
-    expect(state.tabs).toHaveLength(2);
-    expect(state.activeTabId).toBe(state.tabs[1].id);
-    expect(state.tabs[1]).toMatchObject({
-      kind: 'browser',
-      browserInitialUrl: 'https://example.com/docs',
-    });
-  });
-
-  it('Electron 分支:订阅本地 webview 事件总线,不走 tauri listen', () => {
-    isElectronMock.mockReturnValue(true);
+  it('订阅本地 webview 事件总线与 main 弹窗兜底通道(工单 09 终态)', () => {
     initBrowserHostBridge();
     expect(electronBusMocks.page).toHaveBeenCalledWith(expect.any(Function));
     expect(electronBusMocks.newWindow).toHaveBeenCalledWith(expect.any(Function));
-    expect(listenMock).not.toHaveBeenCalled();
+    expect(bridgeState.bridge?.onBrowserNewWindow).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it('Electron 分支:webview 页面补丁经本地总线等价分发进 store', () => {
-    isElectronMock.mockReturnValue(true);
+  it('webview 页面补丁经本地总线等价分发进 store', () => {
     initBrowserHostBridge();
     const pageHandler = electronBusMocks.page.mock.calls[0]?.[0] as (patch: BrowserPagePatch) => void;
 
@@ -114,15 +75,47 @@ describe('browserHostBridge', () => {
     });
   });
 
-  it('Electron 分支:main 弹窗兜底转发,来源未知时回落当前可见浏览器页', () => {
-    isElectronMock.mockReturnValue(true);
+  it('main 弹窗兜底转发,来源已知时直接开新标签', () => {
+    initBrowserHostBridge();
     const captured: {
       handler?: (payload: { sourceBrowserId?: string | null; url?: string }) => void;
     } = {};
-    electronBusMocks.onBrowserNewWindow.mockImplementation((callback: typeof captured.handler) => {
-      captured.handler = callback;
-      return () => {};
+    bridgeState.bridge = {
+      onBrowserNewWindow: vi.fn((callback: typeof captured.handler) => {
+        captured.handler = callback;
+        return () => {};
+      }),
+    };
+
+    initBrowserHostBridge();
+    expect(captured.handler).toBeTypeOf('function');
+
+    useSidePanelStore.getState().setScope('session-a');
+    const sourceTabId = useSidePanelStore.getState().openBrowserTab();
+    const pageId = useBrowserStore.getState().ensureBlankPage(sourceTabId);
+
+    captured.handler?.({ sourceBrowserId: pageId, url: 'https://example.com/docs' });
+
+    const state = useSidePanelStore.getState();
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeTabId).toBe(state.tabs[1].id);
+    expect(state.tabs[1]).toMatchObject({
+      kind: 'browser',
+      browserInitialUrl: 'https://example.com/docs',
     });
+  });
+
+  it('main 弹窗兜底转发,来源未知时回落当前可见浏览器页', () => {
+    initBrowserHostBridge();
+    const captured: {
+      handler?: (payload: { sourceBrowserId?: string | null; url?: string }) => void;
+    } = {};
+    bridgeState.bridge = {
+      onBrowserNewWindow: vi.fn((callback: typeof captured.handler) => {
+        captured.handler = callback;
+        return () => {};
+      }),
+    };
 
     initBrowserHostBridge();
     expect(captured.handler).toBeTypeOf('function');

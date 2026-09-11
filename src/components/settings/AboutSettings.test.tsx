@@ -3,9 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getNameMock = vi.fn(async () => 'CodeMUX');
-const getVersionMock = vi.fn(async () => '1.0.0');
-const getTauriVersionMock = vi.fn(async () => '2.0.0');
+const currentVersionMock = vi.fn(async () => '1.0.0');
 
 type MockUpdaterContext = {
   stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
@@ -16,11 +14,13 @@ type MockUpdaterContext = {
 
 let mockUpdaterContext: MockUpdaterContext;
 
-vi.mock('@tauri-apps/api/app', () => ({
-  getName: getNameMock,
-  getVersion: getVersionMock,
-  getTauriVersion: getTauriVersionMock,
-}));
+vi.mock('../../lib/desktop-bridge', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/desktop-bridge')>('../../lib/desktop-bridge');
+  return {
+    ...actual,
+    desktopBridge: { currentVersion: currentVersionMock },
+  };
+});
 
 vi.mock('../../features/update/UpdaterProvider', () => ({
   useUpdaterContext: () => mockUpdaterContext,
@@ -145,7 +145,7 @@ describe('AboutSettings', () => {
   });
 
   it('读取应用信息失败时仍显示规范品牌名', async () => {
-    getNameMock.mockRejectedValueOnce(new Error('unavailable'));
+    currentVersionMock.mockRejectedValueOnce(new Error('unavailable'));
     const { AboutSettings } = await import('./AboutSettings');
 
     render(<AboutSettings />);

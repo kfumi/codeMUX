@@ -3,10 +3,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const invokeMock = vi.hoisted(() => vi.fn(async () => undefined));
+const openInExplorerMock = vi.hoisted(() => vi.fn(async () => undefined));
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: invokeMock,
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
+    openInExplorer: openInExplorerMock,
+  },
 }));
 
 import { SessionItem } from './SessionItem';
@@ -196,8 +198,6 @@ describe('SessionItem', () => {
     await waitFor(() => expect(screen.getByText('在资源管理器中打开')).toBeTruthy());
     fireEvent.click(screen.getByText('在资源管理器中打开'));
 
-    expect(invokeMock).toHaveBeenCalledWith('open_in_explorer', {
-      path: 'D:/project/codeMUX/.worktrees/brave-otter',
-    });
+    expect(openInExplorerMock).toHaveBeenCalledWith('D:/project/codeMUX/.worktrees/brave-otter');
   });
 });

@@ -19,10 +19,9 @@ const mocks = vi.hoisted(() => ({
   toastLoading: vi.fn(() => 'toast-id'),
 }));
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (command: string, args?: Record<string, unknown>) => {
-    if (command === 'open_in_explorer') return mocks.openInExplorer(args);
-    return Promise.resolve();
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
+    openInExplorer: mocks.openInExplorer,
   },
 }));
 
@@ -47,15 +46,6 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
   },
 }));
 
-vi.mock('../../lib/tauri', () => ({
-  agentApi: {},
-  openInExplorer: mocks.openInExplorer,
-  sessionApi: {
-    archive: vi.fn().mockResolvedValue(undefined),
-    setPinned: vi.fn().mockResolvedValue(undefined),
-    updateTitle: vi.fn().mockResolvedValue(undefined),
-  },
-}));
 
 function makeSession(overrides: Partial<Session>): Session {
   return {

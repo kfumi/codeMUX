@@ -4,7 +4,7 @@ import {
   resolveWorktreeBaseRef,
   type DraftWorkspaceSelection,
 } from './draftWorkspacePicker';
-import { appApi } from './tauri';
+import { requireDesktopBridge } from './desktop-bridge';
 import { daemonFacade } from './facades/daemon-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
@@ -39,7 +39,7 @@ export async function ensureDraftSessionWorkingPath(cwd: string): Promise<string
   if (!isDefaultWorkingDirectoryRequest(cwd)) {
     return cwd.trim();
   }
-  const homeDir = await appApi.getUserHomeDirectory();
+  const homeDir = await requireDesktopBridge().getUserHomeDirectory();
   return resolveDefaultWorkingDirectory(homeDir);
 }
 

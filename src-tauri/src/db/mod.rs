@@ -26,7 +26,7 @@ mod tests {
     use crate::paths::PathRoots;
 
     #[test]
-    fn initialize_creates_schema_without_tauri_app() {
+    fn initialize_creates_schema_without_shell_process() {
         let temp = tempfile::tempdir().expect("tempdir");
         let roots = PathRoots {
             app_data_dir: temp.path().to_path_buf(),

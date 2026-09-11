@@ -187,10 +187,21 @@ git push origin v0.0.7
 
 当前 workflow 已暂时移除 Ubuntu 发布，原因是 Linux 的 AppImage 打包经常在 `linuxdeploy` 阶段失败。为了保证正式发版稳定性，现在只发布 Windows 和 macOS。后续如果需要恢复 Linux 发布，可以单独再补 Linux 专用工作流或仅保留 `deb/rpm` 目标。
 
-## Electron 壳发版路径(草稿,工单 06;正式切换由工单 09 收口)
+## Electron 壳发版路径(正式)
 
-`desktop-electron/` 壳已具备可安装包产出与应用内更新能力,本节为切换期的草稿说明;
-正式的资源根布局与 CI 接线以工单 09 为准。
+自工单 09 起,桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**,Tauri 壳
+已从仓库移除(`src-tauri/` 目录名保留,内容为 daemon crate 与其 bin 目标)。
+
+### 数据目录与旧壳用户迁移
+
+daemon 的应用数据目录不变(`%APPDATA%/com.codemux.desktop` 及平台等价目录):
+SQLite 会话、config.json、配对设备、Local Daemon Token 全部原地复用。旧 Tauri
+版用户**一次性安装 Electron 安装包即完成迁移**,无数据搬家脚本。
+
+### unix 打包(待办)
+
+`electron-builder.yml` 当前仅配置 win(NSIS);mac/linux 的 daemon 二进制命名、
+resources 映射与公证流程为待办事项。
 
 ### 构建安装包(NSIS)
 

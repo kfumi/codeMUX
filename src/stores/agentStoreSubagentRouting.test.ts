@@ -28,52 +28,6 @@ vi.mock('../lib/daemon-session-bridge', () => ({
   resetDaemonSessionBridge: vi.fn(),
 }));
 
-vi.mock('../lib/tauri', () => ({
-  agentApi: {
-    interrupt: vi.fn(),
-    shutdown: vi.fn(),
-    resetSession: vi.fn(),
-    sendToolResponse: vi.fn(),
-    respondToAgentPermission: vi.fn(),
-    saveEvents: vi.fn(),
-    getEvents: vi.fn(),
-    loadSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
-    loadClaudeSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadCodexSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadOpenCodeSessionEvents: vi.fn(() => Promise.resolve([])),
-    loadLatestTokenUsage: vi.fn(() => Promise.resolve(null)),
-    rewindSession: vi.fn(),
-    enrichAttachments: vi.fn(),
-  },
-  sessionApi: {
-    create: vi.fn(),
-    getAll: vi.fn(),
-    delete: vi.fn(),
-    updateTitle: vi.fn(),
-    updateProvider: vi.fn(),
-    updatePermissions: vi.fn(() => Promise.resolve()),
-    updateWorkingPath: vi.fn(() => Promise.resolve()),
-    touch: vi.fn(() => Promise.resolve()),
-    getMessages: vi.fn(),
-  },
-  configApi: {
-    get: vi.fn(),
-  },
-  fileApi: {
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-  },
-  companionApi: {
-    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
-    getStatus: vi.fn(() => Promise.resolve({ port: 8787, enabled: false })),
-  },
-  gitApi: {},
-  mcpApi: {},
-  skillApi: {},
-  appApi: {},
-}));
-
 vi.mock('../lib/facades/daemon-facade', () => ({
   ensureDaemonClient: vi.fn(() => Promise.resolve({
     sendMessage: sendMessageViaDaemonMock,
@@ -95,10 +49,6 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   },
   getDaemonClientInitError: vi.fn(() => null),
   resetDaemonClient: vi.fn(),
-}));
-
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(() => Promise.resolve('test-token')),
 }));
 
 describe('agentStore subagent event routing', () => {

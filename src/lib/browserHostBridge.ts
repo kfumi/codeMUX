@@ -1,5 +1,3 @@
-import { listen } from '@tauri-apps/api/event';
-
 import { browserPageTitle } from './browserPage';
 import { browserScopeFromPanelTabId } from './browserPanelTab';
 import {
@@ -7,12 +5,10 @@ import {
   onElectronBrowserPage,
 } from './browser/electronBrowserHost';
 import {
-  BROWSER_NEW_WINDOW_EVENT,
-  BROWSER_PAGE_EVENT,
   type BrowserNewWindowPayload,
   type BrowserPagePatch,
 } from './browserHost';
-import { desktopBridge, isElectronDesktop } from './desktop-bridge';
+import { desktopBridge } from './desktop-bridge';
 import { createLogger } from './logger';
 import { useBrowserStore } from '../stores/browserStore';
 import { useSidePanelStore } from '../stores/sidePanelStore';
@@ -29,7 +25,7 @@ function openBrowserTabInScope(scopeId: string, url?: string) {
   sidePanel.openBrowserTab(url);
 }
 
-/** 页面事件分发(Tauri/Electron 共用;payload 形状见 ../lib/browserHost.ts)。 */
+/** 页面事件分发(payload 形状见 ../lib/browserHost.ts)。 */
 export function dispatchBrowserPagePatch(patch?: BrowserPagePatch): void {
   if (!patch?.browserId) {
     logger.warn('Ignored browser page event without browserId');
@@ -48,7 +44,7 @@ export function dispatchBrowserPagePatch(patch?: BrowserPagePatch): void {
   );
 }
 
-/** 弹窗(新标签)事件分发(Tauri/Electron 共用)。 */
+/** 弹窗(新标签)事件分发。 */
 export function dispatchBrowserNewWindow(payload?: BrowserNewWindowPayload): void {
   const { sourceBrowserId, url } = payload ?? {};
   if (!sourceBrowserId || !url) {
@@ -60,31 +56,23 @@ export function dispatchBrowserNewWindow(payload?: BrowserNewWindowPayload): voi
   openBrowserTabInScope(scopeId, url);
 }
 
+/**
+ * 浏览器宿主事件桥(工单 09 终态):页面事件来自渲染层 <webview> 的本地
+ * 事件总线;弹窗兜底经 main setWindowOpenHandler 转发(preload onBrowserNewWindow)。
+ * Tauri emit 通道随壳退役移除。
+ */
 export function initBrowserHostBridge(): void {
-  if (isElectronDesktop()) {
-    // Electron(工单 07):页面事件来自渲染层 <webview> 的本地事件总线,
-    // 弹窗兜底经 main setWindowOpenHandler 转发(preload onBrowserNewWindow)。
-    onElectronBrowserPage(dispatchBrowserPagePatch);
-    onElectronBrowserNewWindow(dispatchBrowserNewWindow);
-    desktopBridge?.onBrowserNewWindow((payload) => {
-      let sourceBrowserId = payload.sourceBrowserId ?? '';
-      if (!sourceBrowserId) {
-        // main 侧无法定位来源时,回落到当前可见浏览器页。
-        const visibleTabId = useBrowserStore.getState().lastVisibleBrowserTabId;
-        sourceBrowserId = visibleTabId
-          ? useBrowserStore.getState().activePageIdByPanel[visibleTabId] ?? ''
-          : '';
-      }
-      dispatchBrowserNewWindow({ sourceBrowserId, url: payload.url ?? '' });
-    });
-    return;
-  }
-
-  void listen<BrowserPagePatch>(BROWSER_PAGE_EVENT, (event) => {
-    dispatchBrowserPagePatch(event.payload);
-  });
-
-  void listen<BrowserNewWindowPayload>(BROWSER_NEW_WINDOW_EVENT, (event) => {
-    dispatchBrowserNewWindow(event.payload);
+  onElectronBrowserPage(dispatchBrowserPagePatch);
+  onElectronBrowserNewWindow(dispatchBrowserNewWindow);
+  desktopBridge?.onBrowserNewWindow((payload) => {
+    let sourceBrowserId = payload.sourceBrowserId ?? '';
+    if (!sourceBrowserId) {
+      // main 侧无法定位来源时,回落到当前可见浏览器页。
+      const visibleTabId = useBrowserStore.getState().lastVisibleBrowserTabId;
+      sourceBrowserId = visibleTabId
+        ? useBrowserStore.getState().activePageIdByPanel[visibleTabId] ?? ''
+        : '';
+    }
+    dispatchBrowserNewWindow({ sourceBrowserId, url: payload.url ?? '' });
   });
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// 工单 06:desktopDialogs 平台分流 —— Electron 走壳桥,Tauri 回退 plugin-dialog。
+// 工单 09 终态:desktopDialogs 只走壳桥;桥缺失时显式报错(不再回退 Tauri plugin-dialog)。
 const bridgeState = vi.hoisted(() => ({
   bridge: undefined as {
     showDialogOpen: ReturnType<typeof vi.fn>;
@@ -9,44 +9,28 @@ const bridgeState = vi.hoisted(() => ({
   | undefined,
 }));
 
-const isElectronDesktopMock = vi.hoisted(() => vi.fn(() => false));
-
-const tauriDialog = vi.hoisted(() => ({
-  open: vi.fn(),
-  save: vi.fn(),
-}));
-
-vi.mock('./desktop-bridge', async () => {
-  const actual = await vi.importActual<typeof import('./desktop-bridge')>('./desktop-bridge');
-  return {
-    ...actual,
-    get desktopBridge() {
-      return bridgeState.bridge;
-    },
-    isElectronDesktop: isElectronDesktopMock,
-  };
-});
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: tauriDialog.open,
-  save: tauriDialog.save,
+vi.mock('./desktop-bridge', () => ({
+  requireDesktopBridge: () => {
+    if (!bridgeState.bridge) {
+      throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
+    }
+    return bridgeState.bridge;
+  },
 }));
 
 import { openDialog, saveDialog } from './desktopDialogs';
 
-describe('desktopDialogs 平台分流', () => {
+describe('desktopDialogs(壳桥直连)', () => {
   afterEach(() => {
     bridgeState.bridge = undefined;
-    isElectronDesktopMock.mockReturnValue(false);
     vi.clearAllMocks();
   });
 
-  it('Electron 壳:openDialog 走壳桥并原样下传 options', async () => {
+  it('openDialog 走壳桥并原样下传 options', async () => {
     bridgeState.bridge = {
       showDialogOpen: vi.fn().mockResolvedValue('D:/work/codeMUX'),
       showDialogSave: vi.fn(),
     };
-    isElectronDesktopMock.mockReturnValue(true);
 
     const result = await openDialog({ directory: true, multiple: false, title: '选择项目文件夹' });
 
@@ -56,15 +40,13 @@ describe('desktopDialogs 平台分流', () => {
       multiple: false,
       title: '选择项目文件夹',
     });
-    expect(tauriDialog.open).not.toHaveBeenCalled();
   });
 
-  it('Electron 壳:saveDialog 走壳桥', async () => {
+  it('saveDialog 走壳桥', async () => {
     bridgeState.bridge = {
       showDialogOpen: vi.fn(),
       showDialogSave: vi.fn().mockResolvedValue('D:/out/snapshot.json'),
     };
-    isElectronDesktopMock.mockReturnValue(true);
 
     const result = await saveDialog({
       defaultPath: 'codemux-perf.json',
@@ -76,18 +58,13 @@ describe('desktopDialogs 平台分流', () => {
       defaultPath: 'codemux-perf.json',
       filters: [{ name: 'JSON', extensions: ['json'] }],
     });
-    expect(tauriDialog.save).not.toHaveBeenCalled();
   });
 
-  it('Tauri 壳/纯 Web:回退 @tauri-apps/plugin-dialog 且行为不变', async () => {
-    tauriDialog.open.mockResolvedValueOnce('D:/work');
-    tauriDialog.save.mockResolvedValueOnce('D:/out.json');
+  it('桥缺失时显式报错(不再有 plugin-dialog 回退)', async () => {
+    bridgeState.bridge = undefined;
 
-    await expect(openDialog({ directory: true, multiple: false })).resolves.toBe('D:/work');
-    expect(tauriDialog.open).toHaveBeenCalledWith({ directory: true, multiple: false });
-
-    await expect(saveDialog({})).resolves.toBe('D:/out.json');
-    expect(tauriDialog.save).toHaveBeenCalledWith({});
+    await expect(openDialog({ directory: true, multiple: false })).rejects.toThrow('codemuxDesktop 桥不可用');
+    await expect(saveDialog({})).rejects.toThrow('codemuxDesktop 桥不可用');
   });
 
   it('取消(桥返回 null)原样透传', async () => {
@@ -95,9 +72,17 @@ describe('desktopDialogs 平台分流', () => {
       showDialogOpen: vi.fn().mockResolvedValue(null),
       showDialogSave: vi.fn().mockResolvedValue(null),
     };
-    isElectronDesktopMock.mockReturnValue(true);
 
     await expect(openDialog({ directory: true })).resolves.toBeNull();
     await expect(saveDialog()).resolves.toBeNull();
+  });
+
+  it('multiple 返回数组形状原样透传', async () => {
+    bridgeState.bridge = {
+      showDialogOpen: vi.fn().mockResolvedValue(['D:/a', 'D:/b']),
+      showDialogSave: vi.fn(),
+    };
+
+    await expect(openDialog({ multiple: true })).resolves.toEqual(['D:/a', 'D:/b']);
   });
 });

@@ -79,7 +79,7 @@ fn maybe_finish_turn_and_drain_queue(
     let companion_state = companion_state.clone();
     let roots = roots.clone();
     let session_id = session_id.to_string();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         for message in queued {
             if let Err(error) = send_companion_message_owned(
                 app.clone(),

@@ -11,16 +11,11 @@ import type { Project } from '../../types/project';
 import { ProjectExplorer } from './ProjectExplorer';
 
 const listDirectoryMock = vi.hoisted(() => vi.fn());
-const invokeMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
     listDirectory: listDirectoryMock,
   },
-}));
-
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
 vi.mock('../../stores/sidePanelStore', () => ({

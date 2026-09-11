@@ -1,0 +1,176 @@
+attachments.rs:39 removed wrapper pub async fn enrich_attachments
+attachments.rs: removed use tauri::State;
+claude_history.rs:72 removed wrapper pub async fn load_claude_session_events
+claude_history.rs:141 removed wrapper pub async fn delete_claude_session_files
+claude_history.rs: removed use tauri::State;
+codex_history.rs:1061 removed wrapper pub async fn load_codex_session_events
+codex_history.rs:1104 removed wrapper pub async fn delete_codex_session_files
+codex_history.rs: removed use tauri::State;
+codex_proxy.rs:78 removed wrapper pub async fn start_codex_proxy
+codex_proxy.rs:78 removed wrapper pub async fn stop_codex_proxy
+codex_proxy.rs:78 removed wrapper pub async fn get_codex_proxy_port
+codex_proxy.rs: removed use tauri::State;
+commands.rs: removed stray attr at 953
+fork.rs:253 removed wrapper pub async fn fork_claude_session
+fork.rs:369 removed wrapper pub async fn fork_codex_session
+fork.rs:462 removed wrapper pub async fn fork_opencode_session
+fork.rs:569 removed wrapper pub async fn fork_pi_session
+history_import.rs:75 removed wrapper pub async fn discover_importable_sessions
+history_import.rs:105 removed wrapper pub fn import_sessions
+history_import.rs:171 removed wrapper pub async fn load_session_events
+history_import.rs:177 removed wrapper pub async fn resync_session_from_native
+history_import.rs:750 removed wrapper pub fn fetch_session_timeline
+history_import.rs: removed use tauri::State;
+opencode_history.rs:2130 removed wrapper pub async fn load_opencode_session_events
+opencode_history.rs:2150 removed wrapper pub async fn delete_opencode_session
+opencode_history.rs: removed use tauri::State;
+pi_history.rs:669 removed wrapper pub async fn load_pi_session_events
+pi_history.rs: removed use tauri::State;
+rewind.rs:688 removed wrapper pub async fn rewind_agent_session
+session_lifecycle.rs:1414 removed wrapper pub async fn get_agent_session_info
+session_lifecycle.rs:1440 removed wrapper pub async fn load_agent_latest_token_usage
+session_lifecycle.rs:1459 removed wrapper pub async fn ensure_agent_session
+session_lifecycle.rs:1459 removed wrapper pub async fn send_agent_input
+session_lifecycle.rs:1564 removed wrapper pub async fn start_agent_session
+session_lifecycle.rs:1564 removed wrapper pub async fn interrupt_agent_session
+session_lifecycle.rs:1564 removed wrapper pub async fn shutdown_agent
+session_lifecycle.rs:1590 removed wrapper pub async fn send_tool_response
+session_lifecycle.rs:1590 removed wrapper pub async fn respond_to_agent_permission
+session_lifecycle.rs:1590 removed wrapper pub async fn reset_agent_session
+session_lifecycle.rs: removed use tauri::State;
+subagent_persist.rs:89 removed wrapper pub async fn load_session_subagents
+lib.rs:125 removed wrapper fn show_main_window_command
+lib.rs:330 removed wrapper fn send_agent_notification_command
+lib.rs: removed use tauri::menu::MenuBuilder;
+lib.rs: removed use tauri::path::BaseDirectory;
+lib.rs: removed braced tauri use
+file.rs: dropped attr for pub fn open_in_explorer
+file.rs: dropped attr for pub fn open_project_path
+file.rs: dropped attr for pub fn read_file
+file.rs: dropped attr for pub fn write_file
+file.rs: dropped attr for pub fn delete_file
+file.rs: dropped attr for pub fn list_directory
+file.rs: dropped attr for pub fn read_home_file
+forge.rs:24 removed wrapper pub async fn create_pull_request
+forge.rs: dropped attr for pub fn get_gitee_credential_status
+forge.rs: dropped attr for pub fn set_gitee_token
+forge.rs: dropped attr for pub fn clear_gitee_token
+forge.rs: removed use tauri::State;
+git.rs: dropped attr for pub fn get_git_changed_files
+git.rs: dropped attr for pub fn get_git_changed_files_since_head
+git.rs: dropped attr for pub fn get_git_status_changes
+git.rs: dropped attr for pub fn get_git_status_change_detail
+git.rs: dropped attr for pub fn stage_git_status_changes
+git.rs: dropped attr for pub fn unstage_git_status_changes
+git.rs: dropped attr for pub fn get_git_repository_state
+git.rs: dropped attr for pub fn create_git_branch
+git.rs: dropped attr for pub fn checkout_git_branch
+git.rs: dropped attr for pub fn list_git_worktrees
+git.rs: dropped attr for pub fn create_git_worktree
+git.rs: dropped attr for pub fn revert_git_status_changes
+git.rs: dropped attr for pub fn commit_git_changes
+git.rs: dropped attr for pub fn push_git_branch
+git.rs:1855 removed wrapper pub async fn generate_git_commit_message
+git.rs:1855 removed wrapper pub async fn generate_pull_request_description
+git.rs: removed use tauri::State;
+mcp.rs:34 removed wrapper pub fn get_mcp_servers
+mcp.rs:40 removed wrapper pub fn upsert_mcp_server
+mcp.rs:46 removed wrapper pub fn delete_mcp_server
+mcp.rs:52 removed wrapper pub fn toggle_mcp_app
+mcp.rs:61 removed wrapper pub async fn import_mcp_from_apps
+mcp.rs:442 removed wrapper pub async fn probe_all_mcp_servers
+mcp.rs:451 removed wrapper pub async fn probe_mcp_server
+mcp.rs: removed use tauri::State;
+model_provider.rs: dropped attr for pub fn list_builtin_provider_templates
+model_provider.rs:28 removed wrapper pub fn instantiate_builtin_provider_template
+model_provider.rs:38 removed wrapper pub fn upsert_model_provider
+model_provider.rs:115 removed wrapper pub fn delete_model_provider
+model_provider.rs:131 removed wrapper pub fn set_active_model_provider
+model_provider.rs:148 removed wrapper pub fn set_model_provider_enabled
+model_provider.rs: dropped attr for pub async fn test_model_provider
+model_provider.rs:176 removed wrapper pub fn provider_usable_for_agent
+model_provider.rs: removed use tauri::State;
+perf.rs: dropped attr for pub fn get_tokio_console_info
+perf.rs: dropped attr for pub fn export_perf_snapshot
+provider.rs: dropped attr for pub fn upsert_agent_provider_profile
+provider.rs: dropped attr for pub fn activate_agent_provider_profile
+provider.rs: dropped attr for pub fn activate_default_claude_supplier
+provider.rs: dropped attr for pub fn activate_default_codex_supplier
+provider.rs: dropped attr for pub fn activate_default_opencode_supplier
+provider.rs: dropped attr for pub fn set_active_agent_profile_model
+provider.rs: dropped attr for pub fn delete_agent_provider_profile
+provider.rs: dropped attr for pub fn fetch_agent_profile_models
+provider.rs: dropped attr for pub async fn test_agent_provider_profile
+provider.rs:196 removed wrapper pub fn get_config
+provider.rs: dropped attr for pub fn update_provider
+provider.rs: dropped attr for pub fn delete_provider
+provider.rs: dropped attr for pub fn set_active_provider
+provider.rs:216 removed wrapper pub fn set_default_agent_kind
+provider.rs:228 removed wrapper pub fn update_agent_config
+provider.rs:242 removed wrapper pub fn set_theme
+provider.rs:258 removed wrapper pub fn set_compact_ai_output
+provider.rs:270 removed wrapper pub fn set_immediate_run_mode
+provider.rs:286 removed wrapper pub fn set_attachment_enrichment
+provider.rs:312 removed wrapper pub fn set_notification_settings
+provider.rs:340 removed wrapper pub fn set_default_open_target
+provider.rs:377 removed wrapper pub fn set_git_settings
+provider.rs: dropped attr for pub async fn fetch_opencode_free_models
+provider.rs: dropped attr for pub async fn fetch_provider_models
+provider.rs:717 removed wrapper pub async fn test_provider
+provider.rs: removed use tauri::State;
+runtime.rs:125 removed wrapper pub async fn check_managed_runtimes
+runtime.rs:147 removed wrapper pub async fn list_managed_runtime_versions
+runtime.rs:161 removed wrapper pub async fn refresh_managed_runtime
+runtime.rs:245 removed wrapper pub async fn install_managed_runtime
+runtime.rs:268 removed wrapper pub async fn upgrade_managed_runtime
+runtime.rs:284 removed wrapper pub async fn repair_managed_runtime
+runtime.rs:300 removed wrapper pub async fn remove_managed_runtime
+runtime.rs: removed braced tauri use
+scheduled_tasks.rs:66 removed wrapper pub fn list_scheduled_tasks
+scheduled_tasks.rs:74 removed wrapper pub fn get_scheduled_task
+scheduled_tasks.rs:86 removed wrapper pub fn create_scheduled_task
+scheduled_tasks.rs:99 removed wrapper pub fn update_scheduled_task
+scheduled_tasks.rs:104 removed wrapper pub fn delete_scheduled_task
+scheduled_tasks.rs:113 removed wrapper pub fn set_scheduled_task_enabled
+scheduled_tasks.rs:121 removed wrapper pub fn list_scheduled_task_runs
+scheduled_tasks.rs: dropped attr for pub fn get_scheduled_task_timezone
+scheduled_tasks.rs:126 removed wrapper pub async fn run_scheduled_task_now
+scheduled_tasks.rs:131 removed wrapper pub fn delete_scheduled_task_run
+scheduled_tasks.rs: removed use tauri::State;
+session.rs:17 removed wrapper pub fn create_session
+session.rs:17 removed wrapper pub fn get_all_sessions
+session.rs:17 removed wrapper pub fn get_archived_sessions
+session.rs:17 removed wrapper pub async fn delete_session
+session.rs:56 removed wrapper pub fn archive_session
+session.rs:56 removed wrapper pub fn unarchive_session
+session.rs:56 removed wrapper pub fn set_session_pinned
+session.rs:56 removed wrapper pub fn set_session_read_only
+session.rs:56 removed wrapper pub fn update_session_title
+session.rs:56 removed wrapper pub fn update_session_working_path
+session.rs:69 removed wrapper pub fn touch_session
+session.rs:69 removed wrapper pub fn update_session_provider
+session.rs:95 removed wrapper pub fn update_session_reasoning_effort
+session.rs:111 removed wrapper pub async fn update_session_permissions
+session.rs: removed use tauri::State;
+system.rs: dropped attr for pub fn get_system_fonts
+usage.rs:27 removed wrapper pub fn get_usage_stats
+usage.rs:139 removed wrapper pub async fn get_usage_token_breakdown
+usage.rs: removed use tauri::State;
+commands.rs:218 removed wrapper pub fn list_installed_skills
+commands.rs:223 removed wrapper pub fn uninstall_skill
+commands.rs:269 removed wrapper pub fn toggle_skill
+commands.rs:269 removed wrapper pub fn toggle_skill_app
+commands.rs:278 removed wrapper pub fn list_importable_skills
+commands.rs:284 removed wrapper pub fn import_skills_from_apps
+commands.rs:291 removed wrapper pub fn get_skill_content
+commands.rs:319 removed wrapper pub fn scan_disk_skills
+commands.rs:368 removed wrapper pub fn register_skill_from_disk
+commands.rs:377 removed wrapper pub fn get_enabled_skill_names
+commands.rs: dropped attr for pub async fn list_project_skills
+commands.rs: removed use tauri::State;
+terminal.rs:204 removed wrapper pub fn start_terminal_session
+terminal.rs:204 removed wrapper pub fn attach_terminal_session
+terminal.rs:204 removed wrapper pub fn detach_terminal_session
+terminal.rs:204 removed wrapper pub fn write_terminal_session
+terminal.rs:204 removed wrapper pub fn resize_terminal_session
+terminal.rs:216 removed wrapper pub fn close_terminal_session

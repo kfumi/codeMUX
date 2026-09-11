@@ -87,8 +87,10 @@ const {
   },
 }));
 
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: openExternal,
+vi.mock('@/lib/facades/shell-facade', () => ({
+  shellFacade: {
+    openExternal,
+  },
 }));
 
 vi.mock('@/stores/settingsStore', () => ({

@@ -10,13 +10,10 @@ import { GeneralSettings } from './GeneralSettings';
 const setDefaultOpenTargetMock = vi.fn();
 const setImmediateRunModeMock = vi.fn();
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}));
-
-vi.mock('../../lib/tauri', () => ({
-  appApi: {
+vi.mock('../../lib/facades/shell-facade', () => ({
+  shellFacade: {
     getAppDataDirectory: vi.fn(async () => 'D:\\CodeMUX'),
+    openInExplorer: vi.fn(async () => undefined),
   },
 }));
 

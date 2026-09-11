@@ -1,10 +1,6 @@
 //! Attachment enrichment: image recognition through a short-lived sidecar
 //! that talks to an OpenAI-compatible vision endpoint.
 
-use std::sync::Arc;
-
-use tauri::State;
-
 use super::spawn_sidecar;
 
 struct EnrichmentResultEvent {
@@ -34,14 +30,6 @@ fn parse_enrichment_result_event(event: &str) -> Option<EnrichmentResultEvent> {
             .to_string())
     };
     Some(EnrichmentResultEvent { request_id, result })
-}
-
-#[tauri::command]
-pub async fn enrich_attachments(
-    daemon: State<'_, Arc<crate::daemon::DaemonState>>,
-    attachments: Vec<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    enrich_attachments_for_companion(&daemon.roots, &daemon.app, attachments).await
 }
 
 pub async fn enrich_attachments_for_companion(

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink, Github } from 'lucide-react';
-import { getName, getVersion, getTauriVersion } from '@tauri-apps/api/app';
 
-import { desktopBridge, isElectronDesktop } from '@/lib/desktop-bridge';
+import { desktopBridge } from '@/lib/desktop-bridge';
+import { shellFacade } from '@/lib/facades/shell-facade';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
 
 import { Button } from '../ui/button';
@@ -19,7 +19,6 @@ import {
 interface AppInfo {
   name: string;
   version: string;
-  tauriVersion: string;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -44,18 +43,10 @@ export function AboutSettings() {
     || stage === 'restarting';
 
   useEffect(() => {
-    if (isElectronDesktop() && desktopBridge) {
-      // Electron 壳(工单 06):应用版本走壳桥 currentVersion;无 Tauri 运行时元数据。
-      desktopBridge.currentVersion()
-        .then((version) => {
-          setInfo({ name: 'CodeMUX', version, tauriVersion: '-' });
-        })
-        .catch(() => {});
-      return;
-    }
-    Promise.all([getName(), getVersion(), getTauriVersion()])
-      .then(([name, version, tauriVersion]) => {
-        setInfo({ name, version, tauriVersion });
+    // 应用版本走壳桥 currentVersion(工单 09 终态);桥缺失(纯 Web)时保持占位符。
+    desktopBridge?.currentVersion()
+      .then((version) => {
+        setInfo({ name: 'CodeMUX', version });
       })
       .catch(() => {});
   }, []);
@@ -83,7 +74,7 @@ export function AboutSettings() {
         <label className="text-sm text-foreground/74">运行环境</label>
         <div className="rounded-xl bg-muted/40 px-4 divide-y divide-border/40">
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
-          <InfoRow label="Tauri 版本" value={info?.tauriVersion ?? '-'} />
+          <InfoRow label="桌面外壳" value="Electron" />
           <InfoRow label="操作系统" value={getOSInfo()} />
           <InfoRow label="系统架构" value={getArchInfo()} />
         </div>
@@ -123,9 +114,8 @@ export function AboutSettings() {
             size="sm"
             className="gap-1.5"
             onClick={() => {
-              import('@tauri-apps/plugin-shell').then(({ open }) => {
-                open('https://github.com/kfumi/codeMUX');
-              }).catch(() => {});
+              // 外链走壳桥 openExternal(main 侧 shell.openExternal,仅 http/https)。
+              void shellFacade.openExternal('https://github.com/kfumi/codeMUX').catch(() => {});
             }}
           >
             <Github className="h-3.5 w-3.5" />
@@ -191,7 +181,6 @@ function getOSInfo(): string {
 }
 
 function getArchInfo(): string {
-  // In Tauri, navigator.platform is still available
   const p = navigator.platform ?? '';
   if (p.includes('x64') || p.includes('x86_64') || p.includes('Win64')) return 'x86_64';
   if (p.includes('arm64') || p.includes('aarch64')) return 'ARM64';

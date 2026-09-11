@@ -1,7 +1,7 @@
 //! codemux-daemon:无壳独立 daemon。
 //!
 //! 权威进程(SQLite、Session、Agent、Sidecar、MCP、skills、定时任务)。
-//! 壳(Tauri/Electron supervisor)与本机开发者都以同一方式拉起它:
+//! 壳(Electron supervisor)与本机开发者都以同一方式拉起它:
 //! `codemux-daemon [--app-data-dir <dir>] [--resource-dir <dir>] [--port <n>]
 //!                 [--managed-by <tag>]`
 //! 同名环境变量 `CODEMUX_APP_DATA_DIR` / `CODEMUX_RESOURCE_DIR` /
