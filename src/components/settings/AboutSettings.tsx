@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, Github } from 'lucide-react';
 import { getName, getVersion, getTauriVersion } from '@tauri-apps/api/app';
 
+import { desktopBridge, isElectronDesktop } from '@/lib/desktop-bridge';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
 
 import { Button } from '../ui/button';
@@ -43,6 +44,15 @@ export function AboutSettings() {
     || stage === 'restarting';
 
   useEffect(() => {
+    if (isElectronDesktop() && desktopBridge) {
+      // Electron 壳(工单 06):应用版本走壳桥 currentVersion;无 Tauri 运行时元数据。
+      desktopBridge.currentVersion()
+        .then((version) => {
+          setInfo({ name: 'CodeMUX', version, tauriVersion: '-' });
+        })
+        .catch(() => {});
+      return;
+    }
     Promise.all([getName(), getVersion(), getTauriVersion()])
       .then(([name, version, tauriVersion]) => {
         setInfo({ name, version, tauriVersion });

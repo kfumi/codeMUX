@@ -1,7 +1,7 @@
-import { open } from '@tauri-apps/plugin-dialog';
 import { MessageSquarePlus, Search, Settings, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { openDialog } from '../../lib/desktopDialogs';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -42,7 +42,7 @@ export function Sidebar({
 
   const handleAddProject = async () => {
     try {
-      const selected = await open({
+      const selected = await openDialog({
         directory: true,
         multiple: false,
         title: '选择项目文件夹',

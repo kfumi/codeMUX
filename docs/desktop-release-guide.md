@@ -186,3 +186,49 @@ git push origin v0.0.7
 ### 为什么没有 Ubuntu 安装包
 
 当前 workflow 已暂时移除 Ubuntu 发布，原因是 Linux 的 AppImage 打包经常在 `linuxdeploy` 阶段失败。为了保证正式发版稳定性，现在只发布 Windows 和 macOS。后续如果需要恢复 Linux 发布，可以单独再补 Linux 专用工作流或仅保留 `deb/rpm` 目标。
+
+## Electron 壳发版路径(草稿,工单 06;正式切换由工单 09 收口)
+
+`desktop-electron/` 壳已具备可安装包产出与应用内更新能力,本节为切换期的草稿说明;
+正式的资源根布局与 CI 接线以工单 09 为准。
+
+### 构建安装包(NSIS)
+
+前置:daemon release 二进制已构建,渲染层已构建(脚本会自动完成后者)。
+
+```bash
+cd src-tauri && cargo build --release --bin codemux-daemon
+npm run build:electron-installer
+```
+
+`build:electron-installer` 依次执行:仓库根 `vite build`(渲染层 dist/;类型
+检查门禁独立跑 `npx tsc --noEmit`)→ `desktop-electron` tsc(main/preload)→
+`scripts/copy-renderer-dist.mjs` 把 `../dist` 拷入 `desktop-electron/renderer-dist`
+→ `electron-builder --win nsis`。
+产物输出到 `desktop-electron/release/`。
+
+### 更新通道(GitHub Releases)
+
+- [`desktop-electron/electron-builder.yml`](/D:/project/my-project/codeMUX/desktop-electron/electron-builder.yml:1)
+  的 `publish`(provider: github,owner/repo = `kfumi/codeMUX`)在打包时生成
+  `resources/app-update.yml`;electron-updater 运行时自动读取,代码不硬编码 feed。
+- 应用内更新流:渲染层「检查更新」(AboutSettings / 标题栏 UpdateEntry)→
+  preload 桥 → main `autoUpdater`(见 `desktop-electron/src/updater.ts`);
+  `autoDownload=false`(用户确认后下载)、`autoInstallOnAppQuit=true`(下载后
+  即使不立即重启,退出时也会安装)。
+- 开发/未打包环境(`app.isPackaged === false`)更新器自动禁用,check 返回
+  unavailable。
+- 发布新版本时,把 GitHub Release 附件(latest.yml + NSIS exe)上传到
+  `kfumi/codeMUX` Releases 即可被现有安装版检测到。
+
+### 通知身份(Windows)
+
+- main 进程 `app.setAppUserModelId('com.codemux.desktop')`,与 electron-builder
+  `appId` 一致;NSIS 快捷方式的 AUMID 由此派生 → 通知中心按 CodeMUX 归组、
+  点击回跳应用。修改 appId 时必须同步修改 main.ts 的 `APP_ID`。
+
+### 手动验收清单(不进 CI)
+
+- [ ] 安装 NSIS 包后触发一次真实更新安装(检查更新 → 下载 → 重启进入新版本)。
+- [ ] 从开始菜单/桌面快捷方式启动应用,触发 agent 通知:通知在通知中心归组到
+      CodeMUX,点击通知回跳应用并激活对应会话。

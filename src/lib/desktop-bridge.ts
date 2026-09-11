@@ -112,6 +112,49 @@ export interface DesktopDaemonInfo {
   version: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// 对话框(工单 06):options/返回形状对齐 @tauri-apps/plugin-dialog
+// (取消/关闭一律 null;multiple 为 string[];单选为 string | null)。
+// ---------------------------------------------------------------------------
+
+export interface DesktopDialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+export interface DesktopOpenDialogOptions {
+  title?: string;
+  defaultPath?: string;
+  /** true = 选目录;false/缺省 = 选文件。 */
+  directory?: boolean;
+  multiple?: boolean;
+  filters?: DesktopDialogFilter[];
+}
+
+export interface DesktopSaveDialogOptions {
+  title?: string;
+  defaultPath?: string;
+  filters?: DesktopDialogFilter[];
+}
+
+// ---------------------------------------------------------------------------
+// 更新器(工单 06):electron-updater 桥;事件契约与 desktop-electron/src/updater.ts 对齐。
+// ---------------------------------------------------------------------------
+
+export type DesktopUpdaterEvent =
+  | { type: 'checking' }
+  | { type: 'available'; version: string }
+  | { type: 'not-available'; version: string | null }
+  | { type: 'progress'; percent: number; transferred: number; total: number }
+  | { type: 'downloaded'; version: string | null }
+  | { type: 'error'; message: string };
+
+/** checkForUpdates 的返回(unavailable = 开发/未打包环境,壳侧更新器已禁用)。 */
+export interface DesktopUpdaterCheckResult {
+  status: 'available' | 'not-available' | 'unavailable';
+  version: string | null;
+}
+
 /** window.codemuxDesktop 的完整方法面(与 desktop-electron/src/preload.ts 对齐)。 */
 export interface CodemuxDesktopBridge {
   // token / 目录 / 日志
@@ -127,9 +170,19 @@ export interface CodemuxDesktopBridge {
   openInExplorer(path: string, reveal?: boolean): Promise<void>;
   openProjectPath(path: string, target: OpenTarget): Promise<void>;
 
+  // 文件/目录对话框(工单 06;返回形状对齐 @tauri-apps/plugin-dialog)
+  showDialogOpen(options?: DesktopOpenDialogOptions): Promise<string | string[] | null>;
+  showDialogSave(options?: DesktopSaveDialogOptions): Promise<string | null>;
+
   // 通知 / 主窗口
   sendAgentNotification(payload: { title: string; body: string; sessionId: string }): Promise<void>;
   showMainWindow(): Promise<void>;
+
+  // 应用内更新器(工单 06;进度事件经 onUpdaterEvent 转发)
+  checkForUpdates(): Promise<DesktopUpdaterCheckResult>;
+  downloadAndInstall(): Promise<{ version: string | null }>;
+  quitAndInstall(): Promise<void>;
+  currentVersion(): Promise<string>;
 
   // 环境与运行时检测
   checkDevelopmentEnvironment(): Promise<DesktopDevelopmentEnvironmentCheck>;
@@ -163,6 +216,7 @@ export interface CodemuxDesktopBridge {
   // 事件
   onDaemonLifecycle(callback: (payload: DesktopDaemonLifecycleEvent) => void): () => void;
   onAgentNotificationClicked(callback: (payload: DesktopAgentNotificationClickPayload) => void): () => void;
+  onUpdaterEvent(callback: (event: DesktopUpdaterEvent) => void): () => void;
 }
 
 /**

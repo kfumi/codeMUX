@@ -11,6 +11,10 @@ node_modules
 dist
 dist-mobile
 dist-electron
+# Electron 打包产物(工单 06):renderer-dist 由 scripts/copy-renderer-dist.mjs
+# 在打包前从根 dist/ 拷入;release/ 为 electron-builder 输出。
+desktop-electron/renderer-dist
+desktop-electron/release
 dist-ssr
 .worktrees/
 *.local

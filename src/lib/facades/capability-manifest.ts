@@ -53,12 +53,13 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'workspace.git', owner: 'daemon', companionRoute: 'GET|POST /api/workspace/git', daemonMethod: 'git' },
   { id: 'terminal.pty', owner: 'daemon', companionRoute: 'WS /api/ws (terminal frames)', daemonMethod: 'terminal' },
 
-  // Shell-only
+  // Shell-only(dialog:工单 06 落地 —— lib/desktopDialogs.ts 按平台分流到壳桥)
   { id: 'browser.host', owner: 'shell', shellMethod: 'browser' },
-  { id: 'dialog.file', owner: 'shell', shellMethod: 'pickFile' },
-  { id: 'dialog.directory', owner: 'shell', shellMethod: 'pickDirectory' },
+  { id: 'dialog.file', owner: 'shell', shellMethod: 'openDialog' },
+  { id: 'dialog.directory', owner: 'shell', shellMethod: 'openDialog' },
   { id: 'window.manage', owner: 'shell', shellMethod: 'window' },
   { id: 'tray.manage', owner: 'shell', shellMethod: 'tray' },
+  // updater(工单 06 落地 —— features/update/hooks/useUpdater.ts 按平台分流到壳桥)
   { id: 'updater', owner: 'shell', shellMethod: 'updater' },
   { id: 'open.external', owner: 'shell', shellMethod: 'openExternal' },
   // browser.control 的「配置写入」走 daemon PATCH /api/config;浏览器宿主

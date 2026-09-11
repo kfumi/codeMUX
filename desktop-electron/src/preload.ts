@@ -29,6 +29,18 @@ function onAgentNotificationClicked(callback: (payload: unknown) => void): () =>
   };
 }
 
+/**
+ * 更新器事件订阅(工单 06:checking/available/progress/downloaded/error,
+ * 契约见 src/lib/desktop-bridge.ts 的 DesktopUpdaterEvent);返回取消订阅函数。
+ */
+function onUpdaterEvent(callback: (payload: unknown) => void): () => void {
+  const listener = (_event: IpcRendererEvent, payload: unknown) => callback(payload);
+  ipcRenderer.on('updater-event', listener);
+  return () => {
+    ipcRenderer.off('updater-event', listener);
+  };
+}
+
 const bridge = {
   // token / 目录 / 日志
   getLocalDaemonToken: () => invoke<string>('getLocalDaemonToken'),
@@ -43,10 +55,21 @@ const bridge = {
   openInExplorer: (path: string, reveal?: boolean) => invoke<void>('openInExplorer', { path, reveal }),
   openProjectPath: (path: string, target: string) => invoke<void>('openProjectPath', { path, target }),
 
+  // 文件/目录对话框(工单 06;options 形状对齐 @tauri-apps/plugin-dialog,
+  // 取消/关闭返回 null,multiple 为 string[])
+  showDialogOpen: (options?: unknown) => invoke('showDialogOpen', options ?? {}),
+  showDialogSave: (options?: unknown) => invoke('showDialogSave', options ?? {}),
+
   // 通知 / 主窗口
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }) =>
     invoke<void>('sendAgentNotification', payload),
   showMainWindow: () => invoke<void>('showMainWindow'),
+
+  // 应用内更新器(工单 06;electron-updater;进度事件经 onUpdaterEvent 转发)
+  checkForUpdates: () => invoke('checkForUpdates'),
+  downloadAndInstall: () => invoke('downloadAndInstall'),
+  quitAndInstall: () => invoke<void>('quitAndInstall'),
+  currentVersion: () => invoke<string>('currentVersion'),
 
   // 环境与运行时检测
   checkDevelopmentEnvironment: () => invoke('checkDevelopmentEnvironment'),
@@ -81,6 +104,7 @@ const bridge = {
   // 事件
   onDaemonLifecycle,
   onAgentNotificationClicked,
+  onUpdaterEvent,
 };
 
 contextBridge.exposeInMainWorld('codemuxDesktop', bridge);

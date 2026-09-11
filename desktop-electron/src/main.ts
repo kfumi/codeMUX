@@ -7,8 +7,9 @@
 //!   开发态用 CODEMUX_DEV_SERVER_URL(默认脚本注入 http://localhost:1420);
 //! - 关窗到托盘;托盘「打开 CodeMUX / 退出」;退出时 stopManaged 停掉自有 daemon。
 //!
-//! 打包形态注意:渲染层 dist 目前指向仓库根 `dist/`(app.getAppPath()/../dist),
-//! electron-builder 的正式打包/分发由工单 09 收口;本票以 dev 模式验收为主。
+//! 打包形态注意:渲染层 dist 在打包态指向随包分发的 renderer-dist/(打包前
+//! 由 scripts/copy-renderer-dist.mjs 从仓库根 dist/ 拷入);资源根的正式布局
+//! 由工单 09 收口。更新器经 electron-updater + GitHub Releases(工单 06)。
 
 import { app, BrowserWindow, Menu, protocol, Tray, nativeImage } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -16,6 +17,7 @@ import path from 'node:path';
 
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
+import { createUpdaterService } from './updater';
 
 const APP_ID = 'com.codemux.desktop';
 const DEV_SERVER_URL = process.env.CODEMUX_DEV_SERVER_URL;
@@ -97,10 +99,15 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * 生产渲染层目录:本票指向仓库根 dist/(`npm run build` 产物);
- * 正式打包形态(app:// 资源随安装包分发)由工单 09 收口。
+ * 生产渲染层目录:dev 态指向仓库根 dist/(`npm run build` 产物);
+ * 打包态指向随安装包分发的 renderer-dist/(构建脚本在打包前把仓库根 dist/
+ * 拷入 desktop-electron/renderer-dist,见 scripts/copy-renderer-dist.mjs;
+ * 正式资源根布局由工单 09 收口)。
  */
 function resolveRendererDist(): string {
+  if (app.isPackaged) {
+    return path.join(app.getAppPath(), 'renderer-dist');
+  }
   return path.join(repoRoot, 'dist');
 }
 
@@ -282,6 +289,9 @@ async function quitApplication(): Promise<void> {
 
 // 必须在 ready 前设置:与 Tauri 共用同一数据目录(零迁移)。
 app.setPath('userData', path.join(app.getPath('appData'), APP_ID));
+// 通知身份(工单 06):Windows 通知中心按 AppUserModelID 归组;该 ID 必须与
+// electron-builder.yml 的 appId 一致(NSIS 快捷方式 AUMID 由此派生),否则
+// 从快捷方式启动时通知会被 Windows 拒投或归到未知应用。
 app.setAppUserModelId(APP_ID);
 
 // app:// 需要在 ready 前声明特权(fetch/标准 scheme)。
@@ -305,12 +315,19 @@ if (!gotLock) {
     if (!supervisor) {
       throw new Error('supervisor not initialized');
     }
+    // 应用内更新器(工单 06):electron-updater(GitHub Releases);
+    // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
+    const updater = createUpdaterService({
+      isPackaged: () => app.isPackaged,
+      sendToRenderer,
+    });
     unregisterBridge = registerShellBridge({
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,
       showMainWindow,
       supervisor,
+      updater,
       sendToRenderer,
     });
     createTray(() => {

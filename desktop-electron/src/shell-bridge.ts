@@ -1,14 +1,24 @@
 //! 壳门面的 main 进程实现:注册 `codemux:*` IPC 通道,供 sandboxed preload
-//! 经 contextBridge 暴露给渲染层(工单 05)。
+//! 经 contextBridge 暴露给渲染层(工单 05/06)。
 //!
 //! 通道面与前端审计对齐(见 src/lib/tauri.ts / src/lib/facades/shell-facade.ts):
 //! - token / 目录 / 日志 / 通知 / 主窗口
 //! - 开发环境与 agent 运行时检测(最小面,见 agent-checks.ts)
 //! - open_in_explorer / open_project_path / read_home_file
+//! - 文件/目录对话框(工单 06;返回形状对齐 @tauri-apps/plugin-dialog)
+//! - 应用内更新器(工单 06;electron-updater,见 updater.ts)
 //! - browser.* 13 方法:除纯窗口几何(hide/show/setBounds,no-op)外全部迁移中拒绝(工单 07)
 //! - daemonRestart / getDaemonInfo(supervisor 出口)
 
-import { BrowserWindow, Notification, ipcMain, type WebContents } from 'electron';
+import {
+  BrowserWindow,
+  Notification,
+  dialog,
+  ipcMain,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+  type WebContents,
+} from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +31,7 @@ import {
 } from './agent-checks';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
+import type { UpdaterService } from './updater';
 
 export interface ShellBridgeDeps {
   /** 与 Tauri 版 app_data_dir 完全一致(零迁移)。 */
@@ -33,7 +44,9 @@ export interface ShellBridgeDeps {
   showMainWindow(): void;
   /** supervisor 出口。 */
   supervisor: Supervisor;
-  /** 渲染层事件出口(通知点击等)。 */
+  /** 应用内更新器(工单 06;开发/未打包环境自身返回 unavailable)。 */
+  updater: UpdaterService;
+  /** 渲染层事件出口(通知点击/更新进度等)。 */
   sendToRenderer(channel: string, payload: unknown): void;
 }
 
@@ -93,6 +106,73 @@ function readHomeFile(relativePath: string): string {
   return readFileSync(resolved, 'utf8');
 }
 
+// --- 对话框参数解析(对齐 @tauri-apps/plugin-dialog 的 options 形状) --------
+
+interface DialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+function parseDialogFilters(value: unknown): DialogFilter[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('filters must be an array');
+  }
+  return value.map((entry) => {
+    const { name, extensions } = (entry ?? {}) as { name?: unknown; extensions?: unknown };
+    if (
+      typeof name !== 'string'
+      || !Array.isArray(extensions)
+      || extensions.some((extension) => typeof extension !== 'string')
+    ) {
+      throw new Error('filters entry requires { name: string, extensions: string[] }');
+    }
+    return { name, extensions };
+  });
+}
+
+function parseOptionalString(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${key} must be a string`);
+  }
+  return value;
+}
+
+/** open({ directory, multiple, title, defaultPath, filters }) → Electron showOpenDialog 选项。 */
+function parseOpenDialogOptions(payload: unknown): OpenDialogOptions {
+  const source = (payload ?? {}) as Record<string, unknown>;
+  const directory = source.directory === true;
+  const multiple = source.multiple === true;
+  const properties: Array<'openFile' | 'openDirectory' | 'multiSelections'> = [
+    directory ? 'openDirectory' : 'openFile',
+  ];
+  if (multiple) {
+    properties.push('multiSelections');
+  }
+  return {
+    title: parseOptionalString(source, 'title'),
+    defaultPath: parseOptionalString(source, 'defaultPath'),
+    properties,
+    filters: parseDialogFilters(source.filters),
+  };
+}
+
+/** save({ title, defaultPath, filters }) → Electron showSaveDialog 选项。 */
+function parseSaveDialogOptions(payload: unknown): SaveDialogOptions {
+  const source = (payload ?? {}) as Record<string, unknown>;
+  return {
+    title: parseOptionalString(source, 'title'),
+    defaultPath: parseOptionalString(source, 'defaultPath'),
+    filters: parseDialogFilters(source.filters),
+  };
+}
+
 /** 注册全部 `codemux:*` IPC 通道;返回解除注册(测试/热重载用)。 */
 export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -150,6 +230,31 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     return openProjectPath(targetPath, target);
   });
 
+  // --- 对话框(工单 06;返回形状对齐 @tauri-apps/plugin-dialog:取消为 null)
+  handle('showDialogOpen', async (payload: unknown) => {
+    const options = parseOpenDialogOptions(payload);
+    const parent = deps.getMainWindow();
+    const result = parent && !parent.isDestroyed()
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    const multiple = options.properties?.includes('multiSelections') ?? false;
+    return multiple ? result.filePaths : result.filePaths[0];
+  });
+  handle('showDialogSave', async (payload: unknown) => {
+    const options = parseSaveDialogOptions(payload);
+    const parent = deps.getMainWindow();
+    const result = parent && !parent.isDestroyed()
+      ? await dialog.showSaveDialog(parent, options)
+      : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    return result.filePath;
+  });
+
   // --- 通知 / 主窗口 --------------------------------------------------------
   handle('sendAgentNotification', (payload: unknown) => {
     const { title, body, sessionId } = (payload ?? {}) as { title?: string; body?: string; sessionId?: string };
@@ -159,6 +264,9 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     if (!Notification.isSupported()) {
       return; // 与 Tauri 通知插件在无通知环境下的静默行为一致。
     }
+    // Windows 归组:通知身份 = 进程 AppUserModelID(main.ts setAppUserModelId
+    // 'com.codemux.desktop',与 NSIS 快捷方式 AUMID 一致),通知中心按它归组;
+    // Electron 33 无 per-notification relevance 配置,无需额外设置。
     const notification = new Notification({ title, body });
     notification.once('click', () => {
       deps.showMainWindow();
@@ -217,6 +325,15 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     contents?.toggleDevTools();
   });
 
+  // --- 更新器(工单 06;electron-updater,事件经 'updater-event' 转发) -------
+  // 开发/未打包环境由 updater.check() 显式返回 unavailable / downloadAndInstall 拒绝。
+  handle('checkForUpdates', () => deps.updater.check());
+  handle('downloadAndInstall', () => deps.updater.downloadAndInstall());
+  handle('quitAndInstall', () => {
+    deps.updater.quitAndInstall();
+  });
+  handle('currentVersion', () => deps.updater.currentVersion());
+
   // --- supervisor -----------------------------------------------------------
   handle('daemonRestart', () => deps.supervisor.restart());
   handle('getDaemonInfo', async () => {
@@ -243,12 +360,18 @@ export const SHELL_BRIDGE_CHANNELS = [
   'readHomeFile',
   'openInExplorer',
   'openProjectPath',
+  'showDialogOpen',
+  'showDialogSave',
   'sendAgentNotification',
   'showMainWindow',
   'checkDevelopmentEnvironment',
   'checkAgentRuntimes',
   'probeAgentInstallations',
   'upgradeAgentRuntime',
+  'checkForUpdates',
+  'downloadAndInstall',
+  'quitAndInstall',
+  'currentVersion',
   'browserHide',
   'browserShow',
   'browserSetBounds',

@@ -1,4 +1,3 @@
-import { open } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check,
@@ -16,6 +15,8 @@ import {
   getBranchPickerLabel,
   getWorktreeTriggerLabel,
 } from '../../lib/draftWorkspacePicker';
+// 工单 06:平台分流 —— Electron 走壳桥 dialog,Tauri 走 plugin-dialog。
+import { openDialog } from '../../lib/desktopDialogs';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import type { GitRepositoryState, GitWorktree } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
@@ -128,7 +129,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
 
   const handleOpenFolder = async () => {
     try {
-      const selected = await open({
+      const selected = await openDialog({
         directory: true,
         multiple: false,
         title: '选择项目文件夹',

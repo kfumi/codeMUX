@@ -1,17 +1,27 @@
-# CodeMUX Electron 壳打包配置(工单 05 只落配置,不出包;打包形态工单 09 收口)。
-# 出包前先构建 daemon release 二进制:
+# CodeMUX Electron 壳打包配置(工单 06:可产出 NSIS 安装包;正式打包形态工单 09 收口)。
+# 出包流程(根脚本 build:electron-installer):
+#   npm run build          (仓库根,产出 dist/ 渲染层)
 #   cd src-tauri && cargo build --release --bin codemux-daemon
-#   npm run build        (仓库根,产出 dist/ 渲染层 —— 工单 09 前由壳经 app:// 读取仓库根 dist)
+#   之后根脚本构建 main(tsc)→ scripts/copy-renderer-dist.mjs 把 ../dist 拷入
+#   renderer-dist/ → electron-builder --win nsis。
 appId: com.codemux.desktop
 productName: CodeMUX
+# GitHub Releases(工单 06):electron-updater 的 feed 源 —— electron-builder 打包时
+# 生成 resources/app-update.yml,运行时 autoUpdater 自动读取;owner/repo 反推自
+# src-tauri/tauri.conf.json 的 updater endpoint(github.com/kfumi/codeMUX)。
+publish:
+  provider: github
+  owner: kfumi
+  repo: codeMUX
 directories:
   output: release
   buildResources: build
 files:
   - dist-electron/**
+  # 渲染层随包分发(工单 06;打包前由 scripts/copy-renderer-dist.mjs 从仓库根
+  # dist/ 拷入 —— 与工单 09 的资源根收口不冲突,届时只调整来源/布局)。
+  - renderer-dist/**
   - package.json
-# 渲染层 dist 不进本包(工单 05 允许 dev 模式验收;生产 scheme 指向
-# app.getAppPath()/../dist,随包分发由工单 09 收口)。
 extraResources:
   # daemon 独立二进制(工单 03)→ 资源根 daemon/
   - from: ../src-tauri/target/release/codemux-daemon.exe
@@ -24,7 +34,11 @@ win:
     - target: nsis
       arch:
         - x64
+  # 通知身份(工单 06):electron-builder 的 NSIS 快捷方式 AUMID 由 appId 派生,
+  # 与 main.ts 的 app.setAppUserModelId('com.codemux.desktop') 一致 → 通知在
+  # 通知中心归组到 CodeMUX,点击回跳应用。
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  shortcutName: CodeMUX

@@ -1,8 +1,8 @@
 import { Gauge } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { saveDialog } from '../../lib/desktopDialogs';
 import { toggleDevtools, exportPerfSnapshot } from '../../lib/tauri';
 import { usePerfStore } from '../../stores/perfStore';
 import { TooltipHint } from '../ui/tooltip';
@@ -146,7 +146,7 @@ export function PerfOverlay() {
   const exportSnapshot = useCallback(async () => {
     try {
       const snap = usePerfStore.getState().snapshot();
-      const filePath = await save({
+      const filePath = await saveDialog({
         defaultPath: `codemux-perf-${Date.now()}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
