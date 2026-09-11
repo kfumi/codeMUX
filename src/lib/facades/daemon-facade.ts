@@ -570,6 +570,9 @@ export const daemonFacade = {
   setDefaultOpenTarget: async (target: import('../openTargets').OpenTarget) => {
     await (await ensureDaemonClient()).patchAppConfig({ defaultOpenTarget: target });
   },
+  setBrowserControl: async (settings: import('../../types/provider').BrowserControlSettings) => {
+    await (await ensureDaemonClient()).patchAppConfig({ browser: settings });
+  },
   fetchProviderModels: async (apiKey: string, baseUrl: string) =>
     providersViaDaemon.fetchProviderModels(apiKey, baseUrl),
   fetchOpenCodeFreeModels: () => providersViaDaemon.fetchOpenCodeFreeModels(),

@@ -2,8 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::browser::manager::{self, BrowserPageBounds, BrowserState};
 use crate::config::types::BrowserControlConfig;
-use crate::shell;
-use crate::AppState;
+use crate::paths::PathRoots;
 
 // Child WebView create/mutate must be async. On Windows, WebviewBuilder / add_child
 // deadlocks inside a synchronous command because WebView2 needs the UI thread to
@@ -14,12 +13,14 @@ use crate::AppState;
 pub async fn browser_create(
     app: AppHandle,
     state: State<'_, BrowserState>,
-    config_state: State<'_, std::sync::Arc<AppState>>,
     browser_id: String,
     url: String,
     bounds: BrowserPageBounds,
 ) -> Result<(), String> {
-    let config = config_state.config.lock().unwrap().clone();
+    // 权威配置在 daemon 侧随时可能被改写,壳内不再持有缓存;
+    // browser 操作低频,调用点现读现传。
+    let roots = PathRoots::from_app(&app)?;
+    let config = crate::config::load_config(&roots);
     manager::create_page(&app, &state, &config, browser_id, url, bounds)
 }
 
@@ -116,13 +117,12 @@ pub async fn browser_clear_data(app: AppHandle, scope: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn set_browser_control(
-    state: State<'_, std::sync::Arc<AppState>>,
-    app: AppHandle,
-    settings: BrowserControlConfig,
-) -> Result<(), String> {
-    let mut config = state.config.lock().unwrap();
+pub fn set_browser_control(app: AppHandle, settings: BrowserControlConfig) -> Result<(), String> {
+    // 壳内 config 缓存会陈旧(daemon 是权威写方):现读 → 改字段 → 整份保存,
+    // 避免用陈旧快照覆盖 daemon 侧的其它字段。
+    let roots = PathRoots::from_app(&app)?;
+    let mut config = crate::config::load_config(&roots);
     config.browser = settings;
-    shell::save_config(&app, &config)?;
+    crate::config::save_config(&roots, &config)?;
     Ok(())
 }

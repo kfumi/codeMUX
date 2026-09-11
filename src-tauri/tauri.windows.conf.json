@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "bundle": {
+    "resources": {
+      "target/release/codemux-daemon.exe": "daemon/codemux-daemon.exe"
+    }
+  }
+}

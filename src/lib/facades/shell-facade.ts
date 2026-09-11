@@ -1,12 +1,12 @@
-import { browserApi, appApi, configApi } from './invoke-backend';
+import { browserApi, appApi } from './invoke-backend';
 import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from '../browserHost';
-import type { BrowserControlSettings } from '../../types/provider';
 import type { OpenTarget } from '../openTargets';
 
 export const shellFacade = {
   browser: browserApi as BrowserHost,
-  setBrowserControl: (settings: BrowserControlSettings): Promise<void> =>
-    configApi.setBrowserControl(settings),
+  /** supervisor 提供的 daemon 重启(壳命令),daemon 断连 overlay 的重试入口。 */
+  daemonRestart: (): Promise<unknown> =>
+    import('@tauri-apps/api/core').then(({ invoke }) => invoke('daemon_restart')),
   showMainWindow: (): Promise<void> => appApi.showMainWindow(),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
     appApi.sendAgentNotification(payload),

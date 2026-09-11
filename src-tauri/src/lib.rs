@@ -16,6 +16,7 @@ mod runtime;
 mod scheduled_tasks;
 mod shell;
 mod skills;
+pub mod supervisor;
 
 use log::{info, warn};
 use serde::Serialize;
@@ -345,12 +346,9 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     match event_id {
         TRAY_OPEN_ID => show_main_window(app),
         TRAY_QUIT_ID => {
-            let companion_state = {
-                let state = app.state::<std::sync::Arc<companion::CompanionState>>();
-                state.inner().clone()
-            };
+            let supervisor = app.state::<supervisor::SupervisorState>();
             tauri::async_runtime::block_on(async {
-                if let Err(error) = companion::stop_daemon_for_state(&companion_state).await {
+                if let Err(error) = supervisor::stop_managed(supervisor.inner()).await {
                     warn!(target: "app", "Failed to stop daemon on tray quit: {}", error);
                 }
             });
@@ -436,16 +434,12 @@ pub fn run() {
             let path_roots = shell::path_roots(app.handle());
             let ui_events = std::sync::Arc::new(shell::TauriUiEventSink::new(app.handle().clone()));
             let daemon = std::sync::Arc::new(
-                daemon::DaemonState::assemble(path_roots, ui_events)
+                daemon::DaemonState::assemble(path_roots.clone(), ui_events)
                     .expect("Failed to assemble daemon core"),
             );
-            let (providers_len, theme, companion_config) = {
+            let (providers_len, theme) = {
                 let config = daemon.app.config.lock().unwrap();
-                (
-                    config.providers.len(),
-                    config.theme.clone(),
-                    config.companion.clone(),
-                )
+                (config.providers.len(), config.theme.clone())
             };
             info!(
                 target: "app",
@@ -460,34 +454,46 @@ pub fn run() {
             app.manage(daemon.clone());
             app.manage(crate::browser::manager::BrowserState::default());
 
-            let port = companion_config.port;
-            let listen_address = companion_config.listen_address.clone();
-            let expose_lan = companion_config.enabled;
-            let daemon_for_server = daemon.clone();
+            // 权威 daemon 跑独立二进制:壳只做 supervisor(spawn / attach /
+            // restart / watch / stop)。进程内 DaemonState 仅服务遗留命令与
+            // shell 读面,不再启动 companion 服务、定时任务或数据迁移。
+            app.manage(supervisor::SupervisorState::new(
+                path_roots,
+                supervisor::resolve_daemon_exe(app.handle()),
+                "desktop",
+            ));
+
+            let app_for_ensure = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = companion::start_daemon_server(
-                    daemon_for_server,
-                    port,
-                    expose_lan,
-                    listen_address,
+                let supervisor_state = app_for_ensure.state::<supervisor::SupervisorState>();
+                match supervisor::ensure_daemon(
+                    supervisor_state.roots.clone(),
+                    supervisor_state.exe_path.clone(),
+                    &supervisor_state,
+                    &app_for_ensure,
                 )
                 .await
                 {
-                    warn!(target: "companion", "Failed to auto-start daemon server: {}", error);
+                    Ok(decision) => info!(
+                        target: "supervisor",
+                        "Daemon ensured ({})",
+                        decision.as_str()
+                    ),
+                    Err(error) => {
+                        warn!(target: "supervisor", "Failed to ensure daemon: {}", error);
+                        use tauri::Emitter;
+                        let _ = app_for_ensure.emit(
+                            "daemon-lifecycle",
+                            serde_json::json!({ "status": "start-failed", "error": error }),
+                        );
+                    }
                 }
             });
 
-            let daemon_for_tick = daemon.clone();
+            let app_for_watch = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                loop {
-                    scheduled_tasks::tick_async(&daemon_for_tick, chrono::Utc::now()).await;
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                }
-            });
-
-            let daemon_for_cleanup = daemon.clone();
-            tauri::async_runtime::spawn(async move {
-                agent::history_import::cleanup_legacy_timeline_artifacts(&daemon_for_cleanup).await;
+                let supervisor_state = app_for_watch.state::<supervisor::SupervisorState>();
+                supervisor::watch_managed(&supervisor_state, &app_for_watch).await;
             });
 
             let tray_menu = MenuBuilder::new(app)
@@ -577,6 +583,8 @@ pub fn run() {
             commands::runtime::remove_managed_runtime,
             show_main_window_command,
             send_agent_notification_command,
+            supervisor::daemon_status,
+            supervisor::daemon_restart,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::get_archived_sessions,
@@ -747,15 +755,15 @@ mod tests {
     }
 
     #[test]
-    fn tray_quit_stops_daemon_before_process_exit() {
+    fn tray_quit_stops_managed_daemon_before_process_exit() {
         let source = include_str!("lib.rs");
         let start = source
             .find("fn handle_tray_menu_event")
             .expect("handle_tray_menu_event");
         let body = &source[start..start + 900];
         let stop = body
-            .find("stop_daemon_for_state")
-            .expect("tray quit stops daemon");
+            .find("stop_managed")
+            .expect("tray quit stops managed daemon");
         let exit = body.find("app.exit").expect("tray quit exits app");
         assert!(stop < exit);
     }

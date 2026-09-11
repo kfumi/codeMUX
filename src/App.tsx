@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { toast, Toaster } from 'sonner';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { DaemonStatusOverlay } from './components/layout/DaemonStatusOverlay';
 import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
@@ -459,6 +460,7 @@ function App() {
             )}
           </ErrorBoundary>
         </MainLayout>
+        <DaemonStatusOverlay />
         <Toaster position="top-center" richColors />
       </TooltipProvider>
     </UpdaterProvider>

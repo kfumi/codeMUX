@@ -27,13 +27,11 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     setNotificationSettings: setNotificationSettingsMock,
     setDefaultOpenTarget: setDefaultOpenTargetMock,
     setImmediateRunMode: setImmediateRunModeMock,
+    setBrowserControl: setBrowserControlMock,
   },
 }));
 
 vi.mock('../lib/tauri', () => ({
-  configApi: {
-    setBrowserControl: setBrowserControlMock,
-  },
   agentApi: {
     stopProxy: vi.fn(),
   },

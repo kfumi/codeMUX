@@ -64,14 +64,17 @@ impl DaemonState {
     }
 }
 
-/// 无壳独立运行 daemon:组装核心 → 启动回环服务 → 写 run-state →
-/// 跑定时任务循环 → 收到关闭信号后优雅退出并清理 run-state。
+/// 无壳独立运行 daemon:组装核心 → 一次性清理遗留时间线产物 → 启动回环
+/// 服务 → 写 run-state → 跑定时任务循环 → 收到关闭信号后优雅退出并清理
+/// run-state。
 pub async fn run_daemon_standalone(
     roots: PathRoots,
     managed_by: String,
     port_override: Option<u16>,
 ) -> Result<(), String> {
     let daemon = Arc::new(DaemonState::assemble(roots, Arc::new(NullUiEventSink))?);
+    // 一次性遗留数据迁移:原先由壳进程在启动时执行,现随权威 daemon 走。
+    crate::agent::history_import::cleanup_legacy_timeline_artifacts(&daemon).await;
     let (port, listen_address) = {
         let config = daemon.app.config.lock().unwrap();
         (

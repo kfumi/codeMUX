@@ -61,7 +61,9 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'tray.manage', owner: 'shell', shellMethod: 'tray' },
   { id: 'updater', owner: 'shell', shellMethod: 'updater' },
   { id: 'open.external', owner: 'shell', shellMethod: 'openExternal' },
-  { id: 'browser.control', owner: 'shell', shellMethod: 'setBrowserControl' },
+  // browser.control 的「配置写入」走 daemon PATCH /api/config;浏览器宿主
+  // (WebView 托管)仍是 shell 能力(browser.host)。
+  { id: 'browser.control', owner: 'daemon', companionRoute: 'PATCH /api/config', daemonMethod: 'setBrowserControl' },
 ];
 
 /** Methods that must route through the daemon HTTP client (no invoke fallback). */
@@ -134,6 +136,7 @@ export const PROTOCOL_BACKED_DAEMON_METHODS = [
   'setNotificationSettings',
   'setGitSettings',
   'setDefaultOpenTarget',
+  'setBrowserControl',
   'setDefaultAgentKind',
   'updateAgentConfig',
   'deleteClaudeSessionFiles',

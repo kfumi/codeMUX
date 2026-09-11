@@ -425,6 +425,22 @@ pub fn set_default_open_target_for_companion(
 
 const MAX_GIT_INSTRUCTIONS_CHARS: usize = 8_000;
 
+pub fn set_browser_control_for_companion(
+    state: &AppState,
+    roots: &crate::paths::PathRoots,
+    settings: crate::config::types::BrowserControlConfig,
+) -> Result<(), String> {
+    info!(
+        target: "provider",
+        "Setting browser control enabled={} ignore_certificate_errors={}",
+        settings.enabled, settings.ignore_certificate_errors
+    );
+    let mut config = state.config.lock().unwrap();
+    config.browser = settings;
+    crate::config::save_config(roots, &config)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_git_settings(
     daemon: State<'_, Arc<DaemonState>>,
@@ -482,6 +498,7 @@ pub struct PatchAppConfigRequest {
     pub notifications: Option<NotificationSettings>,
     pub default_open_target: Option<String>,
     pub git: Option<GitSettingsConfig>,
+    pub browser: Option<crate::config::types::BrowserControlConfig>,
     pub default_agent_kind: Option<String>,
     pub agent_kind: Option<String>,
     pub agent_config: Option<serde_json::Value>,
@@ -512,6 +529,9 @@ pub fn patch_app_config_for_companion(
     }
     if let Some(settings) = patch.git {
         set_git_settings_for_companion(state, roots, settings)?;
+    }
+    if let Some(settings) = patch.browser {
+        set_browser_control_for_companion(state, roots, settings)?;
     }
     if let Some(agent_kind) = patch.default_agent_kind {
         set_default_agent_kind_for_companion(state, roots, agent_kind)?;

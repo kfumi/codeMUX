@@ -11,7 +11,7 @@ import type {
   BrowserControlSettings,
   ImmediateRunMode,
 } from '../types/provider';
-import { agentApi, configApi } from '../lib/tauri';
+import { agentApi } from '../lib/tauri';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
@@ -237,7 +237,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await configApi.setBrowserControl(nextSettings);
+      await daemonFacade.setBrowserControl(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config

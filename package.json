@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node scripts/copy-mobile-dist.mjs && vite",
     "build": "tsc && vite build",
+    "build:daemon": "cd src-tauri && cargo build --bin codemux-daemon",
+    "build:daemon:release": "cd src-tauri && cargo build --release --bin codemux-daemon",
     "build:sidecar": "cd src-tauri/sidecar && npm run build",
     "build:mobile": "cd src-mobile && npm ci && npm run build && cd .. && node scripts/copy-mobile-dist.mjs",
     "preview": "vite preview",
