@@ -1,6 +1,6 @@
 //! 壳侧 daemon supervisor 的 TypeScript 实现(工单 05)。
 //!
-//! 与 Rust 版(`src-tauri/src/supervisor.rs`)对齐的契约:
+//! 与 Tauri 壳时代的 Rust supervisor(已随工单 04/09 退役)同一套契约:
 //! - run-state 发现文件 `<appDataDir>/daemon-run-state.json`
 //!   `{ port, pid, version, managed_by, started_at }`(与 Rust 结构体同形,snake_case 键);
 //! - 回环健康探活 GET /api/health(2s 超时);
@@ -260,7 +260,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       // 只处理仍是当前托管 child 的退出(restart 换上的新 child 继续被守望)。
       if (child !== target) return;
       child = null;
-    childPid = null;
+      childPid = null;
       if (stopping) {
         // 主动 stop/restart 杀掉的:预期退出,不惊扰前端(stopManaged 负责清 run-state)。
         return;
@@ -318,7 +318,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     while (true) {
       if (childExited(currentChild)) {
         child = null;
-    childPid = null;
+        childPid = null;
         closeSync(logFd);
         const reason = currentChild.exitCode !== null ? `exit code ${currentChild.exitCode}` : `signal ${currentChild.signalCode}`;
         throw new Error(`daemon exited during startup: ${reason}`);
@@ -341,7 +341,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
           // ignore
         }
         child = null;
-    childPid = null;
+        childPid = null;
         closeSync(logFd);
         throw new Error(`daemon did not become ready within ${Math.round(timeouts.readyTimeoutMs / 1000)}s`);
       }
@@ -388,7 +388,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       // 先摘除引用:watchChild 的守卫(child !== target)保证这次主动击杀
       // 不会被当成意外退出上报。
       child = null;
-    childPid = null;
+      childPid = null;
       const exited = new Promise<void>((resolve) => {
         if (childExited(managed)) {
           resolve();

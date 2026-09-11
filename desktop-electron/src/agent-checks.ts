@@ -1,11 +1,11 @@
 //! 壳能力的纯 Node 实现件(不 import electron,可被 vitest 直接测试)。
 //!
-//! 本票(05)实现「最小面」:
+//! 当前实现「最小面」:
 //! - checkDevelopmentEnvironment:node/npm/git 版本探测;
 //! - checkAgentRuntimes / probeAgentInstallations:PATH 锚定 + `--version`
-//!   探测 + npm registry 最新版比对(参照 src-tauri/src/commands/agent_runtime_check.rs
-//!   的逻辑用 TS 复刻最小面;多处安装枚举/冲突仲裁留给工单 06 完善);
-//! - upgradeAgentRuntime:不假成功,返回明确的 hard_failure 结构(工单 06 实现)。
+//!   探测 + npm registry 最新版比对(移植自 Tauri 壳时代的
+//!   agent_runtime_check.rs;多处安装枚举/冲突仲裁暂缺,后续按需增强);
+//! - upgradeAgentRuntime:不假成功,返回明确的 hard_failure 结构。
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
@@ -14,7 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
-// 与 src/lib/tauri.ts 对齐的结果形状(壳侧不 import 渲染层模块,保持同形)。
+// 壳载荷契约:与 src/lib/desktop-bridge.ts(唯一归属)同形。壳侧有意不 import
+// 渲染层模块 —— desktop-electron 是独立包,双份定义是包边界的一部分。
 // ---------------------------------------------------------------------------
 
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
@@ -85,7 +86,7 @@ export interface AgentRuntimeUpgradeResult {
 }
 
 // ---------------------------------------------------------------------------
-// 智能体 CLI 规格(对齐 agent_runtime_check.rs 的 AgentSpec)。
+// 智能体 CLI 规格。
 // ---------------------------------------------------------------------------
 
 interface AgentSpec {
@@ -364,7 +365,7 @@ export async function checkAgentRuntimes(): Promise<AgentRuntimeCheckResult> {
 
 /**
  * 单个智能体安装的枚举(最小面:仅 PATH 锚定那处;多处安装/冲突仲裁
- * 留给工单 06 对齐 Rust 版 build_tool_search_paths 全量枚举)。
+ * 待后续按需对齐 Rust 版 build_tool_search_paths 的全量枚举)。
  */
 export async function probeAgentInstallations(agentKind: string): Promise<AgentInstallationReport> {
   const spec = specFor(agentKind);
@@ -405,8 +406,8 @@ export async function probeAgentInstallations(agentKind: string): Promise<AgentI
 }
 
 /**
- * 升级入口:本票(05)不实现升级执行,但不得静默假成功 —— 返回明确的
- * hard_failure 结构;工单 06 对齐 Rust 的自升级/npm 兜底流程。
+ * 升级入口:尚未实现升级执行,但不得静默假成功 —— 返回明确的
+ * hard_failure 结构,由用户手动执行安装命令。
  */
 export function upgradeAgentRuntime(agentKind: string): AgentRuntimeUpgradeResult {
   // 校验 agentKind,未知的仍然显式报错。
@@ -415,7 +416,7 @@ export function upgradeAgentRuntime(agentKind: string): AgentRuntimeUpgradeResul
     agentKind,
     success: false,
     outcome: 'hard_failure',
-    message: 'Electron 壳的运行时升级尚未实现(工单 06);请暂时使用 Tauri 壳或手动执行 npm install -g 升级。',
+    message: `Electron 壳的运行时升级尚未实现;请手动执行安装命令(如 npm install -g ${specFor(agentKind).npmPackage}@latest)升级。`,
     newVersion: null,
   };
 }

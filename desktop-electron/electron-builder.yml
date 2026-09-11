@@ -1,18 +1,23 @@
-# CodeMUX Electron 壳打包配置(工单 06:可产出 NSIS 安装包;正式打包形态工单 09 收口)。
+# CodeMUX Electron 壳打包配置(NSIS 安装包)。
 # 出包流程(根脚本 build:electron-installer):
 #   npm run build          (仓库根,产出 dist/ 渲染层)
 #   cd src-tauri && cargo build --release --bin codemux-daemon
 #   之后根脚本构建 main(tsc)→ scripts/copy-renderer-dist.mjs 把 ../dist 拷入
 #   renderer-dist/ → electron-builder --win nsis。
+# 签名:配置 CSC_LINK/CSC_KEY_PASSWORD 后 electron-builder 自动签应用本体;
+# extraResources 的 daemon 二进制经下方 afterPack 钩子补签(见
+# scripts/sign-daemon.cjs 与 docs/desktop-release-guide.md)。
 appId: com.codemux.desktop
 productName: CodeMUX
 # GitHub Releases(工单 06):electron-updater 的 feed 源 —— electron-builder 打包时
 # 生成 resources/app-update.yml,运行时 autoUpdater 自动读取;owner/repo 反推自
-# src-tauri/tauri.conf.json 的 updater endpoint(github.com/kfumi/codeMUX)。
+# 原 Tauri updater endpoint(github.com/kfumi/codeMUX)。
 publish:
   provider: github
   owner: kfumi
   repo: codeMUX
+# daemon 二进制签名钩子(应用本体由 electron-builder 原生签名)。
+afterPack: scripts/sign-daemon.cjs
 directories:
   output: release
   buildResources: build

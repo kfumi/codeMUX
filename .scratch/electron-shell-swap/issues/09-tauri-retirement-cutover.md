@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] Tauri 壳及其 commands/capabilities 从仓库移除;Rust 构建只剩库与 daemon bin。
-- [ ] 能力清单最终态:出现 invoke 壳后端即测试红。
-- [ ] 发布配置与指南定稿;安装包签名链覆盖 Electron 应用与 daemon 二进制。
+- [x] Tauri 壳及其 commands/capabilities 从仓库移除;Rust 构建只剩库与 daemon bin。
+- [x] 能力清单最终态:出现 invoke 壳后端即测试红。
+- [x] 发布配置与指南定稿;安装包签名链覆盖 Electron 应用与 daemon 二进制。
 - [ ] 手动验收:从旧壳版本机器一次性安装,会话/配置/配对全保留。
-- [ ] ADR 落地:新 ADR + 修订 ADR 0011。
-- [ ] 全量门通过:根与 sidecar 的 Vitest 全量、Rust fmt/clippy/check。
+- [x] ADR 落地:新 ADR + 修订 ADR 0011。
+- [x] 全量门通过:根与 sidecar 的 Vitest 全量、Rust fmt/clippy/check。

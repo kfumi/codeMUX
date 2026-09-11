@@ -2,6 +2,9 @@
 // 注入,验证 `codemux:showDialogOpen/showDialogSave` 的 plugin-dialog 返回形状
 // 映射(取消 → null、单选 → string、多选 → string[])与 updater 通道接线。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const dialogMock = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
@@ -139,5 +142,29 @@ describe('shell-bridge 对话框/更新器通道(工单 06)', () => {
     await getHandler('quitAndInstall')(null, undefined);
     expect(deps.updater.quitAndInstall).toHaveBeenCalledTimes(1);
     await expect(getHandler('currentVersion')(null, undefined)).resolves.toBe('0.3.1');
+  });
+});
+
+describe('shell-bridge getLocalDaemonToken 通道', () => {
+  beforeEach(() => {
+    ipcMainMock.handle.mockClear();
+  });
+
+  it('token 缺失抛「尚未生成」,空白内容抛「为空」,有效值返回 trim 后内容', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'codemux-bridge-token-'));
+    try {
+      registerShellBridge(createDeps({ getAppDataDir: () => dir }));
+      const handler = getHandler('getLocalDaemonToken');
+
+      await expect(handler(null, undefined)).rejects.toThrow('local-daemon-token 尚未生成(daemon 未启动?)');
+
+      writeFileSync(path.join(dir, 'local-daemon-token'), '  \n', 'utf8');
+      await expect(handler(null, undefined)).rejects.toThrow('local-daemon-token 为空');
+
+      writeFileSync(path.join(dir, 'local-daemon-token'), ' token-1234 \n', 'utf8');
+      await expect(handler(null, undefined)).resolves.toBe('token-1234');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

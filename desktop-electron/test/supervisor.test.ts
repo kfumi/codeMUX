@@ -200,6 +200,34 @@ describe('supervisor decision table', () => {
     supervisor.dispose();
   });
 
+  it('Restarted: expected version falls back to CODEMUX_EXPECTED_DAEMON_VERSION env', async () => {
+    const dir = makeTempDir();
+    const external = await startExternalDaemon(dir, ['--version', '9.9.9-old']);
+    const oldPid = external.pid!;
+
+    const prev = process.env.CODEMUX_EXPECTED_DAEMON_VERSION;
+    process.env.CODEMUX_EXPECTED_DAEMON_VERSION = '1.0.0';
+    try {
+      const events: DaemonLifecycleEvent[] = [];
+      const supervisor = makeSupervisor(dir, events);
+      expect(await supervisor.ensureDaemon()).toBe('restarted');
+      await vi.waitFor(
+        () => {
+          expect(pidIsAlive(oldPid)).toBe(false);
+        },
+        { timeout: 10_000, interval: 100 },
+      );
+      await supervisor.stopManaged();
+      supervisor.dispose();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CODEMUX_EXPECTED_DAEMON_VERSION;
+      } else {
+        process.env.CODEMUX_EXPECTED_DAEMON_VERSION = prev;
+      }
+    }
+  });
+
   it('Restarted: unhealthy run-state (live pid, dead port) → kill old + spawn new', async () => {
     const dir = makeTempDir();
     // 活着但端口不服务的进程 + 指向已关闭端口的 run-state。

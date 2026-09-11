@@ -24,15 +24,17 @@ if (!/^\d+\.\d+\.\d+$/.test(normalizedVersion)) {
 }
 
 const packageJsonPath = path.join(rootDir, "package.json");
-const tauriConfigPath = path.join(rootDir, "src-tauri", "tauri.conf.json");
+const desktopPackageJsonPath = path.join(rootDir, "desktop-electron", "package.json");
 const cargoTomlPath = path.join(rootDir, "src-tauri", "Cargo.toml");
 const cargoLockPath = path.join(rootDir, "src-tauri", "Cargo.lock");
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 packageJson.version = normalizedVersion;
 
-const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
-tauriConfig.version = normalizedVersion;
+// desktop-electron 的版本即壳 app.getVersion(),与 daemon 的 DAEMON_VERSION
+// (Cargo.toml)构成 supervisor 版本配对;三者必须同步(见 desktop-electron/src/main.ts)。
+const desktopPackageJson = JSON.parse(readFileSync(desktopPackageJsonPath, "utf8"));
+desktopPackageJson.version = normalizedVersion;
 
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
 const updatedCargoToml = cargoToml.replace(
@@ -49,7 +51,7 @@ const updatedCargoLock = cargoLock.replace(
 
 if (!dryRun) {
   writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
-  writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`, "utf8");
+  writeFileSync(desktopPackageJsonPath, `${JSON.stringify(desktopPackageJson, null, 2)}\n`, "utf8");
   writeFileSync(cargoTomlPath, updatedCargoToml, "utf8");
   writeFileSync(cargoLockPath, updatedCargoLock, "utf8");
 }
@@ -70,7 +72,7 @@ if (createTag) {
 console.log(`已同步版本号为 ${normalizedVersion}`);
 console.log("已更新文件:");
 console.log("- package.json");
-console.log("- src-tauri/tauri.conf.json");
+console.log("- desktop-electron/package.json");
 console.log("- src-tauri/Cargo.toml");
 console.log("- src-tauri/Cargo.lock");
 if (dryRun) {

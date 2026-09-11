@@ -16,7 +16,6 @@
     "preview": "vite preview",
     "release:prepare": "node scripts/prepare-release.mjs",
     "release:ship": "node scripts/release-ship.mjs",
-    "release:local": "node scripts/release-local.mjs",
     "relay:configure": "node scripts/relay/configure-desktop.mjs",
     "relay:pack-vps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-for-vps.ps1",
     "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1",

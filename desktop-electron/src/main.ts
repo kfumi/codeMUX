@@ -5,11 +5,12 @@
 //! - 同一 supervisor 契约的 TS 版拉起/附着独立 daemon(codemux-daemon);
 //! - 生产渲染层经自定义 `app://` scheme 加载(SPA fallback 到 index.html),
 //!   开发态用 CODEMUX_DEV_SERVER_URL(默认脚本注入 http://localhost:1420);
+//! - 渲染层 console 追加落盘到 logs/renderer.log(接替 Tauri log 插件);
 //! - 关窗到托盘;托盘「打开 CodeMUX / 退出」;退出时 stopManaged 停掉自有 daemon。
 //!
 //! 打包形态注意:渲染层 dist 在打包态指向随包分发的 renderer-dist/(打包前
-//! 由 scripts/copy-renderer-dist.mjs 从仓库根 dist/ 拷入);资源根的正式布局
-//! 由工单 09 收口。更新器经 electron-updater + GitHub Releases(工单 06)。
+//! 由 scripts/copy-renderer-dist.mjs 从仓库根 dist/ 拷入)。更新器经
+//! electron-updater + GitHub Releases(工单 06)。
 
 import { app, BrowserWindow, Menu, protocol, Tray, nativeImage } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -17,6 +18,8 @@ import path from 'node:path';
 
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
+import { readLocalDaemonToken } from './daemon-token';
+import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
@@ -44,21 +47,6 @@ function resolveAppDataDir(): string {
 /** 壳与 daemon 共用的日志目录。 */
 function resolveLogDir(): string {
   return path.join(resolveAppDataDir(), 'logs');
-}
-
-/**
- * 读 Local Daemon Token(与 shell-bridge getLocalDaemonToken 同一文件:
- * `<appDataDir>/local-daemon-token`,daemon 启动时落盘)。缺失/为空返回 null。
- */
-function readLocalDaemonToken(): string | null {
-  try {
-    const tokenPath = path.join(resolveAppDataDir(), 'local-daemon-token');
-    if (!existsSync(tokenPath)) return null;
-    const token = readFileSync(tokenPath, 'utf8').trim();
-    return token || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -118,8 +106,7 @@ const CONTENT_TYPES: Record<string, string> = {
 /**
  * 生产渲染层目录:dev 态指向仓库根 dist/(`npm run build` 产物);
  * 打包态指向随安装包分发的 renderer-dist/(构建脚本在打包前把仓库根 dist/
- * 拷入 desktop-electron/renderer-dist,见 scripts/copy-renderer-dist.mjs;
- * 正式资源根布局由工单 09 收口)。
+ * 拷入 desktop-electron/renderer-dist,见 scripts/copy-renderer-dist.mjs)。
  */
 function resolveRendererDist(): string {
   if (app.isPackaged) {
@@ -178,6 +165,13 @@ let unregisterBridge: (() => void) | null = null;
 let browserGuests: BrowserGuestTracker | null = null;
 /** 浏览器自动化接缝(工单 08):daemon → 壳内页面的自动化执行客户端。 */
 let automation: BrowserAutomationService | null = null;
+/** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
+let rendererLog: RendererLogRecorder | null = null;
+
+function getRendererLog(): RendererLogRecorder {
+  rendererLog ??= createRendererLogRecorder(resolveLogDir());
+  return rendererLog;
+}
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -216,6 +210,12 @@ function createMainWindow(): BrowserWindow {
       // Browser Host(工单 07):内置浏览由渲染层 <webview> 标签托管。
       webviewTag: true,
     },
+  });
+
+  // 渲染层 console → logs/renderer.log(工单 09:接替 Tauri log 插件的
+  // 打包态文件日志;webview guest 的 console 不在此列,由 browser-host 管)。
+  window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    getRendererLog().record(level, message, line, sourceId);
   });
 
   // 关窗 → 隐藏到托盘(与 Tauri 版行为一致);真正的退出走托盘菜单。
@@ -295,6 +295,10 @@ function startSupervisor(): void {
     // 开发态不传 --resource-dir(对齐 Rust:仅打包环境传);打包态指向资源根。
     resourceDir: app.isPackaged && process.resourcesPath ? process.resourcesPath : null,
     managedBy: 'desktop',
+    // 版本配对:壳期望的 daemon 版本默认 = 壳自身版本(发版流程把 package.json
+    // / desktop-electron/package.json / Cargo.toml 同步到同一版本,见
+    // scripts/prepare-release.mjs)。env 显式覆盖,便于本地调试旧 daemon。
+    expectedDaemonVersion: process.env.CODEMUX_EXPECTED_DAEMON_VERSION ?? app.getVersion(),
     onEvent: forwardLifecycle,
   });
 
@@ -369,7 +373,7 @@ if (!gotLock) {
     // 这些事件的原投递方(app.emit)由本 sink 接管。
     automation = createBrowserAutomationService({
       getPort: () => supervisor?.getPort() ?? null,
-      readToken: readLocalDaemonToken,
+      readToken: () => readLocalDaemonToken(resolveAppDataDir()),
       resolveTarget: (browserId) => guests.resolveTarget(browserId),
       onUiEvent: (name, payload) => sendToRenderer(name, payload),
     });

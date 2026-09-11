@@ -77,7 +77,7 @@ run("node", prepareArgs);
 run("git", [
   "add",
   "package.json",
-  "src-tauri/tauri.conf.json",
+  "desktop-electron/package.json",
   "src-tauri/Cargo.toml",
   "src-tauri/Cargo.lock",
 ]);
@@ -90,5 +90,7 @@ console.log(`已完成一键发版流程：${tagName}`);
 if (dryRun) {
   console.log("当前为 dry-run，仅输出了将执行的命令，没有改动文件、提交或推送。");
 } else {
-  console.log("GitHub Actions 将自动构建 Windows 和 macOS 安装包，并发布到当前 CodeMUX 仓库的 Releases。");
+  console.log("注意:当前 GitHub Actions 发版流水线仍是 Tauri 时代配置,Electron 安装包");
+  console.log("请用 `npm run build:electron-installer` 本地出包后上传到 GitHub Releases");
+  console.log("(见 docs/desktop-release-guide.md;CI 迁移为待办)。");
 }

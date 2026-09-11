@@ -20,7 +20,7 @@ import type {
   BrowserPagePatch,
 } from '../browserHost';
 import { normalizeBrowserUrl } from '../browserUrl';
-import { desktopBridge } from '../desktop-bridge';
+import { requireDesktopBridge } from '../desktop-bridge';
 import { createLogger, serializeError } from '../logger';
 
 const logger = createLogger('electronBrowserHost');
@@ -253,13 +253,6 @@ function requireRecord(browserId: string): WebviewRecord {
   return record;
 }
 
-function requireBridge(): NonNullable<typeof desktopBridge> {
-  if (!desktopBridge) {
-    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
-  }
-  return desktopBridge;
-}
-
 function stringifyEvaluateResult(result: unknown): string {
   if (result === undefined) return 'null';
   const text = JSON.stringify(result);
@@ -324,7 +317,7 @@ function wireEvents(browserId: string, record: WebviewRecord): void {
     }
     try {
       // guest webContentsId → browserId 登记:main 侧弹窗拒绝转发据此回填来源。
-      void requireBridge().browserRegisterGuest(el.getWebContentsId(), browserId).catch((error) => {
+      void requireDesktopBridge().browserRegisterGuest(el.getWebContentsId(), browserId).catch((error) => {
         logger.warn('Failed to register browser guest', { browserId }, serializeError(error));
       });
     } catch (error) {
@@ -557,7 +550,7 @@ async function clearBrowserData(scope: BrowserDataScope): Promise<void> {
     throw new Error(unknownScopeError(scope));
   }
   // main 进程清独立 partition 的 session(cookies/storage/cache,按 scope)。
-  await requireBridge().browserClearData(scope);
+  await requireDesktopBridge().browserClearData(scope);
   // 对齐 Rust clear_one:清完后重载已打开页面(未附挂的元素无页面可重载)。
   for (const record of records.values()) {
     if (!record.attached) continue;

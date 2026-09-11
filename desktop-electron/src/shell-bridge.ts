@@ -1,7 +1,7 @@
 //! 壳门面的 main 进程实现:注册 `codemux:*` IPC 通道,供 sandboxed preload
-//! 经 contextBridge 暴露给渲染层(工单 05/06/07)。
+//! 经 contextBridge 暴露给渲染层(工单 05/06/07/09)。
 //!
-//! 通道面与前端审计对齐(见 src/lib/tauri.ts / src/lib/facades/shell-facade.ts):
+//! 通道面与渲染层桥契约对齐(唯一归属见 src/lib/desktop-bridge.ts):
 //! - token / 目录 / 日志 / 通知 / 主窗口
 //! - 开发环境与 agent 运行时检测(最小面,见 agent-checks.ts)
 //! - open_in_explorer / open_project_path / read_home_file
@@ -33,6 +33,7 @@ import {
   upgradeAgentRuntime,
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
+import { readLocalDaemonTokenOrThrow } from './daemon-token';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
 import type { UpdaterService } from './updater';
@@ -192,15 +193,7 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   handle('getLocalDaemonToken', () => {
     // Local Daemon Token 由 daemon 在 app-data-dir 落盘(local-daemon-token 明文文件);
     // 壳侧只读,Tauri 版同样语义(daemon 启动时已 ensure)。
-    const tokenPath = path.join(deps.getAppDataDir(), 'local-daemon-token');
-    if (!existsSync(tokenPath)) {
-      throw new Error('local-daemon-token 尚未生成(daemon 未启动?)');
-    }
-    const token = readFileSync(tokenPath, 'utf8').trim();
-    if (!token) {
-      throw new Error('local-daemon-token 为空');
-    }
-    return token;
+    return readLocalDaemonTokenOrThrow(deps.getAppDataDir());
   });
   handle('getAppDataDirectory', () => deps.getAppDataDir());
   handle('getUserHomeDirectory', () => os.homedir());
@@ -452,52 +445,3 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     handlers.clear();
   };
 }
-
-/** 渲染层 → main 的一次性调用助手(preload 使用;此处导出仅为类型/单测便利)。 */
-export const SHELL_BRIDGE_CHANNELS = [
-  'getLocalDaemonToken',
-  'getAppDataDirectory',
-  'getUserHomeDirectory',
-  'getLogDirectory',
-  'getLogFiles',
-  'readLogFile',
-  'readHomeFile',
-  'openInExplorer',
-  'openProjectPath',
-  'openExternal',
-  'windowMinimize',
-  'windowToggleMaximize',
-  'windowClose',
-  'windowIsMaximized',
-  'getSystemFonts',
-  'showDialogOpen',
-  'showDialogSave',
-  'sendAgentNotification',
-  'showMainWindow',
-  'checkDevelopmentEnvironment',
-  'checkAgentRuntimes',
-  'probeAgentInstallations',
-  'upgradeAgentRuntime',
-  'checkForUpdates',
-  'downloadAndInstall',
-  'quitAndInstall',
-  'currentVersion',
-  'browserHide',
-  'browserShow',
-  'browserSetBounds',
-  'browserCreate',
-  'browserDestroy',
-  'browserNavigate',
-  'browserBack',
-  'browserForward',
-  'browserReload',
-  'browserEvaluate',
-  'browserOpenDevtools',
-  'browserSetZoom',
-  'browserClearData',
-  'browserRegisterGuest',
-  'exportPerfSnapshot',
-  'toggleDevtools',
-  'daemonRestart',
-  'getDaemonInfo',
-] as const;

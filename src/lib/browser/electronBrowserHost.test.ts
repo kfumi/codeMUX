@@ -12,6 +12,7 @@ const bridgeMock = vi.hoisted(() => ({
 
 vi.mock('../desktop-bridge', () => ({
   desktopBridge: bridgeMock,
+  requireDesktopBridge: () => bridgeMock,
   isElectronDesktop: () => true,
 }));
 
