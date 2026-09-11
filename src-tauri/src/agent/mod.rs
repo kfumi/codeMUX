@@ -16,16 +16,17 @@ pub(crate) mod opencode_subagent_history;
 pub mod pi_history;
 pub(crate) mod rewind;
 pub(crate) mod session_lifecycle;
+pub mod sidecar_events;
 pub mod subagent_persist;
 pub(crate) mod timeline_persist;
 pub(crate) mod turn_artifact_summary;
 
+use crate::paths::PathRoots;
 use log::{debug, info, warn};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -44,9 +45,9 @@ enum BuildEnvironment {
 pub struct SidecarHandle {
     child: Child,
     stdin_tx: mpsc::Sender<String>,
-    /// The Tauri channel used by the forwarding task. Updated when the sidecar
-    /// is reused for a new `start` command so events reach the new frontend channel.
-    channel: Arc<AsyncMutex<tauri::ipc::Channel<String>>>,
+    /// The event binding used by the forwarding task. Re-bound when the sidecar
+    /// is reused for a new `start` command so events reach the new frontend sink.
+    binding: sidecar_events::SidecarEventBinding,
     /// Captured stderr lines from the sidecar process.
     pub stderr_lines: Arc<AsyncMutex<Vec<String>>>,
 }
@@ -56,8 +57,8 @@ impl SidecarHandle {
         self.stdin_tx.clone()
     }
 
-    pub fn channel_handle(&self) -> Arc<AsyncMutex<tauri::ipc::Channel<String>>> {
-        self.channel.clone()
+    pub fn event_binding(&self) -> sidecar_events::SidecarEventBinding {
+        self.binding.clone()
     }
 
     /// Send a command string to the sidecar's stdin.
@@ -163,10 +164,10 @@ fn normalize_windows_verbatim_path(path: PathBuf) -> PathBuf {
 /// Events are raw JSON strings (one per line) from the sidecar's stdout.
 /// The first event MUST be `{"type":"sidecar_ready"}`.
 pub async fn spawn_sidecar(
-    app_handle: &tauri::AppHandle,
-    channel: tauri::ipc::Channel<String>,
+    roots: &PathRoots,
+    binding: sidecar_events::SidecarEventBinding,
 ) -> Result<(SidecarHandle, mpsc::Receiver<String>), String> {
-    let resource_dir = app_handle.path().resource_dir().ok();
+    let resource_dir = roots.resource_dir.clone();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let environment = build_environment();
     let script_path = normalize_windows_verbatim_path(resolve_sidecar_script_path(
@@ -314,11 +315,10 @@ pub async fn spawn_sidecar(
     }
 
     debug!(target: "agent", "Sidecar spawn completed successfully");
-    let channel = Arc::new(AsyncMutex::new(channel));
     let handle = SidecarHandle {
         child,
         stdin_tx,
-        channel,
+        binding,
         stderr_lines,
     };
     Ok((handle, event_rx))

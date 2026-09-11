@@ -2155,7 +2155,8 @@ pub async fn delete_opencode_session(
     agent_state: State<'_, AgentState>,
     app_session_id: String,
 ) -> Result<(), String> {
-    delete_opencode_session_for_companion(&app, state.inner(), agent_state.inner(), app_session_id).await
+    delete_opencode_session_for_companion(&app, state.inner(), agent_state.inner(), app_session_id)
+        .await
 }
 
 pub async fn delete_opencode_session_for_companion(
@@ -2244,7 +2245,11 @@ pub(crate) async fn delete_opencode_native_session(
 
     // No session sidecar is alive after an app restart. Use a short-lived
     // sidecar so the cleanup still goes through OpenCode's official SDK.
-    let (mut handle, mut events) = spawn_sidecar(app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+    let (mut handle, mut events) = spawn_sidecar(
+        &crate::paths::PathRoots::from_app(app)?,
+        super::sidecar_events::SidecarEventBinding::unbound(),
+    )
+    .await?;
     let send_result = handle.send_command(&command.to_string()).await;
     if let Err(error) = send_result {
         handle.shutdown().await;

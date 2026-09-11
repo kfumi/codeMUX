@@ -9,9 +9,11 @@ mod forge;
 mod log_ctx;
 mod mcp;
 mod model_providers;
+mod paths;
 mod provider_profiles;
 mod runtime;
 mod scheduled_tasks;
+mod shell;
 mod skills;
 
 use log::{info, warn};
@@ -430,8 +432,9 @@ pub fn run() {
             #[cfg(windows)]
             refresh_windows_shell_icon_cache();
 
-            let conn = db::initialize(app.handle()).expect("Failed to initialize database");
-            let config = config::load_config(app.handle());
+            let path_roots = shell::path_roots(app.handle());
+            let conn = db::initialize(&path_roots).expect("Failed to initialize database");
+            let config = config::load_config(&path_roots);
             info!(
                 target: "app",
                 "Runtime initialized; providers={} theme={:?}",
@@ -442,7 +445,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
-                app_data_dir: app.path().app_data_dir()?,
+                app_data_dir: path_roots.app_data_dir,
                 runtime_resolver: crate::runtime::RuntimeResolver::default_root(),
             });
             app.manage(agent::commands::AgentState::default());

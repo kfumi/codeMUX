@@ -11,7 +11,6 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Manager};
 
 trait ConfigFileOps {
     fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()>;
@@ -98,13 +97,11 @@ fn replace_windows_file(source: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn get_config_path(app: &AppHandle) -> PathBuf {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .expect("Failed to get app data dir");
-    std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
-    app_dir.join("config.json")
+fn get_config_path(roots: &crate::paths::PathRoots) -> PathBuf {
+    roots
+        .ensure_app_data_dir()
+        .expect("Failed to create app data dir");
+    roots.config_path()
 }
 
 fn write_default_config_to_path(config_path: &Path) -> AppConfig {
@@ -177,13 +174,13 @@ fn load_config_from_path(config_path: &Path) -> AppConfig {
     }
 }
 
-pub fn load_config(app: &AppHandle) -> AppConfig {
-    let config_path = get_config_path(app);
+pub fn load_config(roots: &crate::paths::PathRoots) -> AppConfig {
+    let config_path = get_config_path(roots);
     load_config_from_path(&config_path)
 }
 
-pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
-    let config_path = get_config_path(app);
+pub fn save_config(roots: &crate::paths::PathRoots, config: &AppConfig) -> Result<(), String> {
+    let config_path = get_config_path(roots);
     save_config_to_path(&config_path, config)
 }
 
@@ -626,5 +623,23 @@ mod tests {
         let error = save_config_to_path(&config_path, &config).unwrap_err();
         assert!(error.contains("active_provider_id"));
         let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn load_and_save_config_through_injected_roots_without_tauri_app() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let roots = crate::paths::PathRoots::new(temp_dir.path(), None);
+
+        // 首次加载写入默认配置文件。
+        let loaded = super::load_config(&roots);
+        assert!(roots.config_path().is_file());
+
+        let mut updated = loaded;
+        updated.theme = crate::config::types::Theme::Dark;
+        super::save_config(&roots, &updated).expect("save config");
+
+        let reloaded_json = serde_json::to_string(&super::load_config(&roots)).expect("serialize");
+        let updated_json = serde_json::to_string(&updated).expect("serialize");
+        assert_eq!(reloaded_json, updated_json);
     }
 }

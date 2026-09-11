@@ -1,0 +1,137 @@
+//! Daemon 核心的注入式环境根。
+//!
+//! 权威侧模块(db、config、agent sidecar 拉起、移动端静态资源)不直接依赖
+//! Tauri 路径 API,而是消费调用方构造并注入的 [`PathRoots`]。Tauri 壳经
+//! [`PathRoots::from_app`] 构造;独立 daemon(后续工单)将改为从启动参数构造。
+
+use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug)]
+pub struct PathRoots {
+    pub app_data_dir: PathBuf,
+    pub resource_dir: Option<PathBuf>,
+}
+
+impl PathRoots {
+    pub fn new(app_data_dir: impl Into<PathBuf>, resource_dir: Option<PathBuf>) -> Self {
+        Self {
+            app_data_dir: app_data_dir.into(),
+            resource_dir,
+        }
+    }
+
+    pub fn from_app(app: &tauri::AppHandle) -> Result<Self, String> {
+        use tauri::Manager;
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        let resource_dir = app.path().resource_dir().ok();
+        Ok(Self {
+            app_data_dir,
+            resource_dir,
+        })
+    }
+
+    pub fn database_path(&self) -> PathBuf {
+        self.app_data_dir.join("codemux.db")
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.app_data_dir.join("config.json")
+    }
+
+    pub fn ensure_app_data_dir(&self) -> Result<(), std::io::Error> {
+        std::fs::create_dir_all(&self.app_data_dir)
+    }
+
+    /// 移动端静态资源目录:打包环境优先资源根下的 dist-mobile,开发环境固定
+    /// 回退源码树内的构建产物或源码目录(与 sidecar 脚本解析同一约定,避免
+    /// 开发时 target 目录里的陈旧拷贝盖过新鲜构建)。
+    pub fn mobile_static_dir(&self) -> PathBuf {
+        self.mobile_static_dir_for(cfg!(debug_assertions))
+    }
+
+    fn mobile_static_dir_for(&self, development: bool) -> PathBuf {
+        if !development {
+            if let Some(resource_dir) = &self.resource_dir {
+                let packaged = resource_dir.join("dist-mobile");
+                if packaged.exists() {
+                    return packaged;
+                }
+            }
+        }
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dev_dist = manifest_dir.join("../dist-mobile");
+        if dev_dist.exists() {
+            return dev_dist;
+        }
+        manifest_dir.join("../src-mobile/dist")
+    }
+
+    pub fn sidecar_resource_dir(&self) -> Option<&Path> {
+        self.resource_dir.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PathRoots;
+
+    #[test]
+    fn derived_paths_live_under_app_data_dir() {
+        let roots = PathRoots::new(r"C:\app-data", None);
+        assert_eq!(
+            roots.database_path(),
+            std::path::Path::new(r"C:\app-data").join("codemux.db")
+        );
+        assert_eq!(
+            roots.config_path(),
+            std::path::Path::new(r"C:\app-data").join("config.json")
+        );
+    }
+
+    #[test]
+    fn mobile_static_dir_prefers_existing_packaged_dir_in_release() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let packaged = temp.path().join("dist-mobile");
+        std::fs::create_dir_all(&packaged).expect("mkdir");
+        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        assert_eq!(
+            roots.mobile_static_dir_for(false),
+            packaged,
+            "release should serve the bundled copy"
+        );
+    }
+
+    #[test]
+    fn mobile_static_dir_ignores_stale_packaged_copy_in_development() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let packaged = temp.path().join("dist-mobile");
+        std::fs::create_dir_all(packaged.join("stale")).expect("mkdir");
+        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        let resolved = roots.mobile_static_dir_for(true);
+        assert!(
+            !resolved.starts_with(temp.path()),
+            "development should fall back to the source tree, not the target copy"
+        );
+    }
+
+    #[test]
+    fn mobile_static_dir_falls_back_to_source_tree() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        // 源码树内 dist-mobile 或 src-mobile/dist 至少存在其一(仓库检出的常态)。
+        let fallback = roots.mobile_static_dir();
+        assert!(fallback.ends_with("dist-mobile") || fallback.ends_with("src-mobile/dist"));
+    }
+
+    #[test]
+    fn ensure_app_data_dir_creates_missing_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path().join("nested").join("data");
+        let roots = PathRoots::new(&data_dir, None);
+        roots.ensure_app_data_dir().expect("mkdir");
+        assert!(data_dir.is_dir());
+    }
+}

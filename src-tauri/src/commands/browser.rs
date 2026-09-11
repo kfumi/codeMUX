@@ -1,8 +1,8 @@
 use tauri::{AppHandle, State};
 
 use crate::browser::manager::{self, BrowserPageBounds, BrowserState};
-use crate::config;
 use crate::config::types::BrowserControlConfig;
+use crate::shell;
 use crate::AppState;
 
 // Child WebView create/mutate must be async. On Windows, WebviewBuilder / add_child
@@ -123,6 +123,6 @@ pub fn set_browser_control(
 ) -> Result<(), String> {
     let mut config = state.config.lock().unwrap();
     config.browser = settings;
-    config::save_config(&app, &config)?;
+    shell::save_config(&app, &config)?;
     Ok(())
 }

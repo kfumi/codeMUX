@@ -10,8 +10,8 @@ use crate::companion::pairing_code::{
 };
 use crate::companion::relay::{set_relay_config, set_relay_enabled, RelayConnectionState};
 use crate::companion::{start_daemon_server, stop_daemon_server, CompanionState};
-use crate::config;
 use crate::db::operations::{self, PairedDevice};
+use crate::shell;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -59,7 +59,7 @@ fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<Stri
         .is_some_and(|value| !value.trim().is_empty());
     let desktop_id = get_or_create_desktop_id(&mut config.companion);
     if !had_desktop_id {
-        config::save_config(app, &config)?;
+        shell::save_config(app, &config)?;
     }
     Ok(desktop_id)
 }
@@ -116,7 +116,7 @@ async fn build_companion_status(
 
     if should_save_config {
         let config = state.config.lock().map_err(|error| error.to_string())?;
-        config::save_config(app, &config)?;
+        shell::save_config(app, &config)?;
     }
 
     let relay_state = companion_state.relay_state().get().await;
@@ -171,7 +171,7 @@ pub async fn set_companion_enabled(
         if !enabled {
             clear_persisted_pairing_code(&mut config.companion);
         }
-        config::save_config(&app, &config)?;
+        shell::save_config(&app, &config)?;
     }
 
     if enabled {
@@ -185,7 +185,7 @@ pub async fn set_companion_enabled(
         if let Err(error) = start_daemon_server(app.clone(), port, true, listen_address).await {
             let mut config = state.config.lock().map_err(|error| error.to_string())?;
             config.companion.enabled = false;
-            config::save_config(&app, &config)?;
+            shell::save_config(&app, &config)?;
             companion_state.inner.set_lan_exposed(false);
             companion_state.clear_pairing_codes();
             return Err(error);
@@ -243,7 +243,7 @@ pub async fn refresh_companion_pairing_code(
     {
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         refresh_persisted_pairing_code(&companion_state, &mut config.companion);
-        config::save_config(&app, &config)?;
+        shell::save_config(&app, &config)?;
     }
     build_companion_status(&app, state.inner(), &companion_state).await
 }
@@ -286,7 +286,7 @@ pub async fn get_companion_pairing_offer(
             lan_ip,
         );
         if should_save {
-            config::save_config(&app, &config)?;
+            shell::save_config(&app, &config)?;
         }
         result
     };

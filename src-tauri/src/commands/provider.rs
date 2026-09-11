@@ -1,9 +1,9 @@
-use crate::config;
 use crate::config::types::{
     AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate,
     CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, OpenCodeAgentConfigUpdate,
     Provider, Theme,
 };
+use crate::shell;
 use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
@@ -268,7 +268,7 @@ pub fn set_default_agent_kind_for_companion(
     info!(target: "provider", "Setting default agent kind agent_kind={}", agent_kind);
     let mut config = state.config.lock().unwrap();
     config.agent_defaults.default_agent_kind = AgentKind::from_str(&agent_kind)?;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -292,7 +292,7 @@ pub fn update_agent_config_for_companion(
     let mut app_config = state.config.lock().unwrap();
     apply_agent_config_update(&mut app_config, AgentKind::from_str(&agent_kind)?, config)?;
 
-    config::save_config(app, &app_config)?;
+    shell::save_config(app, &app_config)?;
     Ok(())
 }
 
@@ -313,7 +313,7 @@ pub fn set_theme_for_companion(
         "dark" => Theme::Dark,
         _ => Theme::System,
     };
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -334,7 +334,7 @@ pub fn set_compact_ai_output_for_companion(
     info!(target: "provider", "Setting compact AI output enabled={}", enabled);
     let mut config = state.config.lock().unwrap();
     config.compact_ai_output = enabled;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -359,7 +359,7 @@ pub fn set_immediate_run_mode_for_companion(
     info!(target: "provider", "Setting immediate run mode mode={}", mode);
     let mut config = state.config.lock().unwrap();
     config.immediate_run_mode = mode;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -394,7 +394,7 @@ pub fn set_attachment_enrichment_for_companion(
     enrichment.api_key_configured = false;
     enrichment.provider_id = None;
     config.attachment_enrichment = enrichment;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -431,7 +431,7 @@ pub fn set_notification_settings_for_companion(
     );
     let mut config = state.config.lock().unwrap();
     config.notifications = settings;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -459,7 +459,7 @@ pub fn set_default_open_target_for_companion(
     info!(target: "provider", "Setting default open target target={}", target);
     let mut config = state.config.lock().unwrap();
     config.default_open_target = target;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -509,7 +509,7 @@ pub fn set_git_settings_for_companion(
         }
     }
     config.git = settings;
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 

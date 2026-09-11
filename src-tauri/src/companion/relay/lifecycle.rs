@@ -85,7 +85,7 @@ pub async fn set_relay_config(
         let mut config = app_state.config.lock().map_err(|error| error.to_string())?;
         config.companion.relay.endpoint = endpoint.trim().to_string();
         config.companion.relay.use_tls = use_tls;
-        crate::config::save_config(app, &config)?;
+        crate::shell::save_config(app, &config)?;
     }
     sync_relay_transport(app, companion_state).await
 }
@@ -107,7 +107,7 @@ pub async fn set_relay_enabled(
         let app_state = app.state::<AppState>();
         let mut config = app_state.config.lock().map_err(|error| error.to_string())?;
         config.companion.relay.enabled = enabled;
-        crate::config::save_config(app, &config)?;
+        crate::shell::save_config(app, &config)?;
     }
     sync_relay_transport(app, companion_state).await
 }

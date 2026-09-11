@@ -95,8 +95,11 @@ pub async fn start_codex_proxy(
         Some(id) => id,
         None => {
             info!(target: "agent", "No active sidecar, spawning dedicated proxy sidecar");
-            let (handle, mut rx) =
-                spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+            let (handle, mut rx) = spawn_sidecar(
+                &crate::paths::PathRoots::from_app(&app)?,
+                super::sidecar_events::SidecarEventBinding::unbound(),
+            )
+            .await?;
 
             // Drain the event stream in the background
             let session_id_clone = PROXY_SESSION_ID.to_string();

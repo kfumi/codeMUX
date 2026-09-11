@@ -20,19 +20,21 @@ use crate::companion::actions::{
     interrupt_companion_session, respond_companion_permission, send_companion_message,
     send_companion_tool_response, update_companion_settings, CompanionSettingsUpdate,
 };
-use crate::companion::auth::{classify_local_daemon_token, local_daemon_device, LocalDaemonTokenDecision};
-use crate::companion::routes_app_config;
-use crate::companion::routes_history_import;
-use crate::companion::routes_agent_runtime;
-use crate::companion::routes_control_plane;
-use crate::companion::routes_extended;
-use crate::companion::routes_providers;
-use crate::companion::routes_terminal;
+use crate::companion::auth::{
+    classify_local_daemon_token, local_daemon_device, LocalDaemonTokenDecision,
+};
 use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
 use crate::companion::offer::build_pairing_offer;
 use crate::companion::pairing::complete_pairing;
+use crate::companion::routes_agent_runtime;
+use crate::companion::routes_app_config;
+use crate::companion::routes_control_plane;
+use crate::companion::routes_extended;
+use crate::companion::routes_history_import;
+use crate::companion::routes_providers;
+use crate::companion::routes_terminal;
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
 use crate::config::types::AgentKind;
 use crate::db::operations;
@@ -157,8 +159,7 @@ pub async fn start_daemon_server(
     lan_listen_address: String,
 ) -> Result<(), String> {
     let app_for_status = app.clone();
-    let result =
-        start_daemon_server_body(app, port, expose_lan, lan_listen_address).await;
+    let result = start_daemon_server_body(app, port, expose_lan, lan_listen_address).await;
     let companion_state = app_for_status.state::<CompanionState>().clone();
     if let Err(error) = &result {
         companion_state.set_daemon_error(Some(error.clone())).await;
@@ -189,7 +190,7 @@ async fn start_daemon_server_body(
         *stored_port = port;
     }
 
-    let static_dir = crate::companion::actions::resolve_static_dir();
+    let static_dir = crate::paths::PathRoots::from_app(&app)?.mobile_static_dir();
     let ctx = ServerContext { app: app.clone() };
     let router = build_router(ctx, static_dir);
 
@@ -233,10 +234,10 @@ async fn start_daemon_server_body(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await;
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await;
         if let Err(error) = result {
             warn!(target: "companion", "Daemon server stopped with error: {}", error);
         }
@@ -432,7 +433,7 @@ async fn pair_offer(
         let port = config.companion.port;
         let relay = config.companion.relay.clone();
         if !had_desktop_id {
-            crate::config::save_config(&ctx.app, &config).map_err(ApiError::internal)?;
+            crate::shell::save_config(&ctx.app, &config).map_err(ApiError::internal)?;
         }
         (desktop_id, port, relay)
     };
@@ -933,7 +934,11 @@ fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
     }
 }
 
-pub(crate) fn authorize(ctx: &ServerContext, headers: &HeaderMap, peer: Option<SocketAddr>) -> Result<(), ApiError> {
+pub(crate) fn authorize(
+    ctx: &ServerContext,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> Result<(), ApiError> {
     authorize_device(ctx, headers, peer).map(|_| ())
 }
 
@@ -947,7 +952,11 @@ fn authorize_device(
     authorize_token_device(ctx, &token, peer)
 }
 
-pub(crate) fn authorize_token(ctx: &ServerContext, token: &str, peer: Option<SocketAddr>) -> Result<(), ApiError> {
+pub(crate) fn authorize_token(
+    ctx: &ServerContext,
+    token: &str,
+    peer: Option<SocketAddr>,
+) -> Result<(), ApiError> {
     authorize_token_device(ctx, token, peer).map(|_| ())
 }
 

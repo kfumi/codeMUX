@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use tauri::{AppHandle, Manager};
 
 use crate::agent::commands::{
@@ -88,32 +86,33 @@ pub async fn send_companion_message(
     if sidecar_running {
         match decide_active_sidecar_send(delivery, companion_state.is_turn_active(session_id)) {
             ActiveSidecarSendDecision::Steer => {
-            let mut cmd =
-                OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
-            if let Some(input_payload) = input_payload {
-                cmd["inputPayload"] = input_payload;
-            }
-            cmd["delivery"] = serde_json::Value::String("steer".to_string());
-            if let Some(request_id) = request_id {
-                cmd["requestId"] = serde_json::Value::String(request_id.to_string());
-            }
-            return send_command_to_session(&agent_state, session_id, cmd).await;
+                let mut cmd =
+                    OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
+                if let Some(input_payload) = input_payload {
+                    cmd["inputPayload"] = input_payload;
+                }
+                cmd["delivery"] = serde_json::Value::String("steer".to_string());
+                if let Some(request_id) = request_id {
+                    cmd["requestId"] = serde_json::Value::String(request_id.to_string());
+                }
+                return send_command_to_session(&agent_state, session_id, cmd).await;
             }
             ActiveSidecarSendDecision::Enqueue => {
                 companion_state.enqueue_message(session_id, prompt.to_string(), input_payload);
                 return Ok(());
             }
             ActiveSidecarSendDecision::StartTurn => {
-        companion_state.mark_turn_active(session_id);
-        let mut cmd = OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
-        if let Some(input_payload) = input_payload {
-            cmd["inputPayload"] = input_payload;
-        }
-        let result = send_command_to_session(&agent_state, session_id, cmd).await;
-        if result.is_err() {
-            let _ = companion_state.finish_turn(session_id);
-        }
-        return result;
+                companion_state.mark_turn_active(session_id);
+                let mut cmd =
+                    OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
+                if let Some(input_payload) = input_payload {
+                    cmd["inputPayload"] = input_payload;
+                }
+                let result = send_command_to_session(&agent_state, session_id, cmd).await;
+                if result.is_err() {
+                    let _ = companion_state.finish_turn(session_id);
+                }
+                return result;
             }
         }
     }
@@ -277,15 +276,6 @@ pub async fn send_companion_tool_response(
         "response": response,
     });
     send_command_to_session(&agent_state, session_id, cmd).await
-}
-
-pub fn resolve_static_dir() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let release_dir = manifest_dir.join("../dist-mobile");
-    if release_dir.exists() {
-        return release_dir;
-    }
-    manifest_dir.join("../src-mobile/dist")
 }
 
 #[cfg(test)]

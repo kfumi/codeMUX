@@ -1,8 +1,9 @@
-use crate::config::{self, types::AppConfig};
+use crate::config::types::AppConfig;
 use crate::model_providers::{
     builtin_templates, instantiate_template, is_provider_usable, required_protocol,
     validate_provider, validate_provider_for_enable, BuiltinProviderTemplate, ModelProvider,
 };
+use crate::shell;
 use crate::AppState;
 use tauri::{AppHandle, State};
 
@@ -109,7 +110,7 @@ fn upsert_model_provider_inner(
     if config.active_provider_id.is_none() {
         config.active_provider_id = config.model_providers.first().map(|item| item.id.clone());
     }
-    config::save_config(app, &config)?;
+    shell::save_config(app, &config)?;
     Ok(())
 }
 
@@ -130,7 +131,7 @@ pub fn delete_model_provider(
     if config.active_provider_id.as_deref() == Some(provider_id.as_str()) {
         config.active_provider_id = config.model_providers.first().map(|item| item.id.clone());
     }
-    config::save_config(&app, &config)?;
+    shell::save_config(&app, &config)?;
     Ok(())
 }
 
@@ -149,7 +150,7 @@ pub fn set_active_model_provider(
         return Err(format!("供应商不存在: {provider_id}"));
     }
     config.active_provider_id = Some(provider_id);
-    config::save_config(&app, &config)?;
+    shell::save_config(&app, &config)?;
     Ok(())
 }
 
@@ -166,7 +167,7 @@ pub fn set_model_provider_enabled(
         validate_provider_for_enable(provider)?;
     }
     provider.enabled = enabled;
-    config::save_config(&app, &config)?;
+    shell::save_config(&app, &config)?;
     Ok(())
 }
 

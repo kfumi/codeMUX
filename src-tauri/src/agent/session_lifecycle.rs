@@ -14,7 +14,7 @@ use crate::model_providers::{
 };
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::{oneshot, Mutex};
 
 use super::claude_history::find_claude_session_jsonl;
@@ -444,24 +444,26 @@ async fn ensure_sidecar_for_session(
     app: AppHandle,
     agent_state: &AgentState,
     session_id: &str,
-    channel: tauri::ipc::Channel<String>,
+    sink: Arc<dyn super::sidecar_events::SidecarEventSink>,
     replace_event_channel: bool,
 ) -> Result<(), String> {
-    let channel_handle = {
+    let existing_binding = {
         let sidecars = agent_state.sidecars.lock().await;
-        sidecars.get(session_id).map(SidecarHandle::channel_handle)
+        sidecars.get(session_id).map(SidecarHandle::event_binding)
     };
-    if let Some(channel_handle) = channel_handle {
+    if let Some(binding) = existing_binding {
         if replace_event_channel {
-            let mut current_channel = channel_handle.lock().await;
-            *current_channel = channel;
+            binding.bind(sink).await;
         }
         info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
         return Ok(());
     }
 
-    let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
-    let shared_channel = handle.channel.clone();
+    let roots = crate::paths::PathRoots::from_app(&app)?;
+    let binding = super::sidecar_events::SidecarEventBinding::unbound();
+    binding.bind(sink).await;
+    let (handle, mut rx) = spawn_sidecar(&roots, binding).await?;
+    let event_binding = handle.binding.clone();
     let session_startup_locks = agent_state.session_startup_locks.clone();
     let session_generations = agent_state.session_generations.clone();
     let session_delete_waiters = agent_state.session_delete_waiters.clone();
@@ -534,21 +536,7 @@ async fn ensure_sidecar_for_session(
                         &app_for_companion,
                         broadcast_events,
                     );
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&event) {
-                        let session_id = value
-                            .get("session_id")
-                            .and_then(|item| item.as_str())
-                            .unwrap_or(session_id_clone.as_str());
-                        let _ = app_handle.emit(
-                            "agent-session-stream-event",
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "payload": event,
-                            }),
-                        );
-                    }
-                    let ch = shared_channel.lock().await;
-                    let _ = ch.send(event);
+                    event_binding.send(event).await;
                 }
                 Err(error) => {
                     let error_event = serde_json::json!({
@@ -556,8 +544,7 @@ async fn ensure_sidecar_for_session(
                         "error": error,
                     })
                     .to_string();
-                    let ch = shared_channel.lock().await;
-                    let _ = ch.send(error_event);
+                    event_binding.send(error_event).await;
                 }
             }
         }
@@ -1314,8 +1301,8 @@ pub async fn ensure_agent_session_for_companion(
         runtime_config.timeouts,
         runtime_config.model_limits,
     )?;
-    let channel = tauri::ipc::Channel::new(|_| Ok(()));
-    ensure_sidecar_for_session(app.clone(), agent_state, session_id, channel, false).await?;
+    let sink = super::sidecar_events::null_sink();
+    ensure_sidecar_for_session(app.clone(), agent_state, session_id, sink, false).await?;
     send_command_to_session(agent_state, session_id, ensure_cmd).await
 }
 
@@ -1388,7 +1375,9 @@ fn load_latest_token_usage_for_agent_session(
             return Ok(None);
         }
         let values = read_json_stream_values(history_path)?;
-        return Ok(super::pi_history::latest_pi_usage_from_session_values(&values, freshness));
+        return Ok(super::pi_history::latest_pi_usage_from_session_values(
+            &values, freshness,
+        ));
     }
 
     let history_path = match agent_kind {
@@ -1524,7 +1513,14 @@ pub async fn ensure_agent_session(
         runtime_config.model_limits,
     )?;
 
-    ensure_sidecar_for_session(app, &agent_state, &session_id, channel, true).await?;
+    ensure_sidecar_for_session(
+        app,
+        &agent_state,
+        &session_id,
+        Arc::new(crate::shell::IpcChannelSink::new(channel)),
+        true,
+    )
+    .await?;
 
     let stderr_lines = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -1630,7 +1626,7 @@ pub async fn start_agent_session(
             app,
             &agent_state,
             &session_id,
-            channel,
+            Arc::new(crate::shell::IpcChannelSink::new(channel)),
             replace_event_channel,
         )
         .await?;
@@ -1881,15 +1877,14 @@ mod tests {
 
     #[test]
     fn resolve_agent_session_info_splits_pi_session_path_and_id() {
-        let temp =
-            std::env::temp_dir().join(format!("codemux-pi-agent-info-test-{}", uuid::Uuid::new_v4()));
-        let session_file = temp.join("2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl");
+        let temp = std::env::temp_dir().join(format!(
+            "codemux-pi-agent-info-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let session_file =
+            temp.join("2026-09-05T09-17-57-962Z_01a070dc-4149-734f-ac29-b192160ab52e.jsonl");
         std::fs::create_dir_all(&temp).unwrap();
-        std::fs::write(
-            &session_file,
-            r#"{"type":"session","id":"pi-session-1"}"#,
-        )
-        .unwrap();
+        std::fs::write(&session_file, r#"{"type":"session","id":"pi-session-1"}"#).unwrap();
 
         let info = resolve_agent_session_info(
             &temp,
@@ -2570,10 +2565,7 @@ mod tests {
         );
         assert_eq!(command["modelLimits"]["contextWindow"], 1_000_000);
         assert_eq!(command["modelLimits"]["maxTokens"], 128_000);
-        assert_eq!(
-            command["mcpServers"]["fetch"]["command"],
-            "npx"
-        );
+        assert_eq!(command["mcpServers"]["fetch"]["command"], "npx");
     }
 
     #[test]

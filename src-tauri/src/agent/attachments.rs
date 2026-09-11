@@ -81,8 +81,11 @@ pub async fn enrich_attachments_for_companion(
         "model": model,
     });
 
-    let (mut handle, mut events) =
-        spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+    let (mut handle, mut events) = spawn_sidecar(
+        &crate::paths::PathRoots::from_app(app)?,
+        super::sidecar_events::SidecarEventBinding::unbound(),
+    )
+    .await?;
     if let Err(error) = handle.send_command(&command.to_string()).await {
         handle.shutdown().await;
         return Err(error);
