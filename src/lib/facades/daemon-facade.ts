@@ -18,8 +18,9 @@ import type { McpServer } from '../../types/mcp';
 import type { ImportableSkill, ProjectSkill, Skill } from '../../types/skill';
 import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../../types/scheduledTask';
 import type { FileTreeNode } from '../tauri';
-import type { DaemonClient } from '../daemon-client/client';
+import type { DaemonClient, DaemonConnectionConfig } from '../daemon-client/client';
 import { createDaemonClient, resolveDesktopDaemonConfig } from '../daemon-client/client';
+import { desktopBridge, isElectronDesktop } from '../desktop-bridge';
 
 let activeClient: DaemonClient | null = null;
 let clientInitPromise: Promise<DaemonClient> | null = null;
@@ -29,14 +30,30 @@ export function getDaemonClientInitError(): string | null {
   return clientInitError;
 }
 
+async function resolveElectronDaemonConfig(): Promise<DaemonConnectionConfig> {
+  // Electron 壳(工单 05):token 读 app-data-dir/local-daemon-token,
+  // 端口来自 main 侧 supervisor(run-state / spawn 结果)。
+  const bridge = desktopBridge;
+  if (!bridge) {
+    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
+  }
+  const [token, info] = await Promise.all([bridge.getLocalDaemonToken(), bridge.getDaemonInfo()]);
+  if (!info.port) {
+    throw new Error('本机 Daemon 未就绪，请稍后重试或重启应用。');
+  }
+  return { baseUrl: `http://127.0.0.1:${info.port}`, token };
+}
+
 export async function ensureDaemonClient(): Promise<DaemonClient> {
   if (activeClient) return activeClient;
   if (!clientInitPromise) {
     clientInitPromise = (async () => {
-      const config = await resolveDesktopDaemonConfig(
-        () => invokeLocalDaemonToken(),
-        () => companionApi.getStatus(),
-      );
+      const config = isElectronDesktop()
+        ? await resolveElectronDaemonConfig()
+        : await resolveDesktopDaemonConfig(
+          () => invokeLocalDaemonToken(),
+          () => companionApi.getStatus(),
+        );
       const health = await fetch(`${config.baseUrl}/api/health`);
       if (!health.ok) {
         throw new Error('本机 Daemon 未就绪，请稍后重试或重启应用。');
@@ -59,6 +76,10 @@ export function resetDaemonClient(): void {
 }
 
 async function invokeLocalDaemonToken(): Promise<string> {
+  if (isElectronDesktop() && desktopBridge) {
+    // Electron 壳(工单 05):读 app-data-dir/local-daemon-token(preload 桥)。
+    return desktopBridge.getLocalDaemonToken();
+  }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<string>('get_local_daemon_token');
 }

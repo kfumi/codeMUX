@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 import { buildAgentNotificationCandidate } from '../lib/agentNotifications';
+import { desktopBridge, isElectronDesktop } from '../lib/desktop-bridge';
 import { createLogger } from '../lib/logger';
 import { appApi } from '../lib/tauri';
 import type { AgentMessage } from '../stores/agentStore';
@@ -149,11 +150,25 @@ export function useAgentNotifications() {
     let disposed = false;
     let unregister: (() => void) | undefined;
 
-    void listen('agent-notification-clicked', (event) => {
-      const sessionId = extractNotificationSessionId(event.payload);
+    const activateSession = (payload: unknown) => {
+      const sessionId = extractNotificationSessionId(payload);
       if (sessionId) {
         void showAppSession(sessionId);
       }
+    };
+
+    if (isElectronDesktop() && desktopBridge) {
+      // Electron 壳(工单 05):main 进程 Notification click 经 preload 转发;
+      // 载荷契约与 Tauri emit 一致({ sessionId })。
+      unregister = desktopBridge.onAgentNotificationClicked(activateSession);
+      return () => {
+        disposed = true;
+        unregister?.();
+      };
+    }
+
+    void listen('agent-notification-clicked', (event) => {
+      activateSession(event.payload);
     })
       .then((unlisten) => {
         if (disposed) {

@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/core';
 import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff, RotateCw, Timer } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { openInExplorer } from '../../lib/tauri';
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -74,7 +74,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       return;
     }
     try {
-      await invoke('open_in_explorer', { path: workingPath });
+      await openInExplorer(workingPath);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }

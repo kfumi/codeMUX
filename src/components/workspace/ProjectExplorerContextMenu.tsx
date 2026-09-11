@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { openInExplorer as openInExplorerShell } from '../../lib/tauri';
 import { toast } from 'sonner';
 
 import { shellFacade } from '../../lib/facades/shell-facade';
@@ -36,7 +36,7 @@ async function copyText(value: string) {
 
 async function openInExplorer(path: string) {
   try {
-    await invoke('open_in_explorer', { path });
+    await openInExplorerShell(path);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error));
   }

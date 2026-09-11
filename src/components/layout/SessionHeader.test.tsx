@@ -49,6 +49,7 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
 
 vi.mock('../../lib/tauri', () => ({
   agentApi: {},
+  openInExplorer: mocks.openInExplorer,
   sessionApi: {
     archive: vi.fn().mockResolvedValue(undefined),
     setPinned: vi.fn().mockResolvedValue(undefined),
@@ -183,9 +184,9 @@ describe('SessionHeader', () => {
     openMenu();
     fireEvent.click(screen.getByText('在资源管理器中打开'));
 
-    expect(mocks.openInExplorer).toHaveBeenCalledWith({
-      path: 'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
-    });
+    expect(mocks.openInExplorer).toHaveBeenCalledWith(
+      'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
+    );
   });
 
   it('handles pin, unread, project path, task path, agent id, and archive actions', async () => {
@@ -205,7 +206,7 @@ describe('SessionHeader', () => {
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('在资源管理器中打开'));
-    expect(mocks.openInExplorer).toHaveBeenCalledWith({ path: 'D:\\project\\ai-code\\codeMUX' });
+    expect(mocks.openInExplorer).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX');
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('复制路径'));

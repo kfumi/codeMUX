@@ -1,0 +1,30 @@
+# CodeMUX Electron 壳打包配置(工单 05 只落配置,不出包;打包形态工单 09 收口)。
+# 出包前先构建 daemon release 二进制:
+#   cd src-tauri && cargo build --release --bin codemux-daemon
+#   npm run build        (仓库根,产出 dist/ 渲染层 —— 工单 09 前由壳经 app:// 读取仓库根 dist)
+appId: com.codemux.desktop
+productName: CodeMUX
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist-electron/**
+  - package.json
+# 渲染层 dist 不进本包(工单 05 允许 dev 模式验收;生产 scheme 指向
+# app.getAppPath()/../dist,随包分发由工单 09 收口)。
+extraResources:
+  # daemon 独立二进制(工单 03)→ 资源根 daemon/
+  - from: ../src-tauri/target/release/codemux-daemon.exe
+    to: daemon/codemux-daemon.exe
+  # 托盘/应用图标
+  - from: ../src-tauri/icons/icon.ico
+    to: icons/icon.ico
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

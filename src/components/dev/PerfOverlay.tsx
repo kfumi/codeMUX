@@ -1,9 +1,9 @@
 import { Gauge } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { toggleDevtools, exportPerfSnapshot } from '../../lib/tauri';
 import { usePerfStore } from '../../stores/perfStore';
 import { TooltipHint } from '../ui/tooltip';
 import './PerfOverlay.css';
@@ -122,8 +122,8 @@ export function PerfOverlay() {
 
   const openDevtools = useCallback(async () => {
     try {
-      const win = getCurrentWebviewWindow();
-      await invoke('plugin:webview|internal_toggle_devtools', { label: win.label });
+      // 工单 05:平台分流 —— Electron 走 webContents.toggleDevTools,Tauri 走原命令。
+      await toggleDevtools();
     } catch (error) {
       console.warn('[PerfOverlay] open devtools failed:', error);
     }
@@ -154,8 +154,8 @@ export function PerfOverlay() {
         toast.info('已取消');
         return;
       }
-      await invoke('export_perf_snapshot', { path: filePath, content: JSON.stringify(snap, null, 2) });
-      toast.success('快照已保存');
+      // 工单 05:平台分流 —— Electron 由主进程写文件;Tauri 走原命令。
+      await exportPerfSnapshot(filePath, JSON.stringify(snap, null, 2));      toast.success('快照已保存');
     } catch {
       toast.error('保存失败');
     }

@@ -1,0 +1,18 @@
+{
+  "name": "@codemux/desktop",
+  "version": "0.3.1",
+  "private": true,
+  "description": "CodeMUX Electron desktop shell (main + preload + supervisor)",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3"
+  }
+}

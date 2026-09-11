@@ -27,8 +27,27 @@ import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../types/schedu
 import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from './browserHost';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
+import {
+  BROWSER_HOST_MIGRATION_MESSAGE,
+  desktopBridge,
+  electronBrowserHost,
+  isElectronDesktop,
+  type CodemuxDesktopBridge,
+} from './desktop-bridge';
 
 const logger = createLogger('tauri');
+
+/**
+ * Electron 壳桥(工单 05):isElectronDesktop() 为 true 时 desktopBridge 必然
+ * 存在;此助手收拢断言,调用方失败路径统一为明确错误(带回退语义由调用点的
+ * isElectronDesktop 分支保证:Tauri 壳/纯 Web 永远走既有 invoke)。
+ */
+function requireDesktopBridge(): CodemuxDesktopBridge {
+  if (!desktopBridge) {
+    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
+  }
+  return desktopBridge;
+}
 const agentChannels = new Map<string, Channel<string>>();
 const agentEventListeners = new Map<string, (event: string) => void>();
 const terminalLifecycleQueues = new Map<string, Promise<void>>();
@@ -529,11 +548,43 @@ export const fileApi = {
     includeHidden = false,
   ): Promise<FileTreeNode[]> =>
     invokeLogged('list_directory', { path, depth, basePath, includeHidden }),
+  // 壳能力(工单 05):Electron 走 preload 桥,Tauri 壳走既有 invoke。
   openProjectPath: (path: string, target: OpenTarget): Promise<void> =>
-    invokeLogged('open_project_path', { path, target }),
+    isElectronDesktop()
+      ? requireDesktopBridge().openProjectPath(path, target)
+      : invokeLogged('open_project_path', { path, target }),
   readHomeFile: (relativePath: string): Promise<string> =>
-    invokeLogged('read_home_file', { relativePath }),
+    isElectronDesktop()
+      ? requireDesktopBridge().readHomeFile(relativePath)
+      : invokeLogged('read_home_file', { relativePath }),
 };
+
+/**
+ * open_in_explorer 壳命令的平台分流:Electron 走 preload 桥(reveal 由主进程
+ * 自动按文件/目录判定),Tauri 壳走既有 invoke(工单 05)。
+ */
+export function openInExplorer(path: string, reveal?: boolean): Promise<void> {
+  if (isElectronDesktop()) {
+    return requireDesktopBridge().openInExplorer(path, reveal);
+  }
+  return invokeLogged('open_in_explorer', { path });
+}
+
+/** PerfOverlay 的快照导出:Electron 由主进程写文件并返回 null;Tauri 走 invoke。 */
+export function exportPerfSnapshot(path: string, content: string): Promise<null> {
+  if (isElectronDesktop()) {
+    return requireDesktopBridge().exportPerfSnapshot(path, content);
+  }
+  return invokeLogged<null>('export_perf_snapshot', { path, content });
+}
+
+/** PerfOverlay 的 devtools 开关:Electron 映射 webContents.toggleDevTools。 */
+export function toggleDevtools(): Promise<void> {
+  if (isElectronDesktop()) {
+    return requireDesktopBridge().toggleDevtools();
+  }
+  return invoke('plugin:webview|internal_toggle_devtools', { label: 'main' });
+}
 
 export const gitApi = {
   getChangedFiles: (projectPath: string, baselineTree: string): Promise<GitChangedFile[]> =>
@@ -648,34 +699,41 @@ export const terminalApi = {
   },
 };
 
-export const browserApi: BrowserHost = {
-  create: (browserId: string, url: string, bounds: BrowserPageBounds): Promise<void> =>
-    invokeLogged('browser_create', { browserId, url, bounds }),
-  destroy: (browserId: string): Promise<void> =>
-    invokeLogged('browser_destroy', { browserId }),
-  navigate: (browserId: string, url: string): Promise<void> =>
-    invokeLogged('browser_navigate', { browserId, url }),
-  back: (browserId: string): Promise<void> =>
-    invokeLogged('browser_back', { browserId }),
-  forward: (browserId: string): Promise<void> =>
-    invokeLogged('browser_forward', { browserId }),
-  reload: (browserId: string): Promise<void> =>
-    invokeLogged('browser_reload', { browserId }),
-  setBounds: (browserId: string, bounds: BrowserPageBounds): Promise<void> =>
-    invokeLogged('browser_set_bounds', { browserId, bounds }),
-  show: (browserId: string): Promise<void> =>
-    invokeLogged('browser_show', { browserId }),
-  hide: (browserId: string): Promise<void> =>
-    invokeLogged('browser_hide', { browserId }),
-  evaluate: (browserId: string, script: string): Promise<string> =>
-    invokeLogged('browser_evaluate', { browserId, script }),
-  openDevtools: (browserId: string): Promise<void> =>
-    invokeLogged('browser_open_devtools', { browserId }),
-  setZoom: (browserId: string, factor: number): Promise<void> =>
-    invokeLogged('browser_set_zoom', { browserId, factor }),
-  clearData: (scope: BrowserDataScope): Promise<void> =>
-    invokeLogged('browser_clear_data', { scope }),
-};
+export const browserApi: BrowserHost = isElectronDesktop()
+  ? // Electron 壳(工单 05):browser host 工单 07 迁移 —— 纯窗口几何 no-op,
+    // 其余显式 reject(不抛未捕获异常),由调用方按失败降级。
+    electronBrowserHost
+  : {
+      create: (browserId: string, url: string, bounds: BrowserPageBounds): Promise<void> =>
+        invokeLogged('browser_create', { browserId, url, bounds }),
+      destroy: (browserId: string): Promise<void> =>
+        invokeLogged('browser_destroy', { browserId }),
+      navigate: (browserId: string, url: string): Promise<void> =>
+        invokeLogged('browser_navigate', { browserId, url }),
+      back: (browserId: string): Promise<void> =>
+        invokeLogged('browser_back', { browserId }),
+      forward: (browserId: string): Promise<void> =>
+        invokeLogged('browser_forward', { browserId }),
+      reload: (browserId: string): Promise<void> =>
+        invokeLogged('browser_reload', { browserId }),
+      setBounds: (browserId: string, bounds: BrowserPageBounds): Promise<void> =>
+        invokeLogged('browser_set_bounds', { browserId, bounds }),
+      show: (browserId: string): Promise<void> =>
+        invokeLogged('browser_show', { browserId }),
+      hide: (browserId: string): Promise<void> =>
+        invokeLogged('browser_hide', { browserId }),
+      evaluate: (browserId: string, script: string): Promise<string> =>
+        invokeLogged('browser_evaluate', { browserId, script }),
+      openDevtools: (browserId: string): Promise<void> =>
+        invokeLogged('browser_open_devtools', { browserId }),
+      setZoom: (browserId: string, factor: number): Promise<void> =>
+        invokeLogged('browser_set_zoom', { browserId, factor }),
+      clearData: (scope: BrowserDataScope): Promise<void> =>
+        invokeLogged('browser_clear_data', { scope }),
+    };
+
+// browser host 迁移中文案复用(desktop-bridge 与 preload/主进程共用同一句式)。
+export { BROWSER_HOST_MIGRATION_MESSAGE };
 
 export const mcpApi = {
   getAll: (): Promise<McpServer[]> => invokeLogged('get_mcp_servers'),
@@ -949,22 +1007,30 @@ export interface RuntimeInstallProgressEvent {
 }
 
 export const appApi = {
-  getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
-  getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
-  getUserHomeDirectory: (): Promise<string> => invokeLogged('get_user_home_directory'),
+  // 以下壳能力(工单 05)在 Electron 壳走 preload 桥,Tauri 壳走既有 invoke;
+  // managed runtime 系列走 daemon(HTTP),不走壳桥。
+  getLogDirectory: (): Promise<string> =>
+    isElectronDesktop() ? requireDesktopBridge().getLogDirectory() : invokeLogged('get_log_directory'),
+  getAppDataDirectory: (): Promise<string> =>
+    isElectronDesktop() ? requireDesktopBridge().getAppDataDirectory() : invokeLogged('get_app_data_directory'),
+  getUserHomeDirectory: (): Promise<string> =>
+    isElectronDesktop() ? requireDesktopBridge().getUserHomeDirectory() : invokeLogged('get_user_home_directory'),
   checkDevelopmentEnvironment: (): Promise<DevelopmentEnvironmentCheck> =>
-    invokeLogged('check_development_environment'),
-  getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
-  readLogFile: (fileName: string): Promise<string> => invokeLogged('read_log_file', { fileName }),
-  showMainWindow: (): Promise<void> => invokeLogged('show_main_window_command'),
+    isElectronDesktop() ? requireDesktopBridge().checkDevelopmentEnvironment() : invokeLogged('check_development_environment'),
+  getLogFiles: (): Promise<LogFileInfo[]> =>
+    isElectronDesktop() ? requireDesktopBridge().getLogFiles() : invokeLogged('get_log_files'),
+  readLogFile: (fileName: string): Promise<string> =>
+    isElectronDesktop() ? requireDesktopBridge().readLogFile(fileName) : invokeLogged('read_log_file', { fileName }),
+  showMainWindow: (): Promise<void> =>
+    isElectronDesktop() ? requireDesktopBridge().showMainWindow() : invokeLogged('show_main_window_command'),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
-    invokeLogged('send_agent_notification_command', payload),
+    isElectronDesktop() ? requireDesktopBridge().sendAgentNotification(payload) : invokeLogged('send_agent_notification_command', payload),
   checkAgentRuntimes: (): Promise<AgentRuntimeCheckResult> =>
-    invokeLogged('check_agent_runtimes'),
+    isElectronDesktop() ? requireDesktopBridge().checkAgentRuntimes() : invokeLogged('check_agent_runtimes'),
   upgradeAgentRuntime: (agentKind: string): Promise<AgentRuntimeUpgradeResult> =>
-    invokeLogged('upgrade_agent_runtime', { agentKind }),
+    isElectronDesktop() ? requireDesktopBridge().upgradeAgentRuntime(agentKind) : invokeLogged('upgrade_agent_runtime', { agentKind }),
   probeAgentInstallations: (agentKind: string): Promise<AgentInstallationReport> =>
-    invokeLogged('probe_agent_installations', { agentKind }),
+    isElectronDesktop() ? requireDesktopBridge().probeAgentInstallations(agentKind) : invokeLogged('probe_agent_installations', { agentKind }),
   checkManagedRuntimes: (): Promise<ManagedRuntimeCheckResult> =>
     invokeLogged('check_managed_runtimes'),
   listManagedRuntimeVersions: (provider: RuntimeProvider): Promise<string[]> =>

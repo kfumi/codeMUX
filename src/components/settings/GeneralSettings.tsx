@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Copy, FolderOpen, Check } from 'lucide-react';
 
-import { appApi } from '../../lib/tauri';
+import { appApi, openInExplorer } from '../../lib/tauri';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
 import { normalizeImmediateRunMode } from '../../lib/agentSteer';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -42,7 +41,7 @@ export function GeneralSettings() {
 
   const handleOpenDir = () => {
     if (!configDir) return;
-    invoke('open_in_explorer', { path: configDir }).catch(() => {});
+    openInExplorer(configDir).catch(() => {});
   };
 
   return (

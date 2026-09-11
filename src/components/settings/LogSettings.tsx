@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen, RefreshCw } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
-
-import { appApi } from '../../lib/tauri';
+import { appApi, openInExplorer } from '../../lib/tauri';
 import { Button } from '../ui/button';
 
 export function LogSettings() {
@@ -69,7 +67,7 @@ export function LogSettings() {
 
   const handleOpenLogDir = () => {
     if (!logDir) return;
-    invoke('open_in_explorer', { path: logDir }).catch(() => {});
+    openInExplorer(logDir).catch(() => {});
   };
 
   const getLineClass = (line: string) => {

@@ -18,6 +18,8 @@ const {
   showMainWindowMock,
   sendAgentNotificationMock,
   audioPlayMock,
+  isElectronDesktopMock,
+  onAgentNotificationClickedBridgeMock,
 } = vi.hoisted(() => ({
   sendNotificationMock: vi.fn(),
   requestPermissionMock: vi.fn(async () => 'granted'),
@@ -27,7 +29,18 @@ const {
   showMainWindowMock: vi.fn(async () => {}),
   sendAgentNotificationMock: vi.fn(async () => {}),
   audioPlayMock: vi.fn(async () => {}),
+  isElectronDesktopMock: vi.fn(() => false),
+  onAgentNotificationClickedBridgeMock: vi.fn(),
 }));
+
+vi.mock('../lib/desktop-bridge', async () => {
+  const actual = await vi.importActual<typeof import('../lib/desktop-bridge')>('../lib/desktop-bridge');
+  return {
+    ...actual,
+    desktopBridge: { onAgentNotificationClicked: onAgentNotificationClickedBridgeMock },
+    isElectronDesktop: isElectronDesktopMock,
+  };
+});
 
 const notificationInstances: Array<{ title: string; options?: NotificationOptions; onclick: (() => void) | null }> = [];
 
@@ -581,5 +594,42 @@ describe('useAgentNotifications', () => {
       expect(showMainWindowMock).toHaveBeenCalled();
       expect(setActiveSession).toHaveBeenCalledWith('session-1');
     });
+  });
+
+  it('subscribes notification clicks via the Electron preload bridge instead of the tauri event API', async () => {
+    const setActiveSession = vi.fn();
+    useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
+    let clickCallback: ((payload: unknown) => void) | null = null;
+    const unsubscribe = vi.fn(() => {
+      clickCallback = null;
+    });
+    onAgentNotificationClickedBridgeMock.mockImplementation((callback: (payload: unknown) => void) => {
+      clickCallback = callback;
+      return unsubscribe;
+    });
+    isElectronDesktopMock.mockReturnValue(true);
+
+    try {
+      render(<Harness />);
+
+      await waitFor(() => {
+        expect(onAgentNotificationClickedBridgeMock).toHaveBeenCalledWith(expect.any(Function));
+      });
+      // Electron 壳内不得再走 tauri 事件 API 订阅同一事件(避免双订阅)。
+      expect(listenMock).not.toHaveBeenCalledWith('agent-notification-clicked', expect.any(Function));
+
+      clickCallback?.({ sessionId: 'session-1' });
+
+      await waitFor(() => {
+        expect(showMainWindowMock).toHaveBeenCalled();
+        expect(setActiveSession).toHaveBeenCalledWith('session-1');
+      });
+
+      cleanup();
+      expect(unsubscribe).toHaveBeenCalled();
+    } finally {
+      isElectronDesktopMock.mockReturnValue(false);
+      onAgentNotificationClickedBridgeMock.mockReset();
+    }
   });
 });

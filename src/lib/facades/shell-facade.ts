@@ -1,12 +1,18 @@
 import { browserApi, appApi } from './invoke-backend';
 import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from '../browserHost';
 import type { OpenTarget } from '../openTargets';
+import { desktopBridge, isElectronDesktop } from '../desktop-bridge';
 
 export const shellFacade = {
   browser: browserApi as BrowserHost,
   /** supervisor 提供的 daemon 重启(壳命令),daemon 断连 overlay 的重试入口。 */
-  daemonRestart: (): Promise<unknown> =>
-    import('@tauri-apps/api/core').then(({ invoke }) => invoke('daemon_restart')),
+  daemonRestart: (): Promise<unknown> => {
+    if (isElectronDesktop() && desktopBridge) {
+      // Electron 壳(工单 05):走 preload 桥 → main supervisor.restart。
+      return desktopBridge.daemonRestart();
+    }
+    return import('@tauri-apps/api/core').then(({ invoke }) => invoke('daemon_restart'));
+  },
   showMainWindow: (): Promise<void> => appApi.showMainWindow(),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
     appApi.sendAgentNotification(payload),

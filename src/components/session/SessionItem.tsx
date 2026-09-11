@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Archive, Loader2, LockKeyhole, FolderOpen, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
+import { openInExplorer } from '../../lib/tauri';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
@@ -167,7 +167,7 @@ export function SessionItem({
       return;
     }
     try {
-      await invoke('open_in_explorer', { path: workingPath });
+      await openInExplorer(workingPath);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
