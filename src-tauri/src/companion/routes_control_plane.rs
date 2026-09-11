@@ -7,11 +7,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-use tauri::Manager;
-
 use crate::commands::scheduled_tasks::ScheduledTaskInput;
 use crate::companion::server::{authorize, ApiError, ServerContext};
-use crate::AppState;
 
 pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
@@ -33,13 +30,27 @@ pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext>
         .route("/skills/{id}/content", get(get_skill_content))
         .route("/skills/{id}/apps", patch(toggle_skill_app))
         // Scheduled tasks
-        .route("/scheduled-tasks", get(list_scheduled_tasks).post(create_scheduled_task))
+        .route(
+            "/scheduled-tasks",
+            get(list_scheduled_tasks).post(create_scheduled_task),
+        )
         .route("/scheduled-tasks/timezone", get(get_scheduled_timezone))
-        .route("/scheduled-tasks/{task_id}", get(get_scheduled_task).patch(update_scheduled_task).delete(delete_scheduled_task))
-        .route("/scheduled-tasks/{task_id}/enabled", patch(set_scheduled_enabled))
+        .route(
+            "/scheduled-tasks/{task_id}",
+            get(get_scheduled_task)
+                .patch(update_scheduled_task)
+                .delete(delete_scheduled_task),
+        )
+        .route(
+            "/scheduled-tasks/{task_id}/enabled",
+            patch(set_scheduled_enabled),
+        )
         .route("/scheduled-tasks/{task_id}/runs", get(list_scheduled_runs))
         .route("/scheduled-tasks/{task_id}/run", post(run_scheduled_now))
-        .route("/scheduled-tasks/runs/{run_id}", delete(delete_scheduled_run))
+        .route(
+            "/scheduled-tasks/runs/{run_id}",
+            delete(delete_scheduled_run),
+        )
         // Workspace files
         .route("/workspace/files/read", post(read_workspace_file))
         .route("/workspace/files/write", post(write_workspace_file))
@@ -47,31 +58,61 @@ pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext>
         .route("/workspace/files/list", post(list_workspace_directory))
         // Git
         .route("/workspace/git/changed-files", post(git_changed_files))
-        .route("/workspace/git/changed-files-since-head", post(git_changed_files_since_head))
-        .route("/workspace/git/repository-state", post(git_repository_state))
+        .route(
+            "/workspace/git/changed-files-since-head",
+            post(git_changed_files_since_head),
+        )
+        .route(
+            "/workspace/git/repository-state",
+            post(git_repository_state),
+        )
         .route("/workspace/git/status-changes", post(git_status_changes))
-        .route("/workspace/git/status-change-detail", post(git_status_change_detail))
+        .route(
+            "/workspace/git/status-change-detail",
+            post(git_status_change_detail),
+        )
         .route("/workspace/git/stage", post(git_stage))
         .route("/workspace/git/unstage", post(git_unstage))
         .route("/workspace/git/revert", post(git_revert))
         .route("/workspace/git/create-branch", post(git_create_branch))
         .route("/workspace/git/checkout-branch", post(git_checkout_branch))
-        .route("/workspace/git/worktrees", get(git_list_worktrees).post(git_create_worktree))
+        .route(
+            "/workspace/git/worktrees",
+            get(git_list_worktrees).post(git_create_worktree),
+        )
         .route("/workspace/git/commit", post(git_commit))
         .route("/workspace/git/push", post(git_push))
-        .route("/workspace/git/generate-commit-message", post(git_generate_commit_message))
-        .route("/workspace/git/generate-pr-description", post(git_generate_pr_description))
+        .route(
+            "/workspace/git/generate-commit-message",
+            post(git_generate_commit_message),
+        )
+        .route(
+            "/workspace/git/generate-pr-description",
+            post(git_generate_pr_description),
+        )
         .route("/workspace/git/pull-request", post(git_create_pull_request))
         .route("/workspace/git/gitee/credentials", get(gitee_credentials))
-        .route("/workspace/git/gitee/token", post(set_gitee_token).delete(clear_gitee_token))
+        .route(
+            "/workspace/git/gitee/token",
+            post(set_gitee_token).delete(clear_gitee_token),
+        )
         // Runtime
         .route("/runtime/managed", get(check_managed_runtimes))
-        .route("/runtime/managed/{provider}/versions", get(list_managed_runtime_versions))
-        .route("/runtime/managed/{provider}/refresh", post(refresh_managed_runtime))
+        .route(
+            "/runtime/managed/{provider}/versions",
+            get(list_managed_runtime_versions),
+        )
+        .route(
+            "/runtime/managed/{provider}/refresh",
+            post(refresh_managed_runtime),
+        )
         .route("/runtime/managed/install", post(install_managed_runtime))
         .route("/runtime/managed/upgrade", post(upgrade_managed_runtime))
         .route("/runtime/managed/repair", post(repair_managed_runtime))
-        .route("/runtime/managed/{provider}", delete(remove_managed_runtime))
+        .route(
+            "/runtime/managed/{provider}",
+            delete(remove_managed_runtime),
+        )
         // Usage statistics
         .route("/usage/stats", get(get_usage_stats))
         .route("/usage/token-breakdown", get(get_usage_token_breakdown))
@@ -85,9 +126,9 @@ async fn list_mcp(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let servers = crate::commands::mcp::get_mcp_servers(state)
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let servers =
+        crate::commands::mcp::get_mcp_servers_impl(&state).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(servers)))
 }
 
@@ -98,9 +139,8 @@ async fn upsert_mcp(
     Json(server): Json<crate::mcp::types::McpServer>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::mcp::upsert_mcp_server(state, server)
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    crate::commands::mcp::upsert_mcp_server_impl(&state, server).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -111,9 +151,8 @@ async fn delete_mcp(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::mcp::delete_mcp_server(state, id)
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    crate::commands::mcp::delete_mcp_server_impl(&state, id).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -132,8 +171,8 @@ async fn toggle_mcp_app(
     Json(body): Json<ToggleMcpAppRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::mcp::toggle_mcp_app(state, id, body.app, body.enabled)
+    let state = ctx.daemon.app.clone();
+    crate::commands::mcp::toggle_mcp_app_impl(&state, id, body.app, body.enabled)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -145,8 +184,8 @@ async fn probe_mcp(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::mcp::probe_mcp_server(state, id)
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::mcp::probe_mcp_server_impl(&state, id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
@@ -158,8 +197,8 @@ async fn probe_all_mcp(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let results = crate::commands::mcp::probe_all_mcp_servers(state)
+    let state = ctx.daemon.app.clone();
+    let results = crate::commands::mcp::probe_all_mcp_servers_impl(&state)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(results).unwrap_or_default()))
@@ -171,10 +210,9 @@ async fn import_mcp(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::mcp::import_mcp_from_apps(state)
-        .await
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let result =
+        crate::commands::mcp::import_mcp_from_apps_impl(&state).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
@@ -186,8 +224,8 @@ async fn list_skills(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let skills = crate::skills::commands::list_installed_skills(state)
+    let state = ctx.daemon.app.clone();
+    let skills = crate::skills::commands::list_installed_skills_impl(&state)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(skills)))
 }
@@ -198,8 +236,8 @@ async fn list_importable_skills(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let skills = crate::skills::commands::list_importable_skills(state)
+    let state = ctx.daemon.app.clone();
+    let skills = crate::skills::commands::list_importable_skills_impl(&state)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(skills)))
 }
@@ -211,9 +249,9 @@ async fn uninstall_skill(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let removed = crate::skills::commands::uninstall_skill(state, id)
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let removed =
+        crate::skills::commands::uninstall_skill_impl(&state, id).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "removed": removed })))
 }
 
@@ -232,8 +270,8 @@ async fn toggle_skill_app(
     Json(body): Json<ToggleSkillAppRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::skills::commands::toggle_skill_app(state, id, body.app, body.enabled)
+    let state = ctx.daemon.app.clone();
+    crate::skills::commands::toggle_skill_app_impl(&state, id, body.app, body.enabled)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -245,8 +283,8 @@ async fn get_skill_content(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let content = crate::skills::commands::get_skill_content(state, id)
+    let state = ctx.daemon.app.clone();
+    let content = crate::skills::commands::get_skill_content_impl(&state, id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "content": content })))
 }
@@ -257,9 +295,9 @@ async fn sync_skills(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let skills = crate::skills::commands::scan_disk_skills(state)
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let skills =
+        crate::skills::commands::scan_disk_skills_impl(&state).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(skills)))
 }
 
@@ -276,8 +314,8 @@ async fn register_skill(
     Json(body): Json<RegisterSkillRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let skill = crate::skills::commands::register_skill_from_disk(state, body.name)
+    let state = ctx.daemon.app.clone();
+    let skill = crate::skills::commands::register_skill_from_disk_impl(&state, body.name)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(skill)))
 }
@@ -295,8 +333,8 @@ async fn import_skills(
     Json(body): Json<ImportSkillsRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::skills::commands::import_skills_from_apps(state, body.selected)
+    let state = ctx.daemon.app.clone();
+    let result = crate::skills::commands::import_skills_from_apps_impl(&state, body.selected)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
@@ -334,8 +372,8 @@ async fn list_scheduled_tasks(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let tasks = crate::commands::scheduled_tasks::list_scheduled_tasks(state)
+    let state = ctx.daemon.app.clone();
+    let tasks = crate::commands::scheduled_tasks::list_scheduled_tasks_impl(&state)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(tasks)))
 }
@@ -347,8 +385,8 @@ async fn get_scheduled_task(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let task = crate::commands::scheduled_tasks::get_scheduled_task(state, task_id)
+    let state = ctx.daemon.app.clone();
+    let task = crate::commands::scheduled_tasks::get_scheduled_task_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -360,8 +398,8 @@ async fn create_scheduled_task(
     Json(input): Json<ScheduledTaskInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let task = crate::commands::scheduled_tasks::create_scheduled_task(state, input)
+    let state = ctx.daemon.app.clone();
+    let task = crate::commands::scheduled_tasks::create_scheduled_task_impl(&state, input)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -374,8 +412,8 @@ async fn update_scheduled_task(
     Json(input): Json<ScheduledTaskInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let task = crate::commands::scheduled_tasks::update_scheduled_task(state, task_id, input)
+    let state = ctx.daemon.app.clone();
+    let task = crate::commands::scheduled_tasks::update_scheduled_task_impl(&state, task_id, input)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(task)))
 }
@@ -387,8 +425,8 @@ async fn delete_scheduled_task(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::scheduled_tasks::delete_scheduled_task(state, task_id)
+    let state = ctx.daemon.app.clone();
+    crate::commands::scheduled_tasks::delete_scheduled_task_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -407,9 +445,9 @@ async fn set_scheduled_enabled(
     Json(body): Json<SetScheduledEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let task = crate::commands::scheduled_tasks::set_scheduled_task_enabled(
-        state,
+    let state = ctx.daemon.app.clone();
+    let task = crate::commands::scheduled_tasks::set_scheduled_task_enabled_impl(
+        &state,
         task_id,
         body.enabled,
     )
@@ -424,8 +462,8 @@ async fn list_scheduled_runs(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let runs = crate::commands::scheduled_tasks::list_scheduled_task_runs(state, task_id)
+    let state = ctx.daemon.app.clone();
+    let runs = crate::commands::scheduled_tasks::list_scheduled_task_runs_impl(&state, task_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(runs)))
 }
@@ -437,7 +475,7 @@ async fn run_scheduled_now(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let run = crate::commands::scheduled_tasks::run_scheduled_task_now(ctx.app.clone(), task_id)
+    let run = crate::scheduled_tasks::run_task_now(&ctx.daemon, &task_id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(run)))
@@ -450,8 +488,8 @@ async fn delete_scheduled_run(
     Path(run_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::scheduled_tasks::delete_scheduled_task_run(state, run_id)
+    let state = ctx.daemon.app.clone();
+    crate::commands::scheduled_tasks::delete_scheduled_task_run_impl(&state, run_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -482,7 +520,7 @@ async fn read_workspace_file(
     Json(body): Json<ReadFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let content = crate::commands::file::read_file(ctx.app.clone(), body.path, body.base_path)
+    let content = crate::commands::file::read_file(body.path, body.base_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "content": content })))
 }
@@ -502,13 +540,8 @@ async fn write_workspace_file(
     Json(body): Json<WriteFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::file::write_file(
-        ctx.app.clone(),
-        body.path,
-        body.content,
-        body.base_path,
-    )
-    .map_err(ApiError::bad_request)?;
+    crate::commands::file::write_file(body.path, body.content, body.base_path)
+        .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -526,8 +559,7 @@ async fn delete_workspace_file(
     Json(body): Json<DeleteFileRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::file::delete_file(ctx.app.clone(), body.path, body.base_path)
-        .map_err(ApiError::bad_request)?;
+    crate::commands::file::delete_file(body.path, body.base_path).map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -548,7 +580,6 @@ async fn list_workspace_directory(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let nodes = crate::commands::file::list_directory(
-        ctx.app.clone(),
         body.path,
         body.base_path,
         body.depth,
@@ -656,12 +687,9 @@ async fn git_status_change_detail(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let area = parse_git_status_area(&body.area)?;
-    let change = crate::commands::git::get_git_status_change_detail(
-        body.project_path,
-        area,
-        body.file_path,
-    )
-    .map_err(ApiError::bad_request)?;
+    let change =
+        crate::commands::git::get_git_status_change_detail(body.project_path, area, body.file_path)
+            .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(change)))
 }
 
@@ -818,8 +846,7 @@ async fn git_push(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    crate::commands::git::push_git_branch(body.project_path)
-        .map_err(ApiError::bad_request)?;
+    crate::commands::git::push_git_branch(body.project_path).map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -830,7 +857,7 @@ async fn git_generate_commit_message(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
+    let state = ctx.daemon.app.clone();
     let config = state.config.lock().unwrap().clone();
     let suggestion = crate::commands::git::generate_git_commit_message_in_project(
         std::path::Path::new(&body.project_path),
@@ -848,7 +875,7 @@ async fn git_generate_pr_description(
     Json(body): Json<GitProjectRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
+    let state = ctx.daemon.app.clone();
     let config = state.config.lock().unwrap().clone();
     let suggestion = crate::commands::git::generate_pull_request_description_in_project(
         std::path::Path::new(&body.project_path),
@@ -866,8 +893,8 @@ async fn git_create_pull_request(
     Json(request): Json<crate::forge::CreatePullRequestRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::forge::create_pull_request(state, request)
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::forge::create_pull_request_impl(&state, request)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -919,8 +946,8 @@ async fn check_managed_runtimes(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::runtime::check_managed_runtimes(state)
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::runtime::check_managed_runtimes_impl(&state)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -933,8 +960,8 @@ async fn list_managed_runtime_versions(
     Path(provider): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let versions = crate::commands::runtime::list_managed_runtime_versions(state, provider)
+    let state = ctx.daemon.app.clone();
+    let versions = crate::commands::runtime::list_managed_runtime_versions_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(versions)))
@@ -947,8 +974,8 @@ async fn refresh_managed_runtime(
     Path(provider): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::runtime::refresh_managed_runtime(state, provider)
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::runtime::refresh_managed_runtime_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -968,12 +995,17 @@ async fn install_managed_runtime(
     Json(body): Json<ManagedRuntimeProviderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::runtime::install_managed_runtime(
-        ctx.app.clone(),
-        state,
+    let state = ctx.daemon.app.clone();
+    let provider = crate::runtime::types::Provider::from_str(&body.provider)
+        .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
+    let result = crate::commands::runtime::install_managed_runtime_impl(
+        &state,
         body.provider,
         body.version,
+        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+            ctx.daemon.ui_events.clone(),
+            provider,
+        )),
     )
     .await
     .map_err(ApiError::bad_request)?;
@@ -987,10 +1019,19 @@ async fn upgrade_managed_runtime(
     Json(body): Json<ManagedRuntimeProviderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::runtime::upgrade_managed_runtime(ctx.app.clone(), state, body.provider)
-        .await
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let provider = crate::runtime::types::Provider::from_str(&body.provider)
+        .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
+    let result = crate::commands::runtime::upgrade_managed_runtime_impl(
+        &state,
+        body.provider,
+        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+            ctx.daemon.ui_events.clone(),
+            provider,
+        )),
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
 }
 
@@ -1001,10 +1042,19 @@ async fn repair_managed_runtime(
     Json(body): Json<ManagedRuntimeProviderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::runtime::repair_managed_runtime(ctx.app.clone(), state, body.provider)
-        .await
-        .map_err(ApiError::bad_request)?;
+    let state = ctx.daemon.app.clone();
+    let provider = crate::runtime::types::Provider::from_str(&body.provider)
+        .ok_or_else(|| ApiError::bad_request(format!("未知的 Provider: {}", body.provider)))?;
+    let result = crate::commands::runtime::repair_managed_runtime_impl(
+        &state,
+        body.provider,
+        std::sync::Arc::new(crate::commands::runtime::RuntimeProgressReporter::new(
+            ctx.daemon.ui_events.clone(),
+            provider,
+        )),
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
 }
 
@@ -1015,8 +1065,8 @@ async fn remove_managed_runtime(
     Path(provider): Path<String>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::runtime::remove_managed_runtime(state, provider)
+    let state = ctx.daemon.app.clone();
+    crate::commands::runtime::remove_managed_runtime_impl(&state, provider)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
@@ -1036,8 +1086,8 @@ async fn get_usage_stats(
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::usage::get_usage_stats(state, query.agent_kind, query.days)
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::usage::get_usage_stats_impl(&state, query.agent_kind, query.days)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
 }
@@ -1049,9 +1099,9 @@ async fn get_usage_token_breakdown(
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let result = crate::commands::usage::get_usage_token_breakdown(
-        state,
+    let state = ctx.daemon.app.clone();
+    let result = crate::commands::usage::get_usage_token_breakdown_impl(
+        &state,
         query.agent_kind,
         query.days,
     )

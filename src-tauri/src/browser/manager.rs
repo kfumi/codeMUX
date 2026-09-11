@@ -141,7 +141,7 @@ fn webview_label(browser_id: &str) -> String {
 }
 
 fn browser_profile_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let state = app.state::<AppState>();
+    let state = app.state::<std::sync::Arc<AppState>>();
     Ok(state.app_data_dir.join("browser-profile"))
 }
 

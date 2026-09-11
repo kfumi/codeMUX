@@ -668,8 +668,15 @@ pub(crate) fn resolve_pi_agent_session_info(
 
 #[tauri::command]
 pub async fn load_pi_session_events(
-    state: State<'_, crate::AppState>,
+    state: tauri::State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
+) -> Result<Vec<Value>, String> {
+    load_pi_session_events_impl(state.inner(), &app_session_id).await
+}
+
+async fn load_pi_session_events_impl(
+    state: &crate::AppState,
+    app_session_id: &str,
 ) -> Result<Vec<Value>, String> {
     debug!(
         target: "agent",
@@ -677,7 +684,7 @@ pub async fn load_pi_session_events(
         app_session_id
     );
 
-    let Some(session_file) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::Pi)?
+    let Some(session_file) = get_agent_session_id(state, app_session_id, AgentKind::Pi)?
     else {
         info!(
             target: "agent",
@@ -705,7 +712,7 @@ pub async fn load_pi_session_events(
         return Ok(Vec::new());
     }
 
-    let normalize_session_id = app_session_id.clone();
+    let normalize_session_id = app_session_id.to_string();
     let normalized = tokio::task::spawn_blocking(move || -> Result<Vec<Value>, String> {
         let raw_events = read_json_stream_values(&path)?;
         Ok(convert_pi_history_values_to_events(
@@ -726,10 +733,10 @@ pub async fn load_pi_session_events(
 }
 
 pub(crate) async fn load_pi_session_events_internal(
-    state: State<'_, crate::AppState>,
+    state: std::sync::Arc<crate::AppState>,
     app_session_id: &str,
 ) -> Result<Vec<Value>, String> {
-    load_pi_session_events(state, app_session_id.to_string()).await
+    load_pi_session_events_impl(&state, app_session_id).await
 }
 
 /// 用户原生 pi CLI 的会话根目录（与 CodeMUX 托管目录 `<数据根>/pi-agent` 无关），

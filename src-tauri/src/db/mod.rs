@@ -28,7 +28,10 @@ mod tests {
     #[test]
     fn initialize_creates_schema_without_tauri_app() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let roots = PathRoots::new(temp.path(), None);
+        let roots = PathRoots {
+            app_data_dir: temp.path().to_path_buf(),
+            resource_dir: None,
+        };
         let conn = initialize(&roots).expect("initialize");
         let table_count: i64 = conn
             .query_row(

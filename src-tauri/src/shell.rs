@@ -13,10 +13,6 @@ pub fn path_roots(app: &AppHandle) -> PathRoots {
     PathRoots::from_app(app).expect("Failed to get app data dir")
 }
 
-pub fn load_config(app: &AppHandle) -> AppConfig {
-    config::load_config(&path_roots(app))
-}
-
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     config::save_config(&path_roots(app), config)
 }
@@ -35,5 +31,23 @@ impl IpcChannelSink {
 impl crate::agent::sidecar_events::SidecarEventSink for IpcChannelSink {
     fn send(&self, event: String) {
         let _ = self.channel.send(event);
+    }
+}
+
+/// daemon 领域事件 → Tauri 前端事件(tauri emit)。
+pub struct TauriUiEventSink {
+    app: AppHandle,
+}
+
+impl TauriUiEventSink {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl crate::daemon::UiEventSink for TauriUiEventSink {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        use tauri::Emitter;
+        let _ = self.app.emit(event, payload);
     }
 }

@@ -1,6 +1,5 @@
 use log::{debug, info};
 use serde::Serialize;
-use tauri::AppHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OpenProjectCommand {
@@ -512,11 +511,7 @@ pub fn open_project_path(path: String, target: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_file(
-    _app: AppHandle,
-    path: String,
-    base_path: Option<String>,
-) -> Result<String, String> {
+pub fn read_file(path: String, base_path: Option<String>) -> Result<String, String> {
     let canonical = resolve_secure_path(&path, base_path)?;
     debug!(target: "file", "Reading file path={}", canonical.display());
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
@@ -524,12 +519,7 @@ pub fn read_file(
 
 /// Write content to a file. Creates the file if it doesn't exist.
 #[tauri::command]
-pub fn write_file(
-    _app: AppHandle,
-    path: String,
-    content: String,
-    base_path: Option<String>,
-) -> Result<(), String> {
+pub fn write_file(path: String, content: String, base_path: Option<String>) -> Result<(), String> {
     let full_path = resolve_secure_path_for_write(&path, base_path)?;
     info!(target: "file", "Writing file path={} bytes={}", full_path.display(), content.len());
     // Create parent directories if they don't exist
@@ -542,7 +532,7 @@ pub fn write_file(
 
 /// Delete a file from disk.
 #[tauri::command]
-pub fn delete_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<(), String> {
+pub fn delete_file(path: String, base_path: Option<String>) -> Result<(), String> {
     let canonical = resolve_secure_path(&path, base_path)?;
     if !canonical.is_file() {
         return Err(format!("Not a file: {}", canonical.display()));
@@ -563,7 +553,6 @@ pub struct FileNode {
 /// Excludes common large directories. Hidden entries can be included by the caller.
 #[tauri::command]
 pub fn list_directory(
-    _app: AppHandle,
     path: String,
     base_path: Option<String>,
     depth: Option<u32>,

@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use crate::config::types::AppConfig;
+use crate::daemon::DaemonState;
 use crate::model_providers::{
     builtin_templates, instantiate_template, is_provider_usable, required_protocol,
     validate_provider, validate_provider_for_enable, BuiltinProviderTemplate, ModelProvider,
 };
-use crate::shell;
 use crate::AppState;
-use tauri::{AppHandle, State};
+use tauri::State;
 
 fn find_provider_mut<'a>(
     config: &'a mut AppConfig,
@@ -25,23 +27,35 @@ pub fn list_builtin_provider_templates() -> Vec<BuiltinProviderTemplate> {
 
 #[tauri::command]
 pub fn instantiate_builtin_provider_template(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
+    template_id: String,
+) -> Result<ModelProvider, String> {
+    instantiate_builtin_provider_template_impl(daemon.inner(), template_id)
+}
+
+pub fn instantiate_builtin_provider_template_impl(
+    daemon: &DaemonState,
     template_id: String,
 ) -> Result<ModelProvider, String> {
     let provider_id = uuid::Uuid::new_v4().to_string();
     let provider = instantiate_template(&template_id, provider_id)?;
-    upsert_model_provider_inner(&state, &app, provider.clone())?;
+    upsert_model_provider_inner(&daemon.app, &daemon.roots, provider.clone())?;
     Ok(provider)
 }
 
 #[tauri::command]
 pub fn upsert_model_provider(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     provider: ModelProvider,
 ) -> Result<(), String> {
-    upsert_model_provider_inner(&state, &app, provider)
+    upsert_model_provider_impl(daemon.inner(), provider)
+}
+
+pub fn upsert_model_provider_impl(
+    daemon: &DaemonState,
+    provider: ModelProvider,
+) -> Result<(), String> {
+    upsert_model_provider_inner(&daemon.app, &daemon.roots, provider)
 }
 
 fn merge_provider_secrets(
@@ -82,8 +96,8 @@ fn merge_provider_secrets(
 }
 
 fn upsert_model_provider_inner(
-    state: &State<'_, AppState>,
-    app: &AppHandle,
+    state: &AppState,
+    roots: &crate::paths::PathRoots,
     provider: ModelProvider,
 ) -> Result<(), String> {
     let mut config = state.config.lock().unwrap();
@@ -110,17 +124,20 @@ fn upsert_model_provider_inner(
     if config.active_provider_id.is_none() {
         config.active_provider_id = config.model_providers.first().map(|item| item.id.clone());
     }
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn delete_model_provider(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     provider_id: String,
 ) -> Result<(), String> {
-    let mut config = state.config.lock().unwrap();
+    delete_model_provider_impl(daemon.inner(), provider_id)
+}
+
+pub fn delete_model_provider_impl(daemon: &DaemonState, provider_id: String) -> Result<(), String> {
+    let mut config = daemon.app.config.lock().unwrap();
     let before = config.model_providers.len();
     config
         .model_providers
@@ -131,17 +148,23 @@ pub fn delete_model_provider(
     if config.active_provider_id.as_deref() == Some(provider_id.as_str()) {
         config.active_provider_id = config.model_providers.first().map(|item| item.id.clone());
     }
-    shell::save_config(&app, &config)?;
+    crate::config::save_config(&daemon.roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_active_model_provider(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     provider_id: String,
 ) -> Result<(), String> {
-    let mut config = state.config.lock().unwrap();
+    set_active_model_provider_impl(daemon.inner(), provider_id)
+}
+
+pub fn set_active_model_provider_impl(
+    daemon: &DaemonState,
+    provider_id: String,
+) -> Result<(), String> {
+    let mut config = daemon.app.config.lock().unwrap();
     if !config
         .model_providers
         .iter()
@@ -150,24 +173,31 @@ pub fn set_active_model_provider(
         return Err(format!("供应商不存在: {provider_id}"));
     }
     config.active_provider_id = Some(provider_id);
-    shell::save_config(&app, &config)?;
+    crate::config::save_config(&daemon.roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_model_provider_enabled(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     provider_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let mut config = state.config.lock().unwrap();
+    set_model_provider_enabled_impl(daemon.inner(), provider_id, enabled)
+}
+
+pub fn set_model_provider_enabled_impl(
+    daemon: &DaemonState,
+    provider_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut config = daemon.app.config.lock().unwrap();
     let provider = find_provider_mut(&mut config, &provider_id)?;
     if enabled {
         validate_provider_for_enable(provider)?;
     }
     provider.enabled = enabled;
-    shell::save_config(&app, &config)?;
+    crate::config::save_config(&daemon.roots, &config)?;
     Ok(())
 }
 
@@ -186,11 +216,19 @@ pub async fn test_model_provider(api_key: String, base_url: String) -> Result<St
 
 #[tauri::command]
 pub fn provider_usable_for_agent(
-    state: State<'_, AppState>,
+    daemon: State<'_, Arc<DaemonState>>,
     provider_id: String,
     agent_kind: crate::config::types::AgentKind,
 ) -> Result<bool, String> {
-    let config = state.config.lock().unwrap();
+    provider_usable_for_agent_impl(daemon.inner(), provider_id, agent_kind)
+}
+
+pub fn provider_usable_for_agent_impl(
+    daemon: &DaemonState,
+    provider_id: String,
+    agent_kind: crate::config::types::AgentKind,
+) -> Result<bool, String> {
+    let config = daemon.app.config.lock().unwrap();
     let provider = config
         .model_providers
         .iter()

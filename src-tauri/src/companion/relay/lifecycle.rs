@@ -1,9 +1,7 @@
-use tauri::{AppHandle, Manager};
-
 use crate::companion::e2ee::load_or_create_e2ee_keypair;
 use crate::companion::relay::start_relay_transport;
 use crate::companion::state::CompanionState;
-use crate::AppState;
+use crate::daemon::DaemonState;
 
 pub async fn stop_relay_transport(companion_state: &CompanionState) {
     let controller = companion_state.take_relay_controller().await;
@@ -13,12 +11,12 @@ pub async fn stop_relay_transport(companion_state: &CompanionState) {
 }
 
 pub async fn sync_relay_transport(
-    app: &AppHandle,
+    daemon: &DaemonState,
     companion_state: &CompanionState,
 ) -> Result<(), String> {
     stop_relay_transport(companion_state).await;
 
-    let app_state = app.state::<AppState>();
+    let app_state = &daemon.app;
     let (relay, port, desktop_id, companion_enabled) = {
         let config = app_state.config.lock().map_err(|error| error.to_string())?;
         (
@@ -34,11 +32,7 @@ pub async fn sync_relay_transport(
         return Ok(());
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let bundle = load_or_create_e2ee_keypair(&app_data_dir)?;
+    let bundle = load_or_create_e2ee_keypair(&daemon.roots.app_data_dir)?;
     companion_state
         .set_e2ee_public_key_b64(bundle.public_key_b64.clone())
         .await;
@@ -74,40 +68,40 @@ pub fn validate_relay_endpoint(endpoint: &str) -> Result<(), String> {
 }
 
 pub async fn set_relay_config(
-    app: &AppHandle,
+    daemon: &DaemonState,
     companion_state: &CompanionState,
     endpoint: String,
     use_tls: bool,
 ) -> Result<(), String> {
     validate_relay_endpoint(&endpoint)?;
     {
-        let app_state = app.state::<AppState>();
+        let app_state = &daemon.app;
         let mut config = app_state.config.lock().map_err(|error| error.to_string())?;
         config.companion.relay.endpoint = endpoint.trim().to_string();
         config.companion.relay.use_tls = use_tls;
-        crate::shell::save_config(app, &config)?;
+        crate::config::save_config(&daemon.roots, &config)?;
     }
-    sync_relay_transport(app, companion_state).await
+    sync_relay_transport(daemon, companion_state).await
 }
 
 pub async fn set_relay_enabled(
-    app: &AppHandle,
+    daemon: &DaemonState,
     companion_state: &CompanionState,
     enabled: bool,
 ) -> Result<(), String> {
     if enabled {
         let endpoint = {
-            let app_state = app.state::<AppState>();
+            let app_state = &daemon.app;
             let config = app_state.config.lock().map_err(|error| error.to_string())?;
             config.companion.relay.endpoint.clone()
         };
         validate_relay_endpoint(&endpoint)?;
     }
     {
-        let app_state = app.state::<AppState>();
+        let app_state = &daemon.app;
         let mut config = app_state.config.lock().map_err(|error| error.to_string())?;
         config.companion.relay.enabled = enabled;
-        crate::shell::save_config(app, &config)?;
+        crate::config::save_config(&daemon.roots, &config)?;
     }
-    sync_relay_transport(app, companion_state).await
+    sync_relay_transport(daemon, companion_state).await
 }

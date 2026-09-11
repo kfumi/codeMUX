@@ -1,7 +1,9 @@
 //! Attachment enrichment: image recognition through a short-lived sidecar
 //! that talks to an OpenAI-compatible vision endpoint.
 
-use tauri::{AppHandle, State};
+use std::sync::Arc;
+
+use tauri::State;
 
 use super::spawn_sidecar;
 
@@ -36,15 +38,14 @@ fn parse_enrichment_result_event(event: &str) -> Option<EnrichmentResultEvent> {
 
 #[tauri::command]
 pub async fn enrich_attachments(
-    app: AppHandle,
-    state: State<'_, crate::AppState>,
+    daemon: State<'_, Arc<crate::daemon::DaemonState>>,
     attachments: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    enrich_attachments_for_companion(&app, state.inner(), attachments).await
+    enrich_attachments_for_companion(&daemon.roots, &daemon.app, attachments).await
 }
 
 pub async fn enrich_attachments_for_companion(
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     state: &crate::AppState,
     attachments: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
@@ -81,11 +82,8 @@ pub async fn enrich_attachments_for_companion(
         "model": model,
     });
 
-    let (mut handle, mut events) = spawn_sidecar(
-        &crate::paths::PathRoots::from_app(app)?,
-        super::sidecar_events::SidecarEventBinding::unbound(),
-    )
-    .await?;
+    let (mut handle, mut events) =
+        spawn_sidecar(roots, super::sidecar_events::SidecarEventBinding::unbound()).await?;
     if let Err(error) = handle.send_command(&command.to_string()).await {
         handle.shutdown().await;
         return Err(error);

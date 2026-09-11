@@ -9,9 +9,6 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-use tauri::Manager;
-
-use crate::commands::terminal::TerminalState;
 use crate::companion::server::{authorize, authorize_token, ApiError, ServerContext};
 
 pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
@@ -38,9 +35,9 @@ async fn start_terminal(
     Json(body): Json<StartTerminalRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let terminal_state = ctx.app.state::<TerminalState>();
+    let terminal_state = ctx.daemon.terminal.clone();
     let terminal_id = crate::commands::terminal::start_terminal_for_companion(
-        terminal_state.inner(),
+        &terminal_state,
         body.project_path,
         body.cols,
         body.rows,
@@ -62,9 +59,9 @@ async fn write_terminal(
     Json(body): Json<WriteTerminalRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let terminal_state = ctx.app.state::<TerminalState>();
+    let terminal_state = ctx.daemon.terminal.clone();
     crate::commands::terminal::write_terminal_for_companion(
-        terminal_state.inner(),
+        &terminal_state,
         &terminal_id,
         &body.data,
     )
@@ -87,9 +84,9 @@ async fn resize_terminal(
     Json(body): Json<ResizeTerminalRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let terminal_state = ctx.app.state::<TerminalState>();
+    let terminal_state = ctx.daemon.terminal.clone();
     crate::commands::terminal::resize_terminal_for_companion(
-        terminal_state.inner(),
+        &terminal_state,
         &terminal_id,
         body.cols,
         body.rows,
@@ -105,8 +102,8 @@ async fn close_terminal(
     Path(terminal_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let terminal_state = ctx.app.state::<TerminalState>();
-    crate::commands::terminal::close_terminal_for_companion(terminal_state.inner(), &terminal_id)
+    let terminal_state = ctx.daemon.terminal.clone();
+    crate::commands::terminal::close_terminal_for_companion(&terminal_state, &terminal_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -130,9 +127,9 @@ pub async fn terminal_ws_handler(
 }
 
 async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, terminal_id: String) {
-    let terminal_state = ctx.app.state::<TerminalState>();
+    let terminal_state = ctx.daemon.terminal.clone();
     let (mut rx, replay) = match crate::commands::terminal::subscribe_terminal_for_companion(
-        terminal_state.inner(),
+        &terminal_state,
         &terminal_id,
     ) {
         Ok(subscription) => subscription,
@@ -176,7 +173,7 @@ async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, termi
                             if body.get("type").and_then(|v| v.as_str()) == Some("write") {
                                 let data = body.get("data").and_then(|v| v.as_str()).unwrap_or("");
                                 let _ = crate::commands::terminal::write_terminal_for_companion(
-                                    terminal_state.inner(),
+                                    &terminal_state,
                                     &terminal_id,
                                     data,
                                 );
@@ -184,7 +181,7 @@ async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, termi
                                 let cols = body.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
                                 let rows = body.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
                                 let _ = crate::commands::terminal::resize_terminal_for_companion(
-                                    terminal_state.inner(),
+                                    &terminal_state,
                                     &terminal_id,
                                     cols,
                                     rows,

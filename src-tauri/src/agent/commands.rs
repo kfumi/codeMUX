@@ -55,7 +55,7 @@ pub use super::claude_history::{
 };
 
 pub(crate) use super::claude_history::{
-    find_claude_session_jsonl, should_include_claude_history_event,
+    find_claude_session_jsonl, load_claude_session_events_impl, should_include_claude_history_event,
 };
 
 // --- Codex history -----------------------------------------------------------
@@ -69,6 +69,7 @@ pub use super::codex_history::{
 
 pub(crate) use super::codex_history::{
     convert_codex_history_values_to_events, find_codex_session_jsonl,
+    load_codex_session_events_impl,
 };
 
 // --- pi history --------------------------------------------------------------
@@ -87,13 +88,15 @@ pub use super::opencode_history::{
     load_opencode_session_events,
 };
 
-pub(crate) use super::opencode_history::delete_opencode_native_session;
+pub(crate) use super::opencode_history::{
+    delete_opencode_native_session, load_opencode_session_events_impl,
+};
 
 // --- Rewind -------------------------------------------------------------------
 
 pub use super::rewind::{
-    __cmd__rewind_agent_session, __tauri_command_name_rewind_agent_session,
-    rewind_agent_session, rewind_agent_session_for_companion,
+    __cmd__rewind_agent_session, __tauri_command_name_rewind_agent_session, rewind_agent_session,
+    rewind_agent_session_for_companion,
 };
 
 // --- Fork ----------------------------------------------------------------------

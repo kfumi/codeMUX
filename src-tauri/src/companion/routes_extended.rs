@@ -6,8 +6,6 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use tauri::Manager;
-
 use crate::agent::fork::{
     fork_claude_session_for_companion, fork_codex_session_for_companion,
     fork_opencode_session_for_companion, fork_pi_session_for_companion,
@@ -15,21 +13,22 @@ use crate::agent::fork::{
 use crate::agent::history_import::resync_session_from_native_for_companion;
 use crate::agent::rewind::{rewind_agent_session_for_companion, RewindTarget};
 use crate::commands::session::{
-    delete_session_with_agent_cleanup_for_companion,
-    update_session_permissions_for_companion, update_session_provider_for_companion,
-    update_session_reasoning_effort_for_companion, update_session_working_path_for_companion,
+    delete_session_with_agent_cleanup_for_companion, update_session_permissions_for_companion,
+    update_session_provider_for_companion, update_session_reasoning_effort_for_companion,
+    update_session_working_path_for_companion,
 };
 use crate::companion::server::{authorize, ApiError, ServerContext};
-use crate::companion::CompanionState;
 use crate::config::types::AgentKind;
 use crate::db::operations;
-use crate::AppState;
 
 pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/daemon/status", get(daemon_status))
         .route("/sessions/archived", get(list_archived_sessions))
-        .route("/sessions/{session_id}/maintenance", patch(session_maintenance))
+        .route(
+            "/sessions/{session_id}/maintenance",
+            patch(session_maintenance),
+        )
         .route("/sessions/{session_id}/archive", post(archive_session))
         .route("/sessions/{session_id}/unarchive", post(unarchive_session))
         .route("/sessions/{session_id}/fork", post(fork_session))
@@ -44,8 +43,8 @@ async fn daemon_status(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let companion_state = ctx.app.state::<CompanionState>();
-    let app_state = ctx.app.state::<AppState>();
+    let companion_state = ctx.daemon.companion.clone();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -66,7 +65,7 @@ async fn list_archived_sessions(
     headers: HeaderMap,
 ) -> Result<Json<Vec<operations::Session>>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -99,7 +98,7 @@ async fn session_maintenance(
     Json(body): Json<SessionMaintenanceRequest>,
 ) -> Result<Json<operations::Session>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     {
         let db = app_state
             .db
@@ -132,13 +131,17 @@ async fn session_maintenance(
     }
 
     if let Some(working_path) = body.working_path {
-        update_session_working_path_for_companion(&ctx.app, session_id.clone(), working_path)
-            .map_err(ApiError::bad_request)?;
+        update_session_working_path_for_companion(
+            &ctx.daemon.app,
+            session_id.clone(),
+            working_path,
+        )
+        .map_err(ApiError::bad_request)?;
     }
 
     if let Some(model) = body.model {
         update_session_provider_for_companion(
-            &ctx.app,
+            &ctx.daemon.app,
             session_id.clone(),
             body.provider_id.clone(),
             model,
@@ -147,7 +150,7 @@ async fn session_maintenance(
         .map_err(ApiError::bad_request)?;
     } else if let Some(reasoning_effort) = body.reasoning_effort.clone() {
         update_session_reasoning_effort_for_companion(
-            &ctx.app,
+            &ctx.daemon.app,
             session_id.clone(),
             reasoning_effort,
         )
@@ -156,7 +159,7 @@ async fn session_maintenance(
 
     if body.permission_config.is_some() || body.plan_mode.is_some() {
         update_session_permissions_for_companion(
-            &ctx.app,
+            &ctx.daemon,
             session_id.clone(),
             body.permission_config.clone(),
             body.plan_mode.clone(),
@@ -182,7 +185,7 @@ async fn archive_session(
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -199,7 +202,7 @@ async fn unarchive_session(
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -231,7 +234,7 @@ async fn fork_session(
     let agent_kind = if let Some(kind) = body.agent_kind.as_deref() {
         kind.to_string()
     } else {
-        let app_state = ctx.app.state::<AppState>();
+        let app_state = ctx.daemon.app.clone();
         let db = app_state
             .db
             .lock()
@@ -244,7 +247,7 @@ async fn fork_session(
 
     let session = match AgentKind::from_str(&agent_kind).map_err(ApiError::bad_request)? {
         AgentKind::Codex => fork_codex_session_for_companion(
-            &ctx.app,
+            &ctx.daemon,
             session_id,
             body.fork_event_id,
             body.fork_provider_message_id,
@@ -255,7 +258,7 @@ async fn fork_session(
         .await
         .map_err(ApiError::bad_request)?,
         AgentKind::Opencode => fork_opencode_session_for_companion(
-            &ctx.app,
+            &ctx.daemon,
             session_id,
             body.fork_event_id,
             body.fork_provider_message_id,
@@ -264,7 +267,7 @@ async fn fork_session(
         .await
         .map_err(ApiError::bad_request)?,
         AgentKind::Pi => fork_pi_session_for_companion(
-            &ctx.app,
+            &ctx.daemon,
             session_id,
             body.fork_event_id,
             body.fork_provider_message_id,
@@ -273,7 +276,7 @@ async fn fork_session(
         .await
         .map_err(ApiError::bad_request)?,
         _ => fork_claude_session_for_companion(
-            &ctx.app,
+            &ctx.daemon,
             session_id,
             body.fork_event_id,
             body.fork_provider_message_id,
@@ -302,7 +305,7 @@ async fn rewind_session(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let result = rewind_agent_session_for_companion(
-        &ctx.app,
+        &ctx.daemon,
         session_id,
         body.agent_kind,
         body.target,
@@ -320,7 +323,7 @@ async fn resync_session(
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let result = resync_session_from_native_for_companion(&ctx.app, session_id)
+    let result = resync_session_from_native_for_companion(ctx.daemon.app.clone(), session_id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))
@@ -333,7 +336,7 @@ async fn delete_session(
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    delete_session_with_agent_cleanup_for_companion(&ctx.app, session_id)
+    delete_session_with_agent_cleanup_for_companion(&ctx.daemon, session_id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(StatusCode::NO_CONTENT)

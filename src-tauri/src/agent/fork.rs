@@ -2,8 +2,8 @@
 //! child sessions for Claude, Codex and OpenCode runtimes.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use tauri::{Manager, State};
 use tokio::sync::oneshot;
 
 use crate::config::types::AgentKind;
@@ -252,8 +252,27 @@ fn install_claude_fork_child_history(
 
 #[tauri::command]
 pub async fn fork_claude_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: tauri::State<'_, Arc<crate::AppState>>,
+    agent_state: tauri::State<'_, Arc<AgentState>>,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_claude_session_impl(
+        state.inner().clone(),
+        agent_state.inner().clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_claude_session_impl(
+    state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
@@ -276,9 +295,8 @@ pub async fn fork_claude_session(
     if fork_event_id.trim().is_empty() {
         return Err("Fork target is missing the assistant message ID".to_string());
     }
-    let source_agent_session_id =
-        get_agent_session_id(state.inner(), &session_id, AgentKind::ClaudeCode)?
-            .ok_or_else(|| "No Claude session mapping found for the source session".to_string())?;
+    let source_agent_session_id = get_agent_session_id(&state, &session_id, AgentKind::ClaudeCode)?
+        .ok_or_else(|| "No Claude session mapping found for the source session".to_string())?;
     let source_history_path =
         find_claude_session_jsonl(&home_dir()?.join(".claude"), &source_agent_session_id)
             .ok_or_else(|| "Claude session history file was not found".to_string())?;
@@ -371,8 +389,32 @@ pub async fn fork_claude_session(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn fork_codex_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: tauri::State<'_, Arc<crate::AppState>>,
+    agent_state: tauri::State<'_, Arc<AgentState>>,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    fork_provider_turn_id: Option<String>,
+    fork_provider_turn_ordinal: Option<usize>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_codex_session_impl(
+        state.inner().clone(),
+        agent_state.inner().clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        fork_provider_turn_id,
+        fork_provider_turn_ordinal,
+        title,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn fork_codex_session_impl(
+    state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
@@ -397,9 +439,8 @@ pub async fn fork_codex_session(
     if fork_event_id.trim().is_empty() {
         return Err("Fork target is missing the assistant message ID".to_string());
     }
-    let source_agent_session_id =
-        get_agent_session_id(state.inner(), &session_id, AgentKind::Codex)?
-            .ok_or_else(|| "No Codex session mapping found for the source session".to_string())?;
+    let source_agent_session_id = get_agent_session_id(&state, &session_id, AgentKind::Codex)?
+        .ok_or_else(|| "No Codex session mapping found for the source session".to_string())?;
 
     let sender = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -465,8 +506,27 @@ pub async fn fork_codex_session(
 
 #[tauri::command]
 pub async fn fork_opencode_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: tauri::State<'_, Arc<crate::AppState>>,
+    agent_state: tauri::State<'_, Arc<AgentState>>,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_opencode_session_impl(
+        state.inner().clone(),
+        agent_state.inner().clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_opencode_session_impl(
+    state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
@@ -500,10 +560,10 @@ pub async fn fork_opencode_session(
                 .to_string(),
         );
     }
-    let source_agent_session_id =
-        get_agent_session_id(state.inner(), &session_id, AgentKind::Opencode)?.ok_or_else(
-            || "No OpenCode session mapping found for the source session".to_string(),
-        )?;
+    let source_agent_session_id = get_agent_session_id(&state, &session_id, AgentKind::Opencode)?
+        .ok_or_else(|| {
+        "No OpenCode session mapping found for the source session".to_string()
+    })?;
 
     let sender = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -573,8 +633,27 @@ pub async fn fork_opencode_session(
 /// 整会话副本；fork_event_id / provider message id 仅透传记录。
 #[tauri::command]
 pub async fn fork_pi_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: tauri::State<'_, Arc<crate::AppState>>,
+    agent_state: tauri::State<'_, Arc<AgentState>>,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_pi_session_impl(
+        state.inner().clone(),
+        agent_state.inner().clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_pi_session_impl(
+    state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
@@ -594,7 +673,7 @@ pub async fn fork_pi_session(
     if source.origin == "imported" || source.is_read_only {
         return Err("Imported or read-only sessions cannot be forked".to_string());
     }
-    let source_agent_session_id = get_agent_session_id(state.inner(), &session_id, AgentKind::Pi)?
+    let source_agent_session_id = get_agent_session_id(&state, &session_id, AgentKind::Pi)?
         .ok_or_else(|| "No pi session mapping found for the source session".to_string())?;
 
     let sender = {
@@ -752,17 +831,15 @@ mod tests {
 }
 
 pub async fn fork_claude_session_for_companion(
-    app: &tauri::AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    let state = app.state::<crate::AppState>();
-    let agent_state = app.state::<AgentState>();
-    fork_claude_session(
-        state,
-        agent_state,
+    fork_claude_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
         session_id,
         fork_event_id,
         fork_provider_message_id,
@@ -772,7 +849,7 @@ pub async fn fork_claude_session_for_companion(
 }
 
 pub async fn fork_codex_session_for_companion(
-    app: &tauri::AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
@@ -780,9 +857,9 @@ pub async fn fork_codex_session_for_companion(
     fork_provider_turn_ordinal: Option<usize>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_codex_session(
-        app.state::<crate::AppState>(),
-        app.state::<AgentState>(),
+    fork_codex_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
         session_id,
         fork_event_id,
         fork_provider_message_id,
@@ -794,15 +871,15 @@ pub async fn fork_codex_session_for_companion(
 }
 
 pub async fn fork_opencode_session_for_companion(
-    app: &tauri::AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_opencode_session(
-        app.state::<crate::AppState>(),
-        app.state::<AgentState>(),
+    fork_opencode_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
         session_id,
         fork_event_id,
         fork_provider_message_id,
@@ -812,15 +889,15 @@ pub async fn fork_opencode_session_for_companion(
 }
 
 pub async fn fork_pi_session_for_companion(
-    app: &tauri::AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
     fork_event_id: String,
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_pi_session(
-        app.state::<crate::AppState>(),
-        app.state::<AgentState>(),
+    fork_pi_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
         session_id,
         fork_event_id,
         fork_provider_message_id,

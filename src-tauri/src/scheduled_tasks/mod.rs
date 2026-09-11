@@ -15,27 +15,6 @@ pub fn reconcile_runs_for_session(conn: &rusqlite::Connection, session_id: &str)
     service::reconcile_runs_for_session(conn, session_id)
 }
 
-pub fn emit_scheduled_tasks_changed(
-    app: &tauri::AppHandle,
-    task_ids: Vec<String>,
-    reason: &'static str,
-) {
-    use tauri::Emitter;
-    if task_ids.is_empty() {
-        return;
-    }
-    let mut ids = task_ids;
-    ids.sort();
-    ids.dedup();
-    let _ = app.emit(
-        "scheduled-tasks-changed",
-        ScheduledTasksChangedPayload {
-            task_ids: ids,
-            reason,
-        },
-    );
-}
-
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScheduledTasksChangedPayload {
@@ -43,14 +22,25 @@ struct ScheduledTasksChangedPayload {
     reason: &'static str,
 }
 
-pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Utc>) {
-    use tauri::Manager;
+fn emit_scheduled_tasks_changed(
+    daemon: &crate::daemon::DaemonState,
+    mut task_ids: Vec<String>,
+    reason: &'static str,
+) {
+    if task_ids.is_empty() {
+        return;
+    }
+    task_ids.sort();
+    task_ids.dedup();
+    let payload = serde_json::to_value(ScheduledTasksChangedPayload { task_ids, reason })
+        .unwrap_or(serde_json::json!({}));
+    daemon.ui_events.emit("scheduled-tasks-changed", payload);
+}
 
-    use crate::companion::CompanionState;
-    use crate::AppState;
-
-    let app_state = app.state::<AppState>();
-    let companion_state = app.state::<CompanionState>();
+pub async fn tick_async(daemon: &crate::daemon::DaemonState, now: chrono::DateTime<chrono::Utc>) {
+    let app_state = &daemon.app;
+    let companion_state = &daemon.companion;
+    let mut changed_task_ids = Vec::new();
     let turn_active = companion_state
         .inner
         .turn_active
@@ -59,8 +49,6 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
         .iter()
         .cloned()
         .collect::<Vec<_>>();
-
-    let mut changed_task_ids = Vec::new();
 
     let (payloads, stale_active_sessions) = {
         let conn = app_state.db.lock().unwrap();
@@ -170,7 +158,7 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
 
     for (run_id, payload) in payloads {
         let task_id = payload.task_id.clone();
-        let result = runner::fire_scheduled_task(app, payload).await;
+        let result = runner::fire_scheduled_task(daemon, payload).await;
         let conn = app_state.db.lock().unwrap();
         match result {
             types::TaskRunnerResult::Started { session_id } => {
@@ -198,24 +186,20 @@ pub async fn tick_async(app: &tauri::AppHandle, now: chrono::DateTime<chrono::Ut
         }
     }
 
-    if !changed_task_ids.is_empty() {
-        changed_task_ids.sort();
-        changed_task_ids.dedup();
-        emit_scheduled_tasks_changed(app, changed_task_ids, "tick");
-    }
+    emit_scheduled_tasks_changed(daemon, changed_task_ids, "tick");
 }
 
-pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskRun, String> {
+pub async fn run_task_now(
+    daemon: &crate::daemon::DaemonState,
+    task_id: &str,
+) -> Result<TaskRun, String> {
     use chrono::Utc;
-    use tauri::Manager;
-
-    use crate::AppState;
 
     use types::{
         SkipReason, TaskRunPayload, TaskRunStatus, TaskRunnerResult, MAX_CONCURRENT_SCHEDULED_RUNS,
     };
 
-    let app_state = app.state::<AppState>();
+    let app_state = &daemon.app;
     let now_str = Utc::now().to_rfc3339();
 
     let (run_id, payload) = {
@@ -275,7 +259,7 @@ pub async fn run_task_now(app: &tauri::AppHandle, task_id: &str) -> Result<TaskR
         (run.id, payload)
     };
 
-    let result = runner::fire_scheduled_task(app, payload).await;
+    let result = runner::fire_scheduled_task(daemon, payload).await;
 
     let conn = app_state.db.lock().map_err(|error| error.to_string())?;
     match result {

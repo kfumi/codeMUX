@@ -4,6 +4,7 @@ mod browser;
 mod commands;
 mod companion;
 mod config;
+mod daemon;
 mod db;
 mod forge;
 mod log_ctx;
@@ -345,8 +346,8 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
         TRAY_OPEN_ID => show_main_window(app),
         TRAY_QUIT_ID => {
             let companion_state = {
-                let state = app.state::<companion::CompanionState>();
-                state.clone()
+                let state = app.state::<std::sync::Arc<companion::CompanionState>>();
+                state.inner().clone()
             };
             tauri::async_runtime::block_on(async {
                 if let Err(error) = companion::stop_daemon_for_state(&companion_state).await {
@@ -433,38 +434,39 @@ pub fn run() {
             refresh_windows_shell_icon_cache();
 
             let path_roots = shell::path_roots(app.handle());
-            let conn = db::initialize(&path_roots).expect("Failed to initialize database");
-            let config = config::load_config(&path_roots);
+            let ui_events = std::sync::Arc::new(shell::TauriUiEventSink::new(app.handle().clone()));
+            let daemon = std::sync::Arc::new(
+                daemon::DaemonState::assemble(path_roots, ui_events)
+                    .expect("Failed to assemble daemon core"),
+            );
+            let (providers_len, theme, companion_config) = {
+                let config = daemon.app.config.lock().unwrap();
+                (
+                    config.providers.len(),
+                    config.theme.clone(),
+                    config.companion.clone(),
+                )
+            };
             info!(
                 target: "app",
                 "Runtime initialized; providers={} theme={:?}",
-                config.providers.len(),
-                config.theme
+                providers_len, theme
             );
 
-            app.manage(AppState {
-                db: Mutex::new(conn),
-                config: Mutex::new(config),
-                app_data_dir: path_roots.app_data_dir,
-                runtime_resolver: crate::runtime::RuntimeResolver::default_root(),
-            });
-            app.manage(agent::commands::AgentState::default());
-            app.manage(commands::terminal::TerminalState::default());
+            app.manage(daemon.app.clone());
+            app.manage(daemon.agent.clone());
+            app.manage(daemon.terminal.clone());
+            app.manage(daemon.companion.clone());
+            app.manage(daemon.clone());
             app.manage(crate::browser::manager::BrowserState::default());
-            app.manage(companion::CompanionState::default());
 
-            let config_for_companion = {
-                let state = app.state::<AppState>();
-                let config = state.config.lock().unwrap();
-                config.companion.clone()
-            };
-            let app_handle = app.handle().clone();
-            let port = config_for_companion.port;
-            let listen_address = config_for_companion.listen_address.clone();
-            let expose_lan = config_for_companion.enabled;
+            let port = companion_config.port;
+            let listen_address = companion_config.listen_address.clone();
+            let expose_lan = companion_config.enabled;
+            let daemon_for_server = daemon.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = companion::start_daemon_server(
-                    app_handle.clone(),
+                    daemon_for_server,
                     port,
                     expose_lan,
                     listen_address,
@@ -475,17 +477,17 @@ pub fn run() {
                 }
             });
 
-            let tick_app_handle = app.handle().clone();
+            let daemon_for_tick = daemon.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
-                    scheduled_tasks::tick_async(&tick_app_handle, chrono::Utc::now()).await;
+                    scheduled_tasks::tick_async(&daemon_for_tick, chrono::Utc::now()).await;
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 }
             });
 
-            let cleanup_app_handle = app.handle().clone();
+            let daemon_for_cleanup = daemon.clone();
             tauri::async_runtime::spawn(async move {
-                agent::history_import::cleanup_legacy_timeline_artifacts(&cleanup_app_handle).await;
+                agent::history_import::cleanup_legacy_timeline_artifacts(&daemon_for_cleanup).await;
             });
 
             let tray_menu = MenuBuilder::new(app)

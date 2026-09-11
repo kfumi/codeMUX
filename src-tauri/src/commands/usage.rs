@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
 use tauri::State;
 
 use crate::agent::commands::{find_claude_session_jsonl, find_codex_session_jsonl, home_dir};
@@ -24,7 +26,15 @@ pub struct UsageStatsResponse {
 
 #[tauri::command]
 pub fn get_usage_stats(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    agent_kind: Option<String>,
+    days: Option<u32>,
+) -> Result<UsageStatsResponse, String> {
+    get_usage_stats_impl(state.inner(), agent_kind, days)
+}
+
+pub fn get_usage_stats_impl(
+    state: &AppState,
     agent_kind: Option<String>,
     days: Option<u32>,
 ) -> Result<UsageStatsResponse, String> {
@@ -137,7 +147,15 @@ fn read_u64(value: Option<&serde_json::Value>) -> u64 {
 
 #[tauri::command]
 pub async fn get_usage_token_breakdown(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    agent_kind: Option<String>,
+    days: Option<u32>,
+) -> Result<TokenBreakdownResponse, String> {
+    get_usage_token_breakdown_impl(state.inner(), agent_kind, days).await
+}
+
+pub async fn get_usage_token_breakdown_impl(
+    state: &AppState,
     agent_kind: Option<String>,
     days: Option<u32>,
 ) -> Result<TokenBreakdownResponse, String> {

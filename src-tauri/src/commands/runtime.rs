@@ -7,6 +7,8 @@
 
 use async_trait::async_trait;
 use serde::Serialize;
+use std::sync::Arc;
+
 use tauri::{AppHandle, Emitter, State};
 
 use crate::runtime::infra::{detect_system_node, detect_system_npm, SystemNodeResolver};
@@ -88,17 +90,18 @@ pub struct ManagedRuntimeOperationResult {
     pub switched: bool,
 }
 
-/// 通过 Tauri 事件向前端汇报 Runtime 安装进度。
+/// Runtime 安装进度上报:经 daemon 的 UI 事件出口投递,桌面命令路径与
+/// 移动端 HTTP 路径共用同一事件契约。
 ///
-/// 事件名：`runtime-install-progress`，payload 为 `Progress`。
-pub struct TauriProgressReporter {
-    app: AppHandle,
+/// 事件名:`runtime-install-progress-<provider>` 与通用 `runtime-install-progress`。
+pub struct RuntimeProgressReporter {
+    ui: Arc<dyn crate::daemon::UiEventSink>,
     provider: Provider,
 }
 
-impl TauriProgressReporter {
-    pub fn new(app: AppHandle, provider: Provider) -> Self {
-        Self { app, provider }
+impl RuntimeProgressReporter {
+    pub fn new(ui: Arc<dyn crate::daemon::UiEventSink>, provider: Provider) -> Self {
+        Self { ui, provider }
     }
 
     fn event_name(&self) -> String {
@@ -107,24 +110,27 @@ impl TauriProgressReporter {
 }
 
 #[async_trait]
-impl ProgressReporter for TauriProgressReporter {
+impl ProgressReporter for RuntimeProgressReporter {
     async fn report(&self, progress: crate::runtime::types::Progress) {
         let payload = serde_json::json!({
             "provider": self.provider.as_str(),
             "progress": progress,
         });
-        let _ = self.app.emit(&self.event_name(), payload.clone());
+        self.ui.emit(&self.event_name(), payload.clone());
         // 也发射通用事件，便于全局监听
-        let _ = self.app.emit("runtime-install-progress", payload);
+        self.ui.emit("runtime-install-progress", payload);
     }
 }
 
-/// 检测所有 Provider 的 CodeMUX 自有 Runtime 状态。
-///
-/// 快速返回本地 Runtime 状态；npm 版本列表由前端进入页面后异步加载。
 #[tauri::command]
 pub async fn check_managed_runtimes(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<ManagedRuntimeCheckResult, String> {
+    check_managed_runtimes_impl(state.inner()).await
+}
+
+pub async fn check_managed_runtimes_impl(
+    state: &AppState,
 ) -> Result<ManagedRuntimeCheckResult, String> {
     let resolver = &state.runtime_resolver;
     let node = detect_node().await;
@@ -147,12 +153,19 @@ pub async fn check_managed_runtimes(
 /// 前端会在页面加载后并行调用三个 Provider，并把结果填入对应卡片。
 #[tauri::command]
 pub async fn list_managed_runtime_versions(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    provider: String,
+) -> Result<Vec<String>, String> {
+    list_managed_runtime_versions_impl(state.inner(), provider).await
+}
+
+pub async fn list_managed_runtime_versions_impl(
+    state: &AppState,
     provider: String,
 ) -> Result<Vec<String>, String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let manager = build_runtime_manager(&state)?;
+    let manager = build_runtime_manager(state)?;
     manager
         .list_available_versions(provider)
         .await
@@ -162,7 +175,14 @@ pub async fn list_managed_runtime_versions(
 /// 重新检测指定 Provider 的 Runtime 状态。
 #[tauri::command]
 pub async fn refresh_managed_runtime(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    provider: String,
+) -> Result<ManagedRuntimeInfo, String> {
+    refresh_managed_runtime_impl(state.inner(), provider).await
+}
+
+pub async fn refresh_managed_runtime_impl(
+    state: &AppState,
     provider: String,
 ) -> Result<ManagedRuntimeInfo, String> {
     let provider =
@@ -170,7 +190,7 @@ pub async fn refresh_managed_runtime(
     let resolver = &state.runtime_resolver;
     let node = detect_node().await;
 
-    if let Ok(manager) = build_runtime_manager(&state) {
+    if let Ok(manager) = build_runtime_manager(state) {
         Ok(check_single_runtime_via_manager(provider, &manager, resolver, &node).await)
     } else {
         Ok(check_single_runtime(provider, resolver, &node))
@@ -248,14 +268,35 @@ fn build_status_message(
 #[tauri::command]
 pub async fn install_managed_runtime(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     provider: String,
     version: Option<String>,
 ) -> Result<ManagedRuntimeOperationResult, String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let manager = build_runtime_manager(&state)?;
-    let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
+    let progress = Arc::new(RuntimeProgressReporter::new(
+        Arc::new(crate::shell::TauriUiEventSink::new(app)),
+        provider,
+    ));
+    install_managed_runtime_impl(
+        state.inner(),
+        provider.as_str().to_string(),
+        version,
+        progress,
+    )
+    .await
+}
+
+pub async fn install_managed_runtime_impl(
+    state: &AppState,
+    provider: String,
+    version: Option<String>,
+    progress: Arc<dyn ProgressReporter>,
+) -> Result<ManagedRuntimeOperationResult, String> {
+    let provider =
+        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
+    let manager = build_runtime_manager(state)?;
+
     let outcome = match version.as_deref() {
         Some(version) => {
             manager
@@ -272,13 +313,26 @@ pub async fn install_managed_runtime(
 #[tauri::command]
 pub async fn upgrade_managed_runtime(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     provider: String,
 ) -> Result<Option<ManagedRuntimeOperationResult>, String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let manager = build_runtime_manager(&state)?;
-    let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
+    let progress = Arc::new(RuntimeProgressReporter::new(
+        Arc::new(crate::shell::TauriUiEventSink::new(app)),
+        provider,
+    ));
+    upgrade_managed_runtime_impl(state.inner(), provider.as_str().to_string(), progress).await
+}
+
+pub async fn upgrade_managed_runtime_impl(
+    state: &AppState,
+    provider: String,
+    progress: Arc<dyn ProgressReporter>,
+) -> Result<Option<ManagedRuntimeOperationResult>, String> {
+    let provider =
+        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
+    let manager = build_runtime_manager(state)?;
     let outcome = manager
         .upgrade(provider, progress.as_ref())
         .await
@@ -290,13 +344,26 @@ pub async fn upgrade_managed_runtime(
 #[tauri::command]
 pub async fn repair_managed_runtime(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     provider: String,
 ) -> Result<Option<ManagedRuntimeOperationResult>, String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
-    let manager = build_runtime_manager(&state)?;
-    let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
+    let progress = Arc::new(RuntimeProgressReporter::new(
+        Arc::new(crate::shell::TauriUiEventSink::new(app)),
+        provider,
+    ));
+    repair_managed_runtime_impl(state.inner(), provider.as_str().to_string(), progress).await
+}
+
+pub async fn repair_managed_runtime_impl(
+    state: &AppState,
+    provider: String,
+    progress: Arc<dyn ProgressReporter>,
+) -> Result<Option<ManagedRuntimeOperationResult>, String> {
+    let provider =
+        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
+    let manager = build_runtime_manager(state)?;
     let outcome = manager
         .repair(provider, progress.as_ref())
         .await
@@ -307,9 +374,13 @@ pub async fn repair_managed_runtime(
 /// 删除指定 Provider 的 Runtime。
 #[tauri::command]
 pub async fn remove_managed_runtime(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     provider: String,
 ) -> Result<(), String> {
+    remove_managed_runtime_impl(state.inner(), provider).await
+}
+
+pub async fn remove_managed_runtime_impl(state: &AppState, provider: String) -> Result<(), String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
     let resolver = &state.runtime_resolver;

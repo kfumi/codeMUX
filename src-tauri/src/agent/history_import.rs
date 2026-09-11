@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::str::FromStr;
-use tauri::{Manager, State};
+use tauri::State;
 
 use crate::agent::claude_subagent_history::load_claude_session_subagent_history;
 use crate::agent::codex_subagent_history::load_codex_session_subagent_history;
@@ -74,7 +74,7 @@ struct DiscoveredSnapshot {
 
 #[tauri::command]
 pub async fn discover_importable_sessions(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     agent_kind: Option<String>,
 ) -> Result<Vec<ImportCandidate>, String> {
     discover_importable_sessions_for_companion(state.inner(), agent_kind).await
@@ -112,7 +112,7 @@ pub async fn discover_importable_sessions_for_companion(
 
 #[tauri::command]
 pub fn import_sessions(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     request: ImportSessionsRequest,
 ) -> Result<ImportSessionsResult, String> {
     import_sessions_for_companion(state.inner(), request)
@@ -186,7 +186,7 @@ pub fn import_sessions_for_companion(
 
 #[tauri::command]
 pub async fn load_session_events(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
 ) -> Result<Vec<Value>, String> {
     let session = {
@@ -229,7 +229,7 @@ pub async fn load_session_events(
 
         if agent_kind == AgentKind::Pi && has_mapping {
             if let Ok(native_events) =
-                load_native_session_events(state.clone(), &app_session_id, agent_kind).await
+                load_native_session_events(state.inner().clone(), &app_session_id, agent_kind).await
             {
                 if persisted_timeline_missing_tool_steps(&events, &native_events) {
                     log::info!(
@@ -266,7 +266,7 @@ pub async fn load_session_events(
 
     if should_hydrate {
         let native_events =
-            load_native_session_events(state.clone(), &app_session_id, agent_kind).await?;
+            load_native_session_events(state.inner().clone(), &app_session_id, agent_kind).await?;
         if !native_events.is_empty() {
             let mut db = state.db.lock().unwrap();
             operations::replace_session_timeline(&mut db, &app_session_id, &native_events)
@@ -294,7 +294,14 @@ pub struct ResyncSessionFromNativeResult {
 
 #[tauri::command]
 pub async fn resync_session_from_native(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    app_session_id: String,
+) -> Result<ResyncSessionFromNativeResult, String> {
+    resync_session_from_native_impl(state.inner().clone(), app_session_id).await
+}
+
+pub async fn resync_session_from_native_impl(
+    state: std::sync::Arc<crate::AppState>,
     app_session_id: String,
 ) -> Result<ResyncSessionFromNativeResult, String> {
     let session = {
@@ -347,10 +354,10 @@ pub async fn resync_session_from_native(
 }
 
 pub async fn resync_session_from_native_for_companion(
-    app: &tauri::AppHandle,
+    state: std::sync::Arc<crate::AppState>,
     app_session_id: String,
 ) -> Result<ResyncSessionFromNativeResult, String> {
-    resync_session_from_native(app.state::<crate::AppState>(), app_session_id).await
+    resync_session_from_native_impl(state, app_session_id).await
 }
 
 pub(crate) fn can_resync_session_from_native(
@@ -381,7 +388,7 @@ pub(crate) fn should_hydrate_timeline_from_native(
 /// Rebuild the persisted session timeline from the provider's on-disk history
 /// after a conversation rewind truncates native JSONL.
 pub(crate) async fn reload_session_timeline_from_native(
-    state: State<'_, crate::AppState>,
+    state: std::sync::Arc<crate::AppState>,
     app_session_id: &str,
     agent_kind: AgentKind,
 ) -> Result<(), String> {
@@ -404,8 +411,8 @@ pub(crate) async fn reload_session_timeline_from_native(
 /// rebuilt from their native provider history when a mapping exists; anything
 /// else is left to the load-time event_id dedupe. Guarded by
 /// `PRAGMA user_version` so the scan and rebuilds run at most once.
-pub async fn cleanup_legacy_timeline_artifacts(app_handle: &tauri::AppHandle) {
-    let state = app_handle.state::<crate::AppState>();
+pub async fn cleanup_legacy_timeline_artifacts(daemon: &crate::daemon::DaemonState) {
+    let state = &daemon.app;
     let done: i64 = {
         let db = state.db.lock().expect("db mutex poisoned");
         db.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -496,27 +503,35 @@ pub async fn cleanup_legacy_timeline_artifacts(app_handle: &tauri::AppHandle) {
 }
 
 async fn load_native_session_events(
-    state: State<'_, crate::AppState>,
+    state: std::sync::Arc<crate::AppState>,
     app_session_id: &str,
     agent_kind: AgentKind,
 ) -> Result<Vec<Value>, String> {
     match agent_kind {
         AgentKind::ClaudeCode => {
-            crate::agent::commands::load_claude_session_events(state, app_session_id.to_string())
-                .await
+            crate::agent::commands::load_claude_session_events_impl(
+                &state,
+                app_session_id.to_string(),
+            )
+            .await
         }
         AgentKind::Codex => {
-            crate::agent::commands::load_codex_session_events(state, app_session_id.to_string())
-                .await
+            crate::agent::commands::load_codex_session_events_impl(
+                &state,
+                app_session_id.to_string(),
+            )
+            .await
         }
         AgentKind::Opencode => {
-            crate::agent::commands::load_opencode_session_events(state, app_session_id.to_string())
-                .await
+            crate::agent::commands::load_opencode_session_events_impl(
+                &state,
+                app_session_id.to_string(),
+            )
+            .await
         }
         AgentKind::Pi => {
-            super::pi_history::load_pi_session_events_internal(state, app_session_id).await
-        }
-        AgentKind::GeminiCli => Ok(Vec::new()),
+            super::pi_history::load_pi_session_events_internal(state.clone(), app_session_id).await
+        }        AgentKind::GeminiCli => Ok(Vec::new()),
     }
 }
 
@@ -851,13 +866,16 @@ fn count_tool_started_events(events: &[Value]) -> usize {
 
 /// True when native pi history carries tool steps that the persisted live
 /// capture omitted entirely (common after older sidecar ordering bugs).
-fn persisted_timeline_missing_tool_steps(existing_events: &[Value], native_events: &[Value]) -> bool {
+fn persisted_timeline_missing_tool_steps(
+    existing_events: &[Value],
+    native_events: &[Value],
+) -> bool {
     count_tool_started_events(native_events) > count_tool_started_events(existing_events)
 }
 
 #[tauri::command]
 pub fn fetch_session_timeline(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     session_id: String,
     direction: Option<String>,
     cursor: Option<i64>,
@@ -1521,7 +1539,11 @@ mod tests {
             serde_json::json!({ "type": "turn_finished", "outcome": "completed" }),
         ];
 
-        assert!(super::persisted_timeline_missing_tool_steps(&persisted, &native));
-        assert!(!super::persisted_timeline_missing_tool_steps(&native, &native));
+        assert!(super::persisted_timeline_missing_tool_steps(
+            &persisted, &native
+        ));
+        assert!(!super::persisted_timeline_missing_tool_steps(
+            &native, &native
+        ));
     }
 }

@@ -203,7 +203,7 @@ fn normalize_windows_verbatim_path(path: PathBuf) -> PathBuf {
 
 #[tauri::command]
 pub fn start_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     project_path: String,
     cols: u16,
     rows: u16,
@@ -304,7 +304,7 @@ pub fn start_terminal_session(
 
 #[tauri::command]
 pub fn attach_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     terminal_id: String,
     cols: u16,
     rows: u16,
@@ -341,7 +341,7 @@ pub fn attach_terminal_session(
 
 #[tauri::command]
 pub fn detach_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     terminal_id: String,
 ) -> Result<(), String> {
     let output = {
@@ -361,7 +361,7 @@ pub fn detach_terminal_session(
 
 #[tauri::command]
 pub fn write_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     terminal_id: String,
     data: String,
 ) -> Result<(), String> {
@@ -387,7 +387,7 @@ pub fn write_terminal_session(
 
 #[tauri::command]
 pub fn resize_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     terminal_id: String,
     cols: u16,
     rows: u16,
@@ -421,7 +421,7 @@ fn ensure_attached(output: &Arc<Mutex<TerminalOutputState>>) -> Result<(), Strin
 
 #[tauri::command]
 pub fn close_terminal_session(
-    state: tauri::State<'_, TerminalState>,
+    state: tauri::State<'_, std::sync::Arc<TerminalState>>,
     terminal_id: String,
 ) -> Result<(), String> {
     let session = state
@@ -619,7 +619,10 @@ pub fn resize_terminal_for_companion(
     resize_master(&master, cols, rows)
 }
 
-pub fn close_terminal_for_companion(state: &TerminalState, terminal_id: &str) -> Result<(), String> {
+pub fn close_terminal_for_companion(
+    state: &TerminalState,
+    terminal_id: &str,
+) -> Result<(), String> {
     let session = state
         .sessions
         .lock()
@@ -666,9 +669,9 @@ mod tests {
 
     #[test]
     fn rejects_io_when_the_terminal_is_detached() {
-        let output = Arc::new(Mutex::new(TerminalOutputState::new(
-            Some(tauri::ipc::Channel::new(|_| Ok(()))),
-        )));
+        let output = Arc::new(Mutex::new(TerminalOutputState::new(Some(
+            tauri::ipc::Channel::new(|_| Ok(())),
+        ))));
 
         detach_output_channel(&output).unwrap();
 

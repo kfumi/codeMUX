@@ -7,24 +7,33 @@ use axum::{Json, Router};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use tauri::Manager;
-
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::model_providers::ModelProvider;
-use crate::AppState;
 
 pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/providers", get(list_providers).post(upsert_provider))
         .route("/providers/templates", get(list_provider_templates))
-        .route("/providers/templates/{template_id}/instantiate", post(instantiate_template))
-        .route("/providers/{provider_id}", axum::routing::delete(delete_provider))
+        .route(
+            "/providers/templates/{template_id}/instantiate",
+            post(instantiate_template),
+        )
+        .route(
+            "/providers/{provider_id}",
+            axum::routing::delete(delete_provider),
+        )
         .route("/providers/{provider_id}/active", post(set_active_provider))
-        .route("/providers/{provider_id}/enabled", post(set_provider_enabled))
+        .route(
+            "/providers/{provider_id}/enabled",
+            post(set_provider_enabled),
+        )
         .route("/providers/{provider_id}/usable", get(provider_usable))
         .route("/providers/test", post(test_provider))
         .route("/providers/fetch-models", post(fetch_provider_models_route))
-        .route("/providers/opencode-free-models", get(fetch_opencode_free_models_route))
+        .route(
+            "/providers/opencode-free-models",
+            get(fetch_opencode_free_models_route),
+        )
 }
 
 async fn list_providers(
@@ -33,8 +42,11 @@ async fn list_providers(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let config = state.config.lock().map_err(|e| ApiError::internal(e.to_string()))?;
+    let state = ctx.daemon.app.clone();
+    let config = state
+        .config
+        .lock()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
         "providers": config.model_providers,
         "activeProviderId": config.active_provider_id,
@@ -58,10 +70,8 @@ async fn instantiate_template(
     Path(template_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    let provider = crate::commands::model_provider::instantiate_builtin_provider_template(
-        state,
-        ctx.app.clone(),
+    let provider = crate::commands::model_provider::instantiate_builtin_provider_template_impl(
+        &ctx.daemon,
         template_id,
     )
     .map_err(ApiError::bad_request)?;
@@ -75,8 +85,7 @@ async fn upsert_provider(
     Json(provider): Json<ModelProvider>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::model_provider::upsert_model_provider(state, ctx.app.clone(), provider)
+    crate::commands::model_provider::upsert_model_provider_impl(&ctx.daemon, provider)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -88,8 +97,7 @@ async fn delete_provider(
     Path(provider_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::model_provider::delete_model_provider(state, ctx.app.clone(), provider_id)
+    crate::commands::model_provider::delete_model_provider_impl(&ctx.daemon, provider_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -101,8 +109,7 @@ async fn set_active_provider(
     Path(provider_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::model_provider::set_active_model_provider(state, ctx.app.clone(), provider_id)
+    crate::commands::model_provider::set_active_model_provider_impl(&ctx.daemon, provider_id)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -121,10 +128,8 @@ async fn set_provider_enabled(
     Json(body): Json<SetProviderEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let state = ctx.app.state::<AppState>();
-    crate::commands::model_provider::set_model_provider_enabled(
-        state,
-        ctx.app.clone(),
+    crate::commands::model_provider::set_model_provider_enabled_impl(
+        &ctx.daemon,
         provider_id,
         body.enabled,
     )
@@ -148,9 +153,8 @@ async fn provider_usable(
     authorize(&ctx, &headers, Some(peer))?;
     let agent_kind = crate::config::types::AgentKind::from_str(&query.agent_kind)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let state = ctx.app.state::<AppState>();
-    let usable = crate::commands::model_provider::provider_usable_for_agent(
-        state,
+    let usable = crate::commands::model_provider::provider_usable_for_agent_impl(
+        &ctx.daemon,
         provider_id,
         agent_kind,
     )
@@ -186,12 +190,10 @@ async fn fetch_provider_models_route(
     Json(body): Json<TestProviderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let models = crate::commands::provider::fetch_provider_models_for_companion(
-        body.api_key,
-        body.base_url,
-    )
-    .await
-    .map_err(ApiError::bad_request)?;
+    let models =
+        crate::commands::provider::fetch_provider_models_for_companion(body.api_key, body.base_url)
+            .await
+            .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(models)))
 }
 

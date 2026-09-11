@@ -4,7 +4,7 @@
 //! Tauri 路径 API,而是消费调用方构造并注入的 [`PathRoots`]。Tauri 壳经
 //! [`PathRoots::from_app`] 构造;独立 daemon(后续工单)将改为从启动参数构造。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct PathRoots {
@@ -13,13 +13,6 @@ pub struct PathRoots {
 }
 
 impl PathRoots {
-    pub fn new(app_data_dir: impl Into<PathBuf>, resource_dir: Option<PathBuf>) -> Self {
-        Self {
-            app_data_dir: app_data_dir.into(),
-            resource_dir,
-        }
-    }
-
     pub fn from_app(app: &tauri::AppHandle) -> Result<Self, String> {
         use tauri::Manager;
         let app_data_dir = app
@@ -68,19 +61,19 @@ impl PathRoots {
         }
         manifest_dir.join("../src-mobile/dist")
     }
-
-    pub fn sidecar_resource_dir(&self) -> Option<&Path> {
-        self.resource_dir.as_deref()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::PathRoots;
+    use std::path::PathBuf;
 
     #[test]
     fn derived_paths_live_under_app_data_dir() {
-        let roots = PathRoots::new(r"C:\app-data", None);
+        let roots = PathRoots {
+            app_data_dir: PathBuf::from(r"C:\app-data"),
+            resource_dir: None,
+        };
         assert_eq!(
             roots.database_path(),
             std::path::Path::new(r"C:\app-data").join("codemux.db")
@@ -96,7 +89,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let packaged = temp.path().join("dist-mobile");
         std::fs::create_dir_all(&packaged).expect("mkdir");
-        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
         assert_eq!(
             roots.mobile_static_dir_for(false),
             packaged,
@@ -109,7 +105,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let packaged = temp.path().join("dist-mobile");
         std::fs::create_dir_all(packaged.join("stale")).expect("mkdir");
-        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
         let resolved = roots.mobile_static_dir_for(true);
         assert!(
             !resolved.starts_with(temp.path()),
@@ -120,7 +119,10 @@ mod tests {
     #[test]
     fn mobile_static_dir_falls_back_to_source_tree() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let roots = PathRoots::new(temp.path().join("data"), Some(temp.path().to_path_buf()));
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
         // 源码树内 dist-mobile 或 src-mobile/dist 至少存在其一(仓库检出的常态)。
         let fallback = roots.mobile_static_dir();
         assert!(fallback.ends_with("dist-mobile") || fallback.ends_with("src-mobile/dist"));
@@ -130,7 +132,10 @@ mod tests {
     fn ensure_app_data_dir_creates_missing_dir() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path().join("nested").join("data");
-        let roots = PathRoots::new(&data_dir, None);
+        let roots = PathRoots {
+            app_data_dir: data_dir.clone(),
+            resource_dir: None,
+        };
         roots.ensure_app_data_dir().expect("mkdir");
         assert!(data_dir.is_dir());
     }

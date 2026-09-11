@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::config::types::AgentKind;
 use crate::db::operations;
@@ -621,8 +620,8 @@ async fn rewind_pi_conversation_via_sidecar(
 /// 条目时清空时间线）。mapping 保留（空 branched 文件仍是可恢复的原生会话），
 /// 也不发 reset_session：pi 进程内已切换，无需重建。
 async fn rewind_pi_conversation(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: std::sync::Arc<crate::AppState>,
+    agent_state: std::sync::Arc<AgentState>,
     app_session_id: &str,
     agent_kind: AgentKind,
     agent_session_id: &str,
@@ -654,7 +653,7 @@ async fn rewind_pi_conversation(
     };
 
     let new_agent_session_id =
-        rewind_pi_conversation_via_sidecar(agent_state.inner(), app_session_id, &entry_id).await?;
+        rewind_pi_conversation_via_sidecar(&agent_state, app_session_id, &entry_id).await?;
 
     {
         let db = state.db.lock().unwrap();
@@ -689,8 +688,28 @@ async fn rewind_pi_conversation(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn rewind_agent_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: tauri::State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: tauri::State<'_, std::sync::Arc<AgentState>>,
+    app_session_id: String,
+    agent_kind: String,
+    target: Option<RewindTarget>,
+    mode: Option<String>,
+) -> Result<RewindSessionResult, String> {
+    rewind_agent_session_impl(
+        state.inner().clone(),
+        agent_state.inner().clone(),
+        app_session_id,
+        agent_kind,
+        target,
+        mode,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn rewind_agent_session_impl(
+    state: std::sync::Arc<crate::AppState>,
+    agent_state: std::sync::Arc<AgentState>,
     app_session_id: String,
     agent_kind: String,
     target: Option<RewindTarget>,
@@ -703,8 +722,7 @@ pub async fn rewind_agent_session(
         _ => RewindMode::Conversation,
     };
     let mut files_changed: Option<usize> = None;
-    let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
-    else {
+    let Some(agent_session_id) = get_agent_session_id(&state, &app_session_id, agent_kind)? else {
         return Err(format!(
             "No agent session mapping found for session_id={}",
             app_session_id
@@ -731,7 +749,7 @@ pub async fn rewind_agent_session(
         match provider_message_id {
             Some(provider_message_id) => {
                 match rewind_agent_files_via_sidecar(
-                    agent_state.inner(),
+                    &agent_state,
                     &app_session_id,
                     &provider_message_id,
                 )
@@ -903,16 +921,21 @@ pub async fn rewind_agent_session(
 }
 
 pub async fn rewind_agent_session_for_companion(
-    app: &tauri::AppHandle,
+    daemon: &crate::daemon::DaemonState,
     app_session_id: String,
     agent_kind: String,
     target: Option<RewindTarget>,
     mode: Option<String>,
 ) -> Result<RewindSessionResult, String> {
-    use tauri::Manager;
-    let state = app.state::<crate::AppState>();
-    let agent_state = app.state::<AgentState>();
-    rewind_agent_session(state, agent_state, app_session_id, agent_kind, target, mode).await
+    rewind_agent_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        app_session_id,
+        agent_kind,
+        target,
+        mode,
+    )
+    .await
 }
 
 #[cfg(test)]

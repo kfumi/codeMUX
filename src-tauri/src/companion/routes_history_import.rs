@@ -7,14 +7,11 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-use tauri::Manager;
-
 use crate::agent::history_import::{
     discover_importable_sessions_for_companion, import_sessions_for_companion, ImportCandidate,
     ImportSessionsRequest, ImportSessionsResult,
 };
 use crate::companion::server::{authorize, ApiError, ServerContext};
-use crate::AppState;
 
 pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
@@ -35,13 +32,10 @@ async fn discover_candidates(
     Query(query): Query<DiscoverCandidatesQuery>,
 ) -> Result<Json<Vec<ImportCandidate>>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
-    let candidates = discover_importable_sessions_for_companion(
-        app_state.inner(),
-        query.agent_kind,
-    )
-    .await
-    .map_err(ApiError::bad_request)?;
+    let app_state = ctx.daemon.app.clone();
+    let candidates = discover_importable_sessions_for_companion(&app_state, query.agent_kind)
+        .await
+        .map_err(ApiError::bad_request)?;
     Ok(Json(candidates))
 }
 
@@ -52,13 +46,11 @@ async fn import_sessions(
     Json(body): Json<ImportSessionsRequest>,
 ) -> Result<Json<ImportSessionsResult>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app = ctx.app.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let app_state = app.state::<AppState>();
-        import_sessions_for_companion(app_state.inner(), body)
-    })
-    .await
-    .map_err(|error| ApiError::internal(error.to_string()))?
-    .map_err(ApiError::bad_request)?;
+    let app_state = ctx.daemon.app.clone();
+    let result =
+        tokio::task::spawn_blocking(move || import_sessions_for_companion(&app_state, body))
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?
+            .map_err(ApiError::bad_request)?;
     Ok(Json(result))
 }

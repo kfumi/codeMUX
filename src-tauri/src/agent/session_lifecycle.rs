@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::config::types::AgentKind;
+use crate::daemon::DaemonState;
 use crate::db::operations;
 use crate::model_providers::{
     effective_api_key, is_provider_usable, required_protocol, select_agent_endpoint,
@@ -14,7 +15,7 @@ use crate::model_providers::{
 };
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 use tokio::sync::{oneshot, Mutex};
 
 use super::claude_history::find_claude_session_jsonl;
@@ -441,8 +442,10 @@ async fn mapping_generation_is_current(
 }
 
 async fn ensure_sidecar_for_session(
-    app: AppHandle,
-    agent_state: &AgentState,
+    app_state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
+    companion_state: Arc<crate::companion::CompanionState>,
+    roots: crate::paths::PathRoots,
     session_id: &str,
     sink: Arc<dyn super::sidecar_events::SidecarEventSink>,
     replace_event_channel: bool,
@@ -459,7 +462,6 @@ async fn ensure_sidecar_for_session(
         return Ok(());
     }
 
-    let roots = crate::paths::PathRoots::from_app(&app)?;
     let binding = super::sidecar_events::SidecarEventBinding::unbound();
     binding.bind(sink).await;
     let (handle, mut rx) = spawn_sidecar(&roots, binding).await?;
@@ -472,7 +474,7 @@ async fn ensure_sidecar_for_session(
     let session_rewind_conversation_waiters =
         agent_state.session_rewind_conversation_waiters.clone();
     let session_id_clone = session_id.to_string();
-    let app_handle = app.clone();
+    let agent_state_task = agent_state.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let Some(result) = parse_session_delete_result_event(&event) {
@@ -511,9 +513,8 @@ async fn ensure_sidecar_for_session(
                 }
                 continue;
             }
-            let app_state = app_handle.state::<crate::AppState>();
             match handle_agent_session_mapping_event(
-                app_state.inner(),
+                &app_state,
                 &session_startup_locks,
                 &session_generations,
                 &event,
@@ -524,16 +525,16 @@ async fn ensure_sidecar_for_session(
                 Ok(false) => {
                     let broadcast_events =
                         crate::agent::timeline_persist::handle_sidecar_timeline_event(
-                            app_state.inner(),
-                            &event,
+                            &app_state, &event,
                         );
                     crate::agent::subagent_persist::handle_sidecar_subagent_event(
-                        app_state.inner(),
-                        &event,
+                        &app_state, &event,
                     );
-                    let app_for_companion = app_handle.clone();
                     crate::companion::handle_sidecar_event_for_companion(
-                        &app_for_companion,
+                        &app_state,
+                        &agent_state_task,
+                        &companion_state,
+                        &roots,
                         broadcast_events,
                     );
                     event_binding.send(event).await;
@@ -1266,13 +1267,13 @@ pub async fn interrupt_agent_session_for_companion(
 }
 
 pub async fn ensure_agent_session_for_companion(
-    app: &AppHandle,
-    state: &crate::AppState,
-    agent_state: &AgentState,
+    daemon: &DaemonState,
     session_id: &str,
     cwd: String,
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
+    let state = &daemon.app;
+    let agent_state = &daemon.agent;
     reject_read_only_session(state, session_id)?;
     let lifecycle_lock = session_lifecycle_lock(agent_state, session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
@@ -1302,7 +1303,16 @@ pub async fn ensure_agent_session_for_companion(
         runtime_config.model_limits,
     )?;
     let sink = super::sidecar_events::null_sink();
-    ensure_sidecar_for_session(app.clone(), agent_state, session_id, sink, false).await?;
+    ensure_sidecar_for_session(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        daemon.companion.clone(),
+        daemon.roots.clone(),
+        session_id,
+        sink,
+        false,
+    )
+    .await?;
     send_command_to_session(agent_state, session_id, ensure_cmd).await
 }
 
@@ -1403,7 +1413,7 @@ fn load_latest_token_usage_for_agent_session(
 
 #[tauri::command]
 pub async fn get_agent_session_info(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
     agent_kind: String,
 ) -> Result<AgentSessionInfo, String> {
@@ -1438,7 +1448,7 @@ pub fn get_agent_session_info_for_companion(
 
 #[tauri::command]
 pub async fn load_agent_latest_token_usage(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
     agent_kind: String,
     freshness: Option<String>,
@@ -1471,33 +1481,34 @@ pub(crate) async fn load_latest_token_usage_for_session(
 
 #[tauri::command]
 pub async fn ensure_agent_session(
-    app: AppHandle,
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    daemon: State<'_, std::sync::Arc<DaemonState>>,
     session_id: String,
     cwd: String,
     channel: tauri::ipc::Channel<String>,
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
+    let daemon = daemon.inner();
     info!(target: "agent", "Ensuring agent session session_id={} cwd={}", session_id, cwd);
+    let state = &daemon.app;
+    let agent_state = &daemon.agent;
 
-    reject_read_only_session(&state, &session_id)?;
+    reject_read_only_session(state, &session_id)?;
 
-    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+    let lifecycle_lock = session_lifecycle_lock(agent_state, &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
-    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
-    let resolved_cwd = resolve_session_cwd(state.inner(), &session_id, &cwd)?;
-    let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
+    let agent_kind = resolve_session_agent_kind(state, &session_id)?;
+    let resolved_cwd = resolve_session_cwd(state, &session_id, &cwd)?;
+    let runtime_config = resolve_active_runtime_config(state, &session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
-        Some(opencode_runtime_generation(agent_state.inner(), &session_id).await)
+        Some(opencode_runtime_generation(agent_state, &session_id).await)
     } else {
         None
     };
-    let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &resolved_cwd)?;
+    let skill_cwd = resolve_skill_cwd(state, &session_id, &resolved_cwd)?;
     preload_project_skills(skill_cwd, &agent_kind).await?;
 
     let cmd = build_ensure_session_command(
-        &state,
+        state,
         &session_id,
         &agent_kind,
         resolved_cwd,
@@ -1514,8 +1525,10 @@ pub async fn ensure_agent_session(
     )?;
 
     ensure_sidecar_for_session(
-        app,
-        &agent_state,
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        daemon.companion.clone(),
+        daemon.roots.clone(),
         &session_id,
         Arc::new(crate::shell::IpcChannelSink::new(channel)),
         true,
@@ -1527,7 +1540,7 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    send_command_to_session(&agent_state, &session_id, cmd).await?;
+    send_command_to_session(agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
 
     if agent_kind == "codex" && agent_state.proxy_port.lock().await.is_none() {
@@ -1546,8 +1559,8 @@ pub async fn ensure_agent_session(
 
 #[tauri::command]
 pub async fn send_agent_input(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
     prompt: String,
     input_payload: Option<serde_json::Value>,
@@ -1572,37 +1585,39 @@ pub async fn send_agent_input(
     Ok(())
 }
 
-#[tauri::command]
+/// Daemon-core session start shared by the Tauri command and the companion
+/// action path. Takes owned Arc handles so spawned forwarding tasks stay
+/// `'static`.
 #[allow(clippy::too_many_arguments)]
-pub async fn start_agent_session(
-    app: AppHandle,
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+pub async fn start_agent_session_core(
+    state: Arc<crate::AppState>,
+    agent_state: Arc<AgentState>,
+    companion_state: Arc<crate::companion::CompanionState>,
+    roots: crate::paths::PathRoots,
     session_id: String,
     prompt: String,
     cwd: String,
-    channel: tauri::ipc::Channel<String>,
+    sink: Arc<dyn super::sidecar_events::SidecarEventSink>,
     reasoning_effort: Option<String>,
     input_payload: Option<serde_json::Value>,
     display_content: Option<String>,
-    replace_event_channel: Option<bool>,
+    replace_event_channel: bool,
 ) -> Result<(), String> {
-    let replace_event_channel = replace_event_channel.unwrap_or(true);
     reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Starting agent session wrapper");
 
-        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let lifecycle_lock = session_lifecycle_lock(&agent_state, &session_id).await;
         let _lifecycle_guard = lifecycle_lock.lock().await;
         let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
         let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
         let runtime_generation = if agent_kind == "opencode" {
-            Some(opencode_runtime_generation(agent_state.inner(), &session_id).await)
+            Some(opencode_runtime_generation(&agent_state, &session_id).await)
         } else {
             None
         };
-        let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
+        let skill_cwd = resolve_skill_cwd(&state, &session_id, &cwd)?;
         preload_project_skills(skill_cwd, &agent_kind).await?;
 
         let ensure_cmd = build_ensure_session_command(
@@ -1623,10 +1638,12 @@ pub async fn start_agent_session(
         )?;
 
         ensure_sidecar_for_session(
-            app,
-            &agent_state,
+            state,
+            agent_state.clone(),
+            companion_state,
+            roots,
             &session_id,
-            Arc::new(crate::shell::IpcChannelSink::new(channel)),
+            sink,
             replace_event_channel,
         )
         .await?;
@@ -1643,10 +1660,66 @@ pub async fn start_agent_session(
     .await
 }
 
+/// [`DaemonState`]-flavored entry used by the companion action path.
+#[allow(clippy::too_many_arguments)]
+pub async fn start_agent_session_impl(
+    daemon: &DaemonState,
+    session_id: String,
+    prompt: String,
+    cwd: String,
+    sink: Arc<dyn super::sidecar_events::SidecarEventSink>,
+    reasoning_effort: Option<String>,
+    input_payload: Option<serde_json::Value>,
+    display_content: Option<String>,
+    replace_event_channel: bool,
+) -> Result<(), String> {
+    start_agent_session_core(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        daemon.companion.clone(),
+        daemon.roots.clone(),
+        session_id,
+        prompt,
+        cwd,
+        sink,
+        reasoning_effort,
+        input_payload,
+        display_content,
+        replace_event_channel,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn start_agent_session(
+    daemon: State<'_, std::sync::Arc<DaemonState>>,
+    session_id: String,
+    prompt: String,
+    cwd: String,
+    channel: tauri::ipc::Channel<String>,
+    reasoning_effort: Option<String>,
+    input_payload: Option<serde_json::Value>,
+    display_content: Option<String>,
+    replace_event_channel: Option<bool>,
+) -> Result<(), String> {
+    start_agent_session_impl(
+        daemon.inner(),
+        session_id,
+        prompt,
+        cwd,
+        Arc::new(crate::shell::IpcChannelSink::new(channel)),
+        reasoning_effort,
+        input_payload,
+        display_content,
+        replace_event_channel.unwrap_or(true),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn interrupt_agent_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
 ) -> Result<(), String> {
     interrupt_agent_session_for_companion(state.inner(), agent_state.inner(), &session_id).await
@@ -1654,8 +1727,8 @@ pub async fn interrupt_agent_session(
 
 #[tauri::command]
 pub async fn shutdown_agent(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
 ) -> Result<(), String> {
     shutdown_agent_for_companion(state.inner(), agent_state.inner(), &session_id).await
@@ -1689,8 +1762,8 @@ pub async fn shutdown_agent_for_companion(
 
 #[tauri::command]
 pub async fn send_tool_response(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
     tool_use_id: String,
     response: serde_json::Value,
@@ -1722,8 +1795,8 @@ pub async fn send_tool_response(
 
 #[tauri::command]
 pub async fn respond_to_agent_permission(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
     request_id: String,
     response: serde_json::Value,
@@ -1741,8 +1814,8 @@ pub async fn respond_to_agent_permission(
 
 #[tauri::command]
 pub async fn reset_agent_session(
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    agent_state: State<'_, std::sync::Arc<AgentState>>,
     session_id: String,
 ) -> Result<(), String> {
     reset_agent_session_for_companion(state.inner(), agent_state.inner(), &session_id).await

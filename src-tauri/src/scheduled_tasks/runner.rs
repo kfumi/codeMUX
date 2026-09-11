@@ -1,31 +1,22 @@
 use chrono::Utc;
 use log::info;
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
 
-use crate::companion::CompanionState;
+use crate::daemon::DaemonState;
 use crate::db::operations;
-use crate::AppState;
 
 use super::types::{TaskRunPayload, TaskRunnerResult};
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionsChangedPayload {
-    session_id: String,
-    project_id: String,
-    task_id: String,
-    reason: &'static str,
-}
-
-pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> TaskRunnerResult {
+pub async fn fire_scheduled_task(
+    daemon: &DaemonState,
+    payload: TaskRunPayload,
+) -> TaskRunnerResult {
     info!(
         target: "scheduled_tasks",
         "Firing scheduled task {} ({})",
         payload.task_id,
         payload.task_title,
     );
-    let app_state = app.state::<AppState>();
+    let app_state = &daemon.app;
 
     let session_title = format!(
         "{} · {}",
@@ -77,17 +68,17 @@ pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> Ta
         }
     }
 
-    let _ = app.emit(
+    daemon.ui_events.emit(
         "sessions-changed",
-        SessionsChangedPayload {
-            session_id: session.id.clone(),
-            project_id: payload.project_id.clone(),
-            task_id: payload.task_id.clone(),
-            reason: "scheduled_task",
-        },
+        serde_json::json!({
+            "sessionId": session.id,
+            "projectId": payload.project_id,
+            "taskId": payload.task_id,
+            "reason": "scheduled_task",
+        }),
     );
 
-    let companion_state = app.state::<CompanionState>();
+    let companion_state = &daemon.companion;
     if companion_state.is_turn_active(&session.id) {
         return TaskRunnerResult::Failed {
             error: "Session already has an active turn".to_string(),
@@ -95,7 +86,7 @@ pub async fn fire_scheduled_task(app: &AppHandle, payload: TaskRunPayload) -> Ta
     }
 
     match crate::companion::actions::send_companion_message(
-        app,
+        daemon,
         &session.id,
         &payload.instruction,
         None,

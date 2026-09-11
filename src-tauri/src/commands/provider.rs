@@ -3,12 +3,14 @@ use crate::config::types::{
     CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, OpenCodeAgentConfigUpdate,
     Provider, Theme,
 };
-use crate::shell;
 use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
 use std::str::FromStr;
-use tauri::{AppHandle, State};
+use std::sync::Arc;
+
+use crate::daemon::DaemonState;
+use tauri::State;
 
 const AGENT_PROVIDER_PROFILE_RETIRED: &str =
     "AgentProviderProfile 已退役（ADR 0005）。请使用模型供应商（Model Provider）配置。";
@@ -135,18 +137,12 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn upsert_agent_provider_profile(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-    _profile: serde_json::Value,
-) -> Result<(), String> {
+pub fn upsert_agent_provider_profile(_profile: serde_json::Value) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
 pub fn activate_agent_provider_profile(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
     _agent_kind: String,
     _profile_id: String,
 ) -> Result<(), String> {
@@ -154,33 +150,22 @@ pub fn activate_agent_provider_profile(
 }
 
 #[tauri::command]
-pub fn activate_default_claude_supplier(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-) -> Result<(), String> {
+pub fn activate_default_claude_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
-pub fn activate_default_codex_supplier(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-) -> Result<(), String> {
+pub fn activate_default_codex_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
-pub fn activate_default_opencode_supplier(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-) -> Result<(), String> {
+pub fn activate_default_opencode_supplier() -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
 pub fn set_active_agent_profile_model(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
     _agent_kind: String,
     _default_model: String,
 ) -> Result<(), String> {
@@ -188,17 +173,12 @@ pub fn set_active_agent_profile_model(
 }
 
 #[tauri::command]
-pub fn delete_agent_provider_profile(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-    _profile_id: String,
-) -> Result<(), String> {
+pub fn delete_agent_provider_profile(_profile_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
 pub fn fetch_agent_profile_models(
-    _state: State<'_, AppState>,
     _agent_kind: String,
     _profile_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
@@ -207,7 +187,6 @@ pub fn fetch_agent_profile_models(
 
 #[tauri::command]
 pub async fn test_agent_provider_profile(
-    _state: State<'_, AppState>,
     _agent_kind: String,
     _profile_id: String,
 ) -> Result<String, String> {
@@ -215,7 +194,7 @@ pub async fn test_agent_provider_profile(
 }
 
 #[tauri::command]
-pub fn get_config(state: State<'_, AppState>) -> AppConfig {
+pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
     get_config_for_companion(state.inner())
 }
 
@@ -225,66 +204,52 @@ pub fn get_config_for_companion(state: &AppState) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn update_provider(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-    _provider: Provider,
-) -> Result<(), String> {
+pub fn update_provider(_provider: Provider) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
-pub fn delete_provider(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-    _provider_id: String,
-) -> Result<(), String> {
+pub fn delete_provider(_provider_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
-pub fn set_active_provider(
-    _state: State<'_, AppState>,
-    _app: AppHandle,
-    _provider_id: String,
-) -> Result<(), String> {
+pub fn set_active_provider(_provider_id: String) -> Result<(), String> {
     agent_provider_profile_retired_err()
 }
 
 #[tauri::command]
 pub fn set_default_agent_kind(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     agent_kind: String,
 ) -> Result<(), String> {
-    set_default_agent_kind_for_companion(state.inner(), &app, agent_kind)
+    set_default_agent_kind_for_companion(&daemon.app, &daemon.roots, agent_kind)
 }
 
 pub fn set_default_agent_kind_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     agent_kind: String,
 ) -> Result<(), String> {
     info!(target: "provider", "Setting default agent kind agent_kind={}", agent_kind);
     let mut config = state.config.lock().unwrap();
     config.agent_defaults.default_agent_kind = AgentKind::from_str(&agent_kind)?;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn update_agent_config(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     agent_kind: String,
     config: serde_json::Value,
 ) -> Result<(), String> {
-    update_agent_config_for_companion(state.inner(), &app, agent_kind, config)
+    update_agent_config_for_companion(&daemon.app, &daemon.roots, agent_kind, config)
 }
 
 pub fn update_agent_config_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     agent_kind: String,
     config: serde_json::Value,
 ) -> Result<(), String> {
@@ -292,18 +257,18 @@ pub fn update_agent_config_for_companion(
     let mut app_config = state.config.lock().unwrap();
     apply_agent_config_update(&mut app_config, AgentKind::from_str(&agent_kind)?, config)?;
 
-    shell::save_config(app, &app_config)?;
+    crate::config::save_config(roots, &app_config)?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> Result<(), String> {
-    set_theme_for_companion(state.inner(), &app, theme)
+pub fn set_theme(daemon: State<'_, Arc<DaemonState>>, theme: String) -> Result<(), String> {
+    set_theme_for_companion(&daemon.app, &daemon.roots, theme)
 }
 
 pub fn set_theme_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     theme: String,
 ) -> Result<(), String> {
     info!(target: "provider", "Setting theme theme={}", theme);
@@ -313,43 +278,41 @@ pub fn set_theme_for_companion(
         "dark" => Theme::Dark,
         _ => Theme::System,
     };
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_compact_ai_output(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     enabled: bool,
 ) -> Result<(), String> {
-    set_compact_ai_output_for_companion(state.inner(), &app, enabled)
+    set_compact_ai_output_for_companion(&daemon.app, &daemon.roots, enabled)
 }
 
 pub fn set_compact_ai_output_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     enabled: bool,
 ) -> Result<(), String> {
     info!(target: "provider", "Setting compact AI output enabled={}", enabled);
     let mut config = state.config.lock().unwrap();
     config.compact_ai_output = enabled;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_immediate_run_mode(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     mode: String,
 ) -> Result<(), String> {
-    set_immediate_run_mode_for_companion(state.inner(), &app, mode)
+    set_immediate_run_mode_for_companion(&daemon.app, &daemon.roots, mode)
 }
 
 pub fn set_immediate_run_mode_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     mode: String,
 ) -> Result<(), String> {
     if !matches!(mode.as_str(), "steer" | "interrupt") {
@@ -359,22 +322,21 @@ pub fn set_immediate_run_mode_for_companion(
     info!(target: "provider", "Setting immediate run mode mode={}", mode);
     let mut config = state.config.lock().unwrap();
     config.immediate_run_mode = mode;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_attachment_enrichment(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     enrichment: AttachmentEnrichmentConfig,
 ) -> Result<(), String> {
-    set_attachment_enrichment_for_companion(state.inner(), &app, enrichment)
+    set_attachment_enrichment_for_companion(&daemon.app, &daemon.roots, enrichment)
 }
 
 pub fn set_attachment_enrichment_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     mut enrichment: AttachmentEnrichmentConfig,
 ) -> Result<(), String> {
     info!(
@@ -394,22 +356,21 @@ pub fn set_attachment_enrichment_for_companion(
     enrichment.api_key_configured = false;
     enrichment.provider_id = None;
     config.attachment_enrichment = enrichment;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_notification_settings(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     settings: NotificationSettings,
 ) -> Result<(), String> {
-    set_notification_settings_for_companion(state.inner(), &app, settings)
+    set_notification_settings_for_companion(&daemon.app, &daemon.roots, settings)
 }
 
 pub fn set_notification_settings_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     settings: NotificationSettings,
 ) -> Result<(), String> {
     if !matches!(
@@ -431,22 +392,21 @@ pub fn set_notification_settings_for_companion(
     );
     let mut config = state.config.lock().unwrap();
     config.notifications = settings;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_default_open_target(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     target: String,
 ) -> Result<(), String> {
-    set_default_open_target_for_companion(state.inner(), &app, target)
+    set_default_open_target_for_companion(&daemon.app, &daemon.roots, target)
 }
 
 pub fn set_default_open_target_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     target: String,
 ) -> Result<(), String> {
     if !matches!(
@@ -459,7 +419,7 @@ pub fn set_default_open_target_for_companion(
     info!(target: "provider", "Setting default open target target={}", target);
     let mut config = state.config.lock().unwrap();
     config.default_open_target = target;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
@@ -467,16 +427,15 @@ const MAX_GIT_INSTRUCTIONS_CHARS: usize = 8_000;
 
 #[tauri::command]
 pub fn set_git_settings(
-    state: State<'_, AppState>,
-    app: AppHandle,
+    daemon: State<'_, Arc<DaemonState>>,
     settings: GitSettingsConfig,
 ) -> Result<(), String> {
-    set_git_settings_for_companion(state.inner(), &app, settings)
+    set_git_settings_for_companion(&daemon.app, &daemon.roots, settings)
 }
 
 pub fn set_git_settings_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     mut settings: GitSettingsConfig,
 ) -> Result<(), String> {
     settings.commit_instructions = settings.commit_instructions.trim().to_string();
@@ -509,7 +468,7 @@ pub fn set_git_settings_for_companion(
         }
     }
     config.git = settings;
-    shell::save_config(app, &config)?;
+    crate::config::save_config(roots, &config)?;
     Ok(())
 }
 
@@ -530,35 +489,35 @@ pub struct PatchAppConfigRequest {
 
 pub fn patch_app_config_for_companion(
     state: &AppState,
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     patch: PatchAppConfigRequest,
 ) -> Result<(), String> {
     if let Some(theme) = patch.theme {
-        set_theme_for_companion(state, app, theme)?;
+        set_theme_for_companion(state, roots, theme)?;
     }
     if let Some(enabled) = patch.compact_ai_output {
-        set_compact_ai_output_for_companion(state, app, enabled)?;
+        set_compact_ai_output_for_companion(state, roots, enabled)?;
     }
     if let Some(mode) = patch.immediate_run_mode {
-        set_immediate_run_mode_for_companion(state, app, mode)?;
+        set_immediate_run_mode_for_companion(state, roots, mode)?;
     }
     if let Some(enrichment) = patch.attachment_enrichment {
-        set_attachment_enrichment_for_companion(state, app, enrichment)?;
+        set_attachment_enrichment_for_companion(state, roots, enrichment)?;
     }
     if let Some(settings) = patch.notifications {
-        set_notification_settings_for_companion(state, app, settings)?;
+        set_notification_settings_for_companion(state, roots, settings)?;
     }
     if let Some(target) = patch.default_open_target {
-        set_default_open_target_for_companion(state, app, target)?;
+        set_default_open_target_for_companion(state, roots, target)?;
     }
     if let Some(settings) = patch.git {
-        set_git_settings_for_companion(state, app, settings)?;
+        set_git_settings_for_companion(state, roots, settings)?;
     }
     if let Some(agent_kind) = patch.default_agent_kind {
-        set_default_agent_kind_for_companion(state, app, agent_kind)?;
+        set_default_agent_kind_for_companion(state, roots, agent_kind)?;
     }
     if let (Some(agent_kind), Some(config)) = (patch.agent_kind, patch.agent_config) {
-        update_agent_config_for_companion(state, app, agent_kind, config)?;
+        update_agent_config_for_companion(state, roots, agent_kind, config)?;
     }
     Ok(())
 }
@@ -812,7 +771,7 @@ pub async fn fetch_provider_models_for_companion(
 /// Test a provider by sending a streaming request. Returns model name on success.
 #[tauri::command]
 pub async fn test_provider(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     provider_id: String,
 ) -> Result<String, String> {
     info!(target: "provider", "Testing provider provider_id={}", provider_id);

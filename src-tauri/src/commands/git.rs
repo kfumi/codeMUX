@@ -1854,7 +1854,7 @@ pub fn push_git_branch(project_path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn generate_git_commit_message(
-    state: State<'_, AppState>,
+    state: State<'_, std::sync::Arc<AppState>>,
     project_path: String,
 ) -> Result<GitCommitMessageSuggestion, String> {
     let config = state.config.lock().unwrap().clone();
@@ -1863,7 +1863,7 @@ pub async fn generate_git_commit_message(
 
 #[tauri::command]
 pub async fn generate_pull_request_description(
-    state: State<'_, AppState>,
+    state: State<'_, std::sync::Arc<AppState>>,
     project_path: String,
 ) -> Result<GitPullRequestSuggestion, String> {
     let config = state.config.lock().unwrap().clone();

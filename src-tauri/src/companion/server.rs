@@ -10,7 +10,6 @@ use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -38,11 +37,10 @@ use crate::companion::routes_terminal;
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
 use crate::config::types::AgentKind;
 use crate::db::operations;
-use crate::AppState;
 
 #[derive(Clone)]
 pub(crate) struct ServerContext {
-    pub app: AppHandle,
+    pub daemon: std::sync::Arc<crate::daemon::DaemonState>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -153,14 +151,13 @@ struct WsQuery {
 }
 
 pub async fn start_daemon_server(
-    app: AppHandle,
+    daemon: std::sync::Arc<crate::daemon::DaemonState>,
     port: u16,
     expose_lan: bool,
     lan_listen_address: String,
 ) -> Result<(), String> {
-    let app_for_status = app.clone();
-    let result = start_daemon_server_body(app, port, expose_lan, lan_listen_address).await;
-    let companion_state = app_for_status.state::<CompanionState>().clone();
+    let companion_state = daemon.companion.clone();
+    let result = start_daemon_server_body(daemon, port, expose_lan, lan_listen_address).await;
     if let Err(error) = &result {
         companion_state.set_daemon_error(Some(error.clone())).await;
     } else {
@@ -170,18 +167,17 @@ pub async fn start_daemon_server(
 }
 
 async fn start_daemon_server_body(
-    app: AppHandle,
+    daemon: std::sync::Arc<crate::daemon::DaemonState>,
     port: u16,
     expose_lan: bool,
     lan_listen_address: String,
 ) -> Result<(), String> {
-    let companion_state = app.state::<CompanionState>();
+    let companion_state = daemon.companion.clone();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
 
     stop_daemon_server_inner(&companion_state).await?;
 
-    let app_state = app.state::<AppState>();
-    let app_data_dir = app_state.app_data_dir.clone();
+    let app_data_dir = daemon.app.app_data_dir.clone();
     let _token =
         crate::companion::local_daemon_token::ensure_local_daemon_token(&app_data_dir, true)?;
 
@@ -190,8 +186,10 @@ async fn start_daemon_server_body(
         *stored_port = port;
     }
 
-    let static_dir = crate::paths::PathRoots::from_app(&app)?.mobile_static_dir();
-    let ctx = ServerContext { app: app.clone() };
+    let static_dir = daemon.roots.mobile_static_dir();
+    let ctx = ServerContext {
+        daemon: daemon.clone(),
+    };
     let router = build_router(ctx, static_dir);
 
     let bind_address = if expose_lan {
@@ -222,7 +220,7 @@ async fn start_daemon_server_body(
 
     if expose_lan {
         if let Err(error) =
-            crate::companion::relay::sync_relay_transport(&app, &companion_state).await
+            crate::companion::relay::sync_relay_transport(&daemon, &companion_state).await
         {
             warn!(target: "companion", "Failed to start relay transport: {}", error);
         }
@@ -249,28 +247,9 @@ async fn start_daemon_server_body(
     Ok(())
 }
 
-/// Start with LAN exposure (legacy alias).
-pub async fn start_companion_server(
-    app: AppHandle,
-    port: u16,
-    listen_address: String,
-) -> Result<(), String> {
-    start_daemon_server(app, port, true, listen_address).await
-}
-
-pub async fn stop_daemon_server(app: AppHandle) -> Result<(), String> {
-    let companion_state = app.state::<CompanionState>();
-    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
-    stop_daemon_server_inner(&companion_state).await
-}
-
 pub async fn stop_daemon_for_state(companion_state: &CompanionState) -> Result<(), String> {
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
     stop_daemon_server_inner(companion_state).await
-}
-
-pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
-    stop_daemon_server(app).await
 }
 
 async fn stop_daemon_server_inner(companion_state: &CompanionState) -> Result<(), String> {
@@ -403,7 +382,7 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
 }
 
 async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
-    let companion_state = ctx.app.state::<CompanionState>();
+    let companion_state = ctx.daemon.companion.clone();
     Json(serde_json::json!({
         "ok": companion_state.inner.is_loopback_running(),
         "loopback": companion_state.inner.is_loopback_running(),
@@ -414,12 +393,12 @@ async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
 async fn pair_offer(
     State(ctx): State<ServerContext>,
 ) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
-    let companion_state = ctx.app.state::<CompanionState>();
+    let companion_state = ctx.daemon.companion.clone();
     if !companion_state.inner.is_lan_exposed() {
         return Err(ApiError::forbidden("Mobile companion is not enabled"));
     }
     let (desktop_id, port, relay) = {
-        let app_state = ctx.app.state::<AppState>();
+        let app_state = ctx.daemon.app.clone();
         let mut config = app_state
             .config
             .lock()
@@ -433,7 +412,7 @@ async fn pair_offer(
         let port = config.companion.port;
         let relay = config.companion.relay.clone();
         if !had_desktop_id {
-            crate::shell::save_config(&ctx.app, &config).map_err(ApiError::internal)?;
+            crate::config::save_config(&ctx.daemon.roots, &config).map_err(ApiError::internal)?;
         }
         (desktop_id, port, relay)
     };
@@ -457,7 +436,7 @@ async fn pair_claim(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<PairClaimRequest>,
 ) -> Result<Json<PairClaimResponse>, ApiError> {
-    let companion_state = ctx.app.state::<CompanionState>();
+    let companion_state = ctx.daemon.companion.clone();
     if !is_loopback_peer(Some(peer)) && !companion_state.inner.is_lan_exposed() {
         return Err(ApiError::forbidden("Mobile companion is not enabled"));
     }
@@ -467,9 +446,8 @@ async fn pair_claim(
         return Err(ApiError::bad_request("Invalid or expired pairing code"));
     }
 
-    let app_state = ctx.app.state::<AppState>();
-    let result =
-        complete_pairing(app_state.inner(), body.name.as_deref()).map_err(ApiError::internal)?;
+    let app_state = ctx.daemon.app.clone();
+    let result = complete_pairing(&app_state, body.name.as_deref()).map_err(ApiError::internal)?;
     Ok(Json(PairClaimResponse {
         token: result.token,
         device_id: result.device_id,
@@ -482,7 +460,7 @@ async fn list_sessions(
     headers: HeaderMap,
 ) -> Result<Json<Vec<operations::Session>>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -499,7 +477,7 @@ async fn create_session(
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<Json<operations::Session>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let agent_kind = AgentKind::from_str(body.agent_kind.as_deref().unwrap_or("claude_code"))
         .map_err(ApiError::bad_request)?;
     let db = app_state
@@ -570,7 +548,7 @@ async fn session_events(
         )?;
         return Ok(Json(page.events));
     }
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -597,7 +575,7 @@ fn read_session_timeline_page(
     session_id: &str,
     query: SessionTimelineQuery,
 ) -> Result<operations::SessionTimelinePage, ApiError> {
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -617,7 +595,7 @@ async fn session_runtime_state(
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let companion_state = ctx.app.state::<CompanionState>();
+    let companion_state = ctx.daemon.companion.clone();
     Ok(Json(serde_json::json!({
         "running": companion_state.is_turn_active(&session_id),
     })))
@@ -635,7 +613,7 @@ async fn send_message(
         return Err(ApiError::bad_request("Prompt cannot be empty"));
     }
     send_companion_message(
-        &ctx.app,
+        &ctx.daemon,
         &session_id,
         body.prompt.trim(),
         body.input_payload,
@@ -654,8 +632,8 @@ async fn composer_context(
     Path(session_id): Path<String>,
 ) -> Result<Json<crate::companion::context::ComposerContext>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
-    build_composer_context(app_state.inner(), &session_id)
+    let app_state = ctx.daemon.app.clone();
+    build_composer_context(&app_state, &session_id)
         .await
         .map(Json)
         .map_err(ApiError::bad_request)
@@ -671,7 +649,7 @@ async fn update_session_settings(
     authorize(&ctx, &headers, Some(peer))?;
     let agent_kind = AgentKind::from_str(&body.agent_kind).map_err(ApiError::bad_request)?;
     let session = update_companion_settings(
-        &ctx.app,
+        &ctx.daemon,
         &session_id,
         CompanionSettingsUpdate {
             agent_kind,
@@ -700,7 +678,7 @@ async fn interrupt_session(
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    interrupt_companion_session(&ctx.app, &session_id)
+    interrupt_companion_session(&ctx.daemon, &session_id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(StatusCode::NO_CONTENT)
@@ -712,7 +690,7 @@ async fn list_projects(
     headers: HeaderMap,
 ) -> Result<Json<Vec<operations::Project>>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -736,7 +714,7 @@ async fn create_project(
     Json(body): Json<CreateProjectRequest>,
 ) -> Result<Json<operations::Project>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -760,7 +738,7 @@ async fn rename_project(
     Json(body): Json<RenameProjectRequest>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -777,7 +755,7 @@ async fn delete_project(
     Path(project_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
+    let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
@@ -793,8 +771,8 @@ async fn bootstrap(
     headers: HeaderMap,
 ) -> Result<Json<crate::companion::config::MobileBootstrap>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let app_state = ctx.app.state::<AppState>();
-    Ok(Json(build_mobile_bootstrap(app_state.inner())))
+    let app_state = ctx.daemon.app.clone();
+    Ok(Json(build_mobile_bootstrap(&app_state)))
 }
 
 async fn permission_respond(
@@ -804,9 +782,14 @@ async fn permission_respond(
     Json(body): Json<PermissionRespondRequest>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    respond_companion_permission(&ctx.app, &body.session_id, &body.request_id, body.response)
-        .await
-        .map_err(ApiError::bad_request)?;
+    respond_companion_permission(
+        &ctx.daemon,
+        &body.session_id,
+        &body.request_id,
+        body.response,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -817,9 +800,14 @@ async fn user_input_respond(
     Json(body): Json<UserInputRespondRequest>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    send_companion_tool_response(&ctx.app, &body.session_id, &body.tool_use_id, body.response)
-        .await
-        .map_err(ApiError::bad_request)?;
+    send_companion_tool_response(
+        &ctx.daemon,
+        &body.session_id,
+        &body.tool_use_id,
+        body.response,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -835,10 +823,11 @@ async fn ws_handler(
 }
 
 async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: String) {
-    let companion_state = ctx.app.state::<CompanionState>();
+    let companion_state = ctx.daemon.companion.clone();
     let mut rx = companion_state.inner.event_tx.subscribe();
 
-    let initial_events = if let Some(app_state) = ctx.app.try_state::<AppState>() {
+    let initial_events = {
+        let app_state = ctx.daemon.app.clone();
         app_state
             .db
             .lock()
@@ -855,8 +844,6 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             })
             .map(|page| page.events)
             .unwrap_or_default()
-    } else {
-        Vec::new()
     };
 
     for event in initial_events {
@@ -965,8 +952,8 @@ fn authorize_token_device(
     token: &str,
     peer: Option<SocketAddr>,
 ) -> Result<operations::PairedDevice, ApiError> {
-    let app_state = ctx.app.state::<AppState>();
-    let companion_state = ctx.app.state::<CompanionState>();
+    let app_state = ctx.daemon.app.clone();
+    let companion_state = ctx.daemon.companion.clone();
     let loopback = is_loopback_peer(peer);
     match classify_local_daemon_token(
         &app_state.app_data_dir,
@@ -1193,5 +1180,57 @@ mod tests {
 
         assert!(!companion_state.inner.is_loopback_running());
         assert!(!companion_state.inner.is_lan_exposed());
+    }
+}
+
+#[cfg(test)]
+mod headless_tests {
+    use super::start_daemon_server;
+    use crate::daemon::DaemonState;
+    use crate::paths::PathRoots;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn headless_daemon_serves_loopback_health() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let daemon = Arc::new(
+            DaemonState::assemble(
+                PathRoots {
+                    app_data_dir: temp.path().to_path_buf(),
+                    resource_dir: None,
+                },
+                Arc::new(crate::daemon::NullUiEventSink),
+            )
+            .expect("assemble"),
+        );
+
+        // 找一个空闲端口:绑定后立即释放,再交给 daemon 绑定。
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe");
+        let port = probe.local_addr().expect("addr").port();
+        drop(probe);
+
+        start_daemon_server(daemon.clone(), port, false, "127.0.0.1".to_string())
+            .await
+            .expect("start daemon server");
+
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        stream
+            .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read response");
+        let response = String::from_utf8_lossy(&buf).to_string();
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "loopback /api/health should answer 200 without a window, got: {response}"
+        );
+
+        super::stop_daemon_for_state(&daemon.companion)
+            .await
+            .expect("stop daemon");
     }
 }

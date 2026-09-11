@@ -10,12 +10,14 @@ use crate::db::operations::{self, NativeSessionRef};
 use crate::AppState;
 use log::{info, warn};
 use std::str::FromStr;
-use tauri::{AppHandle, Manager, State};
+use std::sync::Arc;
+
+use tauri::State;
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_session(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     title: String,
     agent_kind: Option<String>,
     mode: Option<String>,
@@ -61,14 +63,16 @@ pub fn create_session(
 }
 
 #[tauri::command]
-pub fn get_all_sessions(state: State<'_, AppState>) -> Result<Vec<operations::Session>, String> {
+pub fn get_all_sessions(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<operations::Session>, String> {
     let db = state.db.lock().unwrap();
     operations::get_all_sessions(&db).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_archived_sessions(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<operations::Session>, String> {
     let db = state.db.lock().unwrap();
     operations::get_all_archived_sessions(&db).map_err(|e| e.to_string())
@@ -76,11 +80,18 @@ pub fn get_archived_sessions(
 
 #[tauri::command]
 pub async fn delete_session(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    agent_state: State<'_, AgentState>,
+    daemon: tauri::State<'_, Arc<crate::daemon::DaemonState>>,
     session_id: String,
 ) -> Result<(), String> {
+    delete_session_impl(daemon.inner(), session_id).await
+}
+
+pub async fn delete_session_impl(
+    daemon: &crate::daemon::DaemonState,
+    session_id: String,
+) -> Result<(), String> {
+    let state = &daemon.app;
+    let agent_state = &daemon.agent;
     info!(target: "session", "Deleting session session_id={}", session_id);
     let (skip_native_cleanup, native_sessions) = {
         let db = state.db.lock().unwrap();
@@ -100,9 +111,9 @@ pub async fn delete_session(
 
     if !skip_native_cleanup {
         cleanup_native_sessions_best_effort(
-            &app,
-            state.inner(),
-            agent_state.inner(),
+            &daemon.roots,
+            state,
+            agent_state,
             &session_id,
             &native_sessions,
             true,
@@ -115,14 +126,17 @@ pub async fn delete_session(
 }
 
 #[tauri::command]
-pub fn archive_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+pub fn archive_session(state: State<'_, Arc<AppState>>, session_id: String) -> Result<(), String> {
     info!(target: "session", "Archiving session session_id={}", session_id);
     let db = state.db.lock().unwrap();
     operations::archive_session(&db, &session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn unarchive_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+pub fn unarchive_session(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<(), String> {
     info!(target: "session", "Unarchiving session session_id={}", session_id);
     let db = state.db.lock().unwrap();
     operations::unarchive_session(&db, &session_id).map_err(|e| e.to_string())
@@ -130,7 +144,7 @@ pub fn unarchive_session(state: State<'_, AppState>, session_id: String) -> Resu
 
 #[tauri::command]
 pub fn set_session_pinned(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     session_id: String,
     pinned: bool,
 ) -> Result<(), String> {
@@ -141,7 +155,7 @@ pub fn set_session_pinned(
 
 #[tauri::command]
 pub fn set_session_read_only(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     session_id: String,
     read_only: bool,
 ) -> Result<(), String> {
@@ -157,7 +171,7 @@ pub fn set_session_read_only(
 
 #[tauri::command]
 pub fn update_session_title(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     session_id: String,
     title: String,
 ) -> Result<(), String> {
@@ -167,7 +181,15 @@ pub fn update_session_title(
 
 #[tauri::command]
 pub fn update_session_working_path(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    working_path: String,
+) -> Result<operations::Session, String> {
+    update_session_working_path_impl(state.inner(), session_id, working_path)
+}
+
+pub fn update_session_working_path_impl(
+    state: &AppState,
     session_id: String,
     working_path: String,
 ) -> Result<operations::Session, String> {
@@ -180,14 +202,30 @@ pub fn update_session_working_path(
 }
 
 #[tauri::command]
-pub fn touch_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+pub fn touch_session(state: State<'_, Arc<AppState>>, session_id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     operations::touch_session(&db, &session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn update_session_provider(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    provider_id: Option<String>,
+    model: String,
+    reasoning_effort: Option<String>,
+) -> Result<(), String> {
+    update_session_provider_impl(
+        state.inner(),
+        session_id,
+        provider_id,
+        model,
+        reasoning_effort,
+    )
+}
+
+pub fn update_session_provider_impl(
+    state: &AppState,
     session_id: String,
     provider_id: Option<String>,
     model: String,
@@ -214,7 +252,15 @@ pub fn update_session_provider(
 
 #[tauri::command]
 pub fn update_session_reasoning_effort(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    reasoning_effort: String,
+) -> Result<(), String> {
+    update_session_reasoning_effort_impl(state.inner(), session_id, reasoning_effort)
+}
+
+pub fn update_session_reasoning_effort_impl(
+    state: &AppState,
     session_id: String,
     reasoning_effort: String,
 ) -> Result<(), String> {
@@ -231,8 +277,25 @@ pub fn update_session_reasoning_effort(
 
 #[tauri::command]
 pub async fn update_session_permissions(
-    state: State<'_, AppState>,
-    agent_state: State<'_, AgentState>,
+    state: State<'_, Arc<AppState>>,
+    agent_state: State<'_, Arc<AgentState>>,
+    session_id: String,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
+) -> Result<(), String> {
+    update_session_permissions_impl(
+        state.inner(),
+        agent_state.inner(),
+        session_id,
+        permission_config,
+        plan_mode,
+    )
+    .await
+}
+
+pub async fn update_session_permissions_impl(
+    state: &AppState,
+    agent_state: &AgentState,
     session_id: String,
     permission_config: Option<String>,
     plan_mode: Option<String>,
@@ -282,7 +345,7 @@ pub async fn update_session_permissions(
 }
 
 pub(crate) async fn cleanup_native_sessions_best_effort(
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     state: &AppState,
     agent_state: &AgentState,
     app_session_id: &str,
@@ -324,7 +387,7 @@ pub(crate) async fn cleanup_native_sessions_best_effort(
             }
             AgentKind::Opencode => {
                 if let Err(error) = delete_opencode_native_session(
-                    app,
+                    roots,
                     state,
                     agent_state,
                     app_session_id,
@@ -374,20 +437,11 @@ pub(crate) async fn cleanup_native_sessions_best_effort(
     }
 }
 
-pub async fn delete_session_for_companion(
-    app: &AppHandle,
-    session_id: String,
-) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    delete_session(app.clone(), state, agent_state, session_id).await
-}
-
 pub async fn delete_session_with_agent_cleanup_for_companion(
-    app: &AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
 ) -> Result<(), String> {
-    let state = app.state::<AppState>();
+    let state = &daemon.app;
     let skip_cleanup = {
         let db = state.db.lock().unwrap();
         operations::get_session(&db, &session_id)
@@ -396,67 +450,57 @@ pub async fn delete_session_with_agent_cleanup_for_companion(
             .unwrap_or(true)
     };
     if !skip_cleanup {
-        let _ = crate::agent::session_lifecycle::shutdown_agent(
-            app.state::<AppState>(),
-            app.state::<AgentState>(),
-            session_id.clone(),
+        let _ = crate::agent::session_lifecycle::shutdown_agent_for_companion(
+            state,
+            &daemon.agent,
+            &session_id,
         )
         .await;
-        let _ = crate::agent::session_lifecycle::reset_agent_session(
-            app.state::<AppState>(),
-            app.state::<AgentState>(),
-            session_id.clone(),
+        let _ = crate::agent::session_lifecycle::reset_agent_session_for_companion(
+            state,
+            &daemon.agent,
+            &session_id,
         )
         .await;
     }
-    delete_session_for_companion(app, session_id).await
+    delete_session_impl(daemon, session_id).await
 }
 
 pub fn update_session_working_path_for_companion(
-    app: &AppHandle,
+    state: &AppState,
     session_id: String,
     working_path: String,
 ) -> Result<operations::Session, String> {
-    update_session_working_path(app.state::<AppState>(), session_id, working_path)
-}
-
-pub fn touch_session_for_companion(app: &AppHandle, session_id: String) -> Result<(), String> {
-    touch_session(app.state::<AppState>(), session_id)
+    update_session_working_path_impl(state, session_id, working_path)
 }
 
 pub fn update_session_provider_for_companion(
-    app: &AppHandle,
+    state: &AppState,
     session_id: String,
     provider_id: Option<String>,
     model: String,
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
-    update_session_provider(
-        app.state::<AppState>(),
-        session_id,
-        provider_id,
-        model,
-        reasoning_effort,
-    )
+    update_session_provider_impl(state, session_id, provider_id, model, reasoning_effort)
 }
 
 pub fn update_session_reasoning_effort_for_companion(
-    app: &AppHandle,
+    state: &AppState,
     session_id: String,
     reasoning_effort: String,
 ) -> Result<(), String> {
-    update_session_reasoning_effort(app.state::<AppState>(), session_id, reasoning_effort)
+    update_session_reasoning_effort_impl(state, session_id, reasoning_effort)
 }
 
 pub async fn update_session_permissions_for_companion(
-    app: &AppHandle,
+    daemon: &crate::daemon::DaemonState,
     session_id: String,
     permission_config: Option<String>,
     plan_mode: Option<String>,
 ) -> Result<(), String> {
-    update_session_permissions(
-        app.state::<AppState>(),
-        app.state::<AgentState>(),
+    update_session_permissions_impl(
+        &daemon.app,
+        &daemon.agent,
         session_id,
         permission_config,
         plan_mode,

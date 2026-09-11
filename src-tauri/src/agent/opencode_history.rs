@@ -1,7 +1,7 @@
 use log::{debug, info};
 use rusqlite::Connection;
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::State;
 use tokio::sync::oneshot;
 
 use super::history_events::normalize_history_events;
@@ -2129,12 +2129,19 @@ pub(crate) fn timestamp_string(timestamp: i64) -> String {
 
 #[tauri::command]
 pub async fn load_opencode_session_events(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    app_session_id: String,
+) -> Result<Vec<Value>, String> {
+    load_opencode_session_events_impl(state.inner(), app_session_id).await
+}
+
+pub(crate) async fn load_opencode_session_events_impl(
+    state: &crate::AppState,
     app_session_id: String,
 ) -> Result<Vec<Value>, String> {
     debug!(target: "agent", "Loading OpenCode SQLite session events for app_session_id={}", app_session_id);
     let Some(opencode_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+        get_agent_session_id(state, &app_session_id, AgentKind::Opencode)?
     else {
         info!(target: "agent", "No OpenCode mapping found for app_session_id={}", app_session_id);
         return Ok(Vec::new());
@@ -2150,17 +2157,15 @@ pub async fn load_opencode_session_events(
 
 #[tauri::command]
 pub async fn delete_opencode_session(
-    app: AppHandle,
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
+    daemon: tauri::State<'_, std::sync::Arc<crate::daemon::DaemonState>>,
     app_session_id: String,
 ) -> Result<(), String> {
-    delete_opencode_session_for_companion(&app, state.inner(), agent_state.inner(), app_session_id)
+    delete_opencode_session_for_companion(&daemon.roots, &daemon.app, &daemon.agent, app_session_id)
         .await
 }
 
 pub async fn delete_opencode_session_for_companion(
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     state: &crate::AppState,
     agent_state: &AgentState,
     app_session_id: String,
@@ -2175,7 +2180,7 @@ pub async fn delete_opencode_session_for_companion(
         return Ok(());
     };
     delete_opencode_native_session(
-        app,
+        roots,
         state,
         agent_state,
         &app_session_id,
@@ -2185,7 +2190,7 @@ pub async fn delete_opencode_session_for_companion(
 }
 
 pub(crate) async fn delete_opencode_native_session(
-    app: &AppHandle,
+    roots: &crate::paths::PathRoots,
     state: &crate::AppState,
     agent_state: &AgentState,
     app_session_id: &str,
@@ -2245,11 +2250,8 @@ pub(crate) async fn delete_opencode_native_session(
 
     // No session sidecar is alive after an app restart. Use a short-lived
     // sidecar so the cleanup still goes through OpenCode's official SDK.
-    let (mut handle, mut events) = spawn_sidecar(
-        &crate::paths::PathRoots::from_app(app)?,
-        super::sidecar_events::SidecarEventBinding::unbound(),
-    )
-    .await?;
+    let (mut handle, mut events) =
+        spawn_sidecar(roots, super::sidecar_events::SidecarEventBinding::unbound()).await?;
     let send_result = handle.send_command(&command.to_string()).await;
     if let Err(error) = send_result {
         handle.shutdown().await;

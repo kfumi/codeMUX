@@ -1,4 +1,6 @@
 use keyring::Entry;
+use std::sync::Arc;
+
 use tauri::State;
 
 use crate::forge::{self, CreatePullRequestRequest, CreatePullRequestResult};
@@ -21,7 +23,14 @@ fn read_gitee_token() -> Option<String> {
 
 #[tauri::command]
 pub async fn create_pull_request(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
+    request: CreatePullRequestRequest,
+) -> Result<CreatePullRequestResult, String> {
+    create_pull_request_impl(state.inner(), request).await
+}
+
+pub async fn create_pull_request_impl(
+    state: &AppState,
     request: CreatePullRequestRequest,
 ) -> Result<CreatePullRequestResult, String> {
     let config = state.config.lock().unwrap().clone();

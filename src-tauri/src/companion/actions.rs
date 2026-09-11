@@ -1,12 +1,15 @@
-use tauri::{AppHandle, Manager};
+use std::sync::Arc;
 
 use crate::agent::commands::{
     ensure_agent_session_for_companion, interrupt_agent_session_for_companion,
     send_command_to_session, AgentState,
 };
+use crate::agent::session_lifecycle::start_agent_session_core;
+use crate::agent::sidecar_events::null_sink;
 use crate::agent_runtime::opencode::OpenCodeRuntime;
 use crate::companion::CompanionState;
 use crate::config::types::AgentKind;
+use crate::daemon::DaemonState;
 use crate::db::operations;
 use crate::AppState;
 
@@ -65,17 +68,39 @@ pub(crate) fn decide_active_sidecar_send(
 }
 
 pub async fn send_companion_message(
-    app: &AppHandle,
+    daemon: &DaemonState,
     session_id: &str,
     prompt: &str,
     input_payload: Option<serde_json::Value>,
     delivery: Option<&str>,
     request_id: Option<&str>,
 ) -> Result<(), String> {
-    let app_state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    let companion_state = app.state::<CompanionState>();
+    send_companion_message_owned(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        daemon.companion.clone(),
+        daemon.roots.clone(),
+        session_id,
+        prompt,
+        input_payload,
+        delivery,
+        request_id,
+    )
+    .await
+}
 
+/// Owned-handle variant so the queued-message dispatch task can stay `'static`.
+pub(crate) async fn send_companion_message_owned(
+    app_state: Arc<AppState>,
+    agent_state: Arc<AgentState>,
+    companion_state: Arc<CompanionState>,
+    roots: crate::paths::PathRoots,
+    session_id: &str,
+    prompt: &str,
+    input_payload: Option<serde_json::Value>,
+    delivery: Option<&str>,
+    request_id: Option<&str>,
+) -> Result<(), String> {
     crate::agent::commands::reject_read_only_session(&app_state, session_id)?;
 
     let sidecar_running = {
@@ -118,8 +143,7 @@ pub async fn send_companion_message(
     }
 
     companion_state.mark_turn_active(session_id);
-    let cwd = resolve_session_cwd(app_state.inner(), session_id)?;
-    let channel = tauri::ipc::Channel::new(|_| Ok(()));
+    let cwd = resolve_session_cwd(&app_state, session_id)?;
     let reasoning_effort = {
         let db = app_state.db.lock().map_err(|error| error.to_string())?;
         operations::get_session(&db, session_id)
@@ -127,18 +151,19 @@ pub async fn send_companion_message(
             .and_then(|session| session.reasoning_effort)
     };
 
-    let result = crate::agent::commands::start_agent_session(
-        app.clone(),
+    let result = start_agent_session_core(
         app_state,
         agent_state,
+        companion_state.clone(),
+        roots,
         session_id.to_string(),
         prompt.to_string(),
         cwd,
-        channel,
+        null_sink(),
         reasoning_effort,
         input_payload,
         None,
-        Some(false),
+        false,
     )
     .await;
     if result.is_err() {
@@ -155,15 +180,15 @@ fn validate_companion_agent_kind(current: AgentKind, requested: AgentKind) -> Re
 }
 
 pub async fn update_companion_settings(
-    app: &AppHandle,
+    daemon: &DaemonState,
     session_id: &str,
     update: CompanionSettingsUpdate,
 ) -> Result<operations::Session, String> {
-    let app_state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    let companion_state = app.state::<CompanionState>();
+    let app_state = &daemon.app;
+    let agent_state = &daemon.agent;
+    let companion_state = &daemon.companion;
 
-    crate::agent::commands::reject_read_only_session(app_state.inner(), session_id)?;
+    crate::agent::commands::reject_read_only_session(app_state, session_id)?;
     if companion_state.is_turn_active(session_id) {
         return Err("会话正在运行，请等待处理完成后再修改设置".to_string());
     }
@@ -204,22 +229,15 @@ pub async fn update_companion_settings(
         sidecars.contains_key(session_id)
     };
     if sidecar_running {
-        let cwd = resolve_session_cwd(app_state.inner(), session_id)?;
+        let cwd = resolve_session_cwd(app_state, session_id)?;
         let reasoning_effort = {
             let db = app_state.db.lock().map_err(|error| error.to_string())?;
             operations::get_session(&db, session_id)
                 .map_err(|error| error.to_string())?
                 .and_then(|session| session.reasoning_effort)
         };
-        if let Err(error) = ensure_agent_session_for_companion(
-            app,
-            app_state.inner(),
-            agent_state.inner(),
-            session_id,
-            cwd,
-            reasoning_effort,
-        )
-        .await
+        if let Err(error) =
+            ensure_agent_session_for_companion(daemon, session_id, cwd, reasoning_effort).await
         {
             log::warn!(
                 target: "companion",
@@ -236,46 +254,48 @@ pub async fn update_companion_settings(
         .ok_or_else(|| "会话不存在".to_string())
 }
 
-pub async fn interrupt_companion_session(app: &AppHandle, session_id: &str) -> Result<(), String> {
-    let app_state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    let companion_state = app.state::<CompanionState>();
-    interrupt_agent_session_for_companion(app_state.inner(), agent_state.inner(), session_id)
-        .await?;
+pub async fn interrupt_companion_session(
+    daemon: &DaemonState,
+    session_id: &str,
+) -> Result<(), String> {
+    let app_state = &daemon.app;
+    let agent_state = &daemon.agent;
+    let companion_state = &daemon.companion;
+    interrupt_agent_session_for_companion(app_state, agent_state, session_id).await?;
     let _ = companion_state.finish_turn(session_id);
     Ok(())
 }
 
 pub async fn respond_companion_permission(
-    app: &AppHandle,
+    daemon: &DaemonState,
     session_id: &str,
     request_id: &str,
     response: serde_json::Value,
 ) -> Result<(), String> {
-    let app_state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    crate::agent::commands::reject_read_only_session(&app_state, session_id)?;
+    let app_state = &daemon.app;
+    let agent_state = &daemon.agent;
+    crate::agent::commands::reject_read_only_session(app_state, session_id)?;
 
     let cmd = OpenCodeRuntime::respond_to_permission_command(request_id, session_id, response);
-    send_command_to_session(&agent_state, session_id, cmd).await
+    send_command_to_session(agent_state, session_id, cmd).await
 }
 
 pub async fn send_companion_tool_response(
-    app: &AppHandle,
+    daemon: &DaemonState,
     session_id: &str,
     tool_use_id: &str,
     response: serde_json::Value,
 ) -> Result<(), String> {
-    let app_state = app.state::<AppState>();
-    let agent_state = app.state::<AgentState>();
-    crate::agent::commands::reject_read_only_session(&app_state, session_id)?;
+    let app_state = &daemon.app;
+    let agent_state = &daemon.agent;
+    crate::agent::commands::reject_read_only_session(app_state, session_id)?;
 
     let cmd = serde_json::json!({
         "type": "tool_response",
         "toolUseId": tool_use_id,
         "response": response,
     });
-    send_command_to_session(&agent_state, session_id, cmd).await
+    send_command_to_session(agent_state, session_id, cmd).await
 }
 
 #[cfg(test)]

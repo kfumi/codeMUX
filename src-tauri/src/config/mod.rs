@@ -628,7 +628,10 @@ mod tests {
     #[test]
     fn load_and_save_config_through_injected_roots_without_tauri_app() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
-        let roots = crate::paths::PathRoots::new(temp_dir.path(), None);
+        let roots = crate::paths::PathRoots {
+            app_data_dir: temp_dir.path().to_path_buf(),
+            resource_dir: None,
+        };
 
         // 首次加载写入默认配置文件。
         let loaded = super::load_config(&roots);

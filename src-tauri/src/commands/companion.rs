@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use local_ip_address::local_ip;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::companion::desktop_id::get_or_create_desktop_id;
 use crate::companion::offer::build_pairing_offer;
@@ -9,9 +11,9 @@ use crate::companion::pairing_code::{
     resolve_lan_ip,
 };
 use crate::companion::relay::{set_relay_config, set_relay_enabled, RelayConnectionState};
-use crate::companion::{start_daemon_server, stop_daemon_server, CompanionState};
+use crate::companion::{start_daemon_server, CompanionState};
+use crate::daemon::DaemonState;
 use crate::db::operations::{self, PairedDevice};
-use crate::shell;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -50,7 +52,10 @@ fn relay_connection_state_label(state: RelayConnectionState) -> &'static str {
     }
 }
 
-fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<String, String> {
+fn ensure_desktop_id_persisted(
+    state: &AppState,
+    roots: &crate::paths::PathRoots,
+) -> Result<String, String> {
     let mut config = state.config.lock().map_err(|error| error.to_string())?;
     let had_desktop_id = config
         .companion
@@ -59,17 +64,15 @@ fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<Stri
         .is_some_and(|value| !value.trim().is_empty());
     let desktop_id = get_or_create_desktop_id(&mut config.companion);
     if !had_desktop_id {
-        shell::save_config(app, &config)?;
+        crate::config::save_config(roots, &config)?;
     }
     Ok(desktop_id)
 }
 
-async fn build_companion_status(
-    app: &AppHandle,
-    state: &AppState,
-    companion_state: &CompanionState,
-) -> Result<CompanionStatus, String> {
-    let desktop_id = ensure_desktop_id_persisted(app, state)?;
+async fn build_companion_status(daemon: &DaemonState) -> Result<CompanionStatus, String> {
+    let state = &daemon.app;
+    let companion_state = &daemon.companion;
+    let desktop_id = ensure_desktop_id_persisted(state, &daemon.roots)?;
     let daemon_ready = companion_state.inner.is_loopback_running();
     let lan_exposed = companion_state.inner.is_lan_exposed();
     let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
@@ -116,7 +119,7 @@ async fn build_companion_status(
 
     if should_save_config {
         let config = state.config.lock().map_err(|error| error.to_string())?;
-        shell::save_config(app, &config)?;
+        crate::config::save_config(&daemon.roots, &config)?;
     }
 
     let relay_state = companion_state.relay_state().get().await;
@@ -144,26 +147,25 @@ async fn build_companion_status(
 }
 
 #[tauri::command]
-pub fn get_local_daemon_token(state: State<'_, AppState>) -> Result<String, String> {
+pub fn get_local_daemon_token(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     crate::companion::local_daemon_token::ensure_local_daemon_token(&state.app_data_dir, false)
 }
 
 #[tauri::command]
 pub async fn get_companion_status(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
 ) -> Result<CompanionStatus, String> {
-    build_companion_status(&app, state.inner(), &companion_state).await
+    build_companion_status(daemon.inner()).await
 }
 
 #[tauri::command]
 pub async fn set_companion_enabled(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
     enabled: bool,
 ) -> Result<CompanionStatus, String> {
+    let daemon = daemon.inner();
+    let state = &daemon.app;
+    let companion_state = &daemon.companion;
     {
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         config.companion.enabled = enabled;
@@ -171,7 +173,7 @@ pub async fn set_companion_enabled(
         if !enabled {
             clear_persisted_pairing_code(&mut config.companion);
         }
-        shell::save_config(&app, &config)?;
+        crate::config::save_config(&daemon.roots, &config)?;
     }
 
     if enabled {
@@ -182,10 +184,10 @@ pub async fn set_companion_enabled(
                 config.companion.listen_address.clone(),
             )
         };
-        if let Err(error) = start_daemon_server(app.clone(), port, true, listen_address).await {
+        if let Err(error) = start_daemon_server(daemon.clone(), port, true, listen_address).await {
             let mut config = state.config.lock().map_err(|error| error.to_string())?;
             config.companion.enabled = false;
-            shell::save_config(&app, &config)?;
+            crate::config::save_config(&daemon.roots, &config)?;
             companion_state.inner.set_lan_exposed(false);
             companion_state.clear_pairing_codes();
             return Err(error);
@@ -198,59 +200,59 @@ pub async fn set_companion_enabled(
                 config.companion.listen_address.clone(),
             )
         };
-        crate::companion::relay::stop_relay_transport(&companion_state).await;
+        crate::companion::relay::stop_relay_transport(companion_state).await;
         companion_state.clear_pairing_codes();
-        if let Err(error) = start_daemon_server(app.clone(), port, false, listen_address).await {
+        if let Err(error) = start_daemon_server(daemon.clone(), port, false, listen_address).await {
             return Err(error);
         }
     }
 
-    build_companion_status(&app, state.inner(), &companion_state).await
+    build_companion_status(daemon).await
 }
 
 #[tauri::command]
 pub async fn set_companion_relay_enabled(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
     enabled: bool,
 ) -> Result<CompanionStatus, String> {
-    set_relay_enabled(&app, &companion_state, enabled).await?;
-    build_companion_status(&app, state.inner(), &companion_state).await
+    set_relay_enabled(daemon.inner(), &daemon.companion, enabled).await?;
+    build_companion_status(daemon.inner()).await
 }
 
 #[tauri::command]
 pub async fn set_companion_relay_config(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
     endpoint: String,
     use_tls: bool,
 ) -> Result<CompanionStatus, String> {
-    set_relay_config(&app, &companion_state, endpoint, use_tls).await?;
-    build_companion_status(&app, state.inner(), &companion_state).await
+    set_relay_config(daemon.inner(), &daemon.companion, endpoint, use_tls).await?;
+    build_companion_status(daemon.inner()).await
 }
 
 #[tauri::command]
 pub async fn refresh_companion_pairing_code(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
 ) -> Result<CompanionStatus, String> {
+    let daemon = daemon.inner();
+    let companion_state = &daemon.companion;
     if !companion_state.inner.is_lan_exposed() {
         return Err("Companion server is not enabled".to_string());
     }
     {
-        let mut config = state.config.lock().map_err(|error| error.to_string())?;
-        refresh_persisted_pairing_code(&companion_state, &mut config.companion);
-        shell::save_config(&app, &config)?;
+        let mut config = daemon
+            .app
+            .config
+            .lock()
+            .map_err(|error| error.to_string())?;
+        refresh_persisted_pairing_code(companion_state, &mut config.companion);
+        crate::config::save_config(&daemon.roots, &config)?;
     }
-    build_companion_status(&app, state.inner(), &companion_state).await
+    build_companion_status(daemon).await
 }
 
 #[tauri::command]
 pub fn is_session_turn_active(
-    companion_state: State<'_, CompanionState>,
+    companion_state: State<'_, Arc<CompanionState>>,
     session_id: String,
 ) -> bool {
     companion_state.is_turn_active(&session_id)
@@ -258,18 +260,22 @@ pub fn is_session_turn_active(
 
 #[tauri::command]
 pub async fn get_companion_pairing_offer(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+    daemon: State<'_, Arc<DaemonState>>,
 ) -> Result<crate::companion::offer::CompanionPairingOffer, String> {
-    let _ = ensure_desktop_id_persisted(&app, state.inner())?;
+    let daemon = daemon.inner();
+    let companion_state = &daemon.companion;
+    let _ = ensure_desktop_id_persisted(&daemon.app, &daemon.roots)?;
     let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
     let (desktop_id, port, relay, lan_ip) = {
-        let mut config = state.config.lock().map_err(|error| error.to_string())?;
+        let mut config = daemon
+            .app
+            .config
+            .lock()
+            .map_err(|error| error.to_string())?;
         let mut should_save = false;
         if companion_state.inner.is_lan_exposed() {
             let previous_code = config.companion.pairing_code.clone();
-            ensure_persisted_pairing_code(&companion_state, &mut config.companion);
+            ensure_persisted_pairing_code(companion_state, &mut config.companion);
             if config.companion.pairing_code != previous_code {
                 should_save = true;
             }
@@ -286,13 +292,13 @@ pub async fn get_companion_pairing_offer(
             lan_ip,
         );
         if should_save {
-            shell::save_config(&app, &config)?;
+            crate::config::save_config(&daemon.roots, &config)?;
         }
         result
     };
     let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
     build_pairing_offer(
-        &companion_state,
+        companion_state,
         desktop_id,
         port,
         lan_ip,

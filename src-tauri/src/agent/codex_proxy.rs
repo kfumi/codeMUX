@@ -2,9 +2,10 @@
 //! proxy, parsing its port from stderr, and exposing the live port.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use log::{info, warn};
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use super::session_lifecycle::{send_command_to_session, AgentState};
 use super::{spawn_sidecar, SidecarHandle};
@@ -56,7 +57,7 @@ async fn probe_local_proxy_health(port: u16) -> bool {
 }
 
 #[allow(dead_code)]
-async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16> {
+async fn get_live_proxy_port(agent_state: &Arc<AgentState>) -> Option<u16> {
     let current = *agent_state.proxy_port.lock().await;
     let port = current?;
 
@@ -76,13 +77,13 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 
 #[tauri::command]
 pub async fn start_codex_proxy(
-    app: AppHandle,
-    agent_state: State<'_, AgentState>,
+    daemon: State<'_, Arc<crate::daemon::DaemonState>>,
     api_key: String,
     base_url: String,
     provider_name: String,
     codex_needs_proxy: Option<bool>,
 ) -> Result<u16, String> {
+    let agent_state = &daemon.agent;
     info!(target: "agent", "Starting codex proxy upstream={} provider={}", base_url, provider_name);
 
     // Find an existing sidecar, or spawn a dedicated one for the proxy
@@ -96,7 +97,7 @@ pub async fn start_codex_proxy(
         None => {
             info!(target: "agent", "No active sidecar, spawning dedicated proxy sidecar");
             let (handle, mut rx) = spawn_sidecar(
-                &crate::paths::PathRoots::from_app(&app)?,
+                &daemon.roots,
                 super::sidecar_events::SidecarEventBinding::unbound(),
             )
             .await?;
@@ -162,7 +163,7 @@ pub async fn start_codex_proxy(
 }
 
 #[tauri::command]
-pub async fn stop_codex_proxy(agent_state: State<'_, AgentState>) -> Result<(), String> {
+pub async fn stop_codex_proxy(agent_state: State<'_, Arc<AgentState>>) -> Result<(), String> {
     info!(target: "agent", "Stopping codex proxy");
 
     let session_id = {
@@ -200,7 +201,7 @@ pub async fn stop_codex_proxy(agent_state: State<'_, AgentState>) -> Result<(), 
 
 #[tauri::command]
 pub async fn get_codex_proxy_port(
-    agent_state: State<'_, AgentState>,
+    agent_state: State<'_, Arc<AgentState>>,
 ) -> Result<Option<u16>, String> {
     Ok(*agent_state.proxy_port.lock().await)
 }

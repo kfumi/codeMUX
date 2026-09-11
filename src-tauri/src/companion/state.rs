@@ -87,10 +87,6 @@ impl CompanionInner {
         self.is_loopback_running()
     }
 
-    pub fn set_enabled(&self, enabled: bool) {
-        self.set_loopback_running(enabled);
-    }
-
     pub fn clear_pairing_codes(&self) {
         self.pairing_codes.lock().unwrap().clear();
     }

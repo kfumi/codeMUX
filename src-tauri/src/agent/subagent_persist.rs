@@ -4,9 +4,9 @@
 //! the parent timeline (`session_event_snapshots`).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde_json::Value;
-use tauri::State;
 
 use crate::db::operations::{self, SessionSubagentsPayload};
 
@@ -53,14 +53,11 @@ pub(crate) fn handle_sidecar_subagent_event(state: &crate::AppState, raw_event: 
 /// descriptors to `failed` — but only when no live sidecar owns the session,
 /// so switching between sessions never fails children that are still running.
 pub async fn load_session_subagents_for_companion(
-    app: &tauri::AppHandle,
+    agent_state: &Arc<crate::agent::session_lifecycle::AgentState>,
     state: &crate::AppState,
     app_session_id: String,
 ) -> Result<SessionSubagentsPayload, String> {
-    use tauri::Manager;
-
-    let sidecar_alive = app
-        .state::<crate::agent::commands::AgentState>()
+    let sidecar_alive = agent_state
         .sidecars
         .lock()
         .await
@@ -91,9 +88,8 @@ pub async fn load_session_subagents_for_companion(
 
 #[tauri::command]
 pub async fn load_session_subagents(
-    app: tauri::AppHandle,
-    state: State<'_, crate::AppState>,
+    daemon: tauri::State<'_, Arc<crate::daemon::DaemonState>>,
     app_session_id: String,
 ) -> Result<SessionSubagentsPayload, String> {
-    load_session_subagents_for_companion(&app, state.inner(), app_session_id).await
+    load_session_subagents_for_companion(&daemon.agent, &daemon.app, app_session_id).await
 }

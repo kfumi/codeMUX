@@ -71,7 +71,14 @@ pub(crate) fn is_terminal_claude_stop_reason(reason: &str) -> bool {
 
 #[tauri::command]
 pub async fn load_claude_session_events(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    app_session_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    load_claude_session_events_impl(state.inner(), app_session_id).await
+}
+
+pub(crate) async fn load_claude_session_events_impl(
+    state: &crate::AppState,
     app_session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     debug!(target: "agent", "Loading Claude session events for app_session_id={}", app_session_id);
@@ -79,7 +86,7 @@ pub async fn load_claude_session_events(
     let mut messages = Vec::new();
 
     let Some(claude_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
+        get_agent_session_id(state, &app_session_id, AgentKind::ClaudeCode)?
     else {
         info!(target: "agent", "No Claude mapping found for app_session_id={}", app_session_id);
         return Ok(messages);
@@ -141,7 +148,7 @@ pub async fn load_claude_session_events(
 
 #[tauri::command]
 pub async fn delete_claude_session_files(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
 ) -> Result<Vec<String>, String> {
     delete_claude_session_files_for_companion(state.inner(), app_session_id).await

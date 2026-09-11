@@ -14,7 +14,7 @@ use crate::AppState;
 pub async fn browser_create(
     app: AppHandle,
     state: State<'_, BrowserState>,
-    config_state: State<'_, AppState>,
+    config_state: State<'_, std::sync::Arc<AppState>>,
     browser_id: String,
     url: String,
     bounds: BrowserPageBounds,
@@ -117,7 +117,7 @@ pub async fn browser_clear_data(app: AppHandle, scope: String) -> Result<(), Str
 
 #[tauri::command]
 pub fn set_browser_control(
-    state: State<'_, AppState>,
+    state: State<'_, std::sync::Arc<AppState>>,
     app: AppHandle,
     settings: BrowserControlConfig,
 ) -> Result<(), String> {

@@ -1060,14 +1060,20 @@ pub(crate) fn read_codex_interactive_events_from_dir(
 
 #[tauri::command]
 pub async fn load_codex_session_events(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
+    app_session_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    load_codex_session_events_impl(state.inner(), app_session_id).await
+}
+
+pub(crate) async fn load_codex_session_events_impl(
+    state: &crate::AppState,
     app_session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     debug!(target: "agent", "Loading Codex session events for app_session_id={}", app_session_id);
 
     let mut messages = Vec::new();
-    let Some(codex_session_id) =
-        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+    let Some(codex_session_id) = get_agent_session_id(state, &app_session_id, AgentKind::Codex)?
     else {
         info!(target: "agent", "No Codex mapping found for app_session_id={}", app_session_id);
         return Ok(messages);
@@ -1105,7 +1111,7 @@ pub async fn load_codex_session_events(
 
 #[tauri::command]
 pub async fn delete_codex_session_files(
-    state: State<'_, crate::AppState>,
+    state: State<'_, std::sync::Arc<crate::AppState>>,
     app_session_id: String,
 ) -> Result<Vec<String>, String> {
     delete_codex_session_files_for_companion(state.inner(), app_session_id).await
@@ -1117,8 +1123,7 @@ pub async fn delete_codex_session_files_for_companion(
 ) -> Result<Vec<String>, String> {
     use std::fs;
 
-    let Some(codex_session_id) =
-        get_agent_session_id(state, &app_session_id, AgentKind::Codex)?
+    let Some(codex_session_id) = get_agent_session_id(state, &app_session_id, AgentKind::Codex)?
     else {
         debug!(target: "agent", "No Codex session mapping found for session_id={}", app_session_id);
         return Ok(vec![]);
