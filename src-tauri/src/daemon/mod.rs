@@ -10,12 +10,17 @@
 //! 事件,Tauri 壳绑定 `shell::TauriUiEventSink`(tauri emit),headless
 //! 运行与测试传 [`NullUiEventSink`]。
 
+use log::info;
 use std::sync::Arc;
 
 use crate::agent::session_lifecycle::AgentState;
 use crate::commands::terminal::TerminalState;
 use crate::companion::CompanionState;
 use crate::paths::PathRoots;
+
+pub mod run_state;
+
+pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// daemon → 壳 UI 的领域事件出口。失败静默,与原 tauri emit 的调用侧行为一致。
 pub trait UiEventSink: Send + Sync + 'static {
@@ -56,6 +61,74 @@ impl DaemonState {
             roots,
             ui_events,
         })
+    }
+}
+
+/// 无壳独立运行 daemon:组装核心 → 启动回环服务 → 写 run-state →
+/// 跑定时任务循环 → 收到关闭信号后优雅退出并清理 run-state。
+pub async fn run_daemon_standalone(
+    roots: PathRoots,
+    managed_by: String,
+    port_override: Option<u16>,
+) -> Result<(), String> {
+    let daemon = Arc::new(DaemonState::assemble(roots, Arc::new(NullUiEventSink))?);
+    let (port, listen_address) = {
+        let config = daemon.app.config.lock().unwrap();
+        (
+            port_override.unwrap_or(config.companion.port),
+            config.companion.listen_address.clone(),
+        )
+    };
+
+    crate::companion::start_daemon_server(daemon.clone(), port, false, listen_address).await?;
+    run_state::write(
+        &daemon.roots,
+        &run_state::DaemonRunState {
+            port,
+            pid: std::process::id(),
+            version: DAEMON_VERSION.to_string(),
+            managed_by,
+            started_at: chrono::Utc::now().to_rfc3339(),
+        },
+    )?;
+    info!(
+        target: "daemon",
+        "codemux-daemon listening on 127.0.0.1:{} (version={})",
+        port,
+        DAEMON_VERSION
+    );
+
+    let daemon_for_tick = daemon.clone();
+    let tick_task = tokio::spawn(async move {
+        loop {
+            crate::scheduled_tasks::tick_async(&daemon_for_tick, chrono::Utc::now()).await;
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+
+    wait_for_shutdown_signal().await;
+    info!(target: "daemon", "Shutdown signal received; stopping companion server");
+
+    tick_task.abort();
+    crate::companion::stop_daemon_for_state(&daemon.companion).await?;
+    run_state::clear(&daemon.roots);
+    info!(target: "daemon", "codemux-daemon stopped cleanly");
+    Ok(())
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

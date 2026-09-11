@@ -387,6 +387,7 @@ async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
         "ok": companion_state.inner.is_loopback_running(),
         "loopback": companion_state.inner.is_loopback_running(),
         "lanExposed": companion_state.inner.is_lan_exposed(),
+        "version": crate::daemon::DAEMON_VERSION,
     }))
 }
 
