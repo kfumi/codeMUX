@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
 }));
 
 import { registerShellBridge, type ShellBridgeDeps } from '../src/shell-bridge';
+import type { BrowserGuestTracker } from '../src/browser-host';
 import type { UpdaterService } from '../src/updater';
 
 function getHandler(channel: string): (event: unknown, payload: unknown) => unknown {
@@ -39,6 +40,11 @@ function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
     currentVersion: vi.fn().mockReturnValue('0.3.1'),
   };
   const mainWindow = { isDestroyed: () => false } as never;
+  const browserGuests: BrowserGuestTracker = {
+    onWebContentsCreated: vi.fn(),
+    register: vi.fn(),
+    lookup: () => undefined,
+  };
   return {
     getAppDataDir: () => 'D:/app-data',
     getLogDir: () => 'D:/app-data/logs',
@@ -47,6 +53,7 @@ function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
     supervisor: {} as never,
     updater,
     sendToRenderer: vi.fn(),
+    browserGuests,
     ...overrides,
   };
 }

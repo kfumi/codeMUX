@@ -41,6 +41,18 @@ function onUpdaterEvent(callback: (payload: unknown) => void): () => void {
   };
 }
 
+/**
+ * 浏览器弹窗兜底订阅(工单 07:main 侧 guest setWindowOpenHandler deny 后
+ * 转发 http/https url,渲染层开内置新标签);返回取消订阅函数。
+ */
+function onBrowserNewWindow(callback: (payload: unknown) => void): () => void {
+  const listener = (_event: IpcRendererEvent, payload: unknown) => callback(payload);
+  ipcRenderer.on('browser-new-window', listener);
+  return () => {
+    ipcRenderer.off('browser-new-window', listener);
+  };
+}
+
 const bridge = {
   // token / 目录 / 日志
   getLocalDaemonToken: () => invoke<string>('getLocalDaemonToken'),
@@ -77,7 +89,9 @@ const bridge = {
   probeAgentInstallations: (agentKind: string) => invoke('probeAgentInstallations', agentKind),
   upgradeAgentRuntime: (agentKind: string) => invoke('upgradeAgentRuntime', agentKind),
 
-  // browser.*(工单 07 迁移中;hide/show/setBounds 为 no-op,其余显式 reject)
+  // browser.*(工单 07):页面托管已迁移到渲染层 <webview>;桥面保留「清资料」
+  // 与「guest 登记」数据面,其余通道为契约占位(几何 no-op,其余 reject 兜底,
+  // 渲染层新适配器不再调用)。
   browserCreate: (browserId: string, url: string, bounds: unknown) =>
     invoke<void>('browserCreate', { browserId, url, bounds }),
   browserDestroy: (browserId: string) => invoke<void>('browserDestroy', { browserId }),
@@ -92,6 +106,8 @@ const bridge = {
   browserOpenDevtools: (browserId: string) => invoke<void>('browserOpenDevtools', { browserId }),
   browserSetZoom: (browserId: string, factor: number) => invoke<void>('browserSetZoom', { browserId, factor }),
   browserClearData: (scope: string) => invoke<void>('browserClearData', { scope }),
+  browserRegisterGuest: (webContentsId: number, browserId: string) =>
+    invoke<void>('browserRegisterGuest', { webContentsId, browserId }),
 
   // perf / devtools
   exportPerfSnapshot: (path: string, content: string) => invoke<null>('exportPerfSnapshot', { path, content }),
@@ -105,6 +121,7 @@ const bridge = {
   onDaemonLifecycle,
   onAgentNotificationClicked,
   onUpdaterEvent,
+  onBrowserNewWindow,
 };
 
 contextBridge.exposeInMainWorld('codemuxDesktop', bridge);

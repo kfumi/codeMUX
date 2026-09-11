@@ -25,15 +25,10 @@ import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage'
 import type { CompanionStatus } from '../types/companion';
 import type { ScheduledTask, ScheduledTaskInput, TaskRun } from '../types/scheduledTask';
 import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from './browserHost';
+import { electronBrowserHost } from './browser/electronBrowserHost';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
-import {
-  BROWSER_HOST_MIGRATION_MESSAGE,
-  desktopBridge,
-  electronBrowserHost,
-  isElectronDesktop,
-  type CodemuxDesktopBridge,
-} from './desktop-bridge';
+import { desktopBridge, isElectronDesktop, type CodemuxDesktopBridge } from './desktop-bridge';
 
 const logger = createLogger('tauri');
 
@@ -700,8 +695,7 @@ export const terminalApi = {
 };
 
 export const browserApi: BrowserHost = isElectronDesktop()
-  ? // Electron 壳(工单 05):browser host 工单 07 迁移 —— 纯窗口几何 no-op,
-    // 其余显式 reject(不抛未捕获异常),由调用方按失败降级。
+  ? // Electron 壳(工单 07):渲染层 <webview> 托管的完整实现(13 方法契约)。
     electronBrowserHost
   : {
       create: (browserId: string, url: string, bounds: BrowserPageBounds): Promise<void> =>
@@ -731,9 +725,6 @@ export const browserApi: BrowserHost = isElectronDesktop()
       clearData: (scope: BrowserDataScope): Promise<void> =>
         invokeLogged('browser_clear_data', { scope }),
     };
-
-// browser host 迁移中文案复用(desktop-bridge 与 preload/主进程共用同一句式)。
-export { BROWSER_HOST_MIGRATION_MESSAGE };
 
 export const mcpApi = {
   getAll: (): Promise<McpServer[]> => invokeLogged('get_mcp_servers'),

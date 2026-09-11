@@ -1,5 +1,5 @@
 //! 壳门面的 main 进程实现:注册 `codemux:*` IPC 通道,供 sandboxed preload
-//! 经 contextBridge 暴露给渲染层(工单 05/06)。
+//! 经 contextBridge 暴露给渲染层(工单 05/06/07)。
 //!
 //! 通道面与前端审计对齐(见 src/lib/tauri.ts / src/lib/facades/shell-facade.ts):
 //! - token / 目录 / 日志 / 通知 / 主窗口
@@ -7,7 +7,9 @@
 //! - open_in_explorer / open_project_path / read_home_file
 //! - 文件/目录对话框(工单 06;返回形状对齐 @tauri-apps/plugin-dialog)
 //! - 应用内更新器(工单 06;electron-updater,见 updater.ts)
-//! - browser.* 13 方法:除纯窗口几何(hide/show/setBounds,no-op)外全部迁移中拒绝(工单 07)
+//! - browser.*(工单 07):页面托管已迁移到渲染层 <webview>;桥面只保留
+//!   清资料(browserClearData)与 guest 登记(browserRegisterGuest)数据面,
+//!   几何通道 no-op 占位,其余通道 reject 兜底(渲染层新适配器不再调用)
 //! - daemonRestart / getDaemonInfo(supervisor 出口)
 
 import {
@@ -29,6 +31,7 @@ import {
   probeAgentInstallations,
   upgradeAgentRuntime,
 } from './agent-checks';
+import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
 import type { UpdaterService } from './updater';
@@ -48,6 +51,8 @@ export interface ShellBridgeDeps {
   updater: UpdaterService;
   /** 渲染层事件出口(通知点击/更新进度等)。 */
   sendToRenderer(channel: string, payload: unknown): void;
+  /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
+  browserGuests: BrowserGuestTracker;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -290,24 +295,48 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     return upgradeAgentRuntime(agentKind);
   });
 
-  // --- browser.*:工单 07 迁移;纯窗口几何先 no-op,其余显式拒绝 ---------------
-  // BrowserHost 共 13 方法;渲染层(browserStore/BrowserPanel)已按失败降级处理。
+  // --- browser.*(工单 07:渲染层 <webview> 托管;桥面仅保留数据面) ----------
+  // 几何/显隐通道:渲染层适配器直接操作 <webview> DOM/CSS,不再调用;保留 no-op
+  // 占位以维持 13 方法契约面完整。
   handle('browserHide', () => undefined);
   handle('browserShow', () => undefined);
   handle('browserSetBounds', () => undefined);
-  const browserReject = (method: string) => () => {
-    throw new Error(`browser host 迁移中(工单 07): ${method}`);
+  // 页面生命周期/导航/脚本通道:同样由渲染层适配器本地实现;误用即显式失败。
+  const browserBackstopReject = (method: string) => () => {
+    throw new Error(`browser host 已由渲染层 <webview> 托管(工单 07): ${method}`);
   };
-  handle('browserCreate', browserReject('create'));
-  handle('browserDestroy', browserReject('destroy'));
-  handle('browserNavigate', browserReject('navigate'));
-  handle('browserBack', browserReject('back'));
-  handle('browserForward', browserReject('forward'));
-  handle('browserReload', browserReject('reload'));
-  handle('browserEvaluate', browserReject('evaluate'));
-  handle('browserOpenDevtools', browserReject('openDevtools'));
-  handle('browserSetZoom', browserReject('setZoom'));
-  handle('browserClearData', browserReject('clearData'));
+  handle('browserCreate', browserBackstopReject('create'));
+  handle('browserDestroy', browserBackstopReject('destroy'));
+  handle('browserNavigate', browserBackstopReject('navigate'));
+  handle('browserBack', browserBackstopReject('back'));
+  handle('browserForward', browserBackstopReject('forward'));
+  handle('browserReload', browserBackstopReject('reload'));
+  handle('browserEvaluate', browserBackstopReject('evaluate'));
+  handle('browserOpenDevtools', browserBackstopReject('openDevtools'));
+  handle('browserSetZoom', browserBackstopReject('setZoom'));
+  // 清资料:main 进程清独立 partition session(对齐 Rust clear_data 语义)。
+  handle('browserClearData', async (payload: unknown) => {
+    const { scope } = (payload ?? {}) as { scope?: unknown };
+    if (scope !== 'cache' && scope !== 'all') {
+      throw new Error(`未知的清除范围: ${String(scope)}`);
+    }
+    await clearBrowserProfileData(scope);
+  });
+  // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
+  // main 侧弹窗拒绝转发据此回填 sourceBrowserId。
+  handle('browserRegisterGuest', (payload: unknown) => {
+    const { webContentsId, browserId } = (payload ?? {}) as {
+      webContentsId?: unknown;
+      browserId?: unknown;
+    };
+    if (typeof webContentsId !== 'number' || !Number.isInteger(webContentsId) || webContentsId <= 0) {
+      throw new Error('webContentsId must be a positive integer');
+    }
+    if (typeof browserId !== 'string' || !browserId) {
+      throw new Error('browserId must be a non-empty string');
+    }
+    deps.browserGuests.register(webContentsId, browserId);
+  });
 
   // --- perf / devtools ------------------------------------------------------
   handle('exportPerfSnapshot', (payload: unknown) => {
@@ -385,6 +414,7 @@ export const SHELL_BRIDGE_CHANNELS = [
   'browserOpenDevtools',
   'browserSetZoom',
   'browserClearData',
+  'browserRegisterGuest',
   'exportPerfSnapshot',
   'toggleDevtools',
   'daemonRestart',

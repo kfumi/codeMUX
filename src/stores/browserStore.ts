@@ -7,6 +7,7 @@ import { browserViewportBounds, hostBoundsForViewportTransition, type BrowserVie
 import type { BrowserPageBounds, BrowserPagePatch } from '../lib/browserHost';
 import { resolveEffectiveBrowserTabId } from '../lib/browserVisibilityPolicy';
 import { isBoundsOccluded } from '../lib/nativeViewOcclusion';
+import { isElectronDesktop } from '../lib/desktop-bridge';
 import { createLogger, serializeError } from '../lib/logger';
 
 const logger = createLogger('browserStore');
@@ -197,6 +198,9 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
   beginNativeMenuOpen: () => {
     set((state) => ({ nativeMenuOpenCount: state.nativeMenuOpenCount + 1 }));
+    // Electron(工单 07):<webview> 参与 DOM 层级,浮层天然遮挡,无需隐藏宿主;
+    // Tauri 原生子 webview 高于 DOM,必须隐藏才能露出菜单。
+    if (isElectronDesktop()) return;
     void Promise.all(
       Object.values(get().pages)
         .filter((page) => page.hostAttached)
@@ -547,14 +551,17 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         get().previewByPanel,
         page.panelTabId,
       );
-      const hostsBlockedByMenu = get().nativeMenuOpenCount > 0;
+      const electronHost = isElectronDesktop();
+      const hostsBlockedByMenu = !electronHost && get().nativeMenuOpenCount > 0;
+      // Electron(工单 07):<webview> 属 DOM,遮挡(nativeViewOcclusion)退役,
+      // 仅 Tauri 路径继续按遮挡/菜单状态抑制显示。
       const shouldShow = Boolean(
         effectiveBrowserTabId
         && page.panelTabId === effectiveBrowserTabId
         && page.id === visiblePageId
         && hasUsableBounds(viewportBounds)
         && !hostsBlockedByMenu
-        && !isBoundsOccluded(viewportBounds),
+        && (electronHost || !isBoundsOccluded(viewportBounds)),
       );
       try {
         if (shouldShow) {

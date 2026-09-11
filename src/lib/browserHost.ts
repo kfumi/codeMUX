@@ -18,6 +18,31 @@ export interface BrowserPagePatch {
   lastError?: string | null;
 }
 
+/** 弹窗转发载荷(与 Rust BrowserNewWindowEvent 同形;工单 07 起 Electron 侧复用)。 */
+export interface BrowserNewWindowPayload {
+  sourceBrowserId: string;
+  url: string;
+}
+
+/** BrowserHost 完整方法契约清单(契约守护/能力清单测试断言用)。 */
+export const BROWSER_HOST_METHODS = [
+  'create',
+  'destroy',
+  'navigate',
+  'back',
+  'forward',
+  'reload',
+  'setBounds',
+  'show',
+  'hide',
+  'evaluate',
+  'openDevtools',
+  'setZoom',
+  'clearData',
+] as const;
+
+export type BrowserHostMethod = (typeof BROWSER_HOST_METHODS)[number];
+
 export interface BrowserHost {
   create: (browserId: string, url: string, bounds: BrowserPageBounds) => Promise<void>;
   destroy: (browserId: string) => Promise<void>;

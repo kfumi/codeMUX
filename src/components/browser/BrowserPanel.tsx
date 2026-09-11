@@ -16,6 +16,8 @@ import {
   ELEMENT_SELECTOR_START_SCRIPT,
   ELEMENT_SELECTOR_STOP_SCRIPT,
 } from '../../lib/elementSelector';
+import { bindElectronBrowserContainer } from '../../lib/browser/electronBrowserHost';
+import { isElectronDesktop } from '../../lib/desktop-bridge';
 import { browserApi } from '../../lib/tauri';
 import { cn } from '../../lib/utils';
 import { useBrowserElementStore } from '../../stores/browserElementStore';
@@ -67,6 +69,15 @@ export function BrowserPanel({ tabId, sessionId, isActive }: BrowserPanelProps) 
   useEffect(() => {
     ensureBlankPage(tabId);
   }, [ensureBlankPage, tabId]);
+
+  // Electron(工单 07):把 `<webview>` 挂进面板容器(页面属 DOM 布局);
+  // Tauri 用原生子 webview,不挂载,此 effect 在 Tauri/Web 下为 no-op。
+  useEffect(() => {
+    if (!isElectronDesktop() || !activePageId) return;
+    const host = hostRef.current;
+    if (!host) return;
+    return bindElectronBrowserContainer(activePageId, host);
+  }, [activePageId, tabId]);
 
   useEffect(() => {
     if (!isActive || !browserInitialUrl) return;

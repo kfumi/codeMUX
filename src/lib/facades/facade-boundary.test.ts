@@ -10,6 +10,8 @@ import {
   PROTOCOL_BACKED_DAEMON_METHODS,
   SHELL_CAPABILITIES,
 } from './capability-manifest';
+import { BROWSER_HOST_METHODS } from '../browserHost';
+import { electronBrowserHost } from '../browser/electronBrowserHost';
 import {
   daemonFacade,
   forkClaudeViaDaemon,
@@ -51,6 +53,16 @@ describe('facade boundary', () => {
     const shellIds = new Set(SHELL_CAPABILITIES.map((entry) => entry.id));
     expect(shellIds.has('browser.host')).toBe(true);
     expect(shellFacade.browser).toBeDefined();
+  });
+
+  it('covers the full BrowserHost contract on shell facade and the Electron host (工单 07)', () => {
+    const shell = shellFacade.browser as unknown as Record<string, unknown>;
+    const electron = electronBrowserHost as unknown as Record<string, unknown>;
+    expect(BROWSER_HOST_METHODS).toHaveLength(13);
+    for (const method of BROWSER_HOST_METHODS) {
+      expect(typeof shell[method]).toBe(`function`);
+      expect(typeof electron[method]).toBe(`function`);
+    }
   });
 
   it('binds protocol-backed daemon methods to HTTP client helpers (no invoke fallback)', () => {

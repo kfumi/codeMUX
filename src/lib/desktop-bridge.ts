@@ -1,14 +1,15 @@
 /**
- * Electron 壳桥(工单 05):渲染层探测与类型定义。
+ * Electron 壳桥(工单 05/06/07):渲染层探测与类型定义。
  *
  * - `desktopBridge`:`window.codemuxDesktop`(preload 经 contextBridge 暴露);
  *   非 Electron 环境(Tauri 壳 / 纯 Web)下为 undefined。
  * - `isElectronDesktop()`:平台分流判据;所有壳方法调用方必须先判它再走
  *   desktopBridge,否则回退既有 Tauri invoke(所有适配必须带回退)。
- * - `electronBrowserHost`:browser.* 的 Electron 降级实现 —— 纯窗口几何
- *   (hide/show/setBounds)no-op,其余显式拒绝(browser host 工单 07 迁移)。
+ * - browser.*:工单 07 起页面由渲染层 `<webview>` 托管(见
+ *   src/lib/browser/electronBrowserHost.ts);桥面仅保留清资料 / guest 登记,
+ *   几何与导航通道为契约占位(见 desktop-electron/src/shell-bridge.ts)。
  */
-import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from './browserHost';
+import type { BrowserDataScope, BrowserPageBounds } from './browserHost';
 import type { OpenTarget } from './openTargets';
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,15 @@ export interface DesktopUpdaterCheckResult {
   version: string | null;
 }
 
+/**
+ * main 侧弹窗拒绝转发载荷(guest setWindowOpenHandler deny → 渲染层开新标签;
+ * 与 BrowserNewWindowPayload 同形,sourceBrowserId 在无法定位来源时为空串)。
+ */
+export interface DesktopBrowserNewWindowPayload {
+  sourceBrowserId?: string | null;
+  url?: string;
+}
+
 /** window.codemuxDesktop 的完整方法面(与 desktop-electron/src/preload.ts 对齐)。 */
 export interface CodemuxDesktopBridge {
   // token / 目录 / 日志
@@ -190,7 +200,8 @@ export interface CodemuxDesktopBridge {
   probeAgentInstallations(agentKind: string): Promise<DesktopAgentInstallationReport>;
   upgradeAgentRuntime(agentKind: string): Promise<DesktopAgentRuntimeUpgradeResult>;
 
-  // browser.*(工单 07 迁移中;hide/show/setBounds no-op,其余 reject)
+  // browser.*(工单 07:渲染层 <webview> 托管;桥面保留清资料 + guest 登记,
+  // 其余通道为契约占位 —— 几何 no-op,其余 reject 兜底,渲染层不再调用)
   browserCreate(browserId: string, url: string, bounds: BrowserPageBounds): Promise<void>;
   browserDestroy(browserId: string): Promise<void>;
   browserNavigate(browserId: string, url: string): Promise<void>;
@@ -204,6 +215,8 @@ export interface CodemuxDesktopBridge {
   browserOpenDevtools(browserId: string): Promise<void>;
   browserSetZoom(browserId: string, factor: number): Promise<void>;
   browserClearData(scope: BrowserDataScope): Promise<void>;
+  /** guest webContentsId → browserId 登记(弹窗拒绝转发据此回填来源)。 */
+  browserRegisterGuest(webContentsId: number, browserId: string): Promise<void>;
 
   // perf / devtools
   exportPerfSnapshot(path: string, content: string): Promise<null>;
@@ -217,6 +230,7 @@ export interface CodemuxDesktopBridge {
   onDaemonLifecycle(callback: (payload: DesktopDaemonLifecycleEvent) => void): () => void;
   onAgentNotificationClicked(callback: (payload: DesktopAgentNotificationClickPayload) => void): () => void;
   onUpdaterEvent(callback: (event: DesktopUpdaterEvent) => void): () => void;
+  onBrowserNewWindow(callback: (payload: DesktopBrowserNewWindowPayload) => void): () => void;
 }
 
 /**
@@ -230,26 +244,3 @@ export const desktopBridge =
 
 /** 平台分流判据:Electron 壳内为 true;Tauri 壳/纯 Web 为 false(走既有 invoke)。 */
 export const isElectronDesktop = (): boolean => !!desktopBridge;
-
-/** browser host 工单 07 迁移中的统一错误文案。 */
-export const BROWSER_HOST_MIGRATION_MESSAGE = 'browser host 迁移中(工单 07)';
-
-/**
- * Electron 下的 browserApi 降级实现:纯窗口几何 no-op(返回 resolved
- * promise,不抛未捕获异常),其余显式 reject。
- */
-export const electronBrowserHost: BrowserHost = {
-  create: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  destroy: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  navigate: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  back: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  forward: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  reload: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  setBounds: (browserId, bounds) => desktopBridge!.browserSetBounds(browserId, bounds),
-  show: (browserId) => desktopBridge!.browserShow(browserId),
-  hide: (browserId) => desktopBridge!.browserHide(browserId),
-  evaluate: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  openDevtools: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  setZoom: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-  clearData: () => Promise.reject(new Error(BROWSER_HOST_MIGRATION_MESSAGE)),
-};

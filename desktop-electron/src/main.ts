@@ -15,6 +15,7 @@ import { app, BrowserWindow, Menu, protocol, Tray, nativeImage } from 'electron'
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
@@ -157,6 +158,8 @@ let tray: Tray | null = null;
 /** 主动退出标记:close 事件据此区分「关窗到托盘」与「退出应用」。 */
 let quitting = false;
 let unregisterBridge: (() => void) | null = null;
+/** Browser Host(工单 07)guest 登记表(webview webContentsId → browserId)。 */
+let browserGuests: BrowserGuestTracker | null = null;
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -192,6 +195,8 @@ function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      // Browser Host(工单 07):内置浏览由渲染层 <webview> 标签托管。
+      webviewTag: true,
     },
   });
 
@@ -204,6 +209,14 @@ function createMainWindow(): BrowserWindow {
 
   window.once('ready-to-show', () => {
     window.show();
+  });
+
+  // Browser Host(工单 07):<webview> guest 附挂前校验 —— 剥 preload、禁 Node、
+  // partition 必须带 cmx- 前缀(独立会话),否则销毁 guest(guest 无任何应用桥)。
+  window.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!guardWebviewAttach(webPreferences, params)) {
+      event.preventDefault();
+    }
   });
 
   // 阻止导航离开渲染层(外链交工单 06 的 openExternal;先就地拦截)。
@@ -310,6 +323,10 @@ if (!gotLock) {
 
   void app.whenReady().then(() => {
     registerAppProtocol();
+    // Browser Host(工单 07):guest 弹窗兜底(webContents 创建即注册,先于主窗口)。
+    const guests = createBrowserGuestTracker({ sendToRenderer });
+    browserGuests = guests;
+    app.on('web-contents-created', guests.onWebContentsCreated);
     mainWindow = createMainWindow();
     startSupervisor();
     if (!supervisor) {
@@ -329,6 +346,7 @@ if (!gotLock) {
       supervisor,
       updater,
       sendToRenderer,
+      browserGuests: guests,
     });
     createTray(() => {
       void quitApplication();
@@ -353,5 +371,9 @@ if (!gotLock) {
   app.on('quit', () => {
     unregisterBridge?.();
     unregisterBridge = null;
+    if (browserGuests) {
+      app.off('web-contents-created', browserGuests.onWebContentsCreated);
+      browserGuests = null;
+    }
   });
 }
