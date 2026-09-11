@@ -23,7 +23,7 @@ use crate::agent::subagent_persist::load_session_subagents_for_companion;
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::config::types::AgentKind;
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/sessions/{session_id}/ensure-agent", post(ensure_agent))
         .route("/sessions/{session_id}/reset-agent", post(reset_agent))

@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use crate::commands::scheduled_tasks::ScheduledTaskInput;
 use crate::companion::server::{authorize, ApiError, ServerContext};
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         // MCP
         .route("/mcp", get(list_mcp).post(upsert_mcp))

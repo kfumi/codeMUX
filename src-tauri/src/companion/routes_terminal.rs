@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 
 use crate::companion::server::{authorize, authorize_token, ApiError, ServerContext};
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/terminals", post(start_terminal))
         .route("/terminals/{terminal_id}/write", post(write_terminal))
@@ -110,12 +110,12 @@ async fn close_terminal(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalWsQuery {
+pub(crate) struct TerminalWsQuery {
     token: String,
     terminal_id: String,
 }
 
-pub async fn terminal_ws_handler(
+pub(crate) async fn terminal_ws_handler(
     ws: WebSocketUpgrade,
     State(ctx): State<ServerContext>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

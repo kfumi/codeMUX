@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod auth;
+pub mod browser_automation;
 pub mod config;
 pub mod context;
 pub mod desktop_id;

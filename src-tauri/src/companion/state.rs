@@ -43,6 +43,8 @@ pub struct CompanionInner {
     pub relay_state: RelayTransportState,
     pub e2ee_public_key_b64: RwLock<Option<String>>,
     pub daemon_error: RwLock<Option<String>>,
+    /// 浏览器自动化接缝(工单 08):挂起请求表 + 等待超时。
+    pub browser_automation: crate::companion::browser_automation::AutomationRegistry,
 }
 
 impl CompanionInner {
@@ -63,6 +65,7 @@ impl CompanionInner {
             relay_state: RelayTransportState::new(),
             e2ee_public_key_b64: RwLock::new(None),
             daemon_error: RwLock::new(None),
+            browser_automation: crate::companion::browser_automation::AutomationRegistry::new(),
         }
     }
 

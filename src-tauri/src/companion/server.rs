@@ -22,6 +22,7 @@ use crate::companion::actions::{
 use crate::companion::auth::{
     classify_local_daemon_token, local_daemon_device, LocalDaemonTokenDecision,
 };
+use crate::companion::browser_automation;
 use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
@@ -147,7 +148,8 @@ struct SessionTimelineQuery {
 #[serde(rename_all = "camelCase")]
 struct WsQuery {
     token: String,
-    session_id: String,
+    /// 缺省/空 = 控制面连接(接收 browser-automation-request 等控制事件)。
+    session_id: Option<String>,
 }
 
 pub async fn start_daemon_server(
@@ -366,6 +368,7 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
     let api = routes_control_plane::extend_api_router(api);
     let api = routes_providers::extend_api_router(api);
     let api = routes_terminal::extend_api_router(api);
+    let api = browser_automation::extend_api_router(api);
 
     let index_file = static_dir.join("index.html");
     let static_service = ServeDir::new(static_dir).not_found_service(ServeFile::new(index_file));
@@ -819,8 +822,21 @@ async fn ws_handler(
     Query(query): Query<WsQuery>,
 ) -> Result<Response, ApiError> {
     authorize_token(&ctx, &query.token, Some(peer))?;
-    let session_id = query.session_id.clone();
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, ctx, session_id)))
+    let session_id = control_session_id(query.session_id.as_deref());
+    let upgraded = match session_id {
+        Some(session_id) => ws.on_upgrade(move |socket| handle_socket(socket, ctx, session_id)),
+        // 无 session_id = 控制面连接(壳自动化客户端经此接收控制事件)。
+        None => ws.on_upgrade(move |socket| handle_control_socket(socket, ctx)),
+    };
+    Ok(upgraded)
+}
+
+/// 会话 WS 带非空 session_id;缺省/空 = 控制面连接。
+fn control_session_id(session_id: Option<&str>) -> Option<String> {
+    session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: String) {
@@ -915,7 +931,59 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     }
 }
 
-fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
+/// 控制面 WS(工单 08):无 session_id 的 /ws 连接。先回 hello 供客户端确认
+/// 订阅就绪,随后只转发 session_id 为空的控制事件(如 browser-automation-request);
+/// 会话事件不下发(壳不是会话客户端)。
+async fn handle_control_socket(mut socket: WebSocket, ctx: ServerContext) {
+    let companion_state = ctx.daemon.companion.clone();
+    let mut rx = companion_state.inner.event_tx.subscribe();
+
+    let hello = serde_json::json!({ "type": "hello", "role": "control" });
+    if socket
+        .send(Message::Text(hello.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(payload))) if socket
+                        .send(Message::Pong(payload.clone()))
+                        .await
+                        .is_err() =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            event = rx.recv() => {
+                match event {
+                    Ok(CompanionBroadcastEvent { session_id, event }) if session_id.is_empty() => {
+                        let payload = serde_json::json!({
+                            "type": "event",
+                            "sessionId": "",
+                            "event": event,
+                        });
+                        if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
     match peer {
         Some(addr) => addr.ip().is_loopback(),
         None => true,
@@ -1031,6 +1099,26 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: message.into(),
         }
+    }
+
+    pub(crate) fn service_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn gateway_timeout(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::GATEWAY_TIMEOUT,
+            message: message.into(),
+        }
+    }
+
+    /// 状态码访问器(测试断言用)。
+    #[cfg(test)]
+    pub(crate) fn status(&self) -> StatusCode {
+        self.status
     }
 }
 

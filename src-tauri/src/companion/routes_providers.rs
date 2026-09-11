@@ -10,7 +10,7 @@ use std::str::FromStr;
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::model_providers::ModelProvider;
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/providers", get(list_providers).post(upsert_provider))
         .route("/providers/templates", get(list_provider_templates))

@@ -2,7 +2,7 @@ mod agent;
 mod agent_runtime;
 mod browser;
 mod commands;
-mod companion;
+pub mod companion;
 mod config;
 pub mod daemon;
 mod db;

@@ -16,6 +16,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
+import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
@@ -43,6 +44,21 @@ function resolveAppDataDir(): string {
 /** 壳与 daemon 共用的日志目录。 */
 function resolveLogDir(): string {
   return path.join(resolveAppDataDir(), 'logs');
+}
+
+/**
+ * 读 Local Daemon Token(与 shell-bridge getLocalDaemonToken 同一文件:
+ * `<appDataDir>/local-daemon-token`,daemon 启动时落盘)。缺失/为空返回 null。
+ */
+function readLocalDaemonToken(): string | null {
+  try {
+    const tokenPath = path.join(resolveAppDataDir(), 'local-daemon-token');
+    if (!existsSync(tokenPath)) return null;
+    const token = readFileSync(tokenPath, 'utf8').trim();
+    return token || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -160,6 +176,8 @@ let quitting = false;
 let unregisterBridge: (() => void) | null = null;
 /** Browser Host(工单 07)guest 登记表(webview webContentsId → browserId)。 */
 let browserGuests: BrowserGuestTracker | null = null;
+/** 浏览器自动化接缝(工单 08):daemon → 壳内页面的自动化执行客户端。 */
+let automation: BrowserAutomationService | null = null;
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -286,6 +304,9 @@ function startSupervisor(): void {
 
 async function quitApplication(): Promise<void> {
   quitting = true;
+  // 自动化客户端先行断开(不重连),再停自有 daemon。
+  automation?.stop();
+  automation = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
     await supervisor?.stopManaged();
@@ -332,6 +353,15 @@ if (!gotLock) {
     if (!supervisor) {
       throw new Error('supervisor not initialized');
     }
+    // 浏览器自动化接缝(工单 08):main 进程 WS 客户端连 daemon 控制面,
+    // 端口来自 supervisor(supervisor 出口/daemonStatus 同源)。连接失败仅
+    // 退避重连,不崩溃(降级为无自动化能力)。
+    automation = createBrowserAutomationService({
+      getPort: () => supervisor?.getPort() ?? null,
+      readToken: readLocalDaemonToken,
+      resolveTarget: (browserId) => guests.resolveTarget(browserId),
+    });
+    automation.start();
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);
     // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
     const updater = createUpdaterService({

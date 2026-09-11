@@ -12,7 +12,7 @@ use crate::commands::provider::{
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::config::types::AppConfig;
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router.route("/config", get(get_config).patch(patch_config))
 }
 

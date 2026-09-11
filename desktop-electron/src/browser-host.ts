@@ -5,7 +5,7 @@
 //!    (对齐 Tauri manager.rs on_new_window:Deny + emit browser-new-window-event);
 //! 3. 数据面:独立 partition 的 clearStorageData / clearCache(对齐 Rust clear_data)。
 
-import { session, type WebContents } from 'electron';
+import { session, webContents, type WebContents } from 'electron';
 
 /** 内置浏览专用独立会话 partition(persist → 登录态跨标签切换/关壳重开保留)。 */
 export const BROWSER_PARTITION = 'persist:cmx-browser';
@@ -49,6 +49,11 @@ export interface BrowserGuestTracker {
   /** 渲染层在 webview did-attach 后上报 guest webContentsId → browserId。 */
   register: (webContentsId: number, browserId: string) => void;
   lookup: (webContentsId: number) => string | undefined;
+  /**
+   * 自动化接缝(工单 08):按 browserId 反查仍存活的 guest webContents
+   * (daemon 自动化请求的执行目标;找不到返回 undefined)。
+   */
+  resolveTarget: (browserId: string) => WebContents | undefined;
 }
 
 /**
@@ -80,6 +85,15 @@ export function createBrowserGuestTracker(deps: {
       guests.set(webContentsId, browserId);
     },
     lookup: (webContentsId) => guests.get(webContentsId),
+    resolveTarget: (browserId) => {
+      if (!browserId) return undefined;
+      for (const [id, mapped] of guests) {
+        if (mapped !== browserId) continue;
+        const found = webContents.getAllWebContents().find((item) => item.id === id);
+        if (found) return found;
+      }
+      return undefined;
+    },
   };
 }
 

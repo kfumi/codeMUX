@@ -13,7 +13,7 @@ use crate::agent::history_import::{
 };
 use crate::companion::server::{authorize, ApiError, ServerContext};
 
-pub fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
+pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
         .route("/sessions/import/candidates", get(discover_candidates))
         .route("/sessions/import", post(import_sessions))
