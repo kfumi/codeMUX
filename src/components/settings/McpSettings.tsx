@@ -6,7 +6,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { TooltipHint } from '../ui/tooltip';
-import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
@@ -309,6 +309,116 @@ export function McpSettingsPanel() {
   const textareaClass =
     "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0";
 
+  const renderServerRow = (server: McpServer) => {
+    const serverType = (server.server.type ?? 'stdio') as string;
+    const anyEnabled = server.builtin || Object.values(server.apps).some(Boolean);
+    return (
+      <div
+        key={server.id}
+        className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-muted/65 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  anyEnabled
+                    ? probeStatus[server.id] === 'connected' ? 'bg-[hsl(var(--success))]'
+                      : probeStatus[server.id] === 'pending' ? 'bg-[hsl(var(--warning))]'
+                        : probeStatus[server.id] === 'failed' ? 'bg-[hsl(var(--destructive))]'
+                          : 'bg-muted-foreground/45'
+                    : 'bg-muted-foreground/28'
+                }`}
+              />
+              <span className="font-medium text-sm truncate">{server.name}</span>
+              {server.builtin ? (
+                <TooltipHint content="daemon 内置提供,不可修改或删除">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-[hsl(var(--primary)/0.10)] text-[hsl(var(--primary))] border border-[hsl(var(--primary)/0.16)]">
+                    内置
+                  </span>
+                </TooltipHint>
+              ) : (
+                transportBadge(serverType)
+              )}
+            </div>
+            {server.description && (
+              <TooltipHint content={server.description} side="bottom">
+                <p className="text-xs text-muted-foreground truncate mt-0.5 ml-4 cursor-default">
+                  {server.description}
+                </p>
+              </TooltipHint>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {APP_ORDER.map((app) => (
+              <TooltipHint
+                key={app}
+                content={server.builtin ? `${APP_LABELS[app]}(内置启用)` : APP_LABELS[app]}
+              >
+                <button
+                  aria-label={`toggle-${server.id}-${app}`}
+                  disabled={server.builtin}
+                  onClick={() => toggleApp(server.id, app, !server.apps[app])}
+                  className={cn(
+                    'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
+                    server.builtin
+                      ? 'bg-primary/10 border-primary/30 cursor-default'
+                      : server.apps[app]
+                        ? 'bg-primary/10 border-primary/30'
+                        : 'bg-background border-transparent opacity-40 hover:opacity-70',
+                  )}
+                >
+                  <AppIcon app={app} size={16} />
+                </button>
+              </TooltipHint>
+            ))}
+          </div>
+          {server.builtin ? (
+            <div className="flex items-center text-muted-foreground/50 pr-2">
+              <TooltipHint content="内置 server:不可修改或删除">
+                <Lock className="h-3.5 w-3.5" aria-label={`builtin-${server.id}`} />
+              </TooltipHint>
+            </div>
+          ) : (
+            <div className="flex items-center -space-x-1">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => probeServer(server.id)}>
+                <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(server)}>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const builtinServers = servers.filter((server) => server.builtin);
+  const installedServers = servers.filter((server) => !server.builtin);
+
+  const renderSection = (title: string, rows: McpServer[], emptyHint?: React.ReactNode) => (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-foreground/90">{title}</span>
+        <span className="text-xs text-muted-foreground">{rows.length}</span>
+      </div>
+      {rows.length > 0 ? (
+        <div className="space-y-2">{rows.map(renderServerRow)}</div>
+      ) : (
+        emptyHint
+      )}
+    </section>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-2">
@@ -340,77 +450,20 @@ export function McpSettingsPanel() {
         </div>
       )}
 
-      <div className="space-y-2">
-        {servers.map((server) => {
-          const serverType = (server.server.type ?? 'stdio') as string;
-          const anyEnabled = Object.values(server.apps).some(Boolean);
-          return (
-            <div
-              key={server.id}
-              className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-muted/65 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full shrink-0 ${
-                        anyEnabled
-                          ? probeStatus[server.id] === 'connected' ? 'bg-[hsl(var(--success))]'
-                            : probeStatus[server.id] === 'pending' ? 'bg-[hsl(var(--warning))]'
-                            : probeStatus[server.id] === 'failed' ? 'bg-[hsl(var(--destructive))]'
-                            : 'bg-muted-foreground/45'
-                          : 'bg-muted-foreground/28'
-                      }`}
-                    />
-                    <span className="font-medium text-sm truncate">{server.name}</span>
-                    {transportBadge(serverType)}
-                  </div>
-                  {server.description && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5 ml-4">
-                      {server.description}
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  {APP_ORDER.map((app) => (
-                    <TooltipHint content={APP_LABELS[app]}>
-                      <button
-                        key={app}
-                        aria-label={`toggle-${server.id}-${app}`}
-                        onClick={() => toggleApp(server.id, app, !server.apps[app])}
-                        className={cn(
-                          'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
-                          server.apps[app]
-                            ? 'bg-primary/10 border-primary/30'
-                            : 'bg-background border-transparent opacity-40 hover:opacity-70',
-                        )}
-                      >
-                        <AppIcon app={app} size={16} />
-                      </button>
-                    </TooltipHint>
-                  ))}
-                </div>
-                <div className="flex items-center -space-x-1">
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => probeServer(server.id)}>
-                    <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(server)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                    onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {servers.length > 0 && (
+        <>
+          {builtinServers.length > 0 && renderSection('内置', builtinServers)}
+          {renderSection(
+            '已安装',
+            installedServers,
+            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground rounded-lg border border-dashed">
+              <Server className="h-6 w-6 mb-2 opacity-50" />
+              <p className="text-xs">暂无已安装的 MCP Server</p>
+              <p className="text-xs">点击"从工具导入"或"添加"按钮</p>
+            </div>,
+          )}
+        </>
+      )}
 
       {/* 编辑/新建弹窗 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>

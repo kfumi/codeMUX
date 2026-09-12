@@ -23,4 +23,6 @@ export interface McpServer {
   description: string;
   server: McpServerSpec;
   apps: McpApps;
+  /** 内置 server(daemon 动态提供):展示为「内置」,不可编辑/删除/单独开关。 */
+  builtin?: boolean;
 }

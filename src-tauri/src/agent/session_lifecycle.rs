@@ -1104,22 +1104,36 @@ pub(crate) fn build_ensure_session_command(
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
-    if agent_kind == "pi" {
-        let mcp_servers = {
-            let db = state.db.lock().unwrap();
-            crate::mcp::db::get_servers_enabled_for_app(&db, "pi").map_err(|error| {
-                format!(
-                    "Failed to load enabled MCP servers for session_id={} agent_kind=pi: {}",
-                    session_id, error
-                )
-            })?
-        };
-        if !mcp_servers.is_empty() {
-            let mut map = serde_json::Map::new();
+    // 内置浏览器工具(设置 → 浏览器控制):开启时随会话命令下发 stdio MCP
+    // server(daemon 二进制的 mcp-browser 子命令)。pi 在此合并用户 DB 配置,
+    // claude/codex/opencode 由 sidecar 各自落到 SDK/覆盖面;端点闸门对已在
+    // 途的会话兜底。
+    if matches!(agent_kind, "pi" | "claude_code" | "codex" | "opencode") {
+        let mut mcp_map = serde_json::Map::new();
+        if agent_kind == "pi" {
+            let mcp_servers = {
+                let db = state.db.lock().unwrap();
+                crate::mcp::db::get_servers_enabled_for_app(&db, "pi").map_err(|error| {
+                    format!(
+                        "Failed to load enabled MCP servers for session_id={} agent_kind=pi: {}",
+                        session_id, error
+                    )
+                })?
+            };
             for server in mcp_servers {
-                map.insert(server.name, server.server);
+                mcp_map.insert(server.name, server.server);
             }
-            cmd["mcpServers"] = serde_json::Value::Object(map);
+        }
+        if state.config.lock().unwrap().browser.enabled {
+            let current_exe = std::env::current_exe()
+                .unwrap_or_else(|_| std::path::PathBuf::from("codemux-daemon"));
+            mcp_map.insert(
+                crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
+                crate::browser_mcp::builtin_server_spec(&current_exe, &state.app_data_dir),
+            );
+        }
+        if !mcp_map.is_empty() {
+            cmd["mcpServers"] = serde_json::Value::Object(mcp_map);
         }
     }
 
@@ -2330,6 +2344,7 @@ mod tests {
                     opencode: false,
                     pi: true,
                 },
+                builtin: false,
             },
         )
         .unwrap();
@@ -2376,6 +2391,79 @@ mod tests {
         assert_eq!(command["modelLimits"]["contextWindow"], 1_000_000);
         assert_eq!(command["modelLimits"]["maxTokens"], 128_000);
         assert_eq!(command["mcpServers"]["fetch"]["command"], "npx");
+    }
+
+    #[test]
+    fn builtin_browser_mcp_server_follows_browser_control_toggle() {
+        fn app_state_with_browser(enabled: bool) -> (tempfile::TempDir, crate::AppState) {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            let runtime_root = tempfile::tempdir().unwrap();
+            let version_dir = runtime_root.path().join("claude_code").join("0.3.170");
+            std::fs::create_dir_all(&version_dir).unwrap();
+            std::fs::write(version_dir.join("package.json"), b"{}").unwrap();
+            std::fs::write(
+                runtime_root.path().join("claude_code").join("current"),
+                "0.3.170",
+            )
+            .unwrap();
+            crate::db::schema::initialize_database(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["session-claude", "Claude", "claude_code", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+            let mut config = crate::config::types::AppConfig::default();
+            config.browser.enabled = enabled;
+            let app_state = crate::AppState {
+                db: std::sync::Mutex::new(conn),
+                config: std::sync::Mutex::new(config),
+                app_data_dir: std::path::PathBuf::from("D:/codemux-data"),
+                runtime_resolver: crate::runtime::RuntimeResolver::new(
+                    runtime_root.path().to_path_buf(),
+                ),
+            };
+            (runtime_root, app_state)
+        }
+
+        let build = |state: &crate::AppState| {
+            build_ensure_session_command(
+                state,
+                "session-claude",
+                "claude_code",
+                "D:/workspace/demo".to_string(),
+                Some("secret-key".to_string()),
+                Some("https://provider.example/v1".to_string()),
+                Some("anthropic/glm-5.3-flash".to_string()),
+                None,
+                None,
+                Some("anthropic".to_string()),
+                Some("codemux".to_string()),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        // 默认关闭:claude 会话命令不带任何 mcpServers。
+        let (_root, state) = app_state_with_browser(false);
+        let command = build(&state);
+        assert!(
+            command.get("mcpServers").is_none(),
+            "浏览器控制关闭时不得注入内置 server,got {command:?}"
+        );
+
+        // 开启:注入 stdio spec,指向 daemon 二进制的 mcp-browser 子命令。
+        let (_root, state) = app_state_with_browser(true);
+        let command = build(&state);
+        let spec = &command["mcpServers"][crate::browser_mcp::BROWSER_MCP_SERVER_NAME];
+        assert_eq!(spec["args"][0], "mcp-browser");
+        assert_eq!(spec["args"][1], "--app-data-dir");
+        assert_eq!(spec["args"][2], "D:/codemux-data");
+        assert!(
+            !spec["command"].as_str().unwrap_or_default().is_empty(),
+            "command 应指向 current_exe,got {spec:?}"
+        );
     }
 
     #[test]

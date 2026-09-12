@@ -1,7 +1,8 @@
 //! 浏览器自动化接缝(工单 08):daemon → 壳内页面的受控自动化方法面。
 //!
 //! 链路:HTTP `POST /api/browser-automation/execute`(仅回环 + Local Daemon Token)
-//! → 生成 requestId → 经既有 WS 广播机制(`CompanionBroadcastEvent`,session_id 为空
+//! → 「开启内置浏览器控制」闸门(browser.enabled,关闭即 403)→ 生成 requestId
+//! → 经既有 WS 广播机制(`CompanionBroadcastEvent`,session_id 为空
 //! 表示控制面事件)广播 `browser-automation-request` → 壳(Electron main 进程的
 //! 自动化客户端)经 FIFO 队列串行执行 → `POST /api/browser-automation/result`
 //! 回填结果 → oneshot 唤醒挂起的 execute,HTTP 响应返回结果 payload。
@@ -32,7 +33,7 @@ use crate::companion::state::CompanionBroadcastEvent;
 pub const AUTOMATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 合法自动化操作集合(壳侧按 op 分发执行)。
-pub const AUTOMATION_OPS: [&str; 4] = ["eval", "screenshot", "input", "cdp"];
+pub const AUTOMATION_OPS: [&str; 5] = ["eval", "screenshot", "input", "cdp", "list"];
 
 /// 一次自动化请求的终态(经 oneshot 送回挂起的 execute)。
 #[derive(Debug)]
@@ -172,6 +173,16 @@ async fn execute_browser_automation(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let token = bearer_token_from_headers(&headers);
     authorize_automation_request(&ctx.daemon.app.app_data_dir, token.as_deref(), Some(peer))?;
+    // 设置闸门(设置 → 浏览器控制 → 开启内置浏览器控制):关闭时会话不得驱动
+    // 内置浏览器。403 文案直接面向用户,工具层会原样转述进对话。
+    {
+        let config = ctx.daemon.app.config.lock().unwrap();
+        if !config.browser.enabled {
+            return Err(ApiError::forbidden(
+                "内置浏览器控制未开启:请在 设置 → 浏览器控制 中打开后重试",
+            ));
+        }
+    }
     if !AUTOMATION_OPS.contains(&body.op.as_str()) {
         return Err(ApiError::bad_request(format!(
             "Unknown browser automation op: {}",

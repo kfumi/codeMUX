@@ -59,6 +59,11 @@ async fn stop_daemon(fixture: &DaemonFixture) {
         .expect("stop daemon");
 }
 
+/// 打开「设置 → 浏览器控制」开关(内存配置;既有用例默认走开启态)。
+fn enable_browser_control(fixture: &DaemonFixture) {
+    fixture.daemon.app.config.lock().unwrap().browser.enabled = true;
+}
+
 /// 原始 TCP HTTP/1.1 请求:返回 (状态码, JSON body)。
 async fn http_json(
     port: u16,
@@ -183,8 +188,42 @@ async fn execute_rejects_missing_wrong_and_pairing_tokens() {
 }
 
 #[tokio::test]
+async fn execute_blocked_with_403_when_browser_control_disabled() {
+    let fixture = start_daemon_fixture().await;
+    // 默认配置 browser.enabled=false:鉴权放行后必须被设置闸门 401→403 拦下,
+    // 且不落挂起表(文案面向用户,工具层会原样转述进对话)。
+    let (status, body) = execute_automation(
+        fixture.port,
+        Some(&fixture.token),
+        serde_json::json!({"browserId": "b1", "op": "eval", "params": {"code": "1"}}),
+    )
+    .await;
+    assert_eq!(status, 403, "关闭内置浏览器控制必须 403,got {body:?}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("浏览器控制未开启"),
+        "403 文案应引导用户开开关,got {body:?}"
+    );
+
+    // 开启后同一请求走到既有链路(无壳客户端 → 503 快速失败,证明闸门放行)。
+    enable_browser_control(&fixture);
+    let (status, _) = execute_automation(
+        fixture.port,
+        Some(&fixture.token),
+        serde_json::json!({"browserId": "b1", "op": "eval", "params": {"code": "1"}}),
+    )
+    .await;
+    assert_eq!(status, 503, "开启后闸门应放行(503=无壳客户端)");
+
+    stop_daemon(&fixture).await;
+}
+
+#[tokio::test]
 async fn execute_with_local_token_passes_auth_then_fails_fast_without_client() {
     let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
 
     // 回环 + Local Daemon Token:鉴权放行;无壳 WS 客户端(零订阅者)→ 503 快速失败,
     // 而不是挂 15s。503 即证明通过了鉴权与 op 校验。
@@ -199,12 +238,22 @@ async fn execute_with_local_token_passes_auth_then_fails_fast_without_client() {
         "有 token 回环应过鉴权(503=无客户端),got {body:?}"
     );
 
+    // list 操作同样在合法 op 集合内(不需要目标页)。
+    let (status, _) = execute_automation(
+        fixture.port,
+        Some(&fixture.token),
+        serde_json::json!({"op": "list", "params": {}}),
+    )
+    .await;
+    assert_eq!(status, 503, "list 应被 op 校验接受(503=无客户端)");
+
     stop_daemon(&fixture).await;
 }
 
 #[tokio::test]
 async fn execute_rejects_unknown_op_with_400() {
     let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
 
     for op in ["aria-snapshot", "EVAL", "eval "] {
         let (status, body) = execute_automation(
@@ -226,6 +275,7 @@ async fn execute_rejects_unknown_op_with_400() {
 #[tokio::test]
 async fn execute_roundtrip_via_ws_client_result() {
     let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
 
     let stream = tokio_tungstenite::connect_async(format!(
         "ws://127.0.0.1:{}/api/ws?token={}",
@@ -300,6 +350,7 @@ async fn execute_roundtrip_via_ws_client_result() {
 #[tokio::test]
 async fn shell_error_result_is_forwarded_as_ok_false() {
     let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
 
     let stream = tokio_tungstenite::connect_async(format!(
         "ws://127.0.0.1:{}/api/ws?token={}",
@@ -376,6 +427,7 @@ async fn result_with_unknown_request_id_is_400() {
 #[tokio::test]
 async fn execute_times_out_with_injected_short_timeout() {
     let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
 
     // 测试注入:等待超时 300ms(生产固定 15s)。
     fixture

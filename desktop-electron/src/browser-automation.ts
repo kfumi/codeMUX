@@ -49,6 +49,13 @@ export interface AutomationTarget {
   };
 }
 
+/** list 操作返回的存活 guest 条目(与 BrowserGuestTracker.list 同形)。 */
+export interface AutomationTargetInfo {
+  browserId: string;
+  url: string;
+  title: string;
+}
+
 /** 一次自动化执行的终态(POST 回 daemon 的 result 载荷)。 */
 export interface AutomationOutcome {
   ok: boolean;
@@ -63,6 +70,10 @@ export interface BrowserAutomationDeps {
   readToken(): string | null;
   /** Browser Host guest 登记表:browserId → <webview> webContents。 */
   resolveTarget(browserId: string): AutomationTarget | undefined;
+  /** 最近登记且存活的 guest(请求省略 browserId 时的默认目标;缺省视为无目标)。 */
+  resolveMostRecent?(): AutomationTarget | undefined;
+  /** 全部存活 guest 清单(list 操作)。 */
+  listTargets(): AutomationTargetInfo[];
   /** 日志出口(缺省 console;测试注入断言)。 */
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** 重连退避基值(ms),指数翻倍,上限 10s;测试注入更小值。 */
@@ -142,14 +153,20 @@ export function parseAutomationRequest(raw: string): AutomationRequest | null {
  * 不向上抛(调用方据此 POST result)。
  */
 export async function executeAutomationRequest(
-  deps: Pick<BrowserAutomationDeps, 'resolveTarget'>,
+  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets'>,
   request: AutomationRequest,
 ): Promise<AutomationOutcome> {
   const op = request.op;
-  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp') {
+  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'list') {
     return { ok: false, error: `unknown automation op: ${op}` };
   }
-  const target = request.browserId ? deps.resolveTarget(request.browserId) : undefined;
+  // list 不需要目标页:直接报存活 guest 清单。
+  if (op === 'list') {
+    return { ok: true, payload: deps.listTargets() };
+  }
+  const target = request.browserId
+    ? deps.resolveTarget(request.browserId)
+    : deps.resolveMostRecent?.();
   if (!target) {
     return { ok: false, error: `browser not found: ${request.browserId ?? '(none)'}` };
   }

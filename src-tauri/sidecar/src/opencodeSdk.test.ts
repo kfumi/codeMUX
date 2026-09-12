@@ -230,6 +230,39 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('maps session mcpServers into the mcp config section (local stdio)', () => {
+    const config = buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'model-1',
+      credentialSource: 'codemux',
+      mcpServers: {
+        'codemux-browser': {
+          command: 'D:/bin/codemux-daemon.exe',
+          args: ['mcp-browser', '--app-data-dir', 'D:/data'],
+          env: { A: '1' },
+        },
+        bad: { url: 'https://x' },
+      },
+    });
+    expect(config.mcp).toEqual({
+      'codemux-browser': {
+        type: 'local',
+        command: ['D:/bin/codemux-daemon.exe', 'mcp-browser', '--app-data-dir', 'D:/data'],
+        environment: { A: '1' },
+        enabled: true,
+      },
+    });
+    // 用户既有 mcp 配置保留,会话条目覆盖同名键。
+    const merged = buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'model-1',
+      credentialSource: 'codemux',
+      existingConfig: { mcp: { mine: { type: 'local', command: ['x'], enabled: true } } },
+      mcpServers: { 'codemux-browser': { command: 'daemon' } },
+    });
+    expect(Object.keys(merged.mcp)).toEqual(['mine', 'codemux-browser']);
+  });
+
   it('includes a default output limit when only the context window is configured', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'codemux-openai',

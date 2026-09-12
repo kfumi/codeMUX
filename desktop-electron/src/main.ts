@@ -425,6 +425,8 @@ if (!gotLock) {
       getPort: () => supervisor?.getPort() ?? null,
       readToken: () => readLocalDaemonToken(resolveAppDataDir()),
       resolveTarget: (browserId) => guests.resolveTarget(browserId),
+      resolveMostRecent: () => guests.resolveMostRecent(),
+      listTargets: () => guests.list(),
       onUiEvent: (name, payload) => sendToRenderer(name, payload),
     });
     automation.start();

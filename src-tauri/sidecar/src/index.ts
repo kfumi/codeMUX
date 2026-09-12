@@ -18,6 +18,7 @@ import {
   readClaudeCompactPreTokens,
 } from './claudeCompactEvents.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
+import { mapClaudeMcpServers } from './claudeMcpServers.js';
 import { projectClaudeToolEvents, toClaudeAssistantMessageEvent } from './claudeToolEvents.js';
 import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
@@ -26,6 +27,7 @@ import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import { PiRuntime } from './piRuntime.js';
 import type { PiThinkingLevel } from './piEvents.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping, PiSessionConfig, PiSessionMapping } from './types.js';
+import type { PiMcpServers } from './piMcp.js';
 import {
   getRuntimeFlavor,
 } from './runtimeEvents.js';
@@ -143,6 +145,8 @@ type SessionBootstrap = {
   planMode?: AgentPlanMode;
   runtimeRef?: import('./runtimeContract.js').ProviderRuntimeRef;
   timeouts?: TurnTimeouts;
+  /** daemon 随会话命令下发的 MCP 服务器(pi 直传;claude 经 buildOptions 注入 SDK)。 */
+  mcpServers?: PiMcpServers;
 };
 
 type QueryOptions = Record<string, unknown> & {
@@ -701,6 +705,7 @@ export class SessionRuntime {
       planMode: normalizePlanMode(cmd.planMode),
       runtimeRef: cmd.runtimeRef,
       timeouts: cmd.timeouts,
+      mcpServers: cmd.mcpServers,
     };
   }
 
@@ -1000,6 +1005,7 @@ export class SessionRuntime {
     }
 
     const permissionOptions = buildClaudePermissionOptions(config.permissionConfig, config.planMode);
+    const mcpServers = mapClaudeMcpServers(config.mcpServers);
 
     const options: QueryOptions = {
       cwd: config.cwd,
@@ -1008,6 +1014,7 @@ export class SessionRuntime {
       allowDangerouslySkipPermissions: permissionOptions.allowDangerouslySkipPermissions,
       env: subprocessEnv,
       enableFileCheckpointing: true,
+      ...(mcpServers ? { mcpServers } : {}),
       ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
       includePartialMessages: true,
       systemPrompt: {
@@ -2235,6 +2242,7 @@ function buildOpenCodeSessionConfig(cmd: EnsureSessionCommand): OpenCodeSessionC
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
     ...(cmd.timeouts ? { timeouts: cmd.timeouts } : {}),
     ...(cmd.modelLimits ? { modelLimits: cmd.modelLimits } : {}),
+    ...(cmd.mcpServers ? { mcpServers: cmd.mcpServers } : {}),
   };
 }
 

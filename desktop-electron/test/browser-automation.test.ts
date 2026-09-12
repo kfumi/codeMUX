@@ -179,12 +179,16 @@ function serviceDeps(overrides: {
   getPort?: () => number | null;
   readToken?: () => string | null;
   resolveTarget?: (browserId: string) => AutomationTarget | undefined;
+  resolveMostRecent?: () => AutomationTarget | undefined;
+  listTargets?: () => Array<{ browserId: string; url: string; title: string }>;
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
 }) {
   return {
     getPort: overrides.getPort ?? (() => 4321),
     readToken: overrides.readToken ?? (() => 'tok-1'),
     resolveTarget: overrides.resolveTarget ?? (() => undefined),
+    ...(overrides.resolveMostRecent ? { resolveMostRecent: overrides.resolveMostRecent } : {}),
+    listTargets: overrides.listTargets ?? (() => []),
     reconnectBaseDelayMs: 1,
     ...(overrides.log ? { log: overrides.log } : {}),
   };
@@ -521,12 +525,39 @@ describe('browser-automation 纯函数', () => {
     });
   });
 
-  it('executeAutomationRequest:无 browserId 直接报错', async () => {
+  it('executeAutomationRequest:无 browserId 且无最近 guest 直接报错', async () => {
     const outcome = await executeAutomationRequest(
-      { resolveTarget: () => makeTarget() },
+      { resolveTarget: () => makeTarget(), listTargets: () => [] },
       { requestId: 'r', op: 'eval' },
     );
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toContain('browser not found');
+  });
+
+  it('executeAutomationRequest:无 browserId 回落到最近登记的 guest', async () => {
+    const target = makeTarget();
+    const outcome = await executeAutomationRequest(
+      {
+        resolveTarget: () => undefined,
+        resolveMostRecent: () => target,
+        listTargets: () => [],
+      },
+      { requestId: 'r', op: 'eval', params: { code: '1+1' } },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(target.calls.execute).toEqual(['1+1']);
+  });
+
+  it('executeAutomationRequest:list 返回存活 guest 清单(无需目标页)', async () => {
+    const guests = [
+      { browserId: 'browser-1', url: 'https://a.example', title: 'A' },
+      { browserId: 'browser-2', url: 'https://b.example', title: 'B' },
+    ];
+    const outcome = await executeAutomationRequest(
+      { resolveTarget: () => undefined, listTargets: () => guests },
+      { requestId: 'r', op: 'list' },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.payload).toEqual(guests);
   });
 });

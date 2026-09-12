@@ -22,4 +22,7 @@ pub struct McpServer {
     pub description: String,
     pub server: serde_json::Value,
     pub apps: McpApps,
+    /// 内置 server(daemon 动态提供,不在 DB 中):列表展示为内置,拒绝改删。
+    #[serde(default)]
+    pub builtin: bool,
 }

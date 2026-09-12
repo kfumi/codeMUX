@@ -35,6 +35,8 @@ export interface OpenCodeSessionConfig {
   runtimeRef?: ProviderRuntimeRef;
   timeouts?: TurnTimeouts;
   modelLimits?: SidecarModelLimits;
+  /** daemon 随会话命令下发的 MCP 服务器(落 server config 的 mcp 段)。 */
+  mcpServers?: PiMcpServers;
 }
 
 export interface OpenCodeSessionMapping {

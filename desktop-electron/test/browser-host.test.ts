@@ -11,9 +11,14 @@ const sessionMock = vi.hoisted(() => ({
   fromPartition: vi.fn(),
 }));
 
+const webContentsMock = vi.hoisted(() => ({
+  getAllWebContents: vi.fn(() => [] as Array<{ id: number; isDestroyed: () => boolean; getURL: () => string; getTitle: () => string }>),
+}));
+
 vi.mock('electron', () => ({
   app: appMock,
   session: sessionMock,
+  webContents: webContentsMock,
 }));
 
 import {
@@ -48,6 +53,8 @@ describe('browser-host(工单 07 main 侧)', () => {
     appMock.on.mockClear();
     appMock.off.mockClear();
     sessionMock.fromPartition.mockReset();
+    webContentsMock.getAllWebContents.mockReset();
+    webContentsMock.getAllWebContents.mockReturnValue([]);
   });
 
   it('partition 校验:接受 cmx- 与 persist:cmx- 形态,拒绝其余', () => {
@@ -111,6 +118,41 @@ describe('browser-host(工单 07 main 侧)', () => {
     };
     tracker.onWebContentsCreated(null as never, contents as never);
     expect(contents.setWindowOpenHandler).not.toHaveBeenCalled();
+  });
+
+  it('guest tracker:resolveMostRecent 取最近登记且存活的 guest,list 报清单', () => {
+    const tracker = createBrowserGuestTracker({ sendToRenderer: vi.fn() });
+    const a = makeFakeGuestContents(1);
+    const b = makeFakeGuestContents(2);
+    tracker.onWebContentsCreated(null as never, a as never);
+    tracker.onWebContentsCreated(null as never, b as never);
+    webContentsMock.getAllWebContents.mockReturnValue([
+      { id: 1, isDestroyed: () => false, getURL: () => 'https://a.example', getTitle: () => 'A' },
+      { id: 2, isDestroyed: () => false, getURL: () => 'https://b.example', getTitle: () => 'B' },
+    ]);
+
+    tracker.register(1, 'page-a');
+    tracker.register(2, 'page-b');
+    expect(tracker.resolveMostRecent()?.id).toBe(2);
+    expect(tracker.list()).toEqual([
+      { browserId: 'page-a', url: 'https://a.example', title: 'A' },
+      { browserId: 'page-b', url: 'https://b.example', title: 'B' },
+    ]);
+
+    // 重复登记同一 guest 移到尾部:最近变为 page-a。
+    tracker.register(1, 'page-a');
+    expect(tracker.resolveMostRecent()?.id).toBe(1);
+
+    // guest 销毁:登记与清单同步剔除。
+    b.destroyedHandlers.forEach((fn) => fn());
+    expect(tracker.list()).toEqual([
+      { browserId: 'page-a', url: 'https://a.example', title: 'A' },
+    ]);
+
+    // 存活登记表全部无对应 webContents:最近目标为空。
+    webContentsMock.getAllWebContents.mockReturnValue([]);
+    expect(tracker.resolveMostRecent()).toBeUndefined();
+    expect(tracker.list()).toEqual([]);
   });
 
   it('clearBrowserProfileData:all 清全部资料,cache 只清缓存与 Service Worker', async () => {

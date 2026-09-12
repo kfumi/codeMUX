@@ -14,6 +14,7 @@
 
 mod agent;
 mod agent_runtime;
+pub mod browser_mcp;
 pub mod companion;
 mod config;
 pub mod daemon;

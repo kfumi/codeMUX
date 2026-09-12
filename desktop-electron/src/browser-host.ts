@@ -43,6 +43,12 @@ export function guardWebviewAttach(
   return isAllowedBrowserPartition(params?.partition);
 }
 
+export interface BrowserGuestInfo {
+  browserId: string;
+  url: string;
+  title: string;
+}
+
 export interface BrowserGuestTracker {
   /** app.on('web-contents-created') 处理器:为每个 webview guest 注册弹窗拒绝与清理。 */
   onWebContentsCreated: (event: unknown, contents: WebContents) => void;
@@ -54,6 +60,10 @@ export interface BrowserGuestTracker {
    * (daemon 自动化请求的执行目标;找不到返回 undefined)。
    */
   resolveTarget: (browserId: string) => WebContents | undefined;
+  /** 最近登记且仍存活的 guest(自动化请求省略 browserId 时的默认目标)。 */
+  resolveMostRecent: () => WebContents | undefined;
+  /** 全部仍存活 guest 的清单(自动化 list 操作;按登记顺序)。 */
+  list: () => BrowserGuestInfo[];
 }
 
 /**
@@ -82,6 +92,8 @@ export function createBrowserGuestTracker(deps: {
       });
     },
     register: (webContentsId, browserId) => {
+      // 先删后插:重复登记同一 guest 时移到 Map 尾部,保住「最近登记」语义。
+      guests.delete(webContentsId);
       guests.set(webContentsId, browserId);
     },
     lookup: (webContentsId) => guests.get(webContentsId),
@@ -93,6 +105,27 @@ export function createBrowserGuestTracker(deps: {
         if (found) return found;
       }
       return undefined;
+    },
+    resolveMostRecent: () => {
+      const entries = [...guests.entries()];
+      const all = webContents.getAllWebContents();
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const [id] = entries[i];
+        const found = all.find((item) => item.id === id);
+        if (found && !found.isDestroyed()) return found;
+      }
+      return undefined;
+    },
+    list: () => {
+      const all = webContents.getAllWebContents();
+      const result: BrowserGuestInfo[] = [];
+      for (const [id, browserId] of guests) {
+        const found = all.find((item) => item.id === id);
+        if (found && !found.isDestroyed()) {
+          result.push({ browserId, url: found.getURL(), title: found.getTitle() });
+        }
+      }
+      return result;
     },
   };
 }

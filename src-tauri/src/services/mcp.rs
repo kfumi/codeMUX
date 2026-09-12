@@ -30,18 +30,38 @@ fn get_mcp_servers_from_db(db: &Mutex<rusqlite::Connection>) -> Result<Vec<McpSe
 }
 
 pub fn get_mcp_servers_impl(state: &AppState) -> Result<Vec<McpServer>, String> {
-    let servers = get_mcp_servers_from_db(&state.db)?;
+    let mut servers = get_mcp_servers_from_db(&state.db)?;
+    // 内置浏览器控制 server 动态追加(不落 DB):设置页展示为「内置」,
+    // 无需刷新/导入,写入路径按 id/name 拒绝改删。
+    servers.push(crate::browser_mcp::builtin_server_entry(
+        &std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("codemux-daemon")),
+        &state.app_data_dir,
+    ));
     log::info!(target: "mcp_fetch", "get_mcp_servers returning {} entries", servers.len());
     Ok(servers)
 }
 
+/// 内置 server 保护:用户侧写入(upsert/toggle/delete)不得触碰内置 id/name。
+fn reject_builtin(id_or_name: &str) -> Result<(), String> {
+    if id_or_name == crate::browser_mcp::BROWSER_MCP_SERVER_NAME {
+        Err("内置 MCP server 不可修改或删除".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 pub fn upsert_mcp_server_impl(state: &AppState, server: McpServer) -> Result<(), String> {
+    reject_builtin(&server.id)?;
+    if server.name == crate::browser_mcp::BROWSER_MCP_SERVER_NAME {
+        return Err("内置 MCP server 名称保留,不可占用".to_string());
+    }
     let db = state.db.lock().unwrap();
     db::upsert_mcp_server(&db, &server).map_err(|e| format!("Failed to save MCP server: {}", e))?;
     Ok(())
 }
 
 pub fn delete_mcp_server_impl(state: &AppState, id: String) -> Result<(), String> {
+    reject_builtin(&id)?;
     let db = state.db.lock().unwrap();
     db::delete_mcp_server(&db, &id).map_err(|e| format!("Failed to delete MCP server: {}", e))?;
     Ok(())
@@ -53,6 +73,7 @@ pub fn toggle_mcp_app_impl(
     app: String,
     enabled: bool,
 ) -> Result<(), String> {
+    reject_builtin(&server_id)?;
     crate::mcp::service::toggle_app(state, &server_id, &app, enabled)
 }
 
@@ -463,7 +484,10 @@ pub async fn probe_mcp_server_impl(state: &AppState, id: String) -> Result<Probe
 
 #[cfg(test)]
 mod tests {
-    use super::get_mcp_servers_from_db;
+    use super::{
+        delete_mcp_server_impl, get_mcp_servers_from_db, get_mcp_servers_impl, toggle_mcp_app_impl,
+        upsert_mcp_server_impl,
+    };
     use rusqlite::Connection;
     use std::sync::Mutex;
 
@@ -489,6 +513,7 @@ mod tests {
                     opencode: false,
                     pi: false,
                 },
+                builtin: false,
             },
         )
         .unwrap();
@@ -500,5 +525,104 @@ mod tests {
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].id, "fetch");
         assert_eq!(servers[0].description, "Web fetcher");
+        assert!(!servers[0].builtin);
+    }
+
+    fn app_state() -> (tempfile::TempDir, crate::AppState) {
+        let temp = tempfile::tempdir().unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        let state = crate::AppState {
+            db: Mutex::new(conn),
+            config: Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: temp.path().to_path_buf(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(temp.path().to_path_buf()),
+        };
+        (temp, state)
+    }
+
+    #[test]
+    fn list_appends_builtin_entry_and_writes_are_rejected() {
+        let (_temp, state) = app_state();
+
+        // 列表:DB 为空也追加内置条目(builtin=true,apps 全开,不落 DB)。
+        let servers = get_mcp_servers_impl(&state).unwrap();
+        assert_eq!(servers.len(), 1);
+        assert!(servers[0].builtin);
+        assert_eq!(servers[0].id, crate::browser_mcp::BROWSER_MCP_SERVER_NAME);
+        assert!(
+            servers[0].apps.claude
+                && servers[0].apps.codex
+                && servers[0].apps.gemini
+                && servers[0].apps.opencode
+                && servers[0].apps.pi
+        );
+        // DB 里没有它:刷新/重启不产生累积。
+        let db = state.db.lock().unwrap();
+        assert!(
+            crate::mcp::db::get_mcp_server(&db, crate::browser_mcp::BROWSER_MCP_SERVER_NAME)
+                .unwrap()
+                .is_none()
+        );
+        drop(db);
+
+        // 写入保护:upsert / delete / toggle 一律拒绝。
+        let err = upsert_mcp_server_impl(
+            &state,
+            crate::mcp::types::McpServer {
+                id: crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
+                name: "x".into(),
+                description: String::new(),
+                server: serde_json::json!({"command": "evil"}),
+                apps: Default::default(),
+                builtin: true,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("不可修改或删除"));
+
+        // 用户 server 占用内置名也拒绝。
+        let err = upsert_mcp_server_impl(
+            &state,
+            crate::mcp::types::McpServer {
+                id: "mine".into(),
+                name: crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
+                description: String::new(),
+                server: serde_json::json!({"command": "evil"}),
+                apps: Default::default(),
+                builtin: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("名称保留"));
+
+        let err =
+            delete_mcp_server_impl(&state, crate::browser_mcp::BROWSER_MCP_SERVER_NAME.into())
+                .unwrap_err();
+        assert!(err.contains("不可修改或删除"));
+
+        let err = toggle_mcp_app_impl(
+            &state,
+            crate::browser_mcp::BROWSER_MCP_SERVER_NAME.into(),
+            "claude".into(),
+            false,
+        )
+        .unwrap_err();
+        assert!(err.contains("不可修改或删除"));
+
+        // 正常 server 不受影响。
+        upsert_mcp_server_impl(
+            &state,
+            crate::mcp::types::McpServer {
+                id: "fetch".into(),
+                name: "fetch".into(),
+                description: String::new(),
+                server: serde_json::json!({"command": "npx"}),
+                apps: Default::default(),
+                builtin: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(get_mcp_servers_impl(&state).unwrap().len(), 2);
     }
 }

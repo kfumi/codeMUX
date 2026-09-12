@@ -1,4 +1,5 @@
 import type { Config } from '@opencode-ai/sdk';
+import type { PiMcpServers } from './piMcp.js';
 import * as path from 'node:path';
 import { prepareOpenCodeExecutable } from './opencodeExecutable.js';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
@@ -86,6 +87,8 @@ export interface OpenCodeSdkStartInput {
   serverCloseTimeoutMs?: number;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
+  /** daemon 随会话下发的 MCP 服务器(落 server config 的 mcp 段)。 */
+  mcpServers?: PiMcpServers;
   modelLimits?: {
     contextWindow?: number;
     maxInputTokens?: number;
@@ -115,6 +118,8 @@ export interface OpenCodeServerConfigInput {
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   existingConfig?: Config;
+  /** daemon 随会话下发的 MCP 服务器(stdio,覆盖同名用户配置)。 */
+  mcpServers?: PiMcpServers;
   modelLimits?: {
     contextWindow?: number;
     maxInputTokens?: number;
@@ -123,7 +128,27 @@ export interface OpenCodeServerConfigInput {
   };
 }
 
+/** CodeMUX MCP spec → opencode `mcp` 段(local stdio server)。 */
+export function toOpenCodeMcpConfig(servers: PiMcpServers): Record<string, unknown> {
+  const mcp: Record<string, unknown> = {};
+  for (const [name, spec] of Object.entries(servers)) {
+    if (typeof spec.command !== 'string' || !spec.command.trim()) continue;
+    mcp[name] = {
+      type: 'local',
+      command: [spec.command, ...(Array.isArray(spec.args) ? spec.args : [])],
+      ...(spec.env && typeof spec.env === 'object' && !Array.isArray(spec.env)
+        ? { environment: spec.env }
+        : {}),
+      enabled: true,
+    };
+  }
+  return mcp;
+}
+
 export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Config {
+  const sessionMcp = input.mcpServers && Object.keys(input.mcpServers).length > 0
+    ? toOpenCodeMcpConfig(input.mcpServers)
+    : undefined;
   if (input.provider === 'opencode') {
     const { provider: existingProviders, ...rest } = input.existingConfig ?? {};
     const opencodeProvider = existingProviders?.opencode;
@@ -131,6 +156,7 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
       ...rest,
       ...(opencodeProvider ? { provider: { opencode: opencodeProvider } } : {}),
       model: `opencode/${input.model}`,
+      ...(sessionMcp ? { mcp: { ...((rest as { mcp?: Record<string, unknown> }).mcp ?? {}), ...sessionMcp } } : {}),
     };
   }
 
@@ -165,6 +191,9 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
       ...input.existingConfig?.provider,
       [input.provider]: providerConfig,
     },
+    ...(sessionMcp
+      ? { mcp: { ...(input.existingConfig?.mcp ?? {}), ...sessionMcp } }
+      : {}),
   };
 }
 
@@ -413,7 +442,7 @@ function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef, modelLimits }) {
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits }) {
     const runtimeLoaded = loadRuntime(runtimeRef);
     const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
     const cliPath = executable?.executablePath ?? '(托管 Runtime CLI 路径未解析)';
@@ -433,6 +462,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
       baseUrl,
       credentialSource,
       existingConfig,
+      mcpServers,
       modelLimits,
     });
     const server = await createOpencodeServer({

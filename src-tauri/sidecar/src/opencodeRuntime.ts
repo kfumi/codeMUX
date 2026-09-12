@@ -547,6 +547,7 @@ export class OpenCodeRuntime {
           credentialSource: this.config.credentialSource,
           serverCloseTimeoutMs: this.serverCloseTimeoutMs,
           runtimeRef: this.config.runtimeRef,
+          mcpServers: this.config.mcpServers,
           modelLimits: this.config.modelLimits,
         });
       } catch (error) {

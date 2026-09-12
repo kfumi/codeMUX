@@ -12,6 +12,7 @@
 
 import type { SidecarCommand, SidecarModelLimits } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
+import type { PiMcpServers } from './piMcp.js';
 import {
   isRuntimeError,
   loadProviderRuntime,
@@ -151,6 +152,8 @@ type CodexSessionBootstrap = {
   runtimeRef?: ProviderRuntimeRef;
   timeouts?: TurnTimeouts;
   modelLimits?: SidecarModelLimits;
+  /** daemon 随会话命令下发的 MCP 服务器(落 -c mcp_servers.* 覆盖)。 */
+  mcpServers?: PiMcpServers;
 };
 
 type ActiveTurnState = {
@@ -240,6 +243,7 @@ export class CodexAppServerRuntime {
       runtimeRef: cmd.runtimeRef,
       timeouts: cmd.timeouts,
       modelLimits: cmd.modelLimits,
+      mcpServers: cmd.mcpServers,
     };
     this.timeouts = resolveTurnTimeouts(requestedConfig.timeouts);
 
@@ -1767,23 +1771,38 @@ function buildAppServerEnv(config: CodexSessionBootstrap): Record<string, string
 export const CODEMUX_APP_SERVER_PROVIDER_ID = 'codemux_session';
 
 export function buildAppServerConfigOverrides(
-  config: Pick<CodexSessionBootstrap, 'effectiveBaseUrl' | 'upstreamBaseUrl'>,
+  config: Pick<CodexSessionBootstrap, 'effectiveBaseUrl' | 'upstreamBaseUrl' | 'mcpServers'>,
 ): string[] {
+  const overrides: string[] = [];
   const baseUrl = config.effectiveBaseUrl ?? config.upstreamBaseUrl;
-  if (!baseUrl) {
-    return [];
+  if (baseUrl) {
+    const prefix = `model_providers.${CODEMUX_APP_SERVER_PROVIDER_ID}`;
+    overrides.push(
+      '-c', `model_provider=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
+      '-c', `${prefix}.name=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
+      '-c', `${prefix}.base_url=${baseUrl}`,
+      '-c', `${prefix}.wire_api=responses`,
+      // Third-party providers take credentials from a named env var
+      // (buildAppServerEnv seeds OPENAI_API_KEY from the session's api_key);
+      // requires_openai_auth would demand the official ChatGPT/API-key login.
+      '-c', `${prefix}.env_key=OPENAI_API_KEY`,
+    );
   }
-  const prefix = `model_providers.${CODEMUX_APP_SERVER_PROVIDER_ID}`;
-  return [
-    '-c', `model_provider=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
-    '-c', `${prefix}.name=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
-    '-c', `${prefix}.base_url=${baseUrl}`,
-    '-c', `${prefix}.wire_api=responses`,
-    // Third-party providers take credentials from a named env var
-    // (buildAppServerEnv seeds OPENAI_API_KEY from the session's api_key);
-    // requires_openai_auth would demand the official ChatGPT/API-key login.
-    '-c', `${prefix}.env_key=OPENAI_API_KEY`,
-  ];
+  // 会话级 MCP server(stdio):与用户 ~/.codex/config.toml 同名时,进程级
+  // `-c` 覆盖优先。值面用 JSON 序列化(TOML 字符串/数组/内联表兼容子集)。
+  for (const [name, spec] of Object.entries(config.mcpServers ?? {})) {
+    if (typeof spec.command !== 'string' || !spec.command.trim()) continue;
+    const prefix = `mcp_servers.${name}`;
+    overrides.push('-c', `${prefix}.command=${JSON.stringify(spec.command)}`);
+    if (Array.isArray(spec.args) && spec.args.length > 0) {
+      overrides.push('-c', `${prefix}.args=${JSON.stringify(spec.args)}`);
+    }
+    if (spec.env && typeof spec.env === 'object' && !Array.isArray(spec.env)
+      && Object.keys(spec.env).length > 0) {
+      overrides.push('-c', `${prefix}.env=${JSON.stringify(spec.env)}`);
+    }
+  }
+  return overrides;
 }
 
 /**
