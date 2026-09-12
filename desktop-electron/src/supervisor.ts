@@ -23,6 +23,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';impor
 } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { formatLocalTimestamp } from './log-format';
 
 /** 与 Rust `DaemonRunState` 同形的 run-state 条目(serde 无 rename → snake_case 键)。 */
 export interface DaemonRunState {
@@ -103,8 +104,8 @@ export interface Supervisor {
   dispose(): void;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
+function nowLocalTimestamp(): string {
+  return formatLocalTimestamp(new Date());
 }
 
 function runStatePath(appDataDir: string): string {
@@ -282,7 +283,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, 'daemon.log');
     // append 语义(Rust 版以 append fd 打开);启动时追加一行分隔便于排障。
-    appendFileSync(logPath, `\n[shell] spawning daemon (${nowIso()})\n`);
+    appendFileSync(logPath, `\n[shell] spawning daemon (${nowLocalTimestamp()})\n`);
     const logFd = openSync(logPath, 'a');
     try {
       const args = [...(options.exeArgs ?? []), '--app-data-dir', appDataDir, '--managed-by', managedBy];

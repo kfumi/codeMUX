@@ -22,9 +22,9 @@ afterEach(() => {
 });
 
 describe('createRendererLogRecorder', () => {
-  it('追加写入 [时间] [级别] 消息 (来源:行) 行,并懒建日志目录', () => {
+  it('追加写入 [本地时间] [级别] 消息 (来源:行) 行,并懒建日志目录', () => {
     const logDir = path.join(makeTempDir(), 'logs', 'nested');
-    const recorder = createRendererLogRecorder(logDir, () => new Date('2026-09-12T08:09:10Z'));
+    const recorder = createRendererLogRecorder(logDir, () => new Date(2026, 8, 12, 8, 9, 10, 481));
     expect(recorder.filePath).toBe(path.join(logDir, RENDERER_LOG_FILE));
 
     recorder.record(1, 'hello renderer', 42, 'app:///src/main.tsx');
@@ -32,8 +32,8 @@ describe('createRendererLogRecorder', () => {
 
     const lines = readFileSync(recorder.filePath, 'utf8').trimEnd().split('\n');
     expect(lines).toEqual([
-      '[2026-09-12T08:09:10.000Z] [info] hello renderer (app:///src/main.tsx:42)',
-      '[2026-09-12T08:09:10.000Z] [error] boom (app:///src/main.tsx:7)',
+      '[2026-09-12 08:09:10.481] [info] hello renderer (app:///src/main.tsx:42)',
+      '[2026-09-12 08:09:10.481] [error] boom (app:///src/main.tsx:7)',
     ]);
   });
 

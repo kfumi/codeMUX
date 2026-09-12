@@ -12,27 +12,24 @@ import { cn } from '../../lib/utils';
 // Agent brand SVGs for per-tool toggle icons
 import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
 import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
-import geminiSvg from '@lobehub/icons-static-svg/icons/gemini-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 
 const APP_SVGS: Partial<Record<keyof SkillApps, string>> = {
   claude: claudeSvg,
   codex: openAiSvg,
-  gemini: geminiSvg,
   opencode: opencodeSvg,
   pi: piSvg,
 };
 
-const APP_LABELS: Record<keyof SkillApps, string> = {
+const APP_LABELS: Partial<Record<keyof SkillApps, string>> = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
   opencode: 'OpenCode',
   pi: 'pi',
 };
 
-const APP_ORDER: Array<keyof SkillApps> = ['claude', 'codex', 'gemini', 'opencode', 'pi'];
+const APP_ORDER: Array<keyof SkillApps> = ['claude', 'codex', 'opencode', 'pi'];
 
 function AppIcon({ app, size = 16 }: { app: keyof SkillApps; size?: number }) {
   const svg = APP_SVGS[app];

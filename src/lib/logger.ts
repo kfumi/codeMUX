@@ -77,7 +77,11 @@ function normalizeContext(context?: LogContext, err?: unknown) {
 }
 
 function formatConsolePayload(scope: string, message: string, context?: LogContext, err?: unknown) {
-  return [`[${scope}] ${message}`, context, err].filter((value) => value !== undefined);
+  // context 必须内联进消息字符串:Electron main 的 console-message 事件
+  // (renderer.log 落盘来源)只捕获首个参数文本,对象参数会变成 [object Object],
+  // sessionId 等排查字段会全部丢失。
+  const contextText = context ? ` ${JSON.stringify(context)}` : '';
+  return [`[${scope}] ${message}${contextText}`];
 }
 
 function emit(level: LogLevel, scope: string, message: string, context?: LogContext, err?: unknown) {

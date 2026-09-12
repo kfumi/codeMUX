@@ -1,13 +1,14 @@
 "use client";
 
 import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
-import { Check, Copy, Bug, GitFork, Loader2 } from 'lucide-react';
+import { Check, Copy, Bug, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { TooltipHint } from '@/components/ui/tooltip';
+import { GitForkIcon } from '@/components/ui/git-fork-icon';
 
 export type MessageFooterStats = {
   durationMs?: number;
@@ -186,7 +187,7 @@ function ForkButton({ isForking, onFork }: { isForking: boolean; onFork: () => v
         )}
         aria-label="从此回复创建分支"
       >
-        {isForking ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitFork className="h-3 w-3" />}
+        {isForking ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitForkIcon className="h-3 w-3" />}
       </button>
     </TooltipHint>
   );

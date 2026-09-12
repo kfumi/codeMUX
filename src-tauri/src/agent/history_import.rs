@@ -837,11 +837,21 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
         return Vec::new();
     };
 
+    // 项目目录来自 session 表（旧版 schema 无此表时跳过注入，不影响发现）。
+    let directories = opencode_session_directories(&connection);
+
     session_ids
         .filter_map(Result::ok)
         .filter_map(|session_id| {
             let raw = opencode_history::load_opencode_native_events(home, &session_id).ok()?;
-            let events = normalize_history_events(raw, &session_id);
+            let mut events = normalize_history_events(raw, &session_id);
+            if let Some(directory) = directories.get(&session_id) {
+                for event in &mut events {
+                    if let Some(object) = event.as_object_mut() {
+                        object.insert("cwd".to_string(), Value::String(directory.clone()));
+                    }
+                }
+            }
             if events.is_empty() {
                 return None;
             }
@@ -853,6 +863,24 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
                 None,
             ))
         })
+        .collect()
+}
+
+/// opencode 项目目录映射：session.id -> session.directory。查询失败（旧版
+/// schema 没有 session 表等）返回空映射，调用方按“无 cwd”继续发现。
+fn opencode_session_directories(connection: &Connection) -> HashMap<String, String> {
+    let Ok(mut statement) =
+        connection.prepare("SELECT id, directory FROM session WHERE directory IS NOT NULL")
+    else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) else {
+        return HashMap::new();
+    };
+    rows.filter_map(Result::ok)
+        .filter(|(_, directory)| !directory.trim().is_empty())
         .collect()
 }
 
@@ -1244,6 +1272,57 @@ mod tests {
             .events
             .iter()
             .all(|event| event.get("cwd").and_then(Value::as_str) == Some("C:/demo")));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn discovers_opencode_sessions_with_project_directory() {
+        let home = test_home("opencode-cwd");
+        let db_dir = home.join(".local/share/opencode");
+        fs::create_dir_all(&db_dir).unwrap();
+        let connection = Connection::open(db_dir.join("opencode.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT);
+                 CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+                 CREATE TABLE part (id TEXT PRIMARY KEY, session_id TEXT, message_id TEXT, time_created INTEGER, data TEXT);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO session (id, directory) VALUES ('ses_codemux', 'D:/project/ai-code/codeMUX')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('msg_1', 'ses_codemux', 1783839705646, 1783839705646, '{\"role\":\"user\",\"time\":{\"created\":1783839705646}}')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part (id, session_id, message_id, time_created, data) VALUES ('part_1', 'ses_codemux', 'msg_1', 1783839705647, '{\"type\":\"text\",\"text\":\"帮我检查项目\"}')",
+                [],
+            )
+            .unwrap();
+
+        let snapshots = discover_opencode(&home);
+        assert_eq!(snapshots.len(), 1);
+        let candidate = &snapshots[0].candidate;
+        assert_eq!(candidate.agent_kind.as_str(), "opencode");
+        assert_eq!(candidate.agent_session_id, "ses_codemux");
+        assert_eq!(
+            candidate.cwd.as_deref(),
+            Some("D:/project/ai-code/codeMUX"),
+            "opencode 候选必须携带 session.directory 作为 cwd,否则按项目导入过滤会丢掉全部会话"
+        );
+        assert!(snapshots[0]
+            .events
+            .iter()
+            .all(|event| event.get("cwd").and_then(Value::as_str)
+                == Some("D:/project/ai-code/codeMUX")));
 
         let _ = fs::remove_dir_all(home);
     }

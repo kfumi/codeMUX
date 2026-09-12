@@ -153,6 +153,7 @@ fn main() {
 
 /// 极简 stderr 日志:supervisor 会把 stderr 重定向到日志文件;
 /// 完整日志体系随壳侧工单接入。
+/// 行首本地时间戳与 renderer.log(log-format.ts)保持同一格式。
 fn init_stderr_logger() {
     struct StderrLogger;
 
@@ -163,7 +164,13 @@ fn init_stderr_logger() {
 
         fn log(&self, record: &log::Record) {
             if self.enabled(record.metadata()) {
-                eprintln!("[{} {}] {}", record.level(), record.target(), record.args());
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                eprintln!(
+                    "[{timestamp} {} {}] {}",
+                    record.level(),
+                    record.target(),
+                    record.args()
+                );
             }
         }
 

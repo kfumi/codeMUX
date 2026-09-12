@@ -7,6 +7,7 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { formatLocalTimestamp } from './log-format';
 
 export const RENDERER_LOG_FILE = 'renderer.log';
 
@@ -41,7 +42,7 @@ export function createRendererLogRecorder(
         }
         const levelName = LEVEL_NAMES[level] ?? `level${level}`;
         const origin = sourceId ? ` (${sourceId}:${line})` : '';
-        appendFileSync(filePath, `[${now().toISOString()}] [${levelName}] ${message}${origin}\n`, 'utf8');
+        appendFileSync(filePath, `[${formatLocalTimestamp(now())}] [${levelName}] ${message}${origin}\n`, 'utf8');
       } catch {
         // 日志失败不反噬壳(磁盘满/目录被删等)。
       }

@@ -12,11 +12,87 @@ pub(crate) fn normalize_history_events(raw_events: Vec<Value>, app_session_id: &
         events.extend(normalize_one(raw));
     }
 
+    // 注入 turn 摘要要在 envelope 之前：它新建的 session_summary 事件同样
+    // 需要获得 event_id 与 sequence，放在 envelope 之后会漏掉信封赋值。
+    inject_turn_artifact_summaries(&mut events);
     for (sequence, event) in events.iter_mut().enumerate() {
         normalize_envelope(event, app_session_id, sequence as u64);
     }
-    inject_turn_artifact_summaries(&mut events);
+    dedupe_colliding_event_ids(&mut events);
     events
+}
+
+/// 拆分派生事件（如 assistant 记录里的 tool_use 块 → tool_started）会继承母
+/// 事件的 uuid/provider_message_id，同一母事件拆出的多个事件因此共享同一个
+/// event_id；前端加载持久化时间线时按 event_id 去重，撞 ID 的工具事件会被
+/// 整体丢弃（导入会话“没有事件消息”的根因）。这里把「同 event_id 但内容
+/// 不同」的后续事件改写成唯一 event_id（优先 `{母ID}-{tool_use_id}`）；
+/// 内容完全相同的重复（历史双写持久化 bug）保持原样，继续交给前端去重。
+fn dedupe_colliding_event_ids(events: &mut [Value]) {
+    let mut indices_by_event_id: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (index, event) in events.iter().enumerate() {
+        if let Some(event_id) = event.get("event_id").and_then(Value::as_str) {
+            indices_by_event_id
+                .entry(event_id.to_string())
+                .or_default()
+                .push(index);
+        }
+    }
+
+    for (event_id, indices) in indices_by_event_id {
+        if indices.len() == 1 {
+            continue;
+        }
+        let contents: Vec<Option<String>> = indices
+            .iter()
+            .map(|&index| {
+                events[index].as_object().map(|object| {
+                    let mut content = object.clone();
+                    content.remove("sequence");
+                    serde_json::to_string(&content).unwrap_or_default()
+                })
+            })
+            .collect();
+        if contents.iter().all(|content| content == &contents[0]) {
+            continue;
+        }
+
+        let mut final_id_by_content: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut used_ids = vec![event_id.clone()];
+        if let Some(first_content) = contents[0].clone() {
+            final_id_by_content.insert(first_content, event_id.clone());
+        }
+        for (position, &index) in indices.iter().enumerate().skip(1) {
+            let Some(content) = contents[position].clone() else {
+                continue;
+            };
+            let final_id = if let Some(existing) = final_id_by_content.get(&content) {
+                existing.clone()
+            } else {
+                let tool_use_id = events[index]
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+                let mut candidate = match tool_use_id {
+                    Some(tool_use_id) => format!("{}-{}", event_id, tool_use_id),
+                    None => format!("{}-{}", event_id, index),
+                };
+                while used_ids.contains(&candidate) {
+                    candidate = format!("{}-{}", candidate, index);
+                }
+                used_ids.push(candidate.clone());
+                final_id_by_content.insert(content, candidate.clone());
+                candidate
+            };
+            if let Some(object) = events[index].as_object_mut() {
+                object.insert("event_id".to_string(), json!(final_id));
+                object.insert("uuid".to_string(), json!(final_id));
+            }
+        }
+    }
 }
 
 fn normalize_one(raw: Value) -> Vec<Value> {
@@ -433,6 +509,59 @@ fn stringify(value: &Value) -> String {
 mod tests {
     use super::normalize_history_events;
     use serde_json::json;
+
+    #[test]
+    fn assigns_unique_event_ids_to_tool_events_split_from_one_assistant_record() {
+        // 导入/CLI 同步路径会把一条原生 assistant 记录拆成 assistant_message +
+        // 多个 tool_started。派生事件继承母事件 uuid 后 event_id 全部相同，
+        // 前端按 event_id 去重会把工具事件整体丢掉（导入会话"没有事件消息"）。
+        let events = normalize_history_events(
+            vec![json!({
+                "type": "assistant",
+                "uuid": "msg_assistant_1",
+                "message": { "role": "assistant", "content": [
+                    { "type": "text", "text": "查一下" },
+                    { "type": "tool_use", "id": "tool-1", "name": "grep", "input": { "pattern": "a" } },
+                    { "type": "tool_use", "id": "tool-2", "name": "grep", "input": { "pattern": "b" } }
+                ] }
+            })],
+            "app-1",
+        );
+
+        assert_eq!(events.len(), 3);
+        let event_ids: Vec<&str> = events
+            .iter()
+            .map(|event| event["event_id"].as_str().unwrap())
+            .collect();
+        let mut unique_ids = event_ids.clone();
+        unique_ids.sort();
+        unique_ids.dedup();
+        assert_eq!(
+            unique_ids.len(),
+            event_ids.len(),
+            "同一助手记录拆出的事件 event_id 必须互不相同: {event_ids:?}"
+        );
+        // 母消息保留原 id；工具事件仍携带 provider_message_id 关联母消息。
+        assert_eq!(events[0]["event_id"], "msg_assistant_1");
+        for event in &events[1..] {
+            assert_eq!(event["provider_message_id"], "msg_assistant_1");
+        }
+    }
+
+    #[test]
+    fn keeps_identical_duplicate_events_sharing_one_event_id() {
+        // 历史双写持久化 bug 会把同一事件写多次；内容完全相同的重复事件
+        // 必须保留相同 event_id，交给前端去重，避免同一消息渲染两个气泡。
+        let raw = json!({
+            "type": "assistant",
+            "uuid": "msg_assistant_1",
+            "message": { "role": "assistant", "content": [{ "type": "text", "text": "收到" }] }
+        });
+        let events = normalize_history_events(vec![raw.clone(), raw], "app-1");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["event_id"], events[1]["event_id"]);
+    }
 
     #[test]
     fn normalizes_legacy_messages_and_assigns_one_envelope_sequence() {
