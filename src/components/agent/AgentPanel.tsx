@@ -52,6 +52,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const interrupt = useAgentStore((state) => state.interrupt);
   const loadSessionMessages = useAgentStore((state) => state.loadSessionMessages);
   const attachToActiveTurn = useAgentStore((state) => state.attachToActiveTurn);
+  const attachLiveSession = useAgentStore((state) => state.attachLiveSession);
   const sessionsLoading = useSessionStore((state) => state.isLoading);
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
@@ -178,9 +179,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   useEffect(() => {
     if (!historyReady || pendingWorkingPath || isRunning) return;
-    if (session?.origin !== 'scheduled') return;
-    void attachToActiveTurn(sessionId, effectiveCwd, reasoningEffort);
+    // 刷新后重新进入会话时,daemon 侧回合可能仍在运行:附着 WS 实时流恢复输出。
+    // scheduled 来源保留轮询兜底路径(含 ensureAgentSession 预热)。
+    if (session?.origin === 'scheduled') {
+      void attachToActiveTurn(sessionId, effectiveCwd, reasoningEffort);
+      return;
+    }
+    void attachLiveSession(sessionId);
   }, [
+    attachLiveSession,
     attachToActiveTurn,
     effectiveCwd,
     historyReady,

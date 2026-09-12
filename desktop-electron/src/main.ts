@@ -23,6 +23,7 @@ import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
+import { attachWindowStatePersistence, loadWindowState } from './window-state';
 
 const APP_ID = 'com.codemux.desktop';
 const DEV_SERVER_URL = process.env.CODEMUX_DEV_SERVER_URL;
@@ -192,10 +193,13 @@ function showMainWindow(): void {
 }
 
 function createMainWindow(): BrowserWindow {
+  // 恢复用户上次调整的窗口尺寸/位置(缺失或显示器变化时按工作区钳制/居中)。
+  const windowState = loadWindowState({ width: MAIN_WINDOW_WIDTH, height: MAIN_WINDOW_HEIGHT });
   const window = new BrowserWindow({
     title: 'CodeMUX',
-    width: MAIN_WINDOW_WIDTH,
-    height: MAIN_WINDOW_HEIGHT,
+    width: windowState.width,
+    height: windowState.height,
+    ...(windowState.x !== null && windowState.y !== null ? { x: windowState.x, y: windowState.y } : {}),
     show: false,
     frame: false, // 与现 Tauri 窗口一致(自绘标题栏)。
     resizable: true,
@@ -218,12 +222,54 @@ function createMainWindow(): BrowserWindow {
     getRendererLog().record(level, message, line, sourceId);
   });
 
+  // 开发态右键菜单:WebView2/Tauri dev 默认带「刷新/检查」,Electron 需自建。
+  // 仅开发态注册;打包态不注册(页面内的自定义 React onContextMenu 不受影响)。
+  if (!app.isPackaged) {
+    window.webContents.on('context-menu', (_event, params) => {
+      const items: Electron.MenuItemConstructorOptions[] = [
+        { label: '刷新', accelerator: 'CmdOrCtrl+R', click: () => window.webContents.reload() },
+        { label: '强制刷新', click: () => window.webContents.reloadIgnoringCache() },
+      ];
+      if (params.selectionText || params.isEditable) {
+        items.push(
+          { type: 'separator' },
+          { label: '复制', enabled: params.selectionText.length > 0, click: () => window.webContents.copy() },
+        );
+      }
+      if (params.isEditable) {
+        items.push({ label: '粘贴', click: () => window.webContents.paste() });
+      }
+      items.push(
+        { type: 'separator' },
+        { label: '检查元素', click: () => window.webContents.inspectElement(params.x, params.y) },
+      );
+      Menu.buildFromTemplate(items).popup({ window });
+    });
+
+    // 开发态 devtools 快捷键(Tauri dev 默认有 F12;Electron 不内置)。
+    window.webContents.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return;
+      const isF12 = input.key === 'F12';
+      const isCtrlShiftI = input.control && input.shift && input.key.toLowerCase() === 'i';
+      if (isF12 || isCtrlShiftI) {
+        window.webContents.toggleDevTools();
+      }
+    });
+  }
+
   // 关窗 → 隐藏到托盘(与 Tauri 版行为一致);真正的退出走托盘菜单。
   window.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
     window.hide();
   });
+
+  // 用户调整过的尺寸/位置持久化(Tauri window-state 插件的 Electron 等价物)。
+  attachWindowStatePersistence(window);
+  // 上次关窗时是最大化:先按存储的正常尺寸创建,再重放最大化。
+  if (windowState.maximized) {
+    window.maximize();
+  }
 
   // 窗口最大化状态变化 → 渲染层(TitleBar 自绘窗口控制按钮据此切换图标,
   // 行为对齐 Tauri getCurrentWindow().onResized)。
@@ -338,7 +384,11 @@ app.setPath('userData', path.join(app.getPath('appData'), APP_ID));
 // 通知身份(工单 06):Windows 通知中心按 AppUserModelID 归组;该 ID 必须与
 // electron-builder.yml 的 appId 一致(NSIS 快捷方式 AUMID 由此派生),否则
 // 从快捷方式启动时通知会被 Windows 拒投或归到未知应用。
-app.setAppUserModelId(APP_ID);
+// 仅打包态设置:任务栏图标按 AUMID 反查开始菜单快捷方式,dev 态没有对应
+// 快捷方式,设置了反而导致任务栏不显示图标(dev 态用 Electron 默认 AUMID)。
+if (app.isPackaged) {
+  app.setAppUserModelId(APP_ID);
+}
 
 // app:// 需要在 ready 前声明特权(fetch/标准 scheme)。
 protocol.registerSchemesAsPrivileged([

@@ -522,12 +522,14 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
-                    let broadcast_events =
+                    let mut broadcast_events =
                         crate::agent::timeline_persist::handle_sidecar_timeline_event(
                             &app_state, &event,
                         );
-                    crate::agent::subagent_persist::handle_sidecar_subagent_event(
-                        &app_state, &event,
+                    broadcast_events.extend(
+                        crate::agent::subagent_persist::handle_sidecar_subagent_event(
+                            &app_state, &event,
+                        ),
                     );
                     crate::companion::handle_sidecar_event_for_companion(
                         &app_state,
@@ -1527,36 +1529,6 @@ pub async fn start_agent_session_core(
         }
         send_command_to_session(&agent_state, &session_id, input_cmd).await
     })
-    .await
-}
-
-/// [`DaemonState`]-flavored entry used by the companion action path.
-#[allow(clippy::too_many_arguments)]
-pub async fn start_agent_session_impl(
-    daemon: &DaemonState,
-    session_id: String,
-    prompt: String,
-    cwd: String,
-    sink: Arc<dyn super::sidecar_events::SidecarEventSink>,
-    reasoning_effort: Option<String>,
-    input_payload: Option<serde_json::Value>,
-    display_content: Option<String>,
-    replace_event_channel: bool,
-) -> Result<(), String> {
-    start_agent_session_core(
-        daemon.app.clone(),
-        daemon.agent.clone(),
-        daemon.companion.clone(),
-        daemon.roots.clone(),
-        session_id,
-        prompt,
-        cwd,
-        sink,
-        reasoning_effort,
-        input_payload,
-        display_content,
-        replace_event_channel,
-    )
     .await
 }
 

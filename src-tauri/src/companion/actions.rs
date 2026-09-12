@@ -109,7 +109,21 @@ pub(crate) async fn send_companion_message_owned(
     };
 
     if sidecar_running {
-        match decide_active_sidecar_send(delivery, companion_state.is_turn_active(session_id)) {
+        // 会话未收尾即排队：父回合活跃之外，后台子智能体仍在运行、或刚全部
+        // 结束等待父进程汇总回合的窗口，都算忙（decide 见
+        // ActiveSidecarSendDecision）。DB 查询兜底内存态丢失（如 daemon 重启
+        // 后 sidecar 复用）的场景。
+        let db_running = {
+            let db = app_state
+                .db
+                .lock()
+                .map_err(|_| "Database lock poisoned".to_string())?;
+            operations::has_running_session_subagents(&db, session_id).map_err(|e| e.to_string())?
+        };
+        let flow_busy = companion_state.is_turn_active(session_id)
+            || companion_state.is_continuation_pending(session_id)
+            || db_running;
+        match decide_active_sidecar_send(delivery, flow_busy) {
             ActiveSidecarSendDecision::Steer => {
                 let mut cmd =
                     OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);

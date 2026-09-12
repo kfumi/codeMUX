@@ -157,7 +157,7 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(path.compareDocumentPosition(chevron!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it('运行命令的长参数仍可在最大宽度内截断展示', () => {
+  it('终端的长参数仍可在最大宽度内截断展示', () => {
     const command = 'cd /d/project/ai-code/codeMUX && git diff --stat HEAD | head -40 && npm run build -- --mode production';
     const { container } = renderWithTooltip(
       <CodeMuxToolCallMessagePart
@@ -175,7 +175,7 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(param.className).not.toContain('flex-1');
   });
 
-  it('运行命令展开后以终端面板展示命令和输出，不再拆成参数 JSON 和结果标签', () => {
+  it('终端展开后以终端面板展示命令和输出，不再拆成参数 JSON 和结果标签', () => {
     const command = 'cd /d/project/ai-code/codeMUX && git diff --stat HEAD | head -40';
     const output = [
       'src/components/agent/assistant-ui/CodeMuxMessageParts.tsx | 10 +++-',
@@ -191,7 +191,7 @@ describe('CodeMuxToolCallMessagePart', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /运行命令/ }));
+    fireEvent.click(screen.getByRole('button', { name: /终端/ }));
 
     const panel = container.querySelector('[data-slot="tool-fallback-command"]');
     const commandLine = container.querySelector('[data-slot="tool-fallback-command-line"]');
@@ -228,7 +228,7 @@ describe('CodeMuxToolCallMessagePart', () => {
       />,
     );
 
-    fireEvent.click(within(container).getByRole('button', { name: /运行命令/ }));
+    fireEvent.click(within(container).getByRole('button', { name: /终端/ }));
 
     const panel = container.querySelector('[data-slot="tool-fallback-command"]');
     expect(panel?.textContent).toContain('$ git diff --stat HEAD');

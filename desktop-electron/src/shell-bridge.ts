@@ -199,7 +199,9 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   handle('getUserHomeDirectory', () => os.homedir());
   handle('getLogDirectory', () => deps.getLogDir());
   handle('getLogFiles', () => listLogFiles(deps.getLogDir()));
-  handle('readLogFile', (fileName: unknown) => {
+  // preload 统一传对象 payload({fileName} / {relativePath}),与其他通道一致。
+  handle('readLogFile', (payload: unknown) => {
+    const { fileName } = (payload ?? {}) as { fileName?: unknown };
     if (typeof fileName !== 'string') throw new Error('fileName must be a string');
     if (fileName.includes('/') || fileName.includes('\\')) {
       throw new Error(`Invalid file name: must not contain path separators (got: ${fileName})`);
@@ -210,7 +212,8 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     }
     return readFileSync(target, 'utf8');
   });
-  handle('readHomeFile', (relativePath: unknown) => {
+  handle('readHomeFile', (payload: unknown) => {
+    const { relativePath } = (payload ?? {}) as { relativePath?: unknown };
     if (typeof relativePath !== 'string') throw new Error('relativePath must be a string');
     return readHomeFile(relativePath);
   });

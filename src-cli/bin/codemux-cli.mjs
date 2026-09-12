@@ -8,22 +8,13 @@ import { join } from 'node:path';
 
 const DEFAULT_PORT = 9240;
 
-interface CliOptions {
-  command: string;
-  sessionId?: string;
-  message?: string;
-  requestId?: string;
-  decision?: string;
-  port: number;
-}
-
-function parseArgs(argv: string[]): CliOptions {
+function parseArgs(argv) {
   const [, , command, ...rest] = argv;
   let port = DEFAULT_PORT;
-  let sessionId: string | undefined;
-  let message: string | undefined;
-  let requestId: string | undefined;
-  let decision: string | undefined;
+  let sessionId;
+  let message;
+  let requestId;
+  let decision;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -44,20 +35,29 @@ function parseArgs(argv: string[]): CliOptions {
   return { command: command ?? 'help', sessionId, message, requestId, decision, port };
 }
 
-async function readLocalToken(): Promise<string> {
-  const appData = process.env.CODEMUX_APP_DATA
-    ?? join(homedir(), 'AppData', 'Local', 'com.codemux.app');
+// 与 daemon 默认 app-data-dir 对齐:dirs::data_dir() + "com.codemux.desktop"。
+// Windows 为 Roaming %APPDATA%,macOS 为 ~/Library/Application Support,
+// Linux 为 $XDG_DATA_HOME(~/.local/share)。
+function defaultAppDataDir() {
+  const home = homedir();
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'com.codemux.desktop');
+  }
+  if (process.platform === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'com.codemux.desktop');
+  }
+  return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'com.codemux.desktop');
+}
+
+async function readLocalToken() {
+  const appData = process.env.CODEMUX_APP_DATA ?? defaultAppDataDir();
   const tokenPath = join(appData, 'local-daemon-token');
   const token = (await readFile(tokenPath, 'utf8')).trim();
   if (!token) throw new Error('Local daemon token missing');
   return token;
 }
 
-async function api(
-  port: number,
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
+async function api(port, path, init) {
   const token = await readLocalToken();
   return fetch(`http://127.0.0.1:${port}/api${path}`, {
     ...init,
@@ -69,7 +69,7 @@ async function api(
   });
 }
 
-async function cmdStatus(port: number): Promise<void> {
+async function cmdStatus(port) {
   const health = await fetch(`http://127.0.0.1:${port}/api/health`);
   const healthJson = await health.json();
   const statusResponse = await api(port, '/daemon/status');
@@ -77,13 +77,13 @@ async function cmdStatus(port: number): Promise<void> {
   console.log(JSON.stringify({ health: healthJson, daemon: statusJson }, null, 2));
 }
 
-async function cmdSessions(port: number): Promise<void> {
+async function cmdSessions(port) {
   const response = await api(port, '/sessions');
   const sessions = await response.json();
   console.log(JSON.stringify(sessions, null, 2));
 }
 
-async function cmdSend(port: number, sessionId: string, message: string): Promise<void> {
+async function cmdSend(port, sessionId, message) {
   const response = await api(port, `/sessions/${sessionId}/messages`, {
     method: 'POST',
     body: JSON.stringify({ prompt: message }),
@@ -94,7 +94,7 @@ async function cmdSend(port: number, sessionId: string, message: string): Promis
   console.log('accepted');
 }
 
-async function cmdInterrupt(port: number, sessionId: string): Promise<void> {
+async function cmdInterrupt(port, sessionId) {
   const response = await api(port, `/sessions/${sessionId}/interrupt`, { method: 'POST' });
   if (!response.ok) {
     throw new Error(await response.text());
@@ -102,12 +102,7 @@ async function cmdInterrupt(port: number, sessionId: string): Promise<void> {
   console.log('interrupted');
 }
 
-async function cmdRespond(
-  port: number,
-  sessionId: string,
-  requestId: string,
-  decision: string,
-): Promise<void> {
+async function cmdRespond(port, sessionId, requestId, decision) {
   const response = await api(port, '/permissions/respond', {
     method: 'POST',
     body: JSON.stringify({
@@ -122,7 +117,7 @@ async function cmdRespond(
   console.log('responded');
 }
 
-function printHelp(): void {
+function printHelp() {
   console.log(`CodeMUX CLI (daemon client)
 
 Usage:
@@ -134,7 +129,7 @@ Usage:
 `);
 }
 
-async function main(): Promise<void> {
+async function main() {
   const options = parseArgs(process.argv);
   switch (options.command) {
     case 'status':

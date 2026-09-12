@@ -134,7 +134,10 @@ describe('SubagentPreviewPanel', () => {
 
     renderPanel();
 
-    expect(screen.getByText(/运行中/)).toBeTruthy();
+    // 与主线程一致：运行中显示计时（自首条事件起算），不再展示最新活动 subtitle。
+    // shimmer 会把计时文本渲染两份，故用 getAllByText。
+    expect(screen.getAllByText(/运行中 · \d+d/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Reading src\/main\.tsx/)).toBeNull();
     expect(screen.getByText(/正在检查 package\.json/)).toBeTruthy();
   });
 

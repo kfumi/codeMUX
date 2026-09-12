@@ -51,7 +51,7 @@ const primaryTabs = [
 
 const secondaryTabs = [
   { id: 'system-tools' as const, label: '系统工具', description: '检查 CodeMUX 所需的 Node.js、npm 和 Git 本机环境。', icon: Terminal },
-  { id: 'logs' as const, label: '日志', description: '实时查看应用运行日志（codemux.log），每 3 秒自动刷新。', icon: FileText },
+  { id: 'logs' as const, label: '日志', description: '实时查看应用运行日志（daemon.log / renderer.log），每 3 秒自动刷新。', icon: FileText },
   { id: 'about' as const, label: '关于', description: '应用信息与系统环境。', icon: Info },
 ];
 

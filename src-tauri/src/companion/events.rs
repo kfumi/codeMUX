@@ -28,6 +28,7 @@ pub fn handle_sidecar_event_for_companion(
             .and_then(|item| item.as_str())
             .unwrap_or("")
             .to_string();
+        track_subagent_flow_state(companion_state, &session_id, &event);
         maybe_finish_turn_and_drain_queue(
             app,
             agent_state,
@@ -39,6 +40,33 @@ pub fn handle_sidecar_event_for_companion(
         if companion_enabled {
             broadcast_event(companion_state, &session_id, event);
         }
+    }
+}
+
+/// Maintain the async-flow busy state from broadcast events: subagent upserts
+/// drive the running-children/continuation bookkeeping; a new parent turn or a
+/// finished one clears the continuation wait.
+fn track_subagent_flow_state(
+    companion_state: &CompanionState,
+    session_id: &str,
+    event: &serde_json::Value,
+) {
+    if session_id.is_empty() {
+        return;
+    }
+    match event.get("type").and_then(|item| item.as_str()) {
+        Some("subagent_upsert") => {
+            if let (Some(subagent_id), Some(status)) = (
+                event.get("subagent_id").and_then(|item| item.as_str()),
+                event.get("status").and_then(|item| item.as_str()),
+            ) {
+                companion_state.apply_subagent_upsert(session_id, subagent_id, status);
+            }
+        }
+        Some("user_message") | Some("turn_finished") | Some("error") => {
+            companion_state.clear_continuation_pending(session_id);
+        }
+        _ => {}
     }
 }
 

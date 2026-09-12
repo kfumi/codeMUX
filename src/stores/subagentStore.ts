@@ -95,13 +95,15 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
       const nextDescriptors = { ...current.descriptors, [event.subagent_id]: descriptor };
       // Arm the continuation wait when the last running child goes terminal:
       // the parent is about to be woken for its summary turn. A new (or still
-      // running) child disarms it.
+      // running) child disarms it. 只有正常完成才等待汇总——失败/取消(用户
+      // 停止、子智能体挂掉)不会触发汇总回合,继续等待只会卡住后续发送。
       const hadRunning = Object.values(current.descriptors).some((entry) => entry?.status === 'running');
       const hasRunning = Object.values(nextDescriptors).some((entry) => entry?.status === 'running');
+      const lastChildCompleted = event.status === 'completed';
       const continuationPending = hasRunning
         ? false
         : hadRunning
-          ? true
+          ? lastChildCompleted
           : state.continuationPending[sessionId] ?? false;
       return {
         sessions: {

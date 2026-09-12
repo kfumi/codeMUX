@@ -247,14 +247,6 @@ fn has_native_mapping(
         .map(|mapping| mapping.is_some())
 }
 
-pub(crate) fn should_hydrate_timeline_from_native(
-    session: &operations::Session,
-    timeline: &Option<Vec<Value>>,
-    has_mapping: bool,
-) -> bool {
-    timeline.as_ref().is_none_or(Vec::is_empty) && session.origin == "native" && has_mapping
-}
-
 /// Rebuild the persisted session timeline from the provider's on-disk history
 /// after a conversation rewind truncates native JSONL.
 pub(crate) async fn reload_session_timeline_from_native(
@@ -726,22 +718,6 @@ fn live_capture_missing_tool_args(existing_events: &[Value], restored_timeline: 
         }
     }
     false
-}
-
-fn count_tool_started_events(events: &[Value]) -> usize {
-    events
-        .iter()
-        .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool_started"))
-        .count()
-}
-
-/// True when native pi history carries tool steps that the persisted live
-/// capture omitted entirely (common after older sidecar ordering bugs).
-fn persisted_timeline_missing_tool_steps(
-    existing_events: &[Value],
-    native_events: &[Value],
-) -> bool {
-    count_tool_started_events(native_events) > count_tool_started_events(existing_events)
 }
 
 fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, String> {
@@ -1317,89 +1293,6 @@ mod tests {
                 ..session
             },
             true,
-        ));
-    }
-
-    #[test]
-    fn hydrates_only_empty_native_timelines_with_mapping() {
-        let session = test_session("native");
-        let timeline = Some(vec![serde_json::json!({"type": "user_message"})]);
-
-        assert!(!super::should_hydrate_timeline_from_native(
-            &session, &timeline, true
-        ));
-        assert!(!super::should_hydrate_timeline_from_native(
-            &session, &None, false
-        ));
-        assert!(!super::should_hydrate_timeline_from_native(
-            &test_session("imported"),
-            &None,
-            true,
-        ));
-        assert!(super::should_hydrate_timeline_from_native(
-            &session, &None, true
-        ));
-    }
-
-    #[test]
-    fn persisted_timeline_skips_native_hydration() {
-        use crate::db::{operations, schema::initialize_database};
-        use rusqlite::Connection;
-
-        let mut conn = Connection::open_in_memory().unwrap();
-        initialize_database(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, title, agent_kind, mode, origin, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![
-                "session-1",
-                "Test",
-                "opencode",
-                "agent",
-                "native",
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z"
-            ],
-        )
-        .unwrap();
-        operations::append_timeline_events(
-            &mut conn,
-            "session-1",
-            &[serde_json::json!({
-                "type": "user_message",
-                "event_id": "e1",
-                "content": "hello"
-            })],
-        )
-        .unwrap();
-
-        let timeline = operations::get_session_timeline(&conn, "session-1").unwrap();
-        let session = test_session("native");
-        assert!(!super::should_hydrate_timeline_from_native(
-            &session, &timeline, true
-        ));
-        assert_eq!(timeline.as_ref().map(|events| events.len()), Some(1));
-    }
-
-    #[test]
-    fn detects_persisted_pi_timeline_missing_tool_steps() {
-        let persisted = vec![
-            serde_json::json!({ "type": "user_message", "content": "hello" }),
-            serde_json::json!({ "type": "assistant_message", "content": [{ "type": "text", "text": "done" }] }),
-            serde_json::json!({ "type": "turn_finished", "outcome": "completed" }),
-        ];
-        let native = vec![
-            serde_json::json!({ "type": "user_message", "content": "hello" }),
-            serde_json::json!({ "type": "tool_started", "tool_use_id": "call-1", "name": "bash", "input": {} }),
-            serde_json::json!({ "type": "tool_finished", "tool_use_id": "call-1", "content": "ok" }),
-            serde_json::json!({ "type": "assistant_message", "content": [{ "type": "text", "text": "done" }] }),
-            serde_json::json!({ "type": "turn_finished", "outcome": "completed" }),
-        ];
-
-        assert!(super::persisted_timeline_missing_tool_steps(
-            &persisted, &native
-        ));
-        assert!(!super::persisted_timeline_missing_tool_steps(
-            &native, &native
         ));
     }
 }

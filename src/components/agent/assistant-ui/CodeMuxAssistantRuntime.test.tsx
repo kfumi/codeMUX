@@ -1443,7 +1443,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
     expect(screen.getByRole('button', { name: /已执行/ })).toBeTruthy();
-    expect(screen.getByText('运行命令×1')).toBeTruthy();
+    expect(screen.getByText('终端×1')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
@@ -1658,7 +1658,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('先确认范围。')).toBeTruthy();
     expect(screen.getByText('架构已摸清。')).toBeTruthy();
     expect(screen.getByText('读取×1')).toBeTruthy();
-    expect(screen.getByText('任务×1、匹配文件×1、运行命令×1')).toBeTruthy();
+    expect(screen.getByText('任务×1、匹配文件×1、终端×1')).toBeTruthy();
     expect(screen.queryByText('先探索下当前桌面端架构。')).toBeNull();
     expect(screen.queryByText('再核对任务入口。')).toBeNull();
     expect(screen.queryByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeNull();
@@ -1679,7 +1679,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('读取')).toBeTruthy();
     expect(screen.getByText('任务')).toBeTruthy();
     expect(screen.getByText('匹配文件')).toBeTruthy();
-    expect(screen.getByText('运行命令')).toBeTruthy();
+    expect(screen.getByText('终端')).toBeTruthy();
   });
 
   it('groups write tools with surrounding tools in one tool group', () => {
@@ -1689,7 +1689,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(toolGroupTriggers).toHaveLength(1);
     expect(toolGroupTriggers[0]?.textContent).toContain('读取×1');
     expect(toolGroupTriggers[0]?.textContent).toContain('写入×1');
-    expect(toolGroupTriggers[0]?.textContent).toContain('运行命令×1');
+    expect(toolGroupTriggers[0]?.textContent).toContain('终端×1');
     expect(screen.getByText('文件已写好。')).toBeTruthy();
     expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
 
@@ -2745,12 +2745,12 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-opencode-tool-turn" />);
 
     expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
-    expect(screen.queryByText('运行命令')).toBeNull();
+    expect(screen.queryByText('终端')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: /已执行.*运行命令/ }));
-    expect(screen.getByText('运行命令')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /已执行.*终端/ }));
+    expect(screen.getByText('终端')).toBeTruthy();
   });
 
   it('collapses OpenCode historical process messages across intermediate results', () => {

@@ -22,8 +22,8 @@ describe('toolHeaderSummary', () => {
   });
 
   it('maps known agent built-in tool names to Chinese display names', () => {
-    expect(getToolDisplayName('Bash')).toBe('运行命令');
-    expect(getToolDisplayName('shell_command')).toBe('运行命令');
+    expect(getToolDisplayName('Bash')).toBe('终端');
+    expect(getToolDisplayName('shell_command')).toBe('终端');
     expect(getToolDisplayName('Read')).toBe('读取');
     expect(getToolDisplayName('Write')).toBe('写入');
     expect(getToolDisplayName('Edit')).toBe('编辑');
@@ -82,7 +82,7 @@ describe('toolHeaderSummary', () => {
 
 
   it('maps lowercase OpenCode tool names to the existing Chinese display names', () => {
-    expect(getToolDisplayName('bash')).toBe('运行命令');
+    expect(getToolDisplayName('bash')).toBe('终端');
     expect(getToolDisplayName('read')).toBe('读取');
     expect(getToolDisplayName('write')).toBe('写入');
     expect(getToolDisplayName('edit')).toBe('编辑');
@@ -112,7 +112,7 @@ describe('toolHeaderSummary', () => {
       command: 'npx vitest run src/components/agent/assistant-ui/CodeMuxAssistantRuntime.test.tsx',
     });
 
-    expect(summary.displayName).toBe('运行命令');
+    expect(summary.displayName).toBe('终端');
     expect(summary.text).toBe('npx vitest run src/components/agent/assistant-ui/CodeMuxAssistantRuntime.test.tsx');
   });
 
@@ -137,7 +137,7 @@ describe('toolHeaderSummary', () => {
 
   it('uses lowercase OpenCode aliases for header summaries', () => {
     const bashSummary = getToolHeaderSummary('bash', { command: 'pwd', cwd: 'D:/project/ai-code/codeMUX' });
-    expect(bashSummary.displayName).toBe('运行命令');
+    expect(bashSummary.displayName).toBe('终端');
     expect(bashSummary.text).toBe('pwd');
     expect(getDisplayableArgs({ command: 'pwd', cwd: 'D:/project/ai-code/codeMUX' }, bashSummary.consumedKeys)).toBeNull();
 

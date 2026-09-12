@@ -1,19 +1,11 @@
 use crate::config::types::{
     AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate,
     CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, OpenCodeAgentConfigUpdate,
-    Provider, Theme,
+    Theme,
 };
 use crate::AppState;
-use futures::StreamExt;
 use log::{debug, info};
 use std::str::FromStr;
-
-const AGENT_PROVIDER_PROFILE_RETIRED: &str =
-    "AgentProviderProfile 已退役（ADR 0005）。请使用模型供应商（Model Provider）配置。";
-
-fn agent_provider_profile_retired_err<T>() -> Result<T, String> {
-    Err(AGENT_PROVIDER_PROFILE_RETIRED.to_string())
-}
 
 fn apply_agent_config_update(
     app_config: &mut AppConfig,
@@ -132,69 +124,9 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     redacted
 }
 
-pub fn upsert_agent_provider_profile(_profile: serde_json::Value) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn activate_agent_provider_profile(
-    _agent_kind: String,
-    _profile_id: String,
-) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn activate_default_claude_supplier() -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn activate_default_codex_supplier() -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn activate_default_opencode_supplier() -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn set_active_agent_profile_model(
-    _agent_kind: String,
-    _default_model: String,
-) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn delete_agent_provider_profile(_profile_id: String) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn fetch_agent_profile_models(
-    _agent_kind: String,
-    _profile_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    agent_provider_profile_retired_err()
-}
-
-pub async fn test_agent_provider_profile(
-    _agent_kind: String,
-    _profile_id: String,
-) -> Result<String, String> {
-    agent_provider_profile_retired_err()
-}
-
 pub fn get_config_for_companion(state: &AppState) -> AppConfig {
     debug!(target: "provider", "Loading app config");
     redact_config_for_frontend(&state.config.lock().unwrap())
-}
-
-pub fn update_provider(_provider: Provider) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn delete_provider(_provider_id: String) -> Result<(), String> {
-    agent_provider_profile_retired_err()
-}
-
-pub fn set_active_provider(_provider_id: String) -> Result<(), String> {
-    agent_provider_profile_retired_err()
 }
 
 pub fn set_default_agent_kind_for_companion(
@@ -492,10 +424,6 @@ fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
 
 const OPENCODE_FREE_MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
 
-pub async fn fetch_opencode_free_models() -> Result<Vec<ModelInfo>, String> {
-    fetch_opencode_free_models_for_companion().await
-}
-
 pub async fn fetch_opencode_free_models_for_companion() -> Result<Vec<ModelInfo>, String> {
     info!(target: "provider", "Fetching OpenCode free models from official catalog");
 
@@ -679,13 +607,6 @@ pub(crate) async fn probe_openai_models(
     }
 }
 
-pub async fn fetch_provider_models(
-    api_key: String,
-    base_url: String,
-) -> Result<Vec<ModelInfo>, String> {
-    fetch_provider_models_for_companion(api_key, base_url).await
-}
-
 pub async fn fetch_provider_models_for_companion(
     api_key: String,
     base_url: String,
@@ -695,146 +616,9 @@ pub async fn fetch_provider_models_for_companion(
     Ok(models)
 }
 
-/// Test a provider by sending a streaming request. Returns model name on success.
-/// Single test attempt: try Anthropic endpoint first, then OpenAI.
-async fn test_provider_once(provider: &Provider) -> Result<String, String> {
-    let model = if provider.default_model.is_empty() {
-        "claude-haiku-4-5-20251001".to_string()
-    } else {
-        provider.default_model.clone()
-    };
-
-    // Try Anthropic endpoint first
-    if !provider.anthropic_base_url.is_empty() && !provider.api_key.is_empty() {
-        match test_anthropic_stream(&provider.anthropic_base_url, &provider.api_key, &model).await {
-            Ok(()) => return Ok(model),
-            Err(e) => {
-                // If auth failure, don't try OpenAI
-                if e.contains("认证失败") {
-                    return Err(e);
-                }
-                // Otherwise fall through to try OpenAI
-                if provider.openai_base_url.is_empty() {
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    // Try OpenAI endpoint
-    if !provider.openai_base_url.is_empty() && !provider.api_key.is_empty() {
-        return test_openai_stream(&provider.openai_base_url, &provider.api_key, &model)
-            .await
-            .map(|_| model);
-    }
-
-    Err("请配置 Base URL 和 API Key".to_string())
-}
-
-/// Test Anthropic streaming endpoint. Returns Ok(()) if first chunk received.
-async fn test_anthropic_stream(base_url: &str, api_key: &str, model: &str) -> Result<(), String> {
-    let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "Hi"}],
-        "stream": true
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
-
-    let resp = client
-        .post(&url)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "请求超时".to_string()
-            } else {
-                format!("连接失败: {}", e)
-            }
-        })?;
-
-    let status = resp.status().as_u16();
-    if status == 401 || status == 403 {
-        return Err("认证失败，请检查 API Key".to_string());
-    }
-    if !(200..300).contains(&status) {
-        return Err(format!("请求失败: HTTP {}", status));
-    }
-
-    // Read stream until first chunk received
-    let mut stream = resp.bytes_stream();
-    if let Some(chunk) = stream.next().await {
-        chunk.map_err(|e| format!("流读取失败: {}", e))?;
-        return Ok(());
-    }
-
-    Err("未收到响应".to_string())
-}
-
-/// Test OpenAI-compatible streaming endpoint. Returns Ok(()) if first chunk received.
-async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Result<(), String> {
-    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "Hi"}],
-        "stream": true
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
-
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "请求超时".to_string()
-            } else {
-                format!("连接失败: {}", e)
-            }
-        })?;
-
-    let status = resp.status().as_u16();
-    if status == 401 || status == 403 {
-        return Err("认证失败，请检查 API Key".to_string());
-    }
-    if !(200..300).contains(&status) {
-        return Err(format!("请求失败: HTTP {}", status));
-    }
-
-    let mut stream = resp.bytes_stream();
-    if let Some(chunk) = stream.next().await {
-        chunk.map_err(|e| format!("流读取失败: {}", e))?;
-        return Ok(());
-    }
-
-    Err("未收到响应".to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        agent_provider_profile_retired_err, build_model_urls, model_info_from_json,
-        redact_config_for_frontend, ModelInfo, AGENT_PROVIDER_PROFILE_RETIRED,
-    };
+    use super::{build_model_urls, model_info_from_json, redact_config_for_frontend, ModelInfo};
     use crate::config::types::AppConfig;
 
     #[test]
@@ -936,12 +720,5 @@ mod tests {
     fn build_model_urls_strips_anthropic_compat_suffix() {
         let urls = build_model_urls("https://api.deepseek.com/anthropic");
         assert!(urls.contains(&"https://api.deepseek.com/v1/models".to_string()));
-    }
-
-    #[test]
-    fn retired_profile_commands_share_error_message() {
-        let err: Result<(), String> = agent_provider_profile_retired_err();
-        assert_eq!(err.unwrap_err(), AGENT_PROVIDER_PROFILE_RETIRED);
-        assert!(AGENT_PROVIDER_PROFILE_RETIRED.contains("ADR 0005"));
     }
 }

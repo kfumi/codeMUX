@@ -42,6 +42,28 @@ describe('subagentStore', () => {
     expect(useSubagentStore.getState().continuationPending['session-1']).toBe(false);
   });
 
+  it('does not arm continuationPending when the last child failed or was canceled', () => {
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'running',
+    });
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_1',
+      status: 'failed',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBeFalsy();
+
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_2',
+      status: 'running',
+    });
+    useSubagentStore.getState().applyUpsert('session-1', {
+      subagent_id: 'toolu_2',
+      status: 'canceled',
+    });
+    expect(useSubagentStore.getState().continuationPending['session-1']).toBeFalsy();
+  });
+
   it('disarms continuationPending when a new child starts or the session is hydrated', () => {
     useSubagentStore.getState().applyUpsert('session-1', {
       subagent_id: 'toolu_1',

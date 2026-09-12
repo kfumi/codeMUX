@@ -1,62 +1,6 @@
 use serde_json::{json, Value};
 use similar::{ChangeTag, TextDiff};
 
-use crate::config::types::AgentKind;
-
-pub(crate) fn supports_turn_artifact_summary_backfill(agent_kind: AgentKind) -> bool {
-    matches!(
-        agent_kind,
-        AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Opencode
-    )
-}
-
-pub(crate) fn backfill_turn_artifact_summaries(events: &mut Vec<Value>) -> bool {
-    if !timeline_has_mutation_tools(events) {
-        return false;
-    }
-    let before = summary_fingerprint(events);
-    events.retain(|event| !is_session_summary_event(event));
-    inject_turn_artifact_summaries(events);
-    summary_fingerprint(events) != before
-}
-
-fn summary_fingerprint(events: &[Value]) -> String {
-    let summaries: Vec<&Value> = events
-        .iter()
-        .filter(|event| is_session_summary_event(event))
-        .collect();
-    serde_json::to_string(&summaries).unwrap_or_default()
-}
-
-fn timeline_has_mutation_tools(events: &[Value]) -> bool {
-    events.iter().any(|event| {
-        event.get("type").and_then(Value::as_str) == Some("tool_started")
-            && event
-                .get("name")
-                .and_then(Value::as_str)
-                .map(|name| {
-                    matches!(
-                        name.to_ascii_lowercase().as_str(),
-                        "write" | "edit" | "apply_patch"
-                    )
-                })
-                .unwrap_or(false)
-    })
-}
-
-fn is_session_summary_event(event: &Value) -> bool {
-    event.get("type").and_then(Value::as_str) == Some("system_event")
-        && event.get("subtype").and_then(Value::as_str) == Some("session_summary")
-}
-
-#[cfg(test)]
-fn count_session_summaries(events: &[Value]) -> usize {
-    events
-        .iter()
-        .filter(|event| is_session_summary_event(event))
-        .count()
-}
-
 pub(crate) fn inject_turn_artifact_summaries(events: &mut Vec<Value>) {
     if events.is_empty() {
         return;
@@ -74,16 +18,16 @@ pub(crate) fn inject_turn_artifact_summaries(events: &mut Vec<Value>) {
             }
 
             if !*turn_has_summary {
-                if let Some(summary) = build_turn_summary(&turn_events, &cwd) {
+                if let Some(summary) = build_turn_summary(turn_events, &cwd) {
                     let turn_finished_index = turn_events.iter().position(|event| {
                         event.get("type").and_then(Value::as_str) == Some("turn_finished")
                     });
                     if let Some(index) = turn_finished_index {
                         output.extend(turn_events.drain(..index));
                         output.push(summary);
-                        output.extend(turn_events.drain(..));
+                        output.append(turn_events);
                     } else {
-                        output.extend(turn_events.drain(..));
+                        output.append(turn_events);
                         output.push(summary);
                     }
                     *turn_has_summary = false;
@@ -91,7 +35,7 @@ pub(crate) fn inject_turn_artifact_summaries(events: &mut Vec<Value>) {
                 }
             }
 
-            output.extend(turn_events.drain(..));
+            output.append(turn_events);
             *turn_has_summary = false;
         };
 
@@ -601,81 +545,6 @@ mod tests {
             })
             .expect("turn finished should remain");
         assert!(summary_index < turn_finished_index);
-    }
-
-    #[test]
-    fn backfill_is_idempotent_when_summary_already_present() {
-        let mut events = vec![
-            json!({
-                "type": "user_message",
-                "session_id": "session-1",
-                "content": "patch readme",
-            }),
-            json!({
-                "type": "tool_started",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "name": "Write",
-                "input": { "file_path": "README.md", "content": "hello\n" },
-            }),
-            json!({
-                "type": "tool_finished",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "is_error": false,
-                "content": "Success",
-            }),
-            json!({
-                "type": "system_event",
-                "subtype": "session_summary",
-                "session_id": "session-1",
-                "diffs": [{ "file": "./README.md", "before": "", "after": "hello\n", "additions": 1, "deletions": 0 }],
-            }),
-            json!({
-                "type": "turn_finished",
-                "session_id": "session-1",
-                "outcome": "completed",
-            }),
-        ];
-
-        assert!(!super::backfill_turn_artifact_summaries(&mut events));
-        assert_eq!(super::count_session_summaries(&events), 1);
-    }
-
-    #[test]
-    fn backfill_injects_missing_summary_for_write_turn() {
-        let mut events = vec![
-            json!({
-                "type": "user_message",
-                "session_id": "session-1",
-                "content": "write file",
-            }),
-            json!({
-                "type": "tool_started",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "name": "Write",
-                "input": {
-                    "file_path": "README.md",
-                    "content": "hello",
-                },
-            }),
-            json!({
-                "type": "tool_finished",
-                "session_id": "session-1",
-                "tool_use_id": "write-1",
-                "is_error": false,
-                "content": "Success",
-            }),
-            json!({
-                "type": "assistant_message",
-                "session_id": "session-1",
-                "content": [{ "type": "text", "text": "done" }],
-            }),
-        ];
-
-        assert!(super::backfill_turn_artifact_summaries(&mut events));
-        assert_eq!(super::count_session_summaries(&events), 1);
     }
 
     #[test]

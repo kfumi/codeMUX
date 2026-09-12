@@ -8,7 +8,7 @@ CodeMUX 应用层的一条对话。它拥有稳定的会话身份和一条连续
 _Avoid_: thread（当指应用对话时）, conversation（与 Session 混用）, 混合模式对话
 
 ### Agent Kind
-独立的编码智能体运行时种类：Claude Code、Codex 或 OpenCode。每种有自己的工具协议、权限模型和原生 session 存储；它不是 Model Provider，也不是同一运行时内的 Plan/Build 模式。
+独立的编码智能体运行时种类：Claude Code、Codex、OpenCode 或 pi（pi 为后接入的极简多供应商运行时，定义见 `src/types/agentRegistry.ts`）。每种有自己的工具协议、权限模型和原生 session 存储；它不是 Model Provider，也不是同一运行时内的 Plan/Build 模式。
 _Avoid_: 智能体（单独使用且未区分种类与模型时）, runtime（与 sidecar 进程混淆时）, agent, harness, 混合模式, gemini_cli（当前未接入，不是本上下文的 Agent Kind）
 
 ### Active Agent Kind
@@ -257,7 +257,7 @@ _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 
 
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
-- 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。Daemon 边界与回环 Companion Server 见 [.scratch/daemon-boundary/spec.md](.scratch/daemon-boundary/spec.md)；落地后应修订 ADR 0008「服务仅随移动同步开启」的表述。
+- 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。Daemon 权威、回环 Companion Server 与 Local Daemon Token 见 [ADR 0011](docs/adr/0011-daemon-authority-local-token.md)；Daemon 独立进程（`codemux-daemon`）与 Electron 桌面壳见 [ADR 0012](docs/adr/0012-daemon-process-electron-shell.md)，Tauri 壳已移除，ADR 0008「服务仅随移动同步开启」的表述已被 ADR 0011 修订。
 - Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
 - 定时任务决策见 [docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md](docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md)。
 

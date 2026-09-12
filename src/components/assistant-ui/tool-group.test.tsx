@@ -18,7 +18,7 @@ describe('ToolGroupTrigger', () => {
     const { container } = renderTrigger(['Read', 'Read', 'shell_command']);
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
 
-    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×2、运行命令×1');
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×2、终端×1');
     expect(screen.queryByText(/Read/)).toBeNull();
     expect(screen.queryByText(/shell_command/)).toBeNull();
     expect(trigger?.className).not.toContain('pl-1');
@@ -83,7 +83,7 @@ describe('ToolGroupTrigger', () => {
     const { container } = renderTrigger(['Read', 'Read', 'Task', 'Glob', 'Glob', 'Glob', 'Bash']);
 
     expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe(
-      '读取×2、任务×1、匹配文件×3、运行命令×1',
+      '读取×2、任务×1、匹配文件×3、终端×1',
     );
   });
 

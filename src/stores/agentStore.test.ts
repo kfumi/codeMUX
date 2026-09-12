@@ -313,6 +313,113 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
+  it('queues messages while background subagents run and dispatches when the flow settles', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSubagentStore } = await import('./subagentStore');
+    const session = await primeSession('claude_code');
+
+    // 回合 1 正常跑完(注册会话 handler),子智能体仍在后台运行。
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    useSubagentStore.getState().applyUpsert(session.id, {
+      subagent_id: 'sub-1',
+      provider: 'claude',
+      status: 'running',
+      tool_call_id: 'sub-1',
+    });
+
+    // 子智能体未收尾:新消息进本地可见队列,不直发 daemon。
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+    ]);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+
+    // 最后一个子智能体结束,汇总回合以合成边界收尾 → 队列按序派发。
+    useSubagentStore.getState().applyUpsert(session.id, { subagent_id: 'sub-1', status: 'completed' });
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'turn_finished',
+      session_id: session.id,
+      outcome: 'completed',
+      synthetic: true,
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
+        session.id,
+        'second message',
+        expect.objectContaining({ text: 'second message' }),
+      );
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
+  it('background real-result terminal clears isRunning and drains the queue', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSubagentStore } = await import('./subagentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    useSubagentStore.getState().applyUpsert(session.id, {
+      subagent_id: 'sub-1',
+      provider: 'claude',
+      status: 'running',
+      tool_call_id: 'sub-1',
+    });
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    expect(useAgentStore.getState().queuedQueries[session.id]?.length).toBe(1);
+
+    // 汇总回合被 daemon state 帧置为 running,随后以真实 result 收尾:
+    // 背景回合终点要清掉卡真的 isRunning 并派发队列。
+    useSubagentStore.getState().applyUpsert(session.id, { subagent_id: 'sub-1', status: 'completed' });
+    useAgentStore.setState({ isRunning: { [session.id]: true } });
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'turn_finished',
+      session_id: session.id,
+      outcome: 'completed',
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
+        session.id,
+        'second message',
+        expect.objectContaining({ text: 'second message' }),
+      );
+    });
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
+  });
+
+  it('does not let a background synthetic boundary steal an active user turn', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      void onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+    ]);
+
+    // 后台流的合成边界在用户回合进行中到达:不得派发、不得终止用户回合。
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'turn_finished',
+      session_id: session.id,
+      outcome: 'completed',
+      synthetic: true,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+    ]);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledTimes(1);
+  });
+
   it('queues pi follow-ups during a running turn instead of sending them immediately', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('pi');
@@ -396,6 +503,47 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id]?.some((event) => (
       event.kind === 'user' && event.data.content === '1111'
     ))).toBe(true);
+  });
+
+  it('attachLiveSession subscribes the daemon stream and ends with the turn after a refresh', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { daemonFacade } = await import('../lib/facades/daemon-facade');
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+
+    const attached = await useAgentStore.getState().attachLiveSession(session.id);
+
+    expect(attached).toBe(true);
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(sessionHandlers.has(session.id)).toBe(true);
+
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    });
+    expect(sessionHandlers.has(session.id)).toBe(true);
+  });
+
+  it('attachLiveSession is a no-op when the daemon turn is not active', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { daemonFacade } = await import('../lib/facades/daemon-facade');
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
+
+    const attached = await useAgentStore.getState().attachLiveSession(session.id);
+
+    expect(attached).toBe(false);
+    expect(useAgentStore.getState().isRunning[session.id]).toBeFalsy();
+    expect(sessionHandlers.has(session.id)).toBe(false);
   });
 
   it('runQueuedQueryNow steers the active Codex turn without interrupting', async () => {

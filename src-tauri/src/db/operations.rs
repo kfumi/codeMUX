@@ -1090,21 +1090,6 @@ pub fn hash_pairing_token(token: &str) -> String {
     hex::encode(digest)
 }
 
-pub fn list_paired_devices(conn: &Connection) -> Result<Vec<PairedDevice>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, paired_at, last_seen_at FROM companion_paired_devices ORDER BY paired_at DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(PairedDevice {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            paired_at: row.get(2)?,
-            last_seen_at: row.get(3)?,
-        })
-    })?;
-    rows.collect()
-}
-
 pub fn insert_paired_device(
     conn: &Connection,
     id: &str,
@@ -1743,6 +1728,16 @@ pub fn reconcile_running_session_subagents(conn: &Connection, session_id: &str) 
          WHERE session_id = ?1 AND status = 'running'",
         params![session_id, Utc::now().to_rfc3339()],
     )
+}
+
+/// Authoritative persisted liveness: true while any subagent descriptor of the
+/// session is `running`. Backs the companion send-queue decision when the
+/// in-memory broadcast bookkeeping is cold (e.g. after a daemon restart).
+pub fn has_running_session_subagents(conn: &Connection, session_id: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(
+        "SELECT EXISTS(SELECT 1 FROM session_subagents WHERE session_id = ?1 AND status = 'running')",
+    )?;
+    stmt.query_row([session_id], |row| row.get(0))
 }
 
 #[cfg(test)]
@@ -2950,5 +2945,41 @@ mod tests {
                 ("toolu_2".to_string(), "completed".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn has_running_session_subagents_tracks_liveness_per_session() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        assert!(!super::has_running_session_subagents(&conn, "session-1").unwrap());
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_1",
+                "provider": "claude",
+                "status": "completed"
+            }),
+        )
+        .unwrap();
+        assert!(!super::has_running_session_subagents(&conn, "session-1").unwrap());
+
+        super::upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({
+                "type": "subagent_upsert",
+                "session_id": "session-1",
+                "subagent_id": "toolu_2",
+                "provider": "claude",
+                "status": "running"
+            }),
+        )
+        .unwrap();
+        assert!(super::has_running_session_subagents(&conn, "session-1").unwrap());
+        assert!(!super::has_running_session_subagents(&conn, "session-2").unwrap());
     }
 }

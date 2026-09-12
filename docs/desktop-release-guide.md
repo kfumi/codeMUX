@@ -7,7 +7,7 @@
 - 桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**（Tauri 壳已从仓库移除；`src-tauri/` 目录名保留，内容为 daemon crate 与其 bin 目标）。
 - 出包：`npm run build:electron-installer`（详见下文「构建安装包」），产物输出到 `desktop-electron/release/`。
 - 发布：把安装包（NSIS exe）与 `latest.yml` 上传到 [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)，现有安装版经 electron-updater 检测到更新。
-- **CI 发版流水线待迁移**：`.github/workflows/release.yml` 仍是 Tauri 时代配置（`tauri-action`），对当前仓库结构已失效；正式标签发版请先本地出包手动上传，或先完成 workflow 迁移。
+- CI 发版流水线待迁移：`.github/workflows/release.yml` 目前只负责推标签时创建 GitHub Release 记录（`publish-tauri` 任务已随 Tauri 壳移除），**不产出也不上传安装包**；正式标签发版请本地出包后手动上传附件，或先完成 workflow 迁移。
 
 ## 版本号同步（daemon 版本配对依赖）
 

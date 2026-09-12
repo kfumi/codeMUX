@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useSessionFlowActive } from '../../hooks/useSessionFlowActive';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
@@ -59,11 +60,13 @@ function SessionStatusIcon({
   isActive: boolean;
   agentDef: AgentDefinition | undefined;
 }) {
-  const isRunning = useAgentStore((s) => s.isRunning[session.id] ?? false);
+  // 后台子智能体流未收尾同样算"进行中":侧栏要持续转圈,否则用户会以为
+  // 对话已经结束(父回合 result 早于子智能体返回)。
+  const flowActive = useSessionFlowActive(session.id);
   const hasError = useAgentStore((s) => !!s.error[session.id]);
   const isUnread = useSessionStore((s) => s.unreadSessions.has(session.id));
 
-  if (isRunning) {
+  if (flowActive) {
     return (
       <span className="flex shrink-0 items-center justify-center h-4 w-4">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--sidebar-glow))]" />

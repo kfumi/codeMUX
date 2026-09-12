@@ -42,7 +42,7 @@
    ```
 5. **开发与测试**：
    ```bash
-   npm run tauri dev
+   npm run dev:desktop
    ```
 6. **提交修改**：
    ```bash
@@ -119,30 +119,45 @@ chore(deps): bump tauri to 2.1.0
 ## 项目结构速览
 
 ```
-src/                        # React 前端
+src/                        # React 渲染层（桌面 UI）
   components/agent/         # Agent 对话面板、工具卡片、权限卡片、上下文进度
   components/assistant-ui/  # assistant-ui 自定义组件（消息、Diff、Reasoning 等）
   components/settings/      # 设置页（Provider / MCP / Skills / 通知 / 使用统计 / 日志）
   components/workspace/     # Review / Terminal / Plan 等侧边面板
+  components/browser/       # Browser Host 浏览页 UI（沙箱 webview）
+  components/automation/    # daemon→壳受控自动化相关 UI
+  components/companion/     # 移动伴侣配对与连接 UI
   components/dev/           # 开发模式性能诊断覆盖层
-  features/update/          # 自动更新 Provider 与入口
-  stores/                   # Zustand 状态（agent / session / mcp / skill / perf 等）
+  features/update/          # 自动更新入口
+  stores/                   # Zustand 状态（agent / session / mcp / skill 等）
   types/                    # TypeScript 类型
   lib/                      # 工具函数（通知、权限、模型、上下文计算等）
   hooks/                    # 自定义 Hooks（agent models / notifications / theme）
 
-src-tauri/                  # Rust 后端
-  src/agent_runtime/        # Claude / Codex / OpenCode 运行时抽象
-  src/commands/             # Tauri 命令（usage / git / mcp / session / perf 等）
+desktop-electron/           # Electron 桌面壳（窗口 / 托盘 / supervisor / Browser Host / updater）
+  src/                      # main、preload、supervisor、browser-host、daemon-token 等
+
+src-tauri/                  # Rust daemon crate（目录名保留，Tauri 壳已移除）
+  src/bin/                  # codemux-daemon 入口（权威进程）
+  src/daemon/               # daemon 装配与生命周期
+  src/companion/            # Companion Server（REST/WS、鉴权、配对、自动化接缝）
+  src/agent/                # 会话生命周期、历史导入、Timeline 持久化
+  src/agent_runtime/        # Claude / Codex / OpenCode / pi 运行时抽象
   src/mcp/adapters/         # MCP 各 Agent 适配器（claude / codex / gemini / opencode）
   src/skills/adapters/      # Skills 各 Agent 适配器
-  src/provider_profiles/    # Provider Profile 服务与原生配置
+  src/model_providers/      # Model Provider 服务
+  src/scheduled_tasks/      # 定时任务
   sidecar/src/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
+
+src-mobile/                 # 移动伴侣 PWA（独立 Vite 构建与测试）
+src-cli/                    # 本机命令行 Daemon Client
 ```
+
+架构背景（daemon 权威、Electron 壳 supervisor、Companion 协议）见 ADR：`docs/adr/0011-daemon-authority-local-token.md`、`docs/adr/0012-daemon-process-electron-shell.md`。
 
 ## 设计文档
 
-项目的详细设计文档位于 `docs/superpowers/specs/` 目录，阅读这些文档有助于理解架构决策：
+项目的详细设计文档位于 `docs/superpowers/specs/` 目录，架构决策记录（ADR）位于 `docs/adr/`，阅读这些文档有助于理解架构决策：
 
 - `2026-05-27-ai-codeMUX-design.md` — 项目整体设计
 - `2026-05-28-claude-agent-sdk-integration-design.md` — Claude Agent SDK 集成设计
@@ -156,6 +171,10 @@ src-tauri/                  # Rust 后端
 - `2026-07-12-opencode-sdk-agent-design.md` — OpenCode SDK Agent 接入设计
 - `2026-07-14-agent-provider-profile-refactor-design.md` — Provider Profile 重构设计
 - `2026-07-23-dev-performance-diagnostics-design.md` — 开发性能诊断设计
+- `2026-08-27-scheduled-tasks-design.md` — 定时任务设计
+- `2026-09-01-shared-transcript-message-renderer.md` — 共享消息渲染器设计
+- `docs/adr/0011-daemon-authority-local-token.md` — Daemon 权威与 Local Daemon Token
+- `docs/adr/0012-daemon-process-electron-shell.md` — Daemon 独立进程与 Electron 桌面壳
 
 此外 `docs/` 下还有面向使用者的指南：`agent-provider-profiles-guide.md`、`codex-routing-proxy-guide.md`、`mcp-unified-management-guide.md`、`skills-unified-management-guide.md`、`ai-agent-permission-approval-guide.md`、`desktop-release-guide.md`。
 
@@ -164,8 +183,8 @@ src-tauri/                  # Rust 后端
 提交 PR 前请确认：
 
 - [ ] 代码已通过 `cargo fmt` 和 `cargo clippy`（Rust 部分）
-- [ ] 代码已通过 TypeScript 类型检查（`npm run build`）
-- [ ] 功能在开发模式下测试通过（`npm run tauri dev`）
+- [ ] 代码已通过 TypeScript 类型检查（`npm run build`，壳改动另跑 `cd desktop-electron && npm run typecheck`）
+- [ ] 功能在开发模式下测试通过（`npm run dev:desktop`）
 - [ ] 新功能已更新相关文档
 - [ ] Commit 消息符合 Conventional Commits 规范
 - [ ] PR 描述清晰说明了修改内容和原因

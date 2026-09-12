@@ -291,7 +291,7 @@ function BrowserViewportChrome({
             <ChevronDown className="h-3 w-3" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent ref={menuContentRef} side="top" align="center" avoidCollisions={false} className="z-180 min-w-36">
+        <DropdownMenuContent ref={menuContentRef} side="bottom" align="center" avoidCollisions={false} className="z-180 min-w-36">
           {BROWSER_VIEWPORT_OPTIONS.map((option) => (
             <DropdownMenuItem
               key={String(option.value)}
@@ -357,7 +357,7 @@ function BrowserToolbar({
   };
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/25 px-1.5">
+    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
       <TooltipHint content="后退">
         <button
           type="button"
@@ -406,7 +406,7 @@ function BrowserToolbar({
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          className="font-liga-none h-7 w-full rounded-md border border-border/55 bg-muted/35 px-2.5 text-ui-compact text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
+          className="font-liga-none h-7 w-full rounded-md border border-border bg-muted/35 px-2.5 text-ui-compact text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/45"
           onChange={(event) => onAddressChange(event.target.value)}
         />
       </form>
@@ -456,7 +456,7 @@ function BrowserToolbar({
             </button>
           </DropdownMenuTrigger>
         </TooltipHint>
-        <DropdownMenuContent ref={moreMenuContentRef} side="top" align="end" avoidCollisions={false} className="z-180 min-w-44">
+        <DropdownMenuContent ref={moreMenuContentRef} side="bottom" align="end" avoidCollisions={false} className="z-180 min-w-44">
           <DropdownMenuItem disabled={!pageUrl} onClick={() => void openInDefaultBrowser()}>
             在默认浏览器中打开
           </DropdownMenuItem>

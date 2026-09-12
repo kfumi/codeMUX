@@ -1,26 +1,14 @@
 //! Codex compat proxy lifecycle: starting and stopping the sidecar-hosted
 //! proxy, parsing its port from stderr, and exposing the live port.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use log::warn;
 
 use super::session_lifecycle::AgentState;
-use super::SidecarHandle;
-
-const PROXY_SESSION_ID: &str = "__codex_proxy__";
-
-/// Find any active sidecar to send a global command (e.g. proxy management).
-/// Skips the dedicated proxy sidecar — it has no Codex session initialized.
-fn find_any_active_sidecar(sidecars: &HashMap<String, SidecarHandle>) -> Option<String> {
-    sidecars
-        .keys()
-        .find(|id| id.as_str() != PROXY_SESSION_ID)
-        .cloned()
-}
 
 /// Parse the proxy port from captured sidecar stderr lines.
+#[allow(dead_code)]
 pub(crate) fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
     for line in lines.iter().rev() {
         if let Some(rest) = line.strip_prefix("[proxy-manager] Proxy started on port ") {

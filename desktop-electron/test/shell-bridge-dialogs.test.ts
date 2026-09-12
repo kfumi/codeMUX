@@ -2,7 +2,7 @@
 // 注入,验证 `codemux:showDialogOpen/showDialogSave` 的 plugin-dialog 返回形状
 // 映射(取消 → null、单选 → string、多选 → string[])与 updater 通道接线。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -142,6 +142,42 @@ describe('shell-bridge 对话框/更新器通道(工单 06)', () => {
     await getHandler('quitAndInstall')(null, undefined);
     expect(deps.updater.quitAndInstall).toHaveBeenCalledTimes(1);
     await expect(getHandler('currentVersion')(null, undefined)).resolves.toBe('0.3.1');
+  });
+});
+
+describe('shell-bridge 日志/主目录文件通道', () => {
+  beforeEach(() => {
+    ipcMainMock.handle.mockClear();
+  });
+
+  it('readLogFile:接收 {fileName} 对象 payload,返回文件内容;非法参数各自抛错', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'codemux-bridge-log-'));
+    const logDir = path.join(dir, 'logs');
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(path.join(logDir, 'daemon.log'), 'hello daemon', 'utf8');
+    try {
+      registerShellBridge(createDeps({ getLogDir: () => logDir }));
+      const handler = getHandler('readLogFile');
+
+      await expect(handler(null, { fileName: 'daemon.log' })).resolves.toBe('hello daemon');
+      await expect(handler(null, undefined)).rejects.toThrow('fileName must be a string');
+      await expect(handler(null, { fileName: 123 })).rejects.toThrow('fileName must be a string');
+      await expect(handler(null, { fileName: '../escape.log' })).rejects.toThrow('must not contain path separators');
+      await expect(handler(null, { fileName: 'missing.log' })).rejects.toThrow('not found');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('readHomeFile:接收 {relativePath} 对象 payload;非字符串/绝对路径/.. 各自抛错', async () => {
+    registerShellBridge(createDeps());
+    const handler = getHandler('readHomeFile');
+
+    await expect(handler(null, undefined)).rejects.toThrow('relativePath must be a string');
+    await expect(handler(null, { relativePath: 42 })).rejects.toThrow('relativePath must be a string');
+    // 校验失败发生在读文件之前,因此无需触碰真实主目录即可验证解包与安全校验。
+    await expect(handler(null, { relativePath: 'C:/out/a.txt' })).rejects.toThrow('path must be relative');
+    await expect(handler(null, { relativePath: 'a/../b.txt' })).rejects.toThrow("'..' components are not allowed");
   });
 });
 

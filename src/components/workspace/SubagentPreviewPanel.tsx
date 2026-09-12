@@ -14,6 +14,7 @@ import {
   convertAgentEventsToAssistantMessages,
   type CodeMuxAssistantMessage,
 } from '@/components/agent/assistant-ui/convertAgentEvents';
+import { RunningElapsedTimer } from '@/components/agent/assistant-ui/RunningElapsed';
 import { TooltipHint } from '@/components/ui/tooltip';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
@@ -108,7 +109,9 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
     followKey: `${eventCount}:${isRunning ? 'running' : 'idle'}`,
   });
 
-  const subtitle = descriptor?.subtitle;
+  // 计时与主线程对齐：从首条事件时间起算，重开标签页不清零。
+  const runningStartTs = useMemo(() => timestamps.find((ts) => ts > 0), [timestamps]);
+
   const isEmpty = displayMessages.length === 0;
 
   return (
@@ -176,7 +179,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
             {isRunning ? (
               <div className="flex items-center gap-2 pl-1 text-ui-meta text-muted-foreground/72">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>运行中{subtitle ? ` · ${subtitle}` : ''}</span>
+                <RunningElapsedTimer label="运行中" startTime={runningStartTs} />
               </div>
             ) : null}
           </div>

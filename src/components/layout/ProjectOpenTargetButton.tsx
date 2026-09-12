@@ -25,14 +25,14 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
   };
 
   return (
-    <div className="flex h-7 shrink-0 items-center overflow-hidden rounded-md border border-border/44 bg-[hsl(var(--surface-2))]/70 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
+    <div className="flex h-7 shrink-0 items-center overflow-hidden rounded-md border border-border bg-[hsl(var(--surface-2))]/70 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-label={`打开项目：${defaultOption.label}`}
             onClick={() => openProject(defaultTarget)}
-            className="flex h-7 w-8 items-center justify-center text-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground"
+            className="flex h-7 w-8 items-center justify-center text-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             <DefaultIcon className="h-4 w-4" />
           </button>
@@ -48,7 +48,7 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
               <button
                 type="button"
                 aria-label="选择打开项目方式"
-                className="flex h-7 w-6 items-center justify-center border-l border-border/38 text-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+                className="flex h-7 w-6 items-center justify-center border-l border-border text-foreground/70 transition-colors hover:bg-muted/50 hover:text-foreground"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>

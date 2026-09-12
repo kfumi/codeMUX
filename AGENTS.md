@@ -2,37 +2,50 @@
 
 ## Project Structure & Module Organization
 
-CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScript sidecar.
+CodeMUX is a local-first desktop app: an Electron shell (supervisor), a standalone Rust daemon (`codemux-daemon`), a React/Vite renderer, a Node/TypeScript agent sidecar, a mobile companion PWA, and a local CLI. The daemon is the authority (SQLite, sessions, agents, sidecar, MCP, skills, scheduled tasks); the shell only owns windows, tray, notifications, updates, and the Browser Host. Clients (renderer, mobile, CLI) talk to the daemon exclusively via the loopback Companion REST/WS protocol (`docs/adr/0011-daemon-authority-local-token.md`, `docs/adr/0012-daemon-process-electron-shell.md`).
 
-- `src/` contains frontend components, stores, utilities, types, hooks, styles, and tests.
-- `src-tauri/src/` contains Rust commands, config, database, MCP, skills, and agent runtimes.
+- `src/` contains frontend (renderer) components, stores, utilities, types, hooks, styles, and tests.
+- `desktop-electron/` contains the Electron shell (`src/`: main, preload, supervisor, browser host, updater; `scripts/`: dev and packaging helpers).
+- `src-tauri/` is the Rust **daemon crate** (directory name kept for history; the Tauri shell has been removed): `src/bin/codemux-daemon.rs` entry, `src/daemon/` assembly, `src/companion/` HTTP/WS server, `src/agent/` session lifecycle and history, `src/agent_runtime/` Claude/Codex/OpenCode/pi runtimes, plus config, db, mcp, skills, model_providers, scheduled_tasks.
 - `src-tauri/sidecar/` contains the Node/TypeScript agent sidecar.
-- `src-mobile/` contains the mobile web app (its own Vite build and tests); it is embedded into the desktop app via `npm run build:mobile`.
+- `src-mobile/` contains the mobile companion web app (its own Vite build and tests); it is embedded into the desktop app via `npm run build:mobile`.
+- `src-cli/` contains the local CLI daemon client.
 - `public/` and `src-tauri/icons/` hold static web and app assets.
-- `docs/` contains architecture specs and plans.
+- `docs/` contains architecture specs, ADRs, and plans.
 
 ## Build, Test, and Development Commands
 
 - `npm ci` installs root dependencies.
 - `cd src-tauri/sidecar && npm ci` installs sidecar dependencies.
-- `npm run dev` starts the Vite frontend on port 1420.
-- `npm run tauri dev` runs the desktop app in development mode.
-- `$env:RUSTFLAGS="--cfg tokio_unstable"; npm run tauri dev -- --features tokio-console` runs with tokio-console tracing (requires the `.cargo/config.toml` in `src-tauri/` to also set `rustflags = ["--cfg", "tokio_unstable"]`;`.cargo/config.toml` is already committed, so the RUSTFLAGS env var is only needed as a fallback if that file doesn't apply).
+- `npm run dev` starts the Vite renderer on port 1420.
+- `npm run dev:desktop` runs the desktop app in development mode: waits for Vite to be ready, then launches the Electron shell; the daemon is spawned by the shell's supervisor. Exit cleans up all child processes.
+- `npm run dev:electron` launches only the Electron shell (renderer must already be up on 1420).
 - `npm run build` type-checks `src/` and builds the Vite app.
+- `npm run build:daemon` (and `build:daemon:release`) builds the `codemux-daemon` binary.
+- `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `desktop-electron/release/` (see `docs/desktop-release-guide.md`).
 - `npm run build:mobile` builds `src-mobile/` (installs deps, runs `tsc && vite build`) and copies the output to `dist-mobile/`, which the desktop app loads.
-- `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime; `npm run tauri dev` and release builds rebuild it automatically via `npm run build:sidecar`. After editing sidecar source without going through those commands, rebuild manually or the app runs stale code.
+- `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime; dev and release flows rebuild it automatically via `npm run build:sidecar`. After editing sidecar source without going through those commands, rebuild manually or the app runs stale code.
+- `cd desktop-electron && npm run typecheck` type-checks the shell's main/preload TypeScript.
 - `cd src-tauri && cargo fmt --all -- --check` verifies Rust formatting.
 - `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` runs Rust lints.
 - `cd src-tauri && cargo check --all-targets --all-features` checks Rust compilation.
 - `npx vitest run` runs root TypeScript/React tests; run the same command in `src-tauri/sidecar/` for sidecar tests and in `src-mobile/` for mobile tests.
 
+### Rust daemon changes — always rebuild
+
+After any change under `src-tauri/` (Rust source or `Cargo.toml`), run `npm run build:daemon` as the finishing step of the change — do not leave it to the user.
+
+- The dev shell spawns the daemon from `src-tauri/target/debug/codemux-daemon(.exe)` (see `resolveDaemonExe` in `desktop-electron/src/main.ts`); the running daemon is never hot-reloaded, so a stale binary silently serves old behavior in `dev:desktop`.
+- After rebuilding, the daemon must be restarted to pick up the new binary: restart `npm run dev:desktop`, or stop the daemon and let the shell's supervisor respawn it.
+- If release behavior matters (packaging, installer), verify with `npm run build:daemon:release`.
+
 ### Sidecar packaging
 
-Sidecar uses plain `tsc`; the installer ships **only** `sidecar/dist/`, not `node_modules` (`src-tauri/tauri.conf.json`).
+Sidecar uses plain `tsc`; the installer ships **only** `sidecar/dist/`, not `node_modules` (see `desktop-electron/electron-builder.yml`).
 
 - Do **not** add runtime packages to `src-tauri/sidecar/package.json` `dependencies` — dev works, release fails with `ERR_MODULE_NOT_FOUND`.
 - Reuse frontend logic by inlining in sidecar; do not import from `src/`. Provider SDKs load from managed Runtime (`%LOCALAPPDATA%/CodeMUX/runtimes/`), not sidecar deps.
-- Need a real npm dep? Bundle it (e.g. esbuild) and update packaging config — or verify with a release build; `tauri dev` won't catch this.
+- Need a real npm dep? Bundle it (e.g. esbuild) and update packaging config — or verify with a release build; `dev:desktop` won't catch this.
 
 ## Coding Style & Naming Conventions
 
@@ -84,11 +97,11 @@ Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and
 
 Use Conventional Commits, matching project history: `feat: ...`, `fix(agent): ...`, `docs(readme): ...`, `chore(deps): ...`. Common scopes include `agent`, `mcp`, `skills`, `ui`, `store`, `db`, `sidecar`, and `config`.
 
-Pull requests should include a summary, linked issues when applicable, change type, test results, and screenshots for UI changes. Before opening a PR, confirm the relevant build, Vitest, Rust formatting, clippy, and manual `npm run tauri dev` checks.
+Pull requests should include a summary, linked issues when applicable, change type, test results, and screenshots for UI changes. Before opening a PR, confirm the relevant build, Vitest, Rust formatting, clippy, and manual `npm run dev:desktop` checks.
 
 ## Security & Configuration Tips
 
-Do not commit local credentials, API keys, generated logs, or machine-specific configuration. Keep provider, MCP, and agent settings changes documented when they affect runtime behavior.
+Do not commit local credentials, API keys, generated logs, or machine-specific configuration. Keep provider, MCP, and agent settings changes documented when they affect runtime behavior. Auth between shell/CLI/mobile and the daemon uses the Local Daemon Token (loopback) and Pairing Tokens (paired devices) — never log or commit them.
 
 ## assistant-ui
 

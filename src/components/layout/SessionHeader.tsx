@@ -9,6 +9,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { AgentMessage } from '../../stores/agentStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useSessionFlowActive } from '../../hooks/useSessionFlowActive';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
@@ -34,7 +35,8 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
   const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
-  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  // CLI 同步要求会话完全空闲:后台子智能体流未收尾同样要拦。
+  const flowActive = useSessionFlowActive(sessionId);
   const resyncSessionFromNative = useAgentStore((state) => state.resyncSessionFromNative);
   const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[sessionId] ?? null);
   const workingPath = session
@@ -104,7 +106,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
     if (!canResyncFromCli) {
       return;
     }
-    if (isRunning) {
+    if (flowActive) {
       toast.error('会话正在运行，请先停止后再同步');
       return;
     }
@@ -136,15 +138,15 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
         </TooltipHint>
       )}
       {workingPath ? (
-        <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
-          <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
+          <FolderOpen className="h-3 w-3 shrink-0 text-foreground dark:text-[hsl(var(--sidebar-accent))]" />
           <TooltipHint content={workingPath}>
             <span>{workingPath.split(/[/\\]+/).filter(Boolean).at(-1) ?? workingPath}</span>
           </TooltipHint>
         </div>
       ) : project ? (
-        <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
-          <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
+          <FolderOpen className="h-3 w-3 shrink-0 text-foreground dark:text-[hsl(var(--sidebar-accent))]" />
           <TooltipHint content={project.path}>
             <span>{project.path.split(/[/\\]+/).filter(Boolean).at(-1) ?? project.path}</span>
           </TooltipHint>
@@ -154,7 +156,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
         <DropdownMenuTrigger asChild>
           <button
             aria-label="任务菜单"
-            className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground"
+            className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>

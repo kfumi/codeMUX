@@ -212,6 +212,8 @@ interface AgentState {
   loadSessionMessages: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
   /** Attach live stream UI to a session started in the background (e.g. scheduled task). */
   attachToActiveTurn: (sessionId: string, cwd: string, reasoningEffort?: ReasoningEffort) => Promise<boolean>;
+  /** Re-attach the daemon WS stream after a page refresh while a turn is still running. */
+  attachLiveSession: (sessionId: string) => Promise<boolean>;
   /** Stop the scheduled-turn spinner once history shows the turn has finished. */
   completeBackgroundLiveIfIdle: (sessionId: string) => Promise<void>;
   /** Replace cached timeline with the latest CLI provider history and reload UI state */
@@ -1772,6 +1774,794 @@ export const useAgentStore = create<AgentState>((set, get) => {
     void interruptAndRunQueuedQuery(sessionId, query.id);
   };
 
+function createSessionEventHandler(
+  sessionId: string,
+  get: () => AgentState,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+  visionModel: string | null | undefined,
+): (raw: string) => void {
+  // 活跃判定动态读 store 而非捕获时间戳:同一 handler 要同时服务“发送消息”与
+  // “重新附着进行中回合”两条路径,新一轮会把 queryStartTime 换成新值。
+  const isActiveQuery = () => get().queryStartTime[sessionId] != null;
+  return (raw: string) => {
+    // Subagent tracks are routed to their own store and never enter the
+    // parent timeline events.
+    if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
+      return;
+    }
+    if (consumeSteerResultEvent(raw, (failedSessionId, query) => {
+      void fallbackQueuedQueryNow(failedSessionId, query);
+    })) {
+      return;
+    }
+    let event = parseAgentEvent(raw);
+    const now = Date.now();
+    const forceStoppedNow = get().forceStopped[sessionId] ?? false;
+    if (forceStoppedNow && (event.kind === 'done' || event.kind === 'error')) {
+      resolveInterruptDrain(sessionId);
+    }
+
+    if (event.kind === 'resume_failed') {
+      if (!isActiveQuery()) {
+        return;
+      }
+      const message = `外部会话恢复失败，已切换为只读快照：${event.data.error}`;
+      void useSessionStore.getState().setSessionReadOnly(sessionId, true).catch((error) => {
+        logger.error('Failed to persist imported session read-only state', { sessionId }, serializeError(error));
+      });
+      clearPendingStreaming(sessionId);
+      clearPendingStreamingToolInputs(sessionId);
+      set((s) => ({
+        isRunning: { ...s.isRunning, [sessionId]: false },
+        error: { ...s.error, [sessionId]: message },
+        queryStartTime: Object.fromEntries(Object.entries(s.queryStartTime).filter(([id]) => id !== sessionId)),
+      }));
+      useSessionStore.getState().markSessionUnread(sessionId);
+      return;
+    }
+
+    // Skip sub-agent (sidechain) messages from the main thread.
+    if (event.kind === 'raw' && isClaudeSubagentEvent(event.data)) {
+      return;
+    }
+
+    if (event.kind === 'raw' && event.data?.type === 'vision_unsupported') {
+      markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : visionModel);
+      set((s) => ({
+        events: {
+          ...s.events,
+          [sessionId]: [
+            ...(s.events[sessionId] || []),
+            { kind: 'stream_status', data: { message: '当前模型不支持图片识别，已自动改为仅发送文本。', is_reconnecting: false } },
+          ],
+        },
+        eventTimestamps: {
+          ...s.eventTimestamps,
+          [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
+        },
+      }));
+      return;
+    }
+
+    // The Sidecar now emits the canonical user_message event. Keep the
+    // optimistic local message and discard its wire echo once it arrives.
+    if (event.kind === 'user') {
+      const previousEvents = get().events[sessionId] || [];
+      const lastUserEvent = [...previousEvents].reverse().find((existingEvent) => existingEvent.kind === 'user');
+      if (lastUserEvent?.kind === 'user' && lastUserEvent.data.content === event.data.content) {
+        return;
+      }
+    }
+
+    if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
+      return;
+    }
+
+    if (event.kind === 'raw' && event.data?.type === 'token_usage_update') {
+      return;
+    }
+
+    if (event.kind === 'permission_mode_changed') {
+      const planMode = (event as Extract<AgentMessage, { kind: 'permission_mode_changed' }>).data.plan_mode;
+      // 先更新本地会话投影，原生模式事件到达后下拉立即反映当前模式。
+      useSessionStore.setState((state) => ({
+        sessions: state.sessions.map((session) => session.id === sessionId
+          ? { ...session, plan_mode: planMode }
+          : session),
+      }));
+      void useSessionStore.getState().updateSessionPermissions(sessionId, undefined, planMode).catch((error) => {
+        logger.warn('Failed to persist Claude plan mode change', { sessionId, planMode }, serializeError(error));
+      });
+      return;
+    }
+
+    if (event.kind === 'raw' && isClaudeCompactSummaryRawEvent(event.data)) {
+      return;
+    }
+
+    if (event.kind === 'error' && /Codex session not initialized\. Call ensure_session first\./i.test(event.data.error)) {
+      const existingEvents = get().events[sessionId] || [];
+      const alreadyFailedProxyStartup = existingEvents.some((existingEvent) =>
+        existingEvent.kind === 'error' &&
+        /EADDRINUSE|address already in use|listen .*15722/i.test(existingEvent.data.error),
+      );
+
+      if (alreadyFailedProxyStartup) {
+        logger.warn('Suppressing cascading Codex initialization error after proxy startup failure', {
+          sessionId,
+        });
+        return;
+      }
+    }
+
+    if (event.kind === 'todo_list') {
+      const todoEvent = event;
+      set((s) => ({
+        todos: { ...s.todos, [sessionId]: todoEvent.data.todos },
+      }));
+      return;
+    }
+
+    // Handle file_snapshot events: store original content captured before
+    // Write/Edit tool execution, then re-extract changed files.
+    if (event.kind === 'file_snapshot') {
+      const { file_path, original_content, is_new, tool_use_id } = event.data;
+      set((s) => {
+        const sessionOriginals = preserveFirstOriginalSnapshot(
+          s.fileOriginals[sessionId] || {},
+          file_path,
+          { content: original_content, isNew: is_new, toolUseId: tool_use_id },
+        );
+        const updatedOriginals = { ...s.fileOriginals, [sessionId]: sessionOriginals };
+        const existingEvents = s.events[sessionId] || [];
+        return {
+          fileOriginals: updatedOriginals,
+          changedFiles: {
+            ...s.changedFiles,
+            [sessionId]: extractChangedFilesFromEvents(existingEvents, s.acknowledgedFiles[sessionId], sessionOriginals),
+          },
+        };
+      });
+      return;
+    }
+
+    // Handle streaming events (thinking/text deltas + tool_use) separately
+    if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
+      if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
+      const streamEvents = event.kind === 'streaming_batch' ? event.data.events : [event.data.event];
+      for (const rawStreamEvent of streamEvents) {
+        const streamEvent = rawStreamEvent as Record<string, unknown>;
+        const eventType = streamEvent.type as string;
+        const findToolId = (idx: number | undefined): string | undefined => {
+          if (idx !== undefined) {
+            const byIndex = get().streamingToolIndexMap[sessionId]?.[idx];
+            if (byIndex) return byIndex;
+          }
+          const meta = get().streamingToolMeta[sessionId];
+          if (!meta) return undefined;
+          const entries = Object.entries(meta);
+          return entries.length > 0 ? entries[entries.length - 1][0] : undefined;
+        };
+
+        if (eventType === 'content_block_start') {
+          const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
+          if (contentBlock?.type === 'thinking') {
+            logger.debug('Thinking block started', { sessionId });
+            setSessionStreamPhase(sessionId, 'thinking');
+            flushPendingStreaming(sessionId, set);
+            clearStreamingTextField(sessionId, 'streamingThinking', set, get);
+          } else if (contentBlock?.type === 'text') {
+            logger.debug('Text block started', { sessionId });
+            flushPendingStreaming(sessionId, set);
+            const hasThinkingContent = Boolean(get().streamingThinking[sessionId]);
+            const hasCommittedThinking = hasCurrentTurnCommittedThinking(get().events[sessionId] || []);
+            if (
+              !isOpencodeLikeAgent(sessionId)
+              || hasThinkingContent
+              || hasCommittedThinking
+              || getSessionStreamPhase(sessionId) === 'answer'
+            ) {
+              setSessionStreamPhase(sessionId, 'answer');
+              // Pi 等运行时在最终 assistant_message 到达前不会把思考写入事件；
+              // 进入 answer 阶段时保留 streamingThinking，避免正文流式输出时思考面板消失。
+              if (hasThinkingContent && (
+                hasCommittedThinking
+                || isOpencodeLikeAgent(sessionId)
+                || (
+                  getSessionStreamPhase(sessionId) === 'answer'
+                  && getSessionAgentKind(sessionId) === 'claude_code'
+                )
+              )) {
+                clearStreamingTextField(sessionId, 'streamingThinking', set, get);
+              }
+            }
+            clearStreamingTextField(sessionId, 'streamingText', set, get);
+          } else if (contentBlock?.type === 'tool_use') {
+            const toolId = contentBlock.id as string;
+            const toolName = contentBlock.name as string;
+            const blockIndex = streamEvent.index as number | undefined;
+            logger.debug('Tool use block started', { sessionId, toolId, toolName, blockIndex });
+            set((s) => ({
+              streamingToolMeta: {
+                ...s.streamingToolMeta,
+                [sessionId]: { ...(s.streamingToolMeta[sessionId] || {}), [toolId]: { name: toolName, index: blockIndex ?? -1 } },
+              },
+              streamingToolInputs: {
+                ...s.streamingToolInputs,
+                [sessionId]: { ...(s.streamingToolInputs[sessionId] || {}), [toolId]: '' },
+              },
+              streamingToolIndexMap: blockIndex !== undefined
+                ? { ...s.streamingToolIndexMap, [sessionId]: { ...(s.streamingToolIndexMap[sessionId] || {}), [blockIndex]: toolId } }
+                : s.streamingToolIndexMap,
+            }));
+          }
+        } else if (eventType === 'content_block_delta') {
+          const delta = streamEvent.delta as Record<string, unknown> | undefined;
+          if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+            const toolId = findToolId(streamEvent.index as number | undefined);
+            if (toolId) {
+              appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
+            }
+          } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            setSessionStreamPhase(sessionId, 'thinking');
+            // Reclassify any content that was mis-routed into the answer stream.
+            const misrouted = get().streamingText[sessionId] || '';
+            if (misrouted) {
+              flushPendingStreaming(sessionId, set);
+              set((s) => ({
+                streamingThinking: {
+                  ...s.streamingThinking,
+                  [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
+                },
+                streamingText: { ...s.streamingText, [sessionId]: '' },
+                streamingVersion: {
+                  ...s.streamingVersion,
+                  [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+                },
+              }));
+              sessionsWithLiveTextStream.delete(sessionId);
+            }
+            queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
+          } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+            // OpenCode streams reasoning with field=text (text_delta). Keep it in the
+            // reasoning panel until this turn enters the answer phase.
+            // Other agents emit real answer text via text_delta — don't hijack them.
+            const phase = getSessionStreamPhase(sessionId);
+            const preferThinking = isOpencodeLikeAgent(sessionId) && phase !== 'answer';
+            if (preferThinking) {
+              setSessionStreamPhase(sessionId, 'thinking');
+              if (get().streamingText[sessionId]) {
+                flushPendingStreaming(sessionId, set);
+                const misrouted = get().streamingText[sessionId] || '';
+                set((s) => ({
+                  streamingThinking: {
+                    ...s.streamingThinking,
+                    [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
+                  },
+                  streamingText: { ...s.streamingText, [sessionId]: '' },
+                  streamingVersion: {
+                    ...s.streamingVersion,
+                    [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+                  },
+                }));
+                sessionsWithLiveTextStream.delete(sessionId);
+              }
+              queueStreamingDelta(sessionId, 'thinking', delta.text, set);
+            } else {
+              if (phase === 'thinking' && !isOpencodeLikeAgent(sessionId)) {
+                setSessionStreamPhase(sessionId, 'answer');
+              }
+              queueStreamingDelta(sessionId, 'text', delta.text, set);
+            }
+          }
+        } else if (eventType === 'content_block_stop') {
+          const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
+          if (blockType === 'thinking') {
+            logger.debug('Thinking block stopped', { sessionId });
+          } else if (blockType === 'text') {
+            logger.debug('Text block stopped', { sessionId });
+          } else if (blockType === 'tool_use') {
+            const toolId = findToolId(streamEvent.index as number | undefined);
+            logger.debug('Tool use block stopped', { sessionId, toolId });
+          }
+          logStreamingTelemetry(sessionId, 'content_block_stop');
+          streamingTelemetry.delete(sessionId);
+          const blockIndex = streamEvent.index as number | undefined;
+          const toolId = findToolId(blockIndex);
+          const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
+          if (toolId && toolMeta) {
+            // Skip if this tool_use block already exists in events (real event arrived first)
+            const alreadyExists = (get().events[sessionId] || []).some((evt) =>
+              evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
+            );
+            if (alreadyExists) {
+              clearPendingStreamingToolInputs(sessionId);
+              set((s) => ({
+                streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+              }));
+              return;
+            }
+            const rawJson = readPendingStreamingToolInput(sessionId, toolId, get()) || '{}';
+            let parsedInput: Record<string, unknown> = {};
+            try { parsedInput = JSON.parse(rawJson); } catch {}
+
+            // Capture original file content from disk BEFORE the tool executes.
+            // At content_block_stop time the file is still unmodified on disk.
+            // Fire-and-forget: snapshot is stored async, re-extraction happens on next event.
+            if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
+              const filePath = parsedInput.file_path as string;
+              const projectPath = usePreviewStore.getState().projectPath || undefined;
+              daemonFacade.readFile(filePath, projectPath).then((original) => {
+                set((s) => {
+                  const sessionOriginals = preserveFirstOriginalSnapshot(
+                    s.fileOriginals[sessionId] || {},
+                    filePath,
+                    { content: original, isNew: false, toolUseId: toolId },
+                  );
+                  const events = s.events[sessionId] || [];
+                  return {
+                    fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
+                    changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, s.acknowledgedFiles[sessionId], sessionOriginals) },
+                  };
+                });
+              }).catch(() => {
+                set((s) => {
+                  const sessionOriginals = preserveFirstOriginalSnapshot(
+                    s.fileOriginals[sessionId] || {},
+                    filePath,
+                    { content: '', isNew: true, toolUseId: toolId },
+                  );
+                  return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
+                });
+              });
+            }
+
+            const toolUseBlock: import('../types/agent').ContentBlock = {
+              type: 'tool_use',
+              id: toolId,
+              name: toolMeta.name,
+              input: parsedInput,
+            };
+            const syntheticAssistant: import('../types/agent').AgentAssistantMessage = {
+              type: 'assistant',
+              uuid: `stream-${toolId}`,
+              session_id: sessionId,
+              message: { role: 'assistant', content: [toolUseBlock] },
+              parent_tool_use_id: null,
+            };
+            const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
+            clearPendingStreamingToolInputs(sessionId);
+            set((s) => {
+              const prev = s.events[sessionId] || [];
+              const newEvents = [...prev, syntheticEvent];
+              const extractedTodos = extractTodosFromEvents(newEvents);
+              const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
+              const newIds = new Set(prevIds);
+              newIds.add(toolId);
+              // Un-acknowledge files that have new edits/writes since last save
+              let acknowledged = s.acknowledgedFiles[sessionId];
+              if (acknowledged && acknowledged.size > 0) {
+                const rawPath = parsedInput.file_path as string;
+                if (rawPath && acknowledged.has(normalizeFilePath(rawPath))) {
+                  const newAcknowledged = new Set(acknowledged);
+                  newAcknowledged.delete(normalizeFilePath(rawPath));
+                  acknowledged = newAcknowledged;
+                  try {
+                    localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
+                  } catch {}
+                }
+              }
+              return {
+                events: { ...s.events, [sessionId]: newEvents },
+                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
+                todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
+                changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
+                ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
+                streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+                streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
+                ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
+              };
+            });
+          } else {
+            flushPendingStreaming(sessionId, set);
+          }
+        }
+      }
+      return;
+    }
+
+    const forceStopped = forceStoppedNow;
+    if (forceStopped && shouldSuppressLiveEventWhileStopped(event.kind)) {
+      if (event.kind === 'result') {
+        resolveInterruptDrain(sessionId);
+        const resultData = event.data;
+        clearPendingStreaming(sessionId);
+        set((s) => {
+          const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+          return {
+            isRunning: { ...s.isRunning, [sessionId]: false },
+            queryStartTime: rest,
+            streamingText: { ...s.streamingText, [sessionId]: '' },
+            streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+            streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+            streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+            streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+            streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: new Set() },
+            queuePaused: { ...s.queuePaused, [sessionId]: true },
+            ...(resultData.is_error
+              ? { error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' } }
+              : {}),
+          };
+        });
+        useSessionStore.getState().markSessionUnread(sessionId);
+      }
+      return;
+    }
+
+    // When the complete assistant message arrives, filter out blocks
+    // that were already displayed via streaming to avoid duplicate display.
+    if (event.kind === 'assistant') {
+      logger.debug('Processing assistant event', { sessionId, blockCount: (event.data?.message?.content as any[] | undefined)?.length ?? 0 });
+      // Commit any pending simulated stream immediately before processing.
+      commitPendingSimulatedStream(sessionId, set);
+
+      flushPendingStreaming(sessionId, set);
+      const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
+      const incomingToolOnly = blocks.length > 0 && blocks.every((block: { type?: string }) => block?.type === 'tool_use');
+      if (incomingToolOnly) {
+        commitLiveStreamingNarration(sessionId, set, get);
+      }
+      // Collect all tool_use IDs already present in events (covers race condition)
+      const existingToolIds = new Set<string>();
+      for (const prevEvt of (get().events[sessionId] || [])) {
+        if (prevEvt.kind === 'assistant') {
+          for (const b of (prevEvt.data?.message?.content || [])) {
+            if (b?.type === 'tool_use' && b.id) existingToolIds.add(b.id);
+          }
+        }
+      }
+      const toolUseReplacements = new Map<string, unknown>();
+      const filtered = blocks.filter((b: any) => {
+        if (b?.type === 'tool_use' && existingToolIds.has(b.id)) {
+          if (typeof b.id === 'string') toolUseReplacements.set(b.id, b);
+          return false;
+        }
+        return true;
+      });
+      const replacedExistingTools = toolUseReplacements.size > 0
+        ? replaceToolUseBlocksInEvents(get().events[sessionId] || [], toolUseReplacements)
+        : { events: get().events[sessionId] || [], changed: false };
+      if (filtered.length !== blocks.length) {
+        event = {
+          ...event,
+          data: { ...event.data, message: { ...event.data.message, content: filtered } },
+        };
+      }
+
+      // If the SDK did not stream incrementally, simulate progressive render.
+      const textBlock = filtered.find(
+        (b: any): b is { type: 'text'; text: string } =>
+          b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
+      );
+      const thinkingBlock = filtered.find(
+        (b: any): b is { type: 'thinking'; thinking: string } =>
+          b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0,
+      );
+      const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
+      const currentStreamingText = get().streamingText[sessionId] || '';
+      const currentStreamingThinking = get().streamingThinking[sessionId] || '';
+      const hasLiveTextStream = sessionsWithLiveTextStream.has(sessionId);
+      const finalTextReplacesLiveText = Boolean(
+        textBlock
+        && !hasToolUse
+        && hasLiveTextStream
+        && currentStreamingText
+        && (
+          textBlock.text === currentStreamingText
+          || textBlock.text.startsWith(currentStreamingText)
+          || currentStreamingText.startsWith(textBlock.text)
+        ),
+      );
+      const thinkingOnly = Boolean(thinkingBlock && !textBlock && !hasToolUse);
+      // Superseding events must replace their target in place; routing them
+      // through the simulated-stream buffer would append them at the end.
+      const supersedesExisting = Array.isArray(event.data.supersedes) && event.data.supersedes.length > 0;
+      const narrationInsertAt = isNarrationOnlyAssistantEvent(event)
+        ? findNarrationAssistantInsertionIndex(get().events[sessionId] || [])
+        : undefined;
+      const shouldSimulate = Boolean(
+        !hasToolUse
+        && !supersedesExisting
+        && !isNarrationContinuationAssistantEvent(event)
+        && narrationInsertAt == null
+        && !currentStreamingText
+        && !currentStreamingThinking
+        && (textBlock || thinkingBlock),
+      );
+      if (shouldSimulate) {
+        const chunks: Array<{ key: keyof StreamingBuffer; text: string }> = [];
+        if (thinkingBlock) chunks.push({ key: 'thinking', text: thinkingBlock.thinking });
+        if (textBlock) chunks.push({ key: 'text', text: textBlock.text });
+        simulateStreamingContent(sessionId, event, chunks, set);
+        return;
+      }
+
+      set((s) => {
+        const updates: Partial<AgentState> = {};
+        if (replacedExistingTools.changed) {
+          updates.events = { ...s.events, [sessionId]: replacedExistingTools.events };
+          const extractedTodos = extractTodosFromEvents(replacedExistingTools.events);
+          updates.todos = {
+            ...s.todos,
+            [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []),
+          };
+          updates.changedFiles = {
+            ...s.changedFiles,
+            [sessionId]: extractChangedFilesFromEvents(
+              replacedExistingTools.events,
+              s.acknowledgedFiles[sessionId],
+              s.fileOriginals[sessionId],
+            ),
+          };
+        }
+        if (thinkingOnly && s.streamingText[sessionId]) {
+          const fullThinking = thinkingBlock!.thinking;
+          const liveText = s.streamingText[sessionId];
+          if (
+            liveText === fullThinking
+            || fullThinking.startsWith(liveText)
+            || liveText.startsWith(fullThinking)
+          ) {
+            updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+            sessionsWithLiveTextStream.delete(sessionId);
+          }
+        }
+        if (thinkingOnly) {
+          // OpenCode commits a completed reasoning part before publishing its
+          // following tool calls. Keeping that part in the live buffer makes
+          // the thread append it after those tools, reversing the event order.
+          // The committed assistant event now owns this completed reasoning.
+          resetSessionStreamPhase(sessionId);
+          if (s.streamingThinking[sessionId]) {
+            updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+            updates.streamingVersion = {
+              ...s.streamingVersion,
+              [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+            };
+          }
+        } else if (textBlock) {
+          setSessionStreamPhase(sessionId, 'answer');
+          // Answer arrived: clear live reasoning so committed Thread panel + markdown take over.
+          if (s.streamingThinking[sessionId]) {
+            updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+          }
+          if (s.streamingText[sessionId]) {
+            updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+          }
+        } else {
+          if (s.streamingThinking[sessionId]) {
+            updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+          }
+          if (s.streamingText[sessionId]) {
+            updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+          }
+        }
+        if (finalTextReplacesLiveText) {
+          sessionsWithLiveTextStream.delete(sessionId);
+        }
+        if (s.streamedToolUseIds[sessionId]?.size) {
+          updates.streamedToolUseIds = { ...s.streamedToolUseIds, [sessionId]: new Set<string>() };
+        }
+        return updates;
+      });
+
+      if (filtered.length === 0 && replacedExistingTools.changed) {
+        return;
+      }
+    }
+
+    if (event.kind === 'result') {
+      resetSessionStreamPhase(sessionId);
+      logger.info('Agent query result received', {
+        sessionId,
+        isError: event.data?.is_error,
+      });
+      commitPendingSimulatedStream(sessionId, set);
+    }
+
+    set((s) => {
+      const prev = s.events[sessionId] || [];
+      const supersededAssistantIds = event.kind === 'assistant' && Array.isArray(event.data.supersedes)
+        ? new Set(event.data.supersedes)
+        : null;
+      const hasSuperseded = Boolean(supersededAssistantIds && supersededAssistantIds.size > 0);
+      const supersededMatchIndex = hasSuperseded
+        ? prev.findIndex((entry) => entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid))
+        : -1;
+      const baseEvents = hasSuperseded
+        ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds!.has(entry.data.uuid))
+        : prev;
+      // Replace the previous placeholder instead of stacking duplicates.
+      let newEvents: AgentMessage[];
+      if (supersededMatchIndex >= 0) {
+        // Superseding an earlier assistant event replaces it in place so
+        // late-finalizing content keeps its original timeline position.
+        newEvents = prev
+          .filter((entry, index) => index === supersededMatchIndex
+            || !(entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid)))
+          .map((entry, index) => (index === supersededMatchIndex ? event : entry));
+      } else if (event.kind === 'stream_status' && event.data.is_reconnecting) {
+        newEvents = replaceLastOrAppend(baseEvents, event, isReconnectingStreamStatus);
+      } else if (
+        event.kind === 'compact' &&
+        event.data.compact_metadata?.status === 'completed'
+      ) {
+        // A completed compaction replaces its own loading placeholder
+        // instead of stacking a second compact marker.
+        newEvents = replaceLastOrAppend(
+          baseEvents,
+          event,
+          (entry) => entry.kind === 'compact' && entry.data.compact_metadata?.status === 'compacting',
+        );
+      } else if (
+        event.kind === 'assistant'
+        && isNarrationContinuationAssistantEvent(event)
+        && !hasSuperseded
+      ) {
+        newEvents = appendPiContinuationAssistantMessage(
+          baseEvents,
+          event,
+          sessionId,
+        );
+      } else if (
+        event.kind === 'assistant'
+        && isNarrationOnlyAssistantEvent(event)
+        && !hasSuperseded
+      ) {
+        if (getSessionAgentKind(sessionId) === 'pi') {
+          newEvents = appendPiNarrationFinalAfterTools(baseEvents, event, sessionId);
+        } else {
+          const narrationText = narrationTextFromAssistantEvent(event);
+          const replaceAt = narrationText != null
+            ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+            : undefined;
+          if (replaceAt != null) {
+            newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
+          } else {
+            const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
+            newEvents = insertAt != null
+              ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
+              : [...baseEvents, event];
+          }
+        }
+      } else {
+        newEvents = insertPiProcessEventBeforeTrailingNarration(baseEvents, event, sessionId);
+      }
+      if (event.kind === 'result') {
+        newEvents = normalizeTurnProcessEventOrder(newEvents);
+      }
+      if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
+        newEvents = stripEphemeralLiveStreamNarrationEvents(
+          newEvents.filter((entry) => !isReconnectingStreamStatus(entry)),
+        );
+      }
+      const extractedTodos = extractTodosFromEvents(newEvents);
+
+      // Un-acknowledge files that have new edits/writes since last save
+      let acknowledged = s.acknowledgedFiles[sessionId];
+      if (acknowledged && acknowledged.size > 0 && event.kind === 'assistant') {
+        const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
+        const newAcknowledged = new Set(acknowledged);
+        let changed = false;
+        for (const block of blocks) {
+          if (block?.type === 'tool_use' && (block.name === 'Write' || block.name === 'Edit')) {
+            const rawPath = block.input?.file_path as string;
+            if (rawPath && newAcknowledged.has(normalizeFilePath(rawPath))) {
+              newAcknowledged.delete(normalizeFilePath(rawPath));
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          acknowledged = newAcknowledged;
+          try {
+            localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
+          } catch {}
+        }
+      }
+
+      return {
+        events: { ...s.events, [sessionId]: newEvents },
+        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
+        todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
+        changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
+        ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
+        ...(event.kind === 'permission_resolved' ? { pendingPermissions: dequeueResolvedPermission(s.pendingPermissions, sessionId, event.data.request_id) } : {}),
+        ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
+      };
+    });
+    // Update MCP runtime status from polling results (local to agentStore)
+    if (event.kind === 'mcp_status') {
+      if (event.data.status) {
+        set((s) => ({
+          mcpRuntimeStatus: { ...s.mcpRuntimeStatus, [sessionId]: event.data.status || null },
+        }));
+      }
+    }
+    // Update proxy status with local URL from sidecar
+    if (event.kind === 'proxy_status') {
+      const localUrl = event.data.running && event.data.port
+        ? `http://127.0.0.1:${event.data.port}`
+        : null;
+      useSettingsStore.getState().setProxyRunning(event.data.running, localUrl);
+    }
+
+    const isTerminalEvent = isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error));
+    // Any flow terminal event (real or synthesized continuation boundary)
+    // ends the "children done, parent about to summarize" wait.
+    if (isTerminalEvent) {
+      useSubagentStore.getState().markContinuationSettled(sessionId);
+    }
+    const isSyntheticBoundary = event.kind === 'result' && Boolean(event.data?.synthetic);
+    if (isTerminalEvent && !shouldProcessTerminalEvent(get().isRunning[sessionId] ?? false, event.kind, Boolean(event.kind === 'result' && event.data?.is_error), isSyntheticBoundary)) {
+      // 合成 continuation 边界只代表后台汇总流收尾:用户没有活动回合时
+      // (isActiveQuery 为假),清掉 daemon state 帧置位的 isRunning 并
+      // 派发排队消息;用户回合进行中绝不抢跑。
+      if (isSyntheticBoundary && !isActiveQuery()) {
+        set((s) => ({ isRunning: { ...s.isRunning, [sessionId]: false } }));
+        dispatchNextQueuedQuery(sessionId);
+      }
+      return;
+    }
+
+    if (isTerminalEvent) {
+      if (!isActiveQuery()) {
+        // 后台回合(如子智能体汇总)的终点:用户没有活动回合,安全收尾
+        // 并派发排队消息。既有行为是直接忽略,导致 isRunning 卡真、
+        // 本地队列永不派发。
+        set((s) => ({ isRunning: { ...s.isRunning, [sessionId]: false } }));
+        dispatchNextQueuedQuery(sessionId);
+        return;
+      }
+      clearPendingStreaming(sessionId);
+      clearPendingStreamingToolInputs(sessionId);
+      const terminalFailed = event.kind === 'error'
+        || (event.kind === 'result' && Boolean(event.data?.is_error));
+      set((s) => {
+        const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+        return {
+          isRunning: { ...s.isRunning, [sessionId]: false },
+          queryStartTime: rest,
+          streamingText: { ...s.streamingText, [sessionId]: '' },
+          streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+          queuePaused: terminalFailed
+            ? { ...s.queuePaused, [sessionId]: true }
+            : s.queuePaused,
+          error: event.kind === 'error'
+          ? { ...s.error, [sessionId]: event.data.error }
+          : s.error,
+        };
+      });
+      useSessionStore.getState().markSessionUnread(sessionId);
+      logger.info('Agent query finished', {
+        sessionId,
+        terminalEvent: event.kind,
+        isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
+      });
+      if (event.kind === 'result' && !event.data?.is_error) {
+        void get().refreshLatestTokenUsage(sessionId, 'live_synced');
+      }
+      if (!terminalFailed) {
+        dispatchNextQueuedQuery(sessionId);
+      }
+    }
+  };
+}
+
   return ({
   events: {},
   turns: {},
@@ -1838,14 +2628,21 @@ export const useAgentStore = create<AgentState>((set, get) => {
       await pendingHistoryLoad;
     }
     const currentState = get();
-    // Queue composer sends only while a turn is active or a queued dispatch is in flight.
-    // After a failed/paused turn, composer input starts a new turn immediately; existing
-    // queued messages stay in order and run after that turn succeeds.
+    // 会话未收尾即排队:父回合运行中、派发在途之外,后台子智能体仍在运行、
+    // 或刚全部结束等待父进程汇总回合的窗口,同样算忙——与 daemon 侧发送
+    // 排队语义一致。消息进本地可见队列,流程收尾时按序派发。
+    const subagentSession = useSubagentStore.getState().sessions[sessionId];
+    const childrenRunning = Boolean(
+      subagentSession?.order.some((id) => subagentSession.descriptors[id]?.status === 'running'),
+    );
+    const continuationPending = Boolean(useSubagentStore.getState().continuationPending[sessionId]);
     const shouldQueue =
       !fromQueue
       && (
         Boolean(currentState.isRunning[sessionId])
         || queuedDispatches.has(sessionId)
+        || childrenRunning
+        || continuationPending
       );
     if (shouldQueue) {
       const queuedQuery = createQueuedQuery(
@@ -2001,773 +2798,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }));
       }
 
-      const isActiveQuery = () => get().queryStartTime[sessionId] === queryStartedAt;
-
-      const handleEvent = (raw: string) => {
-        // Subagent tracks are routed to their own store and never enter the
-        // parent timeline events.
-        if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
-          return;
-        }
-        if (consumeSteerResultEvent(raw, (failedSessionId, query) => {
-          void fallbackQueuedQueryNow(failedSessionId, query);
-        })) {
-          return;
-        }
-        let event = parseAgentEvent(raw);
-        const now = Date.now();
-        const forceStoppedNow = get().forceStopped[sessionId] ?? false;
-        if (forceStoppedNow && (event.kind === 'done' || event.kind === 'error')) {
-          resolveInterruptDrain(sessionId);
-        }
-
-        if (event.kind === 'resume_failed') {
-          if (!isActiveQuery()) {
-            return;
-          }
-          const message = `外部会话恢复失败，已切换为只读快照：${event.data.error}`;
-          void useSessionStore.getState().setSessionReadOnly(sessionId, true).catch((error) => {
-            logger.error('Failed to persist imported session read-only state', { sessionId }, serializeError(error));
-          });
-          clearPendingStreaming(sessionId);
-          clearPendingStreamingToolInputs(sessionId);
-          set((s) => ({
-            isRunning: { ...s.isRunning, [sessionId]: false },
-            error: { ...s.error, [sessionId]: message },
-            queryStartTime: Object.fromEntries(Object.entries(s.queryStartTime).filter(([id]) => id !== sessionId)),
-          }));
-          useSessionStore.getState().markSessionUnread(sessionId);
-          return;
-        }
-
-        // Skip sub-agent (sidechain) messages from the main thread.
-        if (event.kind === 'raw' && isClaudeSubagentEvent(event.data)) {
-          return;
-        }
-
-        if (event.kind === 'raw' && event.data?.type === 'vision_unsupported') {
-          markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : modelForVision);
-          set((s) => ({
-            events: {
-              ...s.events,
-              [sessionId]: [
-                ...(s.events[sessionId] || []),
-                { kind: 'stream_status', data: { message: '当前模型不支持图片识别，已自动改为仅发送文本。', is_reconnecting: false } },
-              ],
-            },
-            eventTimestamps: {
-              ...s.eventTimestamps,
-              [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
-            },
-          }));
-          return;
-        }
-
-        // The Sidecar now emits the canonical user_message event. Keep the
-        // optimistic local message and discard its wire echo once it arrives.
-        if (event.kind === 'user') {
-          const previousEvents = get().events[sessionId] || [];
-          const lastUserEvent = [...previousEvents].reverse().find((existingEvent) => existingEvent.kind === 'user');
-          if (lastUserEvent?.kind === 'user' && lastUserEvent.data.content === event.data.content) {
-            return;
-          }
-        }
-
-        if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
-          return;
-        }
-
-        if (event.kind === 'raw' && event.data?.type === 'token_usage_update') {
-          return;
-        }
-
-        if (event.kind === 'permission_mode_changed') {
-          const planMode = (event as Extract<AgentMessage, { kind: 'permission_mode_changed' }>).data.plan_mode;
-          // 先更新本地会话投影，原生模式事件到达后下拉立即反映当前模式。
-          useSessionStore.setState((state) => ({
-            sessions: state.sessions.map((session) => session.id === sessionId
-              ? { ...session, plan_mode: planMode }
-              : session),
-          }));
-          void useSessionStore.getState().updateSessionPermissions(sessionId, undefined, planMode).catch((error) => {
-            logger.warn('Failed to persist Claude plan mode change', { sessionId, planMode }, serializeError(error));
-          });
-          return;
-        }
-
-        if (event.kind === 'raw' && isClaudeCompactSummaryRawEvent(event.data)) {
-          return;
-        }
-
-        if (event.kind === 'error' && /Codex session not initialized\. Call ensure_session first\./i.test(event.data.error)) {
-          const existingEvents = get().events[sessionId] || [];
-          const alreadyFailedProxyStartup = existingEvents.some((existingEvent) =>
-            existingEvent.kind === 'error' &&
-            /EADDRINUSE|address already in use|listen .*15722/i.test(existingEvent.data.error),
-          );
-
-          if (alreadyFailedProxyStartup) {
-            logger.warn('Suppressing cascading Codex initialization error after proxy startup failure', {
-              sessionId,
-            });
-            return;
-          }
-        }
-
-        if (event.kind === 'todo_list') {
-          const todoEvent = event;
-          set((s) => ({
-            todos: { ...s.todos, [sessionId]: todoEvent.data.todos },
-          }));
-          return;
-        }
-
-        // Handle file_snapshot events: store original content captured before
-        // Write/Edit tool execution, then re-extract changed files.
-        if (event.kind === 'file_snapshot') {
-          const { file_path, original_content, is_new, tool_use_id } = event.data;
-          set((s) => {
-            const sessionOriginals = preserveFirstOriginalSnapshot(
-              s.fileOriginals[sessionId] || {},
-              file_path,
-              { content: original_content, isNew: is_new, toolUseId: tool_use_id },
-            );
-            const updatedOriginals = { ...s.fileOriginals, [sessionId]: sessionOriginals };
-            const existingEvents = s.events[sessionId] || [];
-            return {
-              fileOriginals: updatedOriginals,
-              changedFiles: {
-                ...s.changedFiles,
-                [sessionId]: extractChangedFilesFromEvents(existingEvents, s.acknowledgedFiles[sessionId], sessionOriginals),
-              },
-            };
-          });
-          return;
-        }
-
-        // Handle streaming events (thinking/text deltas + tool_use) separately
-        if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
-          if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
-          const streamEvents = event.kind === 'streaming_batch' ? event.data.events : [event.data.event];
-          for (const rawStreamEvent of streamEvents) {
-            const streamEvent = rawStreamEvent as Record<string, unknown>;
-            const eventType = streamEvent.type as string;
-            const findToolId = (idx: number | undefined): string | undefined => {
-              if (idx !== undefined) {
-                const byIndex = get().streamingToolIndexMap[sessionId]?.[idx];
-                if (byIndex) return byIndex;
-              }
-              const meta = get().streamingToolMeta[sessionId];
-              if (!meta) return undefined;
-              const entries = Object.entries(meta);
-              return entries.length > 0 ? entries[entries.length - 1][0] : undefined;
-            };
-
-            if (eventType === 'content_block_start') {
-              const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
-              if (contentBlock?.type === 'thinking') {
-                logger.debug('Thinking block started', { sessionId });
-                setSessionStreamPhase(sessionId, 'thinking');
-                flushPendingStreaming(sessionId, set);
-                clearStreamingTextField(sessionId, 'streamingThinking', set, get);
-              } else if (contentBlock?.type === 'text') {
-                logger.debug('Text block started', { sessionId });
-                flushPendingStreaming(sessionId, set);
-                const hasThinkingContent = Boolean(get().streamingThinking[sessionId]);
-                const hasCommittedThinking = hasCurrentTurnCommittedThinking(get().events[sessionId] || []);
-                if (
-                  !isOpencodeLikeAgent(sessionId)
-                  || hasThinkingContent
-                  || hasCommittedThinking
-                  || getSessionStreamPhase(sessionId) === 'answer'
-                ) {
-                  setSessionStreamPhase(sessionId, 'answer');
-                  // Pi 等运行时在最终 assistant_message 到达前不会把思考写入事件；
-                  // 进入 answer 阶段时保留 streamingThinking，避免正文流式输出时思考面板消失。
-                  if (hasThinkingContent && (
-                    hasCommittedThinking
-                    || isOpencodeLikeAgent(sessionId)
-                    || (
-                      getSessionStreamPhase(sessionId) === 'answer'
-                      && getSessionAgentKind(sessionId) === 'claude_code'
-                    )
-                  )) {
-                    clearStreamingTextField(sessionId, 'streamingThinking', set, get);
-                  }
-                }
-                clearStreamingTextField(sessionId, 'streamingText', set, get);
-              } else if (contentBlock?.type === 'tool_use') {
-                const toolId = contentBlock.id as string;
-                const toolName = contentBlock.name as string;
-                const blockIndex = streamEvent.index as number | undefined;
-                logger.debug('Tool use block started', { sessionId, toolId, toolName, blockIndex });
-                set((s) => ({
-                  streamingToolMeta: {
-                    ...s.streamingToolMeta,
-                    [sessionId]: { ...(s.streamingToolMeta[sessionId] || {}), [toolId]: { name: toolName, index: blockIndex ?? -1 } },
-                  },
-                  streamingToolInputs: {
-                    ...s.streamingToolInputs,
-                    [sessionId]: { ...(s.streamingToolInputs[sessionId] || {}), [toolId]: '' },
-                  },
-                  streamingToolIndexMap: blockIndex !== undefined
-                    ? { ...s.streamingToolIndexMap, [sessionId]: { ...(s.streamingToolIndexMap[sessionId] || {}), [blockIndex]: toolId } }
-                    : s.streamingToolIndexMap,
-                }));
-              }
-            } else if (eventType === 'content_block_delta') {
-              const delta = streamEvent.delta as Record<string, unknown> | undefined;
-              if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-                const toolId = findToolId(streamEvent.index as number | undefined);
-                if (toolId) {
-                  appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
-                }
-              } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-                setSessionStreamPhase(sessionId, 'thinking');
-                // Reclassify any content that was mis-routed into the answer stream.
-                const misrouted = get().streamingText[sessionId] || '';
-                if (misrouted) {
-                  flushPendingStreaming(sessionId, set);
-                  set((s) => ({
-                    streamingThinking: {
-                      ...s.streamingThinking,
-                      [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
-                    },
-                    streamingText: { ...s.streamingText, [sessionId]: '' },
-                    streamingVersion: {
-                      ...s.streamingVersion,
-                      [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
-                    },
-                  }));
-                  sessionsWithLiveTextStream.delete(sessionId);
-                }
-                queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
-              } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-                // OpenCode streams reasoning with field=text (text_delta). Keep it in the
-                // reasoning panel until this turn enters the answer phase.
-                // Other agents emit real answer text via text_delta — don't hijack them.
-                const phase = getSessionStreamPhase(sessionId);
-                const preferThinking = isOpencodeLikeAgent(sessionId) && phase !== 'answer';
-                if (preferThinking) {
-                  setSessionStreamPhase(sessionId, 'thinking');
-                  if (get().streamingText[sessionId]) {
-                    flushPendingStreaming(sessionId, set);
-                    const misrouted = get().streamingText[sessionId] || '';
-                    set((s) => ({
-                      streamingThinking: {
-                        ...s.streamingThinking,
-                        [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
-                      },
-                      streamingText: { ...s.streamingText, [sessionId]: '' },
-                      streamingVersion: {
-                        ...s.streamingVersion,
-                        [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
-                      },
-                    }));
-                    sessionsWithLiveTextStream.delete(sessionId);
-                  }
-                  queueStreamingDelta(sessionId, 'thinking', delta.text, set);
-                } else {
-                  if (phase === 'thinking' && !isOpencodeLikeAgent(sessionId)) {
-                    setSessionStreamPhase(sessionId, 'answer');
-                  }
-                  queueStreamingDelta(sessionId, 'text', delta.text, set);
-                }
-              }
-            } else if (eventType === 'content_block_stop') {
-              const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
-              if (blockType === 'thinking') {
-                logger.debug('Thinking block stopped', { sessionId });
-              } else if (blockType === 'text') {
-                logger.debug('Text block stopped', { sessionId });
-              } else if (blockType === 'tool_use') {
-                const toolId = findToolId(streamEvent.index as number | undefined);
-                logger.debug('Tool use block stopped', { sessionId, toolId });
-              }
-              logStreamingTelemetry(sessionId, 'content_block_stop');
-              streamingTelemetry.delete(sessionId);
-              const blockIndex = streamEvent.index as number | undefined;
-              const toolId = findToolId(blockIndex);
-              const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
-              if (toolId && toolMeta) {
-                // Skip if this tool_use block already exists in events (real event arrived first)
-                const alreadyExists = (get().events[sessionId] || []).some((evt) =>
-                  evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
-                );
-                if (alreadyExists) {
-                  clearPendingStreamingToolInputs(sessionId);
-                  set((s) => ({
-                    streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                    streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                    streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
-                  }));
-                  return;
-                }
-                const rawJson = readPendingStreamingToolInput(sessionId, toolId, get()) || '{}';
-                let parsedInput: Record<string, unknown> = {};
-                try { parsedInput = JSON.parse(rawJson); } catch {}
-
-                // Capture original file content from disk BEFORE the tool executes.
-                // At content_block_stop time the file is still unmodified on disk.
-                // Fire-and-forget: snapshot is stored async, re-extraction happens on next event.
-                if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
-                  const filePath = parsedInput.file_path as string;
-                  const projectPath = usePreviewStore.getState().projectPath || undefined;
-                  daemonFacade.readFile(filePath, projectPath).then((original) => {
-                    set((s) => {
-                      const sessionOriginals = preserveFirstOriginalSnapshot(
-                        s.fileOriginals[sessionId] || {},
-                        filePath,
-                        { content: original, isNew: false, toolUseId: toolId },
-                      );
-                      const events = s.events[sessionId] || [];
-                      return {
-                        fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
-                        changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, s.acknowledgedFiles[sessionId], sessionOriginals) },
-                      };
-                    });
-                  }).catch(() => {
-                    set((s) => {
-                      const sessionOriginals = preserveFirstOriginalSnapshot(
-                        s.fileOriginals[sessionId] || {},
-                        filePath,
-                        { content: '', isNew: true, toolUseId: toolId },
-                      );
-                      return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
-                    });
-                  });
-                }
-
-                const toolUseBlock: import('../types/agent').ContentBlock = {
-                  type: 'tool_use',
-                  id: toolId,
-                  name: toolMeta.name,
-                  input: parsedInput,
-                };
-                const syntheticAssistant: import('../types/agent').AgentAssistantMessage = {
-                  type: 'assistant',
-                  uuid: `stream-${toolId}`,
-                  session_id: sessionId,
-                  message: { role: 'assistant', content: [toolUseBlock] },
-                  parent_tool_use_id: null,
-                };
-                const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
-                clearPendingStreamingToolInputs(sessionId);
-                set((s) => {
-                  const prev = s.events[sessionId] || [];
-                  const newEvents = [...prev, syntheticEvent];
-                  const extractedTodos = extractTodosFromEvents(newEvents);
-                  const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
-                  const newIds = new Set(prevIds);
-                  newIds.add(toolId);
-                  // Un-acknowledge files that have new edits/writes since last save
-                  let acknowledged = s.acknowledgedFiles[sessionId];
-                  if (acknowledged && acknowledged.size > 0) {
-                    const rawPath = parsedInput.file_path as string;
-                    if (rawPath && acknowledged.has(normalizeFilePath(rawPath))) {
-                      const newAcknowledged = new Set(acknowledged);
-                      newAcknowledged.delete(normalizeFilePath(rawPath));
-                      acknowledged = newAcknowledged;
-                      try {
-                        localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
-                      } catch {}
-                    }
-                  }
-                  return {
-                    events: { ...s.events, [sessionId]: newEvents },
-                    eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-                    todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
-                    changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-                    ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
-                    streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                    streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                    streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
-                    streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
-                    ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
-                  };
-                });
-              } else {
-                flushPendingStreaming(sessionId, set);
-              }
-            }
-          }
-          return;
-        }
-
-        const forceStopped = forceStoppedNow;
-        if (forceStopped && shouldSuppressLiveEventWhileStopped(event.kind)) {
-          if (event.kind === 'result') {
-            resolveInterruptDrain(sessionId);
-            const resultData = event.data;
-            clearPendingStreaming(sessionId);
-            set((s) => {
-              const { [sessionId]: _removed, ...rest } = s.queryStartTime;
-              return {
-                isRunning: { ...s.isRunning, [sessionId]: false },
-                queryStartTime: rest,
-                streamingText: { ...s.streamingText, [sessionId]: '' },
-                streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-                streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
-                streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: new Set() },
-                queuePaused: { ...s.queuePaused, [sessionId]: true },
-                ...(resultData.is_error
-                  ? { error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' } }
-                  : {}),
-              };
-            });
-            useSessionStore.getState().markSessionUnread(sessionId);
-          }
-          return;
-        }
-
-        // When the complete assistant message arrives, filter out blocks
-        // that were already displayed via streaming to avoid duplicate display.
-        if (event.kind === 'assistant') {
-          logger.debug('Processing assistant event', { sessionId, blockCount: (event.data?.message?.content as any[] | undefined)?.length ?? 0 });
-          // Commit any pending simulated stream immediately before processing.
-          commitPendingSimulatedStream(sessionId, set);
-
-          flushPendingStreaming(sessionId, set);
-          const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-          const incomingToolOnly = blocks.length > 0 && blocks.every((block: { type?: string }) => block?.type === 'tool_use');
-          if (incomingToolOnly) {
-            commitLiveStreamingNarration(sessionId, set, get);
-          }
-          // Collect all tool_use IDs already present in events (covers race condition)
-          const existingToolIds = new Set<string>();
-          for (const prevEvt of (get().events[sessionId] || [])) {
-            if (prevEvt.kind === 'assistant') {
-              for (const b of (prevEvt.data?.message?.content || [])) {
-                if (b?.type === 'tool_use' && b.id) existingToolIds.add(b.id);
-              }
-            }
-          }
-          const toolUseReplacements = new Map<string, unknown>();
-          const filtered = blocks.filter((b: any) => {
-            if (b?.type === 'tool_use' && existingToolIds.has(b.id)) {
-              if (typeof b.id === 'string') toolUseReplacements.set(b.id, b);
-              return false;
-            }
-            return true;
-          });
-          const replacedExistingTools = toolUseReplacements.size > 0
-            ? replaceToolUseBlocksInEvents(get().events[sessionId] || [], toolUseReplacements)
-            : { events: get().events[sessionId] || [], changed: false };
-          if (filtered.length !== blocks.length) {
-            event = {
-              ...event,
-              data: { ...event.data, message: { ...event.data.message, content: filtered } },
-            };
-          }
-
-          // If the SDK did not stream incrementally, simulate progressive render.
-          const textBlock = filtered.find(
-            (b: any): b is { type: 'text'; text: string } =>
-              b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
-          );
-          const thinkingBlock = filtered.find(
-            (b: any): b is { type: 'thinking'; thinking: string } =>
-              b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0,
-          );
-          const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
-          const currentStreamingText = get().streamingText[sessionId] || '';
-          const currentStreamingThinking = get().streamingThinking[sessionId] || '';
-          const hasLiveTextStream = sessionsWithLiveTextStream.has(sessionId);
-          const finalTextReplacesLiveText = Boolean(
-            textBlock
-            && !hasToolUse
-            && hasLiveTextStream
-            && currentStreamingText
-            && (
-              textBlock.text === currentStreamingText
-              || textBlock.text.startsWith(currentStreamingText)
-              || currentStreamingText.startsWith(textBlock.text)
-            ),
-          );
-          const thinkingOnly = Boolean(thinkingBlock && !textBlock && !hasToolUse);
-          // Superseding events must replace their target in place; routing them
-          // through the simulated-stream buffer would append them at the end.
-          const supersedesExisting = Array.isArray(event.data.supersedes) && event.data.supersedes.length > 0;
-          const narrationInsertAt = isNarrationOnlyAssistantEvent(event)
-            ? findNarrationAssistantInsertionIndex(get().events[sessionId] || [])
-            : undefined;
-          const shouldSimulate = Boolean(
-            !hasToolUse
-            && !supersedesExisting
-            && !isNarrationContinuationAssistantEvent(event)
-            && narrationInsertAt == null
-            && !currentStreamingText
-            && !currentStreamingThinking
-            && (textBlock || thinkingBlock),
-          );
-          if (shouldSimulate) {
-            const chunks: Array<{ key: keyof StreamingBuffer; text: string }> = [];
-            if (thinkingBlock) chunks.push({ key: 'thinking', text: thinkingBlock.thinking });
-            if (textBlock) chunks.push({ key: 'text', text: textBlock.text });
-            simulateStreamingContent(sessionId, event, chunks, set);
-            return;
-          }
-
-          set((s) => {
-            const updates: Partial<AgentState> = {};
-            if (replacedExistingTools.changed) {
-              updates.events = { ...s.events, [sessionId]: replacedExistingTools.events };
-              const extractedTodos = extractTodosFromEvents(replacedExistingTools.events);
-              updates.todos = {
-                ...s.todos,
-                [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []),
-              };
-              updates.changedFiles = {
-                ...s.changedFiles,
-                [sessionId]: extractChangedFilesFromEvents(
-                  replacedExistingTools.events,
-                  s.acknowledgedFiles[sessionId],
-                  s.fileOriginals[sessionId],
-                ),
-              };
-            }
-            if (thinkingOnly && s.streamingText[sessionId]) {
-              const fullThinking = thinkingBlock!.thinking;
-              const liveText = s.streamingText[sessionId];
-              if (
-                liveText === fullThinking
-                || fullThinking.startsWith(liveText)
-                || liveText.startsWith(fullThinking)
-              ) {
-                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
-                sessionsWithLiveTextStream.delete(sessionId);
-              }
-            }
-            if (thinkingOnly) {
-              // OpenCode commits a completed reasoning part before publishing its
-              // following tool calls. Keeping that part in the live buffer makes
-              // the thread append it after those tools, reversing the event order.
-              // The committed assistant event now owns this completed reasoning.
-              resetSessionStreamPhase(sessionId);
-              if (s.streamingThinking[sessionId]) {
-                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
-                updates.streamingVersion = {
-                  ...s.streamingVersion,
-                  [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
-                };
-              }
-            } else if (textBlock) {
-              setSessionStreamPhase(sessionId, 'answer');
-              // Answer arrived: clear live reasoning so committed Thread panel + markdown take over.
-              if (s.streamingThinking[sessionId]) {
-                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
-              }
-              if (s.streamingText[sessionId]) {
-                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
-              }
-            } else {
-              if (s.streamingThinking[sessionId]) {
-                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
-              }
-              if (s.streamingText[sessionId]) {
-                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
-              }
-            }
-            if (finalTextReplacesLiveText) {
-              sessionsWithLiveTextStream.delete(sessionId);
-            }
-            if (s.streamedToolUseIds[sessionId]?.size) {
-              updates.streamedToolUseIds = { ...s.streamedToolUseIds, [sessionId]: new Set<string>() };
-            }
-            return updates;
-          });
-
-          if (filtered.length === 0 && replacedExistingTools.changed) {
-            return;
-          }
-        }
-
-        if (event.kind === 'result') {
-          resetSessionStreamPhase(sessionId);
-          logger.info('Agent query result received', {
-            sessionId,
-            isError: event.data?.is_error,
-          });
-          commitPendingSimulatedStream(sessionId, set);
-        }
-
-        set((s) => {
-          const prev = s.events[sessionId] || [];
-          const supersededAssistantIds = event.kind === 'assistant' && Array.isArray(event.data.supersedes)
-            ? new Set(event.data.supersedes)
-            : null;
-          const hasSuperseded = Boolean(supersededAssistantIds && supersededAssistantIds.size > 0);
-          const supersededMatchIndex = hasSuperseded
-            ? prev.findIndex((entry) => entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid))
-            : -1;
-          const baseEvents = hasSuperseded
-            ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds!.has(entry.data.uuid))
-            : prev;
-          // Replace the previous placeholder instead of stacking duplicates.
-          let newEvents: AgentMessage[];
-          if (supersededMatchIndex >= 0) {
-            // Superseding an earlier assistant event replaces it in place so
-            // late-finalizing content keeps its original timeline position.
-            newEvents = prev
-              .filter((entry, index) => index === supersededMatchIndex
-                || !(entry.kind === 'assistant' && supersededAssistantIds!.has(entry.data.uuid)))
-              .map((entry, index) => (index === supersededMatchIndex ? event : entry));
-          } else if (event.kind === 'stream_status' && event.data.is_reconnecting) {
-            newEvents = replaceLastOrAppend(baseEvents, event, isReconnectingStreamStatus);
-          } else if (
-            event.kind === 'compact' &&
-            event.data.compact_metadata?.status === 'completed'
-          ) {
-            // A completed compaction replaces its own loading placeholder
-            // instead of stacking a second compact marker.
-            newEvents = replaceLastOrAppend(
-              baseEvents,
-              event,
-              (entry) => entry.kind === 'compact' && entry.data.compact_metadata?.status === 'compacting',
-            );
-          } else if (
-            event.kind === 'assistant'
-            && isNarrationContinuationAssistantEvent(event)
-            && !hasSuperseded
-          ) {
-            newEvents = appendPiContinuationAssistantMessage(
-              baseEvents,
-              event,
-              sessionId,
-            );
-          } else if (
-            event.kind === 'assistant'
-            && isNarrationOnlyAssistantEvent(event)
-            && !hasSuperseded
-          ) {
-            if (getSessionAgentKind(sessionId) === 'pi') {
-              newEvents = appendPiNarrationFinalAfterTools(baseEvents, event, sessionId);
-            } else {
-              const narrationText = narrationTextFromAssistantEvent(event);
-              const replaceAt = narrationText != null
-                ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
-                : undefined;
-              if (replaceAt != null) {
-                newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
-              } else {
-                const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
-                newEvents = insertAt != null
-                  ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
-                  : [...baseEvents, event];
-              }
-            }
-          } else {
-            newEvents = insertPiProcessEventBeforeTrailingNarration(baseEvents, event, sessionId);
-          }
-          if (event.kind === 'result') {
-            newEvents = normalizeTurnProcessEventOrder(newEvents);
-          }
-          if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
-            newEvents = stripEphemeralLiveStreamNarrationEvents(
-              newEvents.filter((entry) => !isReconnectingStreamStatus(entry)),
-            );
-          }
-          const extractedTodos = extractTodosFromEvents(newEvents);
-
-          // Un-acknowledge files that have new edits/writes since last save
-          let acknowledged = s.acknowledgedFiles[sessionId];
-          if (acknowledged && acknowledged.size > 0 && event.kind === 'assistant') {
-            const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-            const newAcknowledged = new Set(acknowledged);
-            let changed = false;
-            for (const block of blocks) {
-              if (block?.type === 'tool_use' && (block.name === 'Write' || block.name === 'Edit')) {
-                const rawPath = block.input?.file_path as string;
-                if (rawPath && newAcknowledged.has(normalizeFilePath(rawPath))) {
-                  newAcknowledged.delete(normalizeFilePath(rawPath));
-                  changed = true;
-                }
-              }
-            }
-            if (changed) {
-              acknowledged = newAcknowledged;
-              try {
-                localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
-              } catch {}
-            }
-          }
-
-          return {
-            events: { ...s.events, [sessionId]: newEvents },
-            eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-            todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
-            changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-            ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
-            ...(event.kind === 'permission_resolved' ? { pendingPermissions: dequeueResolvedPermission(s.pendingPermissions, sessionId, event.data.request_id) } : {}),
-            ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
-          };
-        });
-        // Update MCP runtime status from polling results (local to agentStore)
-        if (event.kind === 'mcp_status') {
-          if (event.data.status) {
-            set((s) => ({
-              mcpRuntimeStatus: { ...s.mcpRuntimeStatus, [sessionId]: event.data.status || null },
-            }));
-          }
-        }
-        // Update proxy status with local URL from sidecar
-        if (event.kind === 'proxy_status') {
-          const localUrl = event.data.running && event.data.port
-            ? `http://127.0.0.1:${event.data.port}`
-            : null;
-          useSettingsStore.getState().setProxyRunning(event.data.running, localUrl);
-        }
-
-        const isTerminalEvent = isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error));
-        // Any flow terminal event (real or synthesized continuation boundary)
-        // ends the "children done, parent about to summarize" wait.
-        if (isTerminalEvent) {
-          useSubagentStore.getState().markContinuationSettled(sessionId);
-        }
-        const isSyntheticBoundary = event.kind === 'result' && Boolean(event.data?.synthetic);
-        if (isTerminalEvent && !shouldProcessTerminalEvent(get().isRunning[sessionId] ?? false, event.kind, Boolean(event.kind === 'result' && event.data?.is_error), isSyntheticBoundary)) {
-          return;
-        }
-
-        if (isTerminalEvent) {
-          if (!isActiveQuery()) {
-            return;
-          }
-          clearPendingStreaming(sessionId);
-          clearPendingStreamingToolInputs(sessionId);
-          const terminalFailed = event.kind === 'error'
-            || (event.kind === 'result' && Boolean(event.data?.is_error));
-          set((s) => {
-            const { [sessionId]: _removed, ...rest } = s.queryStartTime;
-            return {
-              isRunning: { ...s.isRunning, [sessionId]: false },
-              queryStartTime: rest,
-              streamingText: { ...s.streamingText, [sessionId]: '' },
-              streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-              queuePaused: terminalFailed
-                ? { ...s.queuePaused, [sessionId]: true }
-                : s.queuePaused,
-              error: event.kind === 'error'
-              ? { ...s.error, [sessionId]: event.data.error }
-              : s.error,
-            };
-          });
-          useSessionStore.getState().markSessionUnread(sessionId);
-          logger.info('Agent query finished', {
-            sessionId,
-            terminalEvent: event.kind,
-            isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
-          });
-          if (event.kind === 'result' && !event.data?.is_error) {
-            void get().refreshLatestTokenUsage(sessionId, 'live_synced');
-          }
-          if (!terminalFailed) {
-            dispatchNextQueuedQuery(sessionId);
-          }
-        }
-      };
+      const handleEvent = createSessionEventHandler(sessionId, get, set, modelForVision);
       registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
         if (!running) return;
         set((s) => {
@@ -2859,6 +2890,44 @@ export const useAgentStore = create<AgentState>((set, get) => {
     });
   },
 
+  attachLiveSession: async (sessionId: string) => {
+    if (get().isRunning[sessionId]) return true;
+    let turnActive = false;
+    try {
+      turnActive = await daemonFacade.isSessionTurnActive(sessionId);
+    } catch (error) {
+      logger.warn('Failed to query session turn state for live attach', { sessionId }, serializeError(error));
+      return false;
+    }
+    if (!turnActive) return false;
+
+    // 刷新后内存订阅尽失;daemon 会话 WS 连上即回放 timeline tail 并续流,
+    // sequence 由 loadSessionMessages 预置的 lastSequence 去重。
+    setSessionStreamPhase(sessionId, 'thinking');
+    set((s) => ({
+      isRunning: { ...s.isRunning, [sessionId]: true },
+      queryStartTime: { ...s.queryStartTime, [sessionId]: s.queryStartTime[sessionId] ?? Date.now() },
+      error: { ...s.error, [sessionId]: null },
+    }));
+
+    const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
+    const handleEvent = createSessionEventHandler(sessionId, get, set, session?.model ?? null);
+    registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
+      if (!running) return;
+      set((s) => {
+        if (s.isRunning[sessionId]) return {};
+        return {
+          isRunning: { ...s.isRunning, [sessionId]: true },
+          queryStartTime: {
+            ...s.queryStartTime,
+            [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+          },
+        };
+      });
+    });
+    return true;
+  },
+
   respondToPermission: async (sessionId: string, requestId: string, response: AgentPermissionResponse) => {
     const request = (get().pendingPermissions[sessionId] ?? []).find((item) => item.request_id === requestId);
     if (!request) return;
@@ -2884,18 +2953,27 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const forceStopped = state.forceStopped[sessionId] ?? false;
     const events = state.events[sessionId] || [];
     const lastEvent = events[events.length - 1];
+    // 父回合已结束但后台子智能体流未收尾时同样可以停止:sidecar interrupt
+    // 会把 running 的子智能体全部置为 failed 并广播 upsert。
+    const subagentSession = useSubagentStore.getState().sessions[sessionId];
+    const childrenRunning = Boolean(
+      subagentSession?.order.some((id) => subagentSession.descriptors[id]?.status === 'running'),
+    );
+    const continuationPending = Boolean(useSubagentStore.getState().continuationPending[sessionId]);
 
-    if (!isRunning || forceStopped || lastEvent?.kind === 'done') {
+    if ((!isRunning && !childrenRunning && !continuationPending) || forceStopped || lastEvent?.kind === 'done') {
       logger.info('Ignoring interrupt for inactive agent query', {
         sessionId,
         isRunning,
+        childrenRunning,
+        continuationPending,
         forceStopped,
         lastEvent: lastEvent?.kind ?? 'none',
       });
       return;
     }
 
-    logger.info('Interrupting agent query', { sessionId });
+    logger.info('Interrupting agent query', { sessionId, isRunning, childrenRunning });
     beginInterruptDrain(sessionId);
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => {
@@ -2916,6 +2994,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
     } catch {
       // Sidecar may already be gone — UI is already stopped.
     }
+    // 子智能体取消后父进程可能不会再被唤醒,不清 continuation 等待会让
+    // 后续发送一直进队列。
+    useSubagentStore.getState().markContinuationSettled(sessionId);
   },
 
   removeQueuedQuery: (sessionId: string, queryId: string) => {

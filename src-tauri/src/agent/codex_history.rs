@@ -443,21 +443,32 @@ fn stringify_codex_tool_output(value: Option<&serde_json::Value>) -> String {
 /// mirror of the provider message id, a normalized `line_index`, and the
 /// app session id.
 fn finalize_codex_history_events(events: &mut [serde_json::Value], app_session_id: &str) {
+    // 合成事件不能复用位置编号命名空间：第二遍会给无 id 的事件发
+    // `codemux-history-{sid}-{位置}`，而前端加载时间线时按 event_id 去重，
+    // 撞号会让 user/assistant 消息顶掉 turn_finished，turn 永远无法完成。
     let mut tool_sequence = 0u64;
+    let mut turn_sequence = 0u64;
     for event in events.iter_mut() {
         let event_type = event.get("type").and_then(|entry| entry.as_str());
-        if !matches!(
-            event_type,
-            Some("tool_started") | Some("tool_finished") | Some("turn_finished")
-        ) {
-            continue;
+        match event_type {
+            Some("tool_started") | Some("tool_finished") => {
+                event["event_id"] = serde_json::json!(format!(
+                    "codemux-history-{}-tool-{}",
+                    app_session_id, tool_sequence
+                ));
+                event["sequence"] = serde_json::json!(tool_sequence);
+                tool_sequence += 1;
+            }
+            Some("turn_finished") => {
+                event["event_id"] = serde_json::json!(format!(
+                    "codemux-history-{}-turn-{}",
+                    app_session_id, turn_sequence
+                ));
+                event["sequence"] = serde_json::json!(turn_sequence);
+                turn_sequence += 1;
+            }
+            _ => {}
         }
-        event["event_id"] = serde_json::json!(format!(
-            "codemux-history-{}-{}",
-            app_session_id, tool_sequence
-        ));
-        event["sequence"] = serde_json::json!(tool_sequence);
-        tool_sequence += 1;
     }
 
     for (sequence, event) in events.iter_mut().enumerate() {
@@ -1767,6 +1778,71 @@ mod tests {
     }
 
     #[test]
+    fn codex_history_event_ids_stay_unique_across_synthetic_turn_markers() {
+        // 前端加载时间线时按 event_id 去重：user/assistant 消息的位置编号
+        // 不能与 turn_finished 的合成编号撞号，否则 turn_finished 被丢弃、
+        // turn 永远无法标记完成，消息 footer 随之消失。
+        let raw_events = vec![
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "user_message", "message": "第一问" }
+            }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "message": "第一答" }
+            }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "duration_ms": 100 }
+            }),
+            serde_json::json!({ "type": "turn_context", "payload": {} }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "user_message", "message": "第二问" }
+            }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "message": "第二答" }
+            }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "duration_ms": 200 }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        let event_ids: Vec<&str> = converted
+            .iter()
+            .map(|event| {
+                event
+                    .get("event_id")
+                    .and_then(|value| value.as_str())
+                    .expect("converted history events must carry an event_id")
+            })
+            .collect();
+        let mut unique_ids = event_ids.clone();
+        unique_ids.sort_unstable();
+        unique_ids.dedup();
+        assert_eq!(
+            unique_ids.len(),
+            event_ids.len(),
+            "event_id collision would make the frontend dedupe drop events: {event_ids:?}"
+        );
+
+        let turn_finished_count = converted
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(|value| value.as_str()) == Some("turn_finished")
+            })
+            .count();
+        assert_eq!(
+            turn_finished_count, 2,
+            "every completed turn keeps its marker"
+        );
+    }
+
+    #[test]
     fn codex_history_emits_deduplicated_codemux_tool_lifecycle_and_turn_outcome() {
         let raw_events = vec![
             serde_json::json!({
@@ -1980,7 +2056,7 @@ mod tests {
                     }]
                 },
                 "timestamp": "2026-07-02T10:00:00.000Z",
-                "event_id": "codemux-history-app-session-1-0",
+                "event_id": "codemux-history-app-session-1-tool-0",
                 "sequence": 1
             })
         );
@@ -1994,7 +2070,7 @@ mod tests {
                 "content": "[\"继续\"]",
                 "is_error": false,
                 "timestamp": "2026-07-02T10:00:00.001Z",
-                "event_id": "codemux-history-app-session-1-1",
+                "event_id": "codemux-history-app-session-1-tool-1",
                 "sequence": 2
             })
         );

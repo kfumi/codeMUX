@@ -98,17 +98,36 @@ function findPreviousUserEventIndex(events: AgentMessage[], eventIndex: number):
   return -1;
 }
 
+function hashTurnSeed(seed: string): string {
+  let hash = 5381;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) + hash + seed.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+// 终态通知的回合身份 = 此前 user 事件的序数 + 其内容哈希。不能用事件时间戳：
+// 实时路径由渲染层 Date.now() 打戳，历史水合路径改用持久化 timestamp（sidecar
+// 上报或 daemon 落库时的 UTC 时间），同一回合两条路径数值不同，切走再切回会话
+// 后去重失效、提示音重播。序数在两条路径下一致（流式回显的 user 事件会被丢弃，
+// 不会重复计数）；内容哈希让 rewind 编辑过的回合拿到新 key。
 function buildDispatchKey(
   sessionId: string,
   candidate: { key: string; kind: string },
   events: AgentMessage[],
   eventIndex: number,
-  timestamps: number[] | undefined,
 ): string {
-  if (candidate.kind === 'task_completed' || candidate.kind === 'task_failed') {
+  if (isTerminalNotification(candidate)) {
     const previousUserIndex = findPreviousUserEventIndex(events, eventIndex);
-    if (previousUserIndex >= 0) {
-      return `terminal:${sessionId}:${candidate.kind}:turn:${timestamps?.[previousUserIndex] ?? previousUserIndex}`;
+    const previousUserEvent = previousUserIndex >= 0 ? events[previousUserIndex] : undefined;
+    if (previousUserEvent?.kind === 'user') {
+      let ordinal = 0;
+      for (let index = 0; index <= previousUserIndex; index += 1) {
+        if (events[index]?.kind === 'user') {
+          ordinal += 1;
+        }
+      }
+      return `terminal:${sessionId}:${candidate.kind}:turn:${ordinal}:${hashTurnSeed(previousUserEvent.data.content)}`;
     }
   }
 
@@ -209,7 +228,7 @@ export function useAgentNotifications() {
           continue;
         }
 
-        const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i, eventTimestamps[sessionId]);
+        const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i);
 
         if (seenNotificationKeysRef.current.has(dispatchKey)) {
           break;

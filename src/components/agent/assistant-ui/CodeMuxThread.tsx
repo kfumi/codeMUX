@@ -41,7 +41,7 @@ import {
 } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
-import type { ConversationTurn } from '../../../types/conversationTurn';
+import type { ConversationTurn, ConversationTurnStatus } from '../../../types/conversationTurn';
 
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -92,9 +92,10 @@ type CodeMuxThreadRenderContextValue = {
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  /** Session uses subagents and the async flow (children running or parent
-   * turn streaming) has not fully settled — footers wait for that moment. */
-  subagentFlowPending: boolean;
+  /** While the async subagent flow is unsettled, this is the id of the turn
+   * still in flight — that turn's footer waits for settlement. Older turns
+   * keep their footers. */
+  pendingTurnId?: string;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -119,6 +120,28 @@ const GROUP_BY_PART = (
   return GROUP_BY_PART_INNER(part, context);
 };
 const CodeMuxThreadRenderContext = createContext<CodeMuxThreadRenderContextValue | null>(null);
+
+/** Main-thread footer rule: public rule + a completed, non-system turn.
+ * Footer suppression is turn-scoped — only the turn still in flight
+ * (`turnId === pendingTurnId`) waits for the async subagent flow to settle;
+ * older turns keep their footers. */
+export function shouldRenderAssistantFooter(input: {
+  role: 'assistant' | 'system';
+  isFinalAssistantMessage?: boolean;
+  turnStatus?: ConversationTurnStatus;
+  turnId?: string;
+  pendingTurnId?: string;
+}): boolean {
+  return shouldShowTranscriptFooter({
+    role: input.role,
+    isFinalAssistantMessage: input.isFinalAssistantMessage,
+    isTimelineRunning: false,
+  })
+    && input.turnStatus === 'completed'
+    && input.role !== 'system'
+    && input.turnId !== undefined
+    && input.turnId !== input.pendingTurnId;
+}
 const MESSAGE_COMPONENTS = {
   UserMessage: CodeMuxUserMessage,
   UserEditComposer: CodeMuxUserEditComposer,
@@ -217,11 +240,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     [conversationTurns],
   );
   const sessionHasSubagents = useSubagentStore((state) => (state.sessions[sessionId]?.order.length ?? 0) > 0);
-  const hasRunningSubagents = useSubagentStore((state) => {
+  const runningSubagentCount = useSubagentStore((state) => {
     const session = state.sessions[sessionId];
-    if (!session) return false;
-    return session.order.some((id) => session.descriptors[id]?.status === 'running');
+    if (!session) return 0;
+    return session.order.reduce(
+      (count, id) => count + (session.descriptors[id]?.status === 'running' ? 1 : 0),
+      0,
+    );
   });
+  const hasRunningSubagents = runningSubagentCount > 0;
   // Continuation turns stream without a sendInput, so isRunning alone misses
   // them — the streaming buffers cover that window.
   const streamingText = useAgentStore((state) => state.streamingText[sessionId] ?? '');
@@ -231,6 +258,11 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
   const subagentFlowPending = sessionHasSubagents
     && (hasRunningSubagents || isRunning || continuationPending || streamingText.length > 0 || streamingThinking.length > 0);
+  // Footer suppression is turn-scoped: only the turn still in flight waits
+  // for the async subagent flow to settle; completed turns keep their footers.
+  const pendingTurnId = subagentFlowPending && conversationTurns.length > 0
+    ? conversationTurns[conversationTurns.length - 1]?.id
+    : undefined;
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
@@ -262,7 +294,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    subagentFlowPending,
+    pendingTurnId,
   }), [
     sessionId,
     compactAiOutput,
@@ -275,7 +307,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    subagentFlowPending,
+    pendingTurnId,
   ]);
 
   return (
@@ -287,6 +319,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           eventCount={events.length}
           userMessageCount={userMessageCount}
           isRunning={isRunning}
+          runningSubagentCount={runningSubagentCount}
           viewportRef={viewportRef}
         >
           {(scrollToBottomButton) => (
@@ -325,6 +358,7 @@ function UnifiedThreadViewport({
   eventCount,
   userMessageCount,
   isRunning,
+  runningSubagentCount,
   viewportRef,
   children,
 }: {
@@ -332,6 +366,10 @@ function UnifiedThreadViewport({
   eventCount: number;
   userMessageCount: number;
   isRunning: boolean;
+  /** Subagent start/finish changes timeline height (status chips, the
+   * background-running row) without emitting parent events; include it so
+   * follow-latest keeps firing through a quiet parent window. */
+  runningSubagentCount: number;
   viewportRef: RefObject<HTMLDivElement>;
   children: (scrollToBottomButton: ReactNode) => ReactNode;
 }) {
@@ -343,7 +381,7 @@ function UnifiedThreadViewport({
   const hasNewUserMessage = userMessageCount > previousUserMessageCountRef.current;
   const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
     viewportRef,
-    followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${streamingVersion}:${userMessageCount}`,
+    followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${streamingVersion}:${userMessageCount}:${runningSubagentCount}`,
     extraFrames: isHistoryHydration || hasNewUserMessage ? 2 : 1,
     forceFollow: hasNewUserMessage,
     behavior: 'smooth',
@@ -509,7 +547,7 @@ function CodeMuxAssistantMessage() {
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
-    subagentFlowPending,
+    pendingTurnId,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -523,7 +561,7 @@ function CodeMuxAssistantMessage() {
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
       turnOrdinalById={turnOrdinalById}
-      subagentFlowPending={subagentFlowPending}
+      pendingTurnId={pendingTurnId}
     />
   );
 }
@@ -1103,7 +1141,7 @@ function AssistantLikeMessage({
   toolDurations,
   turnByEventIndex,
   turnOrdinalById,
-  subagentFlowPending,
+  pendingTurnId,
 }: {
   message: MessageState;
   sessionId: string;
@@ -1115,7 +1153,7 @@ function AssistantLikeMessage({
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
-  subagentFlowPending: boolean;
+  pendingTurnId?: string;
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
@@ -1138,21 +1176,16 @@ function AssistantLikeMessage({
     .map((eventIndex) => turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
   const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
-  // Public footer rule first; main thread then requires a completed turn,
-  // a non-system row, and a settled async subagent flow. `isTimelineRunning`
-  // stays false here because parent completion is turn-scoped, not "tail of
-  // this message list". Grouping / plan cards / data parts stay on this
-  // runtime path instead of CodeMuxTranscriptMessage.
-  const shouldRenderFooter =
-    shouldShowTranscriptFooter({
-      role: sourceRole,
-      isFinalAssistantMessage: isFinal,
-      isTimelineRunning: false,
-    })
-    && turn?.status === 'completed'
-    && sourceRole !== 'system'
-    && !subagentFlowPending
-    && turn !== undefined;
+  // Main thread footer rule lives in shouldRenderAssistantFooter; grouping /
+  // plan cards / data parts stay on this runtime path instead of
+  // CodeMuxTranscriptMessage.
+  const shouldRenderFooter = shouldRenderAssistantFooter({
+    role: sourceRole,
+    isFinalAssistantMessage: isFinal,
+    turnStatus: turn?.status,
+    turnId: turn?.id,
+    pendingTurnId,
+  });
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
   const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;
   const sourceProviderTurnOrdinal = turn ? turnOrdinalById.get(turn.id) : undefined;
@@ -1367,6 +1400,8 @@ function CodeMuxToolGroup({
  */
 function SubagentRunningRow({ sessionId }: { sessionId: string }) {
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  // 用户停止后子智能体会被置为 failed/canceled,不再有"自动继续"——行要隐藏。
+  const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const runningCount = useSubagentStore((state) => {
     const session = state.sessions[sessionId];
     if (!session) return 0;
@@ -1389,7 +1424,7 @@ function SubagentRunningRow({ sessionId }: { sessionId: string }) {
     return undefined;
   });
 
-  if (isRunning || (runningCount === 0 && !continuationPending)) {
+  if (stopped || isRunning || (runningCount === 0 && !continuationPending)) {
     return null;
   }
 

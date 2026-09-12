@@ -16,6 +16,13 @@ let shuttingDown = false;
 
 const isWin = process.platform === 'win32';
 
+// Windows 控制台默认代码页是 GBK,子进程的 UTF-8 中文日志(如
+// [browser-automation])会显示成乱码;切到 UTF-8 仅影响本控制台的显示。
+// 失败(非 cmd 环境/权限)静默忽略 —— 纯显示层,不值得阻塞启动。
+if (isWin) {
+  spawnSync('chcp.com', ['65001'], { stdio: 'ignore', shell: true });
+}
+
 async function isServerUp(url) {
   try {
     await fetch(url, { signal: AbortSignal.timeout(1_000) });

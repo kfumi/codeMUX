@@ -39,6 +39,13 @@ pub struct CompanionInner {
     pub lan_exposed: AtomicBool,
     pub turn_active: Mutex<HashSet<String>>,
     pub message_queues: Mutex<HashMap<String, VecDeque<QueuedCompanionMessage>>>,
+    /// Subagent ids currently believed running per session, maintained from
+    /// `subagent_upsert` broadcasts. Only used to arm the continuation wait.
+    pub running_subagents: Mutex<HashMap<String, HashSet<String>>>,
+    /// Sessions whose background subagents all went terminal and the parent's
+    /// summary turn has not settled yet. Armed with a timestamp; the busy
+    /// window expires so a lost summary turn can never stall the queue.
+    pub continuation_pending: Mutex<HashMap<String, std::time::Instant>>,
     pub relay_controller: tokio::sync::Mutex<Option<RelayTransportController>>,
     pub relay_state: RelayTransportState,
     pub e2ee_public_key_b64: RwLock<Option<String>>,
@@ -61,6 +68,8 @@ impl CompanionInner {
             lan_exposed: AtomicBool::new(false),
             turn_active: Mutex::new(HashSet::new()),
             message_queues: Mutex::new(HashMap::new()),
+            running_subagents: Mutex::new(HashMap::new()),
+            continuation_pending: Mutex::new(HashMap::new()),
             relay_controller: tokio::sync::Mutex::new(None),
             relay_state: RelayTransportState::new(),
             e2ee_public_key_b64: RwLock::new(None),
@@ -211,6 +220,7 @@ impl CompanionState {
 
     pub fn finish_turn(&self, session_id: &str) -> Vec<QueuedCompanionMessage> {
         self.inner.turn_active.lock().unwrap().remove(session_id);
+        self.clear_continuation_pending(session_id);
         self.inner
             .message_queues
             .lock()
@@ -218,6 +228,62 @@ impl CompanionState {
             .remove(session_id)
             .map(|queue| queue.into_iter().collect())
             .unwrap_or_default()
+    }
+
+    /// Track live subagent liveness from `subagent_upsert` broadcasts and arm
+    /// the continuation wait when the last running child goes terminal: the
+    /// parent is about to be woken for its summary turn, so the session is not
+    /// settled even though no child is running anymore.
+    pub fn apply_subagent_upsert(&self, session_id: &str, subagent_id: &str, status: &str) {
+        const TERMINAL: [&str; 3] = ["completed", "failed", "canceled"];
+        let mut running = self.inner.running_subagents.lock().unwrap();
+        let session_running = running.entry(session_id.to_string()).or_default();
+        if TERMINAL.contains(&status) {
+            let was_running = session_running.remove(subagent_id);
+            if session_running.is_empty() {
+                running.remove(session_id);
+                drop(running);
+                if was_running && status == "completed" {
+                    // 只有正常完成才等待汇总回合;失败/取消(用户停止、子智能体
+                    // 挂掉)不会有汇总,继续算忙只会卡住队列。
+                    self.inner
+                        .continuation_pending
+                        .lock()
+                        .unwrap()
+                        .insert(session_id.to_string(), std::time::Instant::now());
+                }
+            }
+        } else {
+            session_running.insert(subagent_id.to_string());
+            self.inner
+                .continuation_pending
+                .lock()
+                .unwrap()
+                .remove(session_id);
+        }
+    }
+
+    pub fn clear_continuation_pending(&self, session_id: &str) {
+        self.inner
+            .continuation_pending
+            .lock()
+            .unwrap()
+            .remove(session_id);
+    }
+
+    /// True while the session's async flow is unsettled: a summary-turn wait
+    /// armed within [`CONTINUATION_BUSY_WINDOW_SECS`]. A stale wait expires so
+    /// a lost summary turn can never stall sends forever.
+    pub fn is_continuation_pending(&self, session_id: &str) -> bool {
+        const CONTINUATION_BUSY_WINDOW_SECS: u64 = 120;
+        self.inner
+            .continuation_pending
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_some_and(|armed_at| {
+                armed_at.elapsed() < std::time::Duration::from_secs(CONTINUATION_BUSY_WINDOW_SECS)
+            })
     }
 
     pub async fn set_daemon_error(&self, error: Option<String>) {
@@ -273,6 +339,81 @@ mod tests {
         let drained_b = state.finish_turn("session-b");
         assert_eq!(drained_b.len(), 1);
         assert_eq!(drained_b[0].prompt, "b1");
+    }
+
+    #[test]
+    fn subagent_flow_tracking_arms_continuation_only_on_last_child_terminal() {
+        let state = CompanionState::new();
+
+        // Children running: not pending, a terminal sibling keeps it that way.
+        state.apply_subagent_upsert("session-1", "toolu_1", "running");
+        state.apply_subagent_upsert("session-1", "toolu_2", "running");
+        assert!(!state.is_continuation_pending("session-1"));
+        state.apply_subagent_upsert("session-1", "toolu_1", "completed");
+        assert!(!state.is_continuation_pending("session-1"));
+
+        // Last running child goes terminal: the summary turn is expected.
+        state.apply_subagent_upsert("session-1", "toolu_2", "completed");
+        assert!(state.is_continuation_pending("session-1"));
+
+        // A new (or still running) child disarms the wait.
+        state.apply_subagent_upsert("session-1", "toolu_3", "running");
+        assert!(!state.is_continuation_pending("session-1"));
+    }
+
+    #[test]
+    fn stale_terminal_upsert_for_unknown_child_does_not_arm_continuation() {
+        let state = CompanionState::new();
+        state.apply_subagent_upsert("session-1", "toolu_1", "completed");
+        assert!(!state.is_continuation_pending("session-1"));
+    }
+
+    #[test]
+    fn failed_children_do_not_arm_the_continuation_wait() {
+        let state = CompanionState::new();
+        state.apply_subagent_upsert("session-1", "toolu_1", "running");
+        state.apply_subagent_upsert("session-1", "toolu_1", "failed");
+        assert!(!state.is_continuation_pending("session-1"));
+    }
+
+    #[test]
+    fn continuation_wait_expires_and_is_cleared_by_turn_boundaries() {
+        let state = CompanionState::new();
+        state.apply_subagent_upsert("session-1", "toolu_1", "running");
+        state.apply_subagent_upsert("session-1", "toolu_1", "completed");
+        assert!(state.is_continuation_pending("session-1"));
+
+        // Backdate past the busy window: the wait must expire on its own so a
+        // lost summary turn can never stall sends forever.
+        {
+            let mut pending = state.inner.continuation_pending.lock().unwrap();
+            pending.insert(
+                "session-1".to_string(),
+                std::time::Instant::now() - std::time::Duration::from_secs(3600),
+            );
+        }
+        assert!(!state.is_continuation_pending("session-1"));
+
+        state.apply_subagent_upsert("session-1", "toolu_2", "running");
+        state.apply_subagent_upsert("session-1", "toolu_2", "completed");
+        assert!(state.is_continuation_pending("session-1"));
+        state.clear_continuation_pending("session-1");
+        assert!(!state.is_continuation_pending("session-1"));
+    }
+
+    #[test]
+    fn finish_turn_clears_the_continuation_wait() {
+        let state = CompanionState::new();
+        state.mark_turn_active("session-1");
+        state.apply_subagent_upsert("session-1", "toolu_1", "running");
+        state.apply_subagent_upsert("session-1", "toolu_1", "completed");
+        state.enqueue_message("session-1", "queued".to_string(), None);
+        assert!(state.is_continuation_pending("session-1"));
+
+        let drained = state.finish_turn("session-1");
+        assert_eq!(drained.len(), 1);
+        assert!(!state.is_continuation_pending("session-1"));
+        assert!(!state.is_turn_active("session-1"));
     }
 
     #[test]

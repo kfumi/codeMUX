@@ -231,6 +231,9 @@ mod tests {
     fn ws_sink_before_attach_drops_events_silently() {
         let sink = WsUiEventSink::new();
         // 未 attach(未组装)时静默丢弃,不 panic —— 与 UiEventSink 契约一致。
-        sink.emit("scheduled-tasks-changed", serde_json::json!({ "taskIds": [] }));
+        sink.emit(
+            "scheduled-tasks-changed",
+            serde_json::json!({ "taskIds": [] }),
+        );
     }
 }

@@ -155,5 +155,5 @@ jobs:
       - name: Build mobile companion
         run: npm run build:mobile
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build renderer
+        run: npm run build

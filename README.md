@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.8-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/Tauri-2-ffc131?logo=tauri" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Electron-33-47848f?logo=electron" alt="Electron 33">
   <img src="https://img.shields.io/badge/React-18-61dafb?logo=react" alt="React 18">
   <img src="https://img.shields.io/badge/Rust-2021-dea584?logo=rust" alt="Rust">
 </p>
@@ -32,7 +32,7 @@
 
 ## CodeMUX 是什么
 
-`CodeMUX` 是一个基于 `Tauri 2 + React + Rust` 的跨平台桌面应用，目标不是做一个“再包一层聊天窗口”，而是把真实的 AI 编码工作流搬到一个更顺手的 GUI 里。
+`CodeMUX` 是一个本地优先的桌面应用，由 `Electron 桌面壳 + 独立 Rust daemon + React 渲染层 + Node.js sidecar` 组成，目标不是做一个“再包一层聊天窗口”，而是把真实的 AI 编码工作流搬到一个更顺手的 GUI 里。
 
 如果你平时在 `Claude Code`、`Codex`、`OpenCode` 这类 CLI 智能体上工作，通常会遇到这些问题：
 
@@ -48,6 +48,7 @@
 - `Claude Code`
 - `Codex`
 - `OpenCode`（基于官方 `@opencode-ai/sdk`，可在运行时设置中按版本安装）
+- `pi`（基于 pi RPC 的极简多供应商运行时，经临时扩展支持审批与提问）
 
 `Gemini CLI` 已完成接入位与 MCP 适配位，运行时仍处于预留阶段。
 
@@ -55,12 +56,20 @@
 
 ## 当前亮点
 
-### 三大 Agent 运行时完整可用
+### 多套 Agent 运行时完整可用
 
 - `Claude Code`：基于官方 `@anthropic-ai/claude-agent-sdk`，可在运行时设置中选择版本安装
 - `Codex`：基于官方 `codex app-server` 子进程（stdio JSON-RPC 长连接），支持工具审批、Plan Mode 闭环与原生上下文压缩；第三方供应商经本地代理做协议翻译
 - `OpenCode`：基于官方 `@opencode-ai/sdk`，运行时同时安装 `opencode-ai` CLI，支持会话持久化与恢复、原生权限桥接、Plan/Build 双 Agent 切换、图片附件输入
-- 三种 Agent 共用统一事件模型、工具卡片、权限审批 UI 和会话管理
+- `pi`：基于 pi RPC 的极简多供应商运行时，支持会话恢复、工具审批、`AskUserQuestion` 问答与 steer
+- 各 Agent 共用统一事件模型、工具卡片、权限审批 UI 和会话管理
+
+### 权威 daemon 与可替换的桌面壳
+
+- 业务权威是独立的 Rust 进程 `codemux-daemon`：拥有 SQLite、会话、Agent 编排、Sidecar、MCP、Skills与定时任务，壳崩溃不影响权威
+- Electron 壳只做窗口、托盘、单实例、通知、自动更新与 Browser Host，并作为 supervisor 拉起/守护 daemon（版本配对仲裁）
+- 桌面 UI、移动伴侣与 CLI 都是 Daemon Client，统一走回环 Companion REST/WS + CodeMUX Event 协议，本机连接使用 Local Daemon Token
+- 移动伴侣（PWA）扫码配对后可在手机上查看与驱动桌面会话；`src-cli` 提供本机命令行客户端
 
 ### 面向真实编码流程，而不是单纯聊天
 
@@ -123,13 +132,13 @@
 ### 系统通知与提示音
 
 - 任务完成、需要权限审批、需要用户回答时自动触发系统通知
-- 应用非活跃状态下点击通知可唤醒主窗口（Windows 通过 Tauri 通知插件 + 单实例拦截实现）
+- 应用非活跃状态下点击通知可唤醒主窗口（Windows 通过 Electron AppUserModelID + 单实例拦截实现）
 - 内置多种提示音（bell / chime / ding / success / task-complete），支持预览与切换
 
 ### 自动更新
 
-- 内置 Tauri Updater，启动时自动检查 GitHub Releases 最新版本
-- 支持下载、校验签名、安装并重启的一站式流程
+- 内置 electron-updater，启动时自动检查 GitHub Releases 最新版本
+- 支持用户确认后下载、退出时自动安装并重启
 - 侧边栏更新入口展示版本信息与进度
 
 ---
@@ -179,13 +188,11 @@
 ### 环境要求
 
 - `Node.js >= 18`
-- `Rust stable`
-- 对应平台的 `Tauri 2` 前置依赖
+- `Rust stable`（编译 daemon）
 
 Windows 通常还需要：
 
-- Visual Studio C++ Build Tools
-- WebView2 Runtime
+- Visual Studio C++ Build Tools（Rust 工具链）
 
 ### 安装依赖
 
@@ -200,8 +207,10 @@ cd ../..
 ### 开发模式
 
 ```bash
-npm run tauri dev
+npm run dev:desktop
 ```
+
+一键启动：等 Vite（端口 1420）就绪后拉起 Electron 壳，daemon 由壳内 supervisor 自动拉起，退出时统一清理子进程。
 
 如果只开发前端：
 
@@ -209,12 +218,16 @@ npm run tauri dev
 npm run dev
 ```
 
+也可以分别手动跑 `npm run dev`（渲染层）与 `npm run dev:electron`（壳，需渲染层已在 1420 就绪）。
+
 ### 生产构建
 
 ```bash
-npm run build
-npm run tauri build
+cd src-tauri && cargo build --release --bin codemux-daemon && cd ..
+npm run build:electron-installer
 ```
+
+产物（NSIS 安装包 + `latest.yml`）输出到 `desktop-electron/release/`，详见[桌面端发版指南](docs/desktop-release-guide.md)。
 
 ### 常用检查命令
 
@@ -226,7 +239,15 @@ npx vitest run
 cd src-tauri/sidecar
 npx vitest run
 
-# Rust 检查
+# 移动端测试
+cd src-mobile
+npx vitest run
+
+# Electron 壳类型检查
+cd desktop-electron
+npm run typecheck
+
+# Rust（daemon crate）检查
 cd src-tauri
 cargo check --all-targets --all-features
 cargo fmt --all -- --check
@@ -259,6 +280,7 @@ Claude Code 默认供应商直接复用 `~/.claude/settings.json`，切换时自
 - `Claude Code`
 - `Codex`
 - `OpenCode`
+- `pi`
 
 ### 3. 管理 MCP
 
@@ -364,8 +386,9 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 | 对话渲染 | `@assistant-ui/react`, `react-markdown`, `streamdown` |
 | 代码 / Diff | CodeMirror, `diff`, `parse-diff`, highlight.js |
 | 终端 | `@xterm/xterm`, `@xterm/addon-fit` |
-| 桌面壳 | Tauri 2（含 Updater、Notification、Shell、Dialog 等插件） |
-| 后端 | Rust 2021, Tokio, Reqwest, Rusqlite |
+| 桌面壳 | Electron 33（窗口、托盘、单实例、通知、electron-updater、Browser Host） |
+| 后端 | Rust 2021 daemon（`codemux-daemon`）: Tokio, Reqwest, Rusqlite，内嵌 Companion Server（回环 REST/WS） |
+| 客户端协议 | Companion REST/WS + CodeMUX Event（桌面渲染层 / 移动伴侣 / CLI 共用） |
 | 本地数据库 | SQLite |
 | Sidecar | Node.js + TypeScript |
 | Agent SDK | 由 CodeMUX 使用本机 npm 安装到托管 Runtime 目录：`@anthropic-ai/claude-agent-sdk`、`@openai/codex`（CLI，供 app-server 使用）、`@opencode-ai/sdk` |
@@ -383,6 +406,7 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 - Codex 配置：`~/.codex/`（保留登录与 vendor 信息）
 - OpenCode 配置：`~/.config/opencode/opencode.json`（默认不覆盖用户配置）
 - Skills 单一数据源：`~/.codemux/skills/`
+- 本机守护凭证（Local Daemon Token）与 daemon 运行状态（`daemon-run-state.json`）：应用数据目录（`%APPDATA%/com.codemux.desktop` 及平台等价目录）
 - Agent 原生历史：由各自运行时和 sidecar 管理
 
 在设置 -> 常规中可以直接查看和打开配置目录。
@@ -391,23 +415,29 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 
 ## 架构概览
 
-### 前端
+### Rust daemon（`codemux-daemon`，权威进程）
 
-- React 渲染桌面 UI
-- Zustand 管理会话、设置、MCP、Skills、侧边面板、性能诊断等状态
-- 通过 Tauri IPC 调用 Rust 命令
+- 独立进程启动即监听回环，写 `daemon-run-state.json`（port / pid / version / managed_by）
+- 拥有 SQLite（会话 / 项目 / Timeline）、配置文件、Agent 编排、Sidecar 生命周期、MCP / Skills 适配、Provider Profile、Git、终端、文件系统与定时任务
+- 内嵌 Companion Server：回环 REST/WS + Local Daemon Token 鉴权，是唯一的客户端业务协议；局域网 / 中继暴露由用户显式开启
+- 广播 CodeMUX Event 与桌面 UI 事件（sessions-changed 等），并提供受控的浏览器自动化接缝
+
+### Electron 桌面壳（supervisor）
+
+- 承载窗口、托盘、单实例锁、原生对话框、通知（AppUserModelID）与 electron-updater
+- 按 supervisor 契约拉起 / 附着 / 重启 daemon（健康检查 + 版本配对仲裁），只管理自己拉起的 daemon
+- Browser Host：渲染层沙箱 `<webview>`（独立 partition，与应用 IPC 隔离），CDP 经 `webContents.debugger` 可用
+- 壳能力经 contextBridge（`window.codemuxDesktop`）暴露给渲染层；壳崩溃不影响 daemon
+
+### 前端渲染层
+
+- React 渲染桌面 UI，Zustand 管理会话、设置、MCP、Skills、侧边面板等状态
+- 作为 Daemon Client 通过 Companion REST/WS 订阅 CodeMUX Event、驱动动作
 - `@assistant-ui/react` 作为对话运行时框架，自定义 Thread / Composer / Tool 卡片
-
-### Rust 后端
-
-- 管理 SQLite、配置文件、MCP 适配、Skills 适配、Provider Profile、Git、终端、文件系统
-- 管理 sidecar 生命周期与跨 Agent 命令桥接
-- 作为前端与实际 agent runtime 之间的桥
-- 内置 Tauri Updater 签名校验与单实例拦截
 
 ### Node.js sidecar
 
-- 封装 Claude Code、Codex、OpenCode 三套运行时
+- 封装 Claude Code、Codex、OpenCode 等 Agent 运行时
 - 处理会话启动、流式事件归一化、历史恢复、代理路由、权限桥接等逻辑
 - OpenCode 通过官方 SDK 启动独立 Server，建立 Client 与 Session，并通过 SSE 订阅事件
 
@@ -417,22 +447,27 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 
 ```text
 codeMUX/
-├─ src/                     # React 前端
+├─ src/                     # React 渲染层（桌面 UI）
 │  ├─ components/agent/     # 对话面板、工具卡片、权限卡片、上下文进度
 │  ├─ components/settings/  # 设置页（Provider / MCP / Skills / 通知 / 使用统计 / 日志）
 │  ├─ components/workspace/ # Review / Terminal / Plan 等侧边面板
-│  ├─ features/update/      # 自动更新 Provider 与入口
-│  ├─ stores/               # Zustand 状态（agent / session / mcp / skill / perf 等）
+│  ├─ stores/               # Zustand 状态（agent / session / mcp / skill 等）
 │  └─ lib/                  # 工具函数（通知、权限、模型、上下文计算等）
-├─ src-tauri/src/           # Rust 后端
-│  ├─ agent_runtime/        # Claude / Codex / OpenCode 运行时抽象
-│  ├─ commands/             # Tauri 命令（usage / git / mcp / session 等）
-│  ├─ mcp/adapters/         # MCP 各 Agent 适配器
-│  ├─ skills/adapters/      # Skills 各 Agent 适配器
-│  └─ provider_profiles/    # Provider Profile 服务与原生配置
-├─ src-tauri/sidecar/src/   # Node.js sidecar（Claude / Codex / OpenCode 运行时）
+├─ desktop-electron/        # Electron 壳（main / preload / supervisor / Browser Host / updater）
+├─ src-tauri/               # Rust daemon crate（目录名保留，Tauri 壳已移除）
+│  ├─ src/bin/              # codemux-daemon 入口
+│  ├─ src/daemon/           # daemon 装配与生命周期
+│  ├─ src/companion/        # Companion Server（REST/WS、鉴权、配对、浏览器自动化接缝）
+│  ├─ src/agent/            # 会话生命周期、历史导入、Timeline 持久化
+│  ├─ src/agent_runtime/    # Claude / Codex / OpenCode / pi 运行时抽象
+│  ├─ src/mcp/ src/skills/  # MCP / Skills 各 Agent 适配器
+│  ├─ src/model_providers/  # Model Provider 服务
+│  └─ src/scheduled_tasks/  # 定时任务
+├─ src-tauri/sidecar/src/   # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
+├─ src-mobile/              # 移动伴侣 PWA（独立 Vite 构建，构建产物进 dist-mobile/）
+├─ src-cli/                 # 本机命令行 Daemon Client
 ├─ public/                  # 静态资源与截图
-├─ docs/                    # 设计文档与实现说明
+├─ docs/                    # 设计文档、ADR 与实现说明
 └─ README.md
 ```
 
@@ -451,14 +486,18 @@ codeMUX/
 - [Skills 统一管理说明](docs/skills-unified-management-guide.md)
 - [AI Agent 权限审批说明](docs/ai-agent-permission-approval-guide.md)
 - [OpenCode SDK Agent 接入设计](docs/superpowers/specs/2026-07-12-opencode-sdk-agent-design.md)
+- [ADR 0011 — Daemon 权威与 Local Daemon Token](docs/adr/0011-daemon-authority-local-token.md)
+- [ADR 0012 — Daemon 独立进程与 Electron 桌面壳](docs/adr/0012-daemon-process-electron-shell.md)
 
 ---
 
 ## 当前状态
 
+- 架构：Electron 桌面壳 + 独立 Rust daemon（`codemux-daemon`），Tauri 壳已移除（`src-tauri/` 目录名保留，内容为 daemon crate）
 - `Claude Code`：主力运行时，支持最完整
 - `Codex`：已集成并可用，包含本地代理兼容链路
 - `OpenCode`：已集成并可用，基于官方 `@opencode-ai/sdk`，从托管 Runtime 目录启动独立 Server
+- `pi`：已集成并可用，基于 pi RPC 的极简多供应商运行时
 - `Gemini CLI`：界面与适配位已预留，运行时待继续完善
 
 ---

@@ -49,12 +49,10 @@
 
 #### 系统通知与提示音
 - 任务完成、权限审批、用户问答时自动触发系统通知
-- Windows 通过 Tauri 通知插件 + 单实例拦截实现点击唤醒
 - 内置多种提示音（bell / chime / ding / success / task-complete），支持预览与切换
 
 #### 自动更新
-- 内置 Tauri Updater，启动时检查 GitHub Releases
-- 支持下载、签名校验、安装并重启的一站式流程
+- 启动时检查 GitHub Releases，支持下载、校验、安装并重启的一站式流程
 - 侧边栏更新入口展示版本信息与进度
 
 #### Skills
@@ -69,6 +67,21 @@
 
 ### Changed
 
+#### 架构（Daemon 边界）
+- 移除 Tauri 壳，发布面切换为 **Electron 桌面壳 + 独立 Rust daemon 进程**（`codemux-daemon`，见 ADR 0011 / 0012）
+  - daemon 为权威进程：拥有 SQLite、会话、Agent 编排、Sidecar、MCP、Skills 与定时任务，启动即监听回环并写 `daemon-run-state.json`
+  - Electron 壳作为 supervisor 拉起 / 附着 / 重启 daemon（健康检查 + 版本配对仲裁），只承载窗口、托盘、通知、自动更新与 Browser Host
+  - 壳崩溃不再影响权威；`src-tauri/` 目录名保留，内容为 daemon crate
+  - 前端 `@tauri-apps` 依赖与 invoke 后端全部退役，壳能力改经 contextBridge（`window.codemuxDesktop`）暴露
+- 自动更新迁移到 electron-updater（GitHub Releases feed），系统通知改用 Electron AppUserModelID
+- 内置 Browser Host 迁移 Chromium：渲染层沙箱 `<webview>`（独立 partition，与应用 IPC 隔离），CDP 经 `webContents.debugger` 可用
+- 新增 daemon→壳受控自动化接缝：桌面 UI 事件出口（sessions-changed 等）与浏览器自动化请求队列，均复用既有控制面 WS 通道
+- 桌面 UI、移动伴侣（PWA）与本机 CLI 统一为 Daemon Client，共享回环 Companion REST/WS + CodeMUX Event 协议
+
+#### Agent 运行时
+- 新增 `pi` 运行时：基于 pi RPC 的极简多供应商编码 Agent，支持会话恢复、工具审批、`AskUserQuestion` 与 steer
+
+#### 界面
 - 设置面板改为面板式表单切换，不再使用弹窗 Modal
 - 外观设置通过 CSS 变量覆盖（`applyAppearance()`），UI 状态经 localStorage + Zustand 持久化
 - 视图切换统一使用 `animate-fade-in-up` 动画

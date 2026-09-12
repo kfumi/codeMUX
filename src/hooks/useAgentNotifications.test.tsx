@@ -426,6 +426,56 @@ describe('useAgentNotifications', () => {
     expect(sendAgentNotificationMock).not.toHaveBeenCalled();
   });
 
+  it('does not replay the completion sound when the session history is rehydrated with different timestamps', async () => {
+    // 复现"切走再切回会话后提示音重播"：实时路径由渲染层 Date.now() 打戳，
+    // 水合路径改用持久化 timestamp。同一回合（同序数同内容）不得二次播报。
+    Object.defineProperty(document, 'hasFocus', {
+      configurable: true,
+      value: () => true,
+    });
+    useSettingsStore.setState({
+      config: {
+        ...structuredClone(baseConfig),
+        notifications: {
+          system_enabled: false,
+          sound_enabled: true,
+          sound: 'ding',
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '开始任务' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [Date.now(), Date.now()] },
+    });
+
+    await waitFor(() => {
+      expect(audioPlayMock).toHaveBeenCalledTimes(1);
+    });
+
+    // 切回会话触发 loadSessionMessages：同一条时间线，时间戳换成持久化值。
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '开始任务' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [1757663037000, 1757663037500] },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(audioPlayMock).toHaveBeenCalledTimes(1);
+  });
+
   it('allows a later task completion in the same session to notify again', async () => {
     render(<Harness />);
 

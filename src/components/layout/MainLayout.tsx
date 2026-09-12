@@ -103,7 +103,7 @@ export function MainLayout({
         onClick={toggleSidebar}
         aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
         className={cn(
-          'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground/58 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
         )}
       >
         <RoundedPanelIcon side="left" expanded={!sidebarCollapsed} className="h-4 w-4" />
@@ -122,7 +122,7 @@ export function MainLayout({
               aria-label="后退"
               disabled={!titleBarNavigation.canGoBack}
               onClick={titleBarNavigation.onBack}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/58 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/22 disabled:hover:bg-transparent"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
@@ -133,7 +133,7 @@ export function MainLayout({
               aria-label="前进"
               disabled={!titleBarNavigation.canGoForward}
               onClick={titleBarNavigation.onForward}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/58 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/22 disabled:hover:bg-transparent"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
             >
               <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>

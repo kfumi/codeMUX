@@ -188,11 +188,11 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       </div>
 
       <div className="flex h-full w-full min-w-0 flex-col">
-        <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
+        <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-1">
           <TooltipHint content="收起面板">
             <button
               aria-label="收起面板"
-              className="rounded-lg p-1.5 text-muted-foreground/64 transition-colors hover:bg-muted/55 hover:text-foreground"
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
               onClick={closePanel}
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -382,8 +382,8 @@ function TabButton({
           className={cn(
             'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
             active
-              ? 'border-border/55 bg-muted/45 text-foreground'
-              : 'border-transparent text-muted-foreground/70 hover:bg-muted/35 hover:text-foreground/86',
+              ? 'border-border bg-muted/45 text-foreground'
+              : 'border-transparent text-muted-foreground hover:bg-muted/35 hover:text-foreground',
           )}
           onClick={onClick}
         >
@@ -399,7 +399,7 @@ function TabButton({
           <span
             role="button"
             tabIndex={-1}
-            className="ml-1 rounded p-0.5 text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            className="ml-1 rounded p-0.5 text-muted-foreground/70 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
               onClose();
