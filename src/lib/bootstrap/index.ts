@@ -15,7 +15,7 @@ import { buildProfileFromOffer, buildProfileFromPairing } from '../companion-con
 import { companionHttpRequest } from '../companion-connection';
 import { connectionBaseUrl, resolveActiveConnection } from '../companion-connection';
 import type { DaemonConnectionConfig } from '../daemon-client/client';
-import { desktopBridge } from '../desktop-bridge';
+import { DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE, desktopBridge } from '../desktop-bridge';
 import { detectHostForm, isLoopbackOrigin, readHostEnvironment, type HostForm } from '../host/host-form';
 import { createLogger } from '../logger';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
@@ -102,7 +102,7 @@ export function currentHostForm(): HostForm {
 async function resolveShellBridgeConfig(): Promise<DaemonConnectionConfig> {
   const bridge = desktopBridge;
   if (!bridge) {
-    throw new DaemonConnectionRequiredError('codemuxDesktop 桥不可用(Electron preload 未注入)');
+    throw new DaemonConnectionRequiredError(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE);
   }
   const [token, info] = await Promise.all([bridge.getLocalDaemonToken(), bridge.getDaemonInfo()]);
   if (!info.port) {

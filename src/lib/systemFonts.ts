@@ -2,7 +2,7 @@
  * 系统字体清单(工单 09):经壳桥 listSystemFonts 获取;
  * main 侧返回常见字体常量清单。桥缺失(纯 Web)时降级为空清单。
  */
-import { desktopBridge } from './desktop-bridge';
+import { DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE, desktopBridge } from './desktop-bridge';
 
 let cachedFonts: string[] | null = null;
 let pendingLoad: Promise<string[]> | null = null;
@@ -20,7 +20,7 @@ export async function loadSystemFonts(): Promise<string[]> {
   if (!pendingLoad) {
     pendingLoad = (desktopBridge
       ? desktopBridge.listSystemFonts()
-      : Promise.reject(new Error('codemuxDesktop 桥不可用(Electron preload 未注入)')))
+      : Promise.reject(new Error(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE)))
       .then((fonts) => {
         cachedFonts = fonts.map(normalizeFontName).filter(Boolean);
         return cachedFonts;

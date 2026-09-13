@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { cn } from '../../lib/utils';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
+import type { HostCapabilitySet } from '../../lib/host/host-capabilities';
 import { AboutSettings } from './AboutSettings';
 import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
@@ -57,7 +59,28 @@ const secondaryTabs = [
 
 const allTabs = [...primaryTabs, ...secondaryTabs];
 
+/**
+ * 壳独占设置页 → 所需能力(工单 02 回归)。
+ *
+ * 日志读的是 Electron 侧日志文件、系统工具探测的是壳进程所在机器的 PATH:
+ * 浏览器/移动形态没有对应后端,导航里直接隐藏入口,而不是让用户点进去看到
+ * 「桥不可用」的报错(用户故事 10:shell-only 能力隐藏而非报错)。
+ */
+const SHELL_ONLY_TAB_CAPABILITY: Partial<Record<SettingsTab, string>> = {
+  logs: 'host.logs',
+  'system-tools': 'host.env-check',
+};
+
+function isTabAvailable(tab: SettingsTab, capabilities: HostCapabilitySet): boolean {
+  const required = SHELL_ONLY_TAB_CAPABILITY[tab];
+  return required ? capabilities.has(required) : true;
+}
+
 export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSidebarProps) {
+  const capabilities = useHostCapabilities();
+  const visiblePrimaryTabs = primaryTabs.filter((tab) => isTabAvailable(tab.id, capabilities));
+  const visibleSecondaryTabs = secondaryTabs.filter((tab) => isTabAvailable(tab.id, capabilities));
+
   const renderNavItem = ({ id, label, icon: Icon }: (typeof allTabs)[number]) => (
     <button
       key={id}
@@ -92,17 +115,18 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
-        {primaryTabs.map(renderNavItem)}
+        {visiblePrimaryTabs.map(renderNavItem)}
       </nav>
 
       <nav className="space-y-1 border-t border-border/50 px-3 py-3">
-        {secondaryTabs.map(renderNavItem)}
+        {visibleSecondaryTabs.map(renderNavItem)}
       </nav>
     </div>
   );
 }
 
 export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps) {
+  const capabilities = useHostCapabilities();
   const activeTabDef = allTabs.find((tab) => tab.id === activeTab);
   const activeLabel = activeTabDef?.label ?? '设置';
   const activeDescription = activeTabDef?.description;
@@ -124,7 +148,11 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
         {activeTab === 'image-recognition' && <ImageRecognitionSettings />}
         {activeTab === 'browser-control' && <BrowserControlSettings />}
         {activeTab === 'agent-runtime' && (
-          <AgentRuntimeSettingsPanel onOpenSystemTools={() => onTabChange('system-tools')} />
+          <AgentRuntimeSettingsPanel
+            onOpenSystemTools={
+              capabilities.has('host.env-check') ? () => onTabChange('system-tools') : undefined
+            }
+          />
         )}
         {activeTab === 'mcp' && <McpSettingsPanel />}
         {activeTab === 'skills' && <SkillsSettingsPanel />}

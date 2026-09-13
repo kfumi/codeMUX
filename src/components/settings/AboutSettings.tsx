@@ -4,6 +4,7 @@ import { ExternalLink, Github } from 'lucide-react';
 import { desktopBridge } from '@/lib/desktop-bridge';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
+import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -36,6 +37,9 @@ export function AboutSettings() {
   const [latestDialogOpen, setLatestDialogOpen] = useState(false);
   const [updateErrorDialogOpen, setUpdateErrorDialogOpen] = useState(false);
   const { stage, version, checkForUpdates, startUpdate } = useUpdaterContext();
+  // 自动更新是壳独占能力(与 UpdateEntry 同一判据):浏览器/移动形态隐藏入口。
+  const capabilities = useHostCapabilities();
+  const canUpdate = capabilities.has('updater');
   const isCheckingForUpdates = stage === 'checking';
   const isUpdateActive = stage === 'checking'
     || stage === 'downloading'
@@ -74,7 +78,14 @@ export function AboutSettings() {
         <label className="text-sm text-foreground/74">运行环境</label>
         <div className="rounded-xl bg-muted/40 px-4 divide-y divide-border/40">
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
-          <InfoRow label="桌面外壳" value="Electron" />
+          <InfoRow
+            label="宿主形态"
+            value={capabilities.form === 'desktop'
+              ? 'Electron 桌面壳'
+              : capabilities.form === 'mobile'
+                ? '手机浏览器'
+                : 'PC 浏览器'}
+          />
           <InfoRow label="操作系统" value={getOSInfo()} />
           <InfoRow label="系统架构" value={getArchInfo()} />
         </div>
@@ -84,31 +95,33 @@ export function AboutSettings() {
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">链接</label>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isUpdateActive}
-            onClick={async () => {
-              try {
-                const update = await checkForUpdates({
-                  interactive: true,
-                  announceNoUpdate: true,
-                  throwOnError: true,
-                });
+          {canUpdate && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isUpdateActive}
+              onClick={async () => {
+                try {
+                  const update = await checkForUpdates({
+                    interactive: true,
+                    announceNoUpdate: true,
+                    throwOnError: true,
+                  });
 
-                if (update) {
-                  setUpdateConfirmOpen(true);
-                  return;
+                  if (update) {
+                    setUpdateConfirmOpen(true);
+                    return;
+                  }
+
+                  setLatestDialogOpen(true);
+                } catch {
+                  setUpdateErrorDialogOpen(true);
                 }
-
-                setLatestDialogOpen(true);
-              } catch {
-                setUpdateErrorDialogOpen(true);
-              }
-            }}
-          >
-            {isCheckingForUpdates ? '检查中...' : '检查更新'}
-          </Button>
+              }}
+            >
+              {isCheckingForUpdates ? '检查中...' : '检查更新'}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

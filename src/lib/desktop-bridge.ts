@@ -275,6 +275,14 @@ export const desktopBridge =
     ? (window as unknown as { codemuxDesktop?: CodemuxDesktopBridge }).codemuxDesktop
     : undefined;
 
+/**
+ * 桥缺失(非 Electron 壳 / preload 未注入)的统一错误文案。
+ *
+ * 同步入口(`requireDesktopBridge`)与异步入口(壳门面)共用同一份文案,
+ * 避免两处字面量漂移导致用户看到两种说法。
+ */
+export const DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE = 'codemuxDesktop 桥不可用(Electron preload 未注入)';
+
 /** 平台分流判据:Electron 壳内为 true。 */
 export const isElectronDesktop = (): boolean => !!desktopBridge;
 
@@ -284,7 +292,7 @@ export const isElectronDesktop = (): boolean => !!desktopBridge;
  */
 export function requireDesktopBridge(): CodemuxDesktopBridge {
   if (!desktopBridge) {
-    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
+    throw new Error(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE);
   }
   return desktopBridge;
 }

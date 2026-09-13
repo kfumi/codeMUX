@@ -176,13 +176,35 @@ describe('no invoke backend (工单 09:Tauri 壳退役终态)', () => {
     }
   });
 
-  it('shell facade routes every shell command through requireDesktopBridge (no platform branching)', () => {
+  it('shell facade routes every shell command through the bridge guard (no platform branching)', () => {
     const content = readFileSync(join(FACADE_DIR, 'shell-facade.ts'), 'utf8');
     expect(content).not.toMatch(/\bisElectronDesktop\b/);
     expect(content).not.toMatch(/__TAURI_INTERNALS__/);
-    const requireCount = content.match(/requireDesktopBridge\(\)/g)?.length ?? 0;
-    // 每个壳方法都以 requireDesktopBridge() 断言开头(浏览器宿主对象除外)。
-    expect(requireCount).toBeGreaterThanOrEqual(17);
+    // 桥缺失检查统一收在 bridgeCall 里(工单 02:同步抛出会冒到 React 错误边界)。
+    expect(content).toMatch(/function bridgeCall</);
+    expect(content).toMatch(/DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE/);
+  });
+
+  it('shell facade methods never throw synchronously without the bridge (工单 02 回归)', async () => {
+    // 浏览器形态(无 preload 桥)下,壳门面必须把失败表达成 rejection:
+    // 同步抛出会越过调用方的 .catch,把整块界面渲染成「渲染错误」。
+    const facade = shellFacade as unknown as Record<string, (...args: unknown[]) => unknown>;
+    // browser 是宿主对象本身;openExternal 有意的降级分支(外链开新标签页)。
+    const exempt = new Set(['browser', 'openExternal']);
+
+    const invoked: string[] = [];
+    for (const [name, member] of Object.entries(facade)) {
+      if (exempt.has(name) || typeof member !== 'function') continue;
+      invoked.push(name);
+
+      let outcome: unknown;
+      expect(() => {
+        outcome = member.call(facade, 'x');
+      }, `${name} 不应同步抛出`).not.toThrow();
+      await expect(outcome, `${name} 应以 rejection 报错`).rejects.toThrow('codemuxDesktop 桥不可用');
+    }
+
+    expect(invoked.length).toBeGreaterThanOrEqual(17);
   });
 
   it('src tree imports no deleted tauri backend module anywhere', () => {

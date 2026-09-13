@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const listSystemFonts = vi.fn();
 
 vi.mock('./desktop-bridge', () => ({
+  DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE: 'codemuxDesktop 桥不可用(Electron preload 未注入)',
   desktopBridge: {
     listSystemFonts,
   },
@@ -35,6 +36,7 @@ describe('loadSystemFonts', () => {
   it('returns an empty list when the desktop bridge is unavailable', async () => {
     vi.resetModules();
     vi.doMock('./desktop-bridge', () => ({
+      DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE: 'codemuxDesktop 桥不可用(Electron preload 未注入)',
       desktopBridge: undefined,
     }));
     const { clearSystemFontsCache, loadSystemFonts } = await import('./systemFonts');

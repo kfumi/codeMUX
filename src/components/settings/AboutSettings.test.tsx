@@ -3,7 +3,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const currentVersionMock = vi.fn(async () => '1.0.0');
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
+
+// vi.mock 工厂会被提升到文件顶部执行,这里必须用 vi.hoisted 声明,
+// 否则 desktop-bridge 被更早的导入链(host-form → daemonConnectionStore)拉取时会踩到 TDZ。
+const currentVersionMock = vi.hoisted(() => vi.fn(async () => '1.0.0'));
 
 type MockUpdaterContext = {
   stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
@@ -28,6 +32,8 @@ vi.mock('../../features/update/UpdaterProvider', () => ({
 
 describe('AboutSettings', () => {
   beforeEach(() => {
+    // 自动更新是壳独占能力:下面的用例断言桌面壳行为。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     mockUpdaterContext = {
       stage: 'idle',
       version: undefined,
@@ -151,5 +157,16 @@ describe('AboutSettings', () => {
     render(<AboutSettings />);
 
     expect(await screen.findByText('CodeMUX')).toBeTruthy();
+  });
+
+  it('浏览器形态隐藏「检查更新」并标注当前宿主形态', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    const { AboutSettings } = await import('./AboutSettings');
+
+    render(<AboutSettings />);
+
+    expect(await screen.findByText('CodeMUX')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '检查更新' })).toBeNull();
+    expect(screen.getByText('PC 浏览器')).toBeTruthy();
   });
 });

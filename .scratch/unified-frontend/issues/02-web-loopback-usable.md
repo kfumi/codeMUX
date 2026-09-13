@@ -23,3 +23,11 @@
 - **发布链路**：`npm run build:web`（`vite build --outDir dist-web`）+ `build:electron-installer` 前置构建 + `electron-builder.yml` extraResources 注入 `dist-web`；daemon 静态目录解析链 = 配置覆盖 → 打包 dist-web → 源码树 dist-web（仅开发）→ 移动端产物兜底。
 - **浏览器宿主与移动形态共存**：`dist-web` 存在时所有浏览器形态（PC/手机）都吃统一产物；移动端独立构建仍在，退役见工单 04。
 - 已知基线问题（非本工单引入）：`npx tsc --noEmit` 有 7 条既有错误（`context-display.tsx`、`ImportSessionsDialog.tsx`、`ProviderConfig.tsx`×2、`daemon-facade.ts:643`、`logger.ts:79`）；全量 vitest 有 3 条既有失败（`McpSettings`×1、`SkillsSettings`×2，均与 gemini 图标位相关，改动文件未触及）。
+
+**2026-09-13 人工验收回归修复（浏览器形态设置页）**
+
+- **现象**：同机浏览器进设置页，内容区整块显示「渲染错误 codemuxDesktop 桥不可用(Electron preload 未注入)」。
+- **根因**：`shellFacade` 在桥缺失时**同步抛出**，而 `GeneralSettings` 读的是 `.then().catch()`——异常越过 `.catch` 冒到 `App` 的错误边界，把整块设置内容打成错误页。这不是单点疏忽而是门面契约问题：任何 `void facade.x().catch(降级)` 的调用点都接不住。
+- **修复**：`shellFacade` 所有壳方法改经 `bridgeCall`，桥缺失/同步异常一律折叠为 rejected Promise（`desktopDialogs` 早已是 async，注释补约定；`desktop-bridge` 导出统一错误文案，`systemFonts`/`bootstrap` 复用）。`facade-boundary.test.ts` 的同步抛出守卫改为「每个壳方法都不同步抛错且以 rejection 报错」的行为断言。
+- **壳独占控件按用户故事 10 隐藏而非报错**：`CAPABILITY_MANIFEST` 新增 `host.app-paths` / `host.logs` / `host.env-check` / `host.agent-cli`（本机应用数据目录、Electron 日志、本机 PATH 环境探测、外部 CLI 安装升级）；设置页据此隐藏「配置文件」区块（常规）、「日志」「系统工具」入口（导航）、「浏览器数据」清理（浏览器控制，`browser.host`）、「检查更新」（关于，`updater`）与「外部 CLI 诊断」（智能体运行时），并在「关于」标注当前宿主形态。
+- **验证**：`npx vitest run` 1439 passed / 3 failed（仍是既有 McpSettings×1、SkillsSettings×2 基线失败）；`npx tsc --noEmit` 仍是既有 7 条错误；`npm run build:web` 后 daemon（127.0.0.1:9240）托管的新产物可正常加载。

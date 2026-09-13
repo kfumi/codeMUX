@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
 const { setBrowserControl, clearData } = vi.hoisted(() => ({
   setBrowserControl: vi.fn(),
@@ -27,6 +29,11 @@ vi.mock('../../lib/facades/shell-facade', () => ({
 import { BrowserControlSettings } from './BrowserControlSettings';
 
 describe('BrowserControlSettings', () => {
+  beforeEach(() => {
+    // 壳内 WebView 的数据清理是壳独占能力,默认按桌面壳形态断言。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -47,5 +54,15 @@ describe('BrowserControlSettings', () => {
     render(<BrowserControlSettings />);
     fireEvent.click(screen.getByRole('button', { name: '清除全部' }));
     expect(clearData).not.toHaveBeenCalled();
+  });
+
+  it('浏览器形态隐藏壳内 WebView 的数据清理,只保留 daemon 侧开关', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+
+    render(<BrowserControlSettings />);
+
+    expect(screen.getByRole('switch', { name: '开启内置浏览器控制' })).toBeTruthy();
+    expect(screen.queryByText('浏览器数据')).toBeNull();
+    expect(screen.queryByRole('button', { name: '清除全部' })).toBeNull();
   });
 });

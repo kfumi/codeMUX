@@ -68,6 +68,14 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   // browser.control 的「配置写入」走 daemon PATCH /api/config;浏览器宿主
   // (WebView 托管)仍是 shell 能力(browser.host)。
   { id: 'browser.control', owner: 'daemon', companionRoute: 'PATCH /api/config', daemonMethod: 'setBrowserControl' },
+
+  // 本机资源(工单 02 回归):这些方法只能由壳进程回答 —— 应用数据目录、
+  // Electron 日志文件、本机 PATH 环境探测、外部 CLI 安装/升级。浏览器/移动
+  // 形态没有对应后端,设置页据此隐藏入口而不是留一个必然失败的控件。
+  { id: 'host.app-paths', owner: 'shell', shellMethod: 'getAppDataDirectory' },
+  { id: 'host.logs', owner: 'shell', shellMethod: 'readLogFile' },
+  { id: 'host.env-check', owner: 'shell', shellMethod: 'checkDevelopmentEnvironment' },
+  { id: 'host.agent-cli', owner: 'shell', shellMethod: 'checkAgentRuntimes' },
 ];
 
 /** Methods that must route through the daemon HTTP client (no invoke fallback). */

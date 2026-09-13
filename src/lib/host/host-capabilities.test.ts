@@ -67,6 +67,15 @@ describe('host-capabilities', () => {
     expect(mobile.presentation.webNotifications).toBe(true);
   });
 
+  it('把本机资源(应用目录/日志/环境探测/外部 CLI)收敛为壳独占', () => {
+    // 设置页据此隐藏入口(工单 02 回归:不留必然失败的死控件)。
+    for (const id of ['host.app-paths', 'host.logs', 'host.env-check', 'host.agent-cli']) {
+      expect(desktop.has(id), `桌面壳应具备 ${id}`).toBe(true);
+      expect(browser.has(id), `浏览器应隐藏 ${id}`).toBe(false);
+      expect(mobile.has(id), `移动应隐藏 ${id}`).toBe(false);
+    }
+  });
+
   it('caches one capability set per host form', () => {
     expect(capabilitiesForHost('browser')).toBe(browser);
   });

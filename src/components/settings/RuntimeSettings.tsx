@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import type {
   AgentRuntimeCheck,
@@ -146,6 +147,10 @@ export function RuntimeSettingsPanel({
 }: {
   onOpenSystemTools?: () => void;
 }) {
+  // 外部 CLI 诊断探测的是壳进程所在机器的 PATH(host.agent-cli):浏览器/移动
+  // 形态隐藏该区块,托管 Runtime 走 daemon 协议,三形态一致保留。
+  const capabilities = useHostCapabilities();
+  const canCheckHostCli = capabilities.has('host.agent-cli');
   const [checkResult, setCheckResult] = useState<ManagedRuntimeCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [operations, setOperations] = useState<Record<string, ProviderOperationState>>({});
@@ -399,7 +404,7 @@ export function RuntimeSettingsPanel({
         <p className="text-ui-caption text-foreground/45">检测时间：{formatCheckedAt(checkResult.checkedAt)}</p>
       )}
 
-      <ExternalCliSection />
+      {canCheckHostCli && <ExternalCliSection />}
     </div>
   );
 }

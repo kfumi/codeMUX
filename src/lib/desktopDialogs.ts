@@ -3,7 +3,9 @@
  * main `dialog.showOpenDialog/showSaveDialog`;返回形状与原 Tauri
  * plugin-dialog 一致(取消/关闭一律 null,multiple 为数组)。
  *
- * 桥缺失(非 Electron 壳/preload 未注入)时显式报错,由调用方决定降级。
+ * 桥缺失(非 Electron 壳/preload 未注入)时以 rejected Promise 报错,由调用方
+ * 决定降级 —— 声明为 async 是为了把 `requireDesktopBridge` 的同步抛出折叠成
+ * rejection,否则调用方的 `.catch` 接不住(同 shell-facade 的约定)。
  *
  * 调用点(审计于工单 06):DraftWorkspaceToolbar / Sidebar(open)、PerfOverlay(save)。
  */
