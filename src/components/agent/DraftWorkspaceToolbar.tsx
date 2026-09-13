@@ -18,6 +18,7 @@ import {
 // 工单 06:平台分流 —— Electron 走壳桥 dialog,Tauri 走 plugin-dialog。
 import { openDialog } from '../../lib/desktopDialogs';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import type { GitRepositoryState, GitWorktree } from '../../lib/gitTypes';
 import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -39,6 +40,8 @@ interface DraftWorkspaceToolbarProps {
 }
 
 export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps) {
+  // 工单 02:「打开文件夹」依赖壳的原生目录选择框,浏览器/移动形态隐藏入口。
+  const canPickDirectory = useHostCapabilities().has('dialog.directory');
   const projects = useProjectStore((state) => state.projects);
   const createProject = useProjectStore((state) => state.createProject);
   const draftProjectId = useNewSessionStore((state) => state.draftProjectId);
@@ -218,14 +221,16 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
             ))}
           </div>
           <div className="mt-1 border-t border-border/45 pt-1">
-            <button
-              type="button"
-              onClick={() => void handleOpenFolder()}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
-            >
-              <FolderPlus className="h-3.5 w-3.5 text-muted-foreground" />
-              <span>打开文件夹</span>
-            </button>
+            {canPickDirectory && (
+              <button
+                type="button"
+                onClick={() => void handleOpenFolder()}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+              >
+                <FolderPlus className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>打开文件夹</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

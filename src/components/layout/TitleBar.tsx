@@ -11,6 +11,7 @@ import {
 import { cn } from '../../lib/utils';
 import { desktopBridge } from '../../lib/desktop-bridge';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
@@ -75,13 +76,15 @@ export function TitleBar({
   const sidePanelOpen = useSidePanelStore((state) => state.isOpen);
   const openSidePanel = useSidePanelStore((state) => state.openPanel);
   const closeSidePanel = useSidePanelStore((state) => state.closePanel);
+  // 宿主能力清单(工单 02):窗口控件与自绘标题栏是壳独占,浏览器形态隐藏。
+  const { presentation } = useHostCapabilities();
 
   const ThemeIcon = currentTheme === 'Dark' ? Moon : currentTheme === 'Light' ? Sun : Monitor;
 
   // 自绘标题栏(工单 09):窗口命令走壳桥,最大化态经 main 的
   // window-maximize-changed 桌面事件订阅;桥缺失(纯 Web)时不渲染窗口按钮。
   useEffect(() => {
-    if (!desktopBridge) return;
+    if (!presentation.windowControls || !desktopBridge) return;
 
     let disposed = false;
     desktopBridge.isWindowMaximized()
@@ -98,7 +101,7 @@ export function TitleBar({
       disposed = true;
       unsubscribe();
     };
-  }, []);
+  }, [presentation.windowControls]);
 
   const themeOptions: Array<{ value: Theme; label: string; Icon: typeof Sun }> = [
     { value: 'Light', label: '浅色', Icon: Sun },
@@ -193,7 +196,7 @@ export function TitleBar({
             </DropdownMenu>
           </div>
 
-          {desktopBridge && (
+          {presentation.windowControls && desktopBridge && (
             <div className="flex h-full items-stretch self-stretch">
               <button
                 className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground transition-colors duration-150 hover:bg-muted/54 hover:text-foreground"
@@ -218,23 +221,26 @@ export function TitleBar({
         </div>
       </ContextMenuTrigger>
 
-      <ContextMenuContent>
-        <ContextMenuItem disabled={!maximized} onSelect={() => void shellFacade.toggleMaximizeWindow().catch(() => {})}>
-          Restore
-        </ContextMenuItem>
-        <ContextMenuItem disabled>Move</ContextMenuItem>
-        <ContextMenuItem disabled>Size</ContextMenuItem>
-        <ContextMenuItem onSelect={() => void shellFacade.minimizeWindow().catch(() => {})}>
-          Minimize
-        </ContextMenuItem>
-        <ContextMenuItem disabled={maximized} onSelect={() => void shellFacade.toggleMaximizeWindow().catch(() => {})}>
-          Maximize
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => void shellFacade.closeWindow().catch(() => {})}>
-          Close
-        </ContextMenuItem>
-      </ContextMenuContent>
+      {/* 窗口命令菜单同样属于壳:浏览器形态不渲染这组必然失效的条目。 */}
+      {presentation.windowControls && (
+        <ContextMenuContent>
+          <ContextMenuItem disabled={!maximized} onSelect={() => void shellFacade.toggleMaximizeWindow().catch(() => {})}>
+            Restore
+          </ContextMenuItem>
+          <ContextMenuItem disabled>Move</ContextMenuItem>
+          <ContextMenuItem disabled>Size</ContextMenuItem>
+          <ContextMenuItem onSelect={() => void shellFacade.minimizeWindow().catch(() => {})}>
+            Minimize
+          </ContextMenuItem>
+          <ContextMenuItem disabled={maximized} onSelect={() => void shellFacade.toggleMaximizeWindow().catch(() => {})}>
+            Maximize
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void shellFacade.closeWindow().catch(() => {})}>
+            Close
+          </ContextMenuItem>
+        </ContextMenuContent>
+      )}
     </ContextMenu>
   );
 }

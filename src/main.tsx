@@ -2,20 +2,20 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
+import { HostBootstrapGate } from "./components/bootstrap/HostBootstrapGate";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
-import { initDaemonClient } from "./lib/daemon-bootstrap";
 import { initDaemonLifecycleBridge } from "./lib/daemonLifecycleBridge";
 import { initScheduledTasksBridge } from "./lib/scheduledTasksBridge";
 import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
+import "./stores/appearanceStore";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
 
 initLogging();
-void initDaemonClient();
 initCompanionStreamBridge();
 initSessionsChangeBridge();
 initScheduledTasksBridge();
@@ -34,6 +34,10 @@ void initializeOpenCodeFreeModels();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    {/* 工单 02:宿主引导闸门 —— 浏览器/移动形态先拿到连接再挂载完整界面,
+        桌面壳形态保持既有行为(直接渲染,失败由界面内覆盖层处理)。 */}
+    <HostBootstrapGate>
+      <App />
+    </HostBootstrapGate>
   </React.StrictMode>,
 );

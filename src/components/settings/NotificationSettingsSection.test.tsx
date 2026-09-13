@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import type { AppConfig } from '../../types/provider';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 
@@ -28,8 +29,14 @@ const baseConfig: AppConfig = {
 };
 
 describe('NotificationSettingsSection', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // 系统通知是壳独占能力:桌面形态下才有开关(工单 02/03)。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     useSettingsStore.setState({
       config: structuredClone(baseConfig),
       setNotificationSettings: setNotificationSettingsMock,
@@ -86,6 +93,21 @@ describe('NotificationSettingsSection', () => {
       system_enabled: true,
       sound_enabled: true,
       sound: 'ding',
+    });
+  });
+
+  it('offers the Web Notification fallback instead of system notifications in a browser host', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: vi.fn(async () => 'granted') } as never);
+
+    render(<NotificationSettingsSection />);
+
+    expect(screen.queryByRole('switch', { name: '系统通知' })).toBeNull();
+    expect(screen.getByText('浏览器通知')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '授权' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '已开启' })).toBeTruthy();
     });
   });
 });

@@ -6,6 +6,7 @@ import type { Project } from '../../types/project';
 import { getDaemonStartupError, initDaemonClient } from '../../lib/daemon-bootstrap';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
@@ -87,6 +88,9 @@ export function SessionList({
   onAddProject,
   onSelectSession,
 }: SessionListProps) {
+  // 工单 02:添加项目依赖壳的原生目录选择框,浏览器/移动形态隐藏入口而不是
+  // 让用户点到一个必然报错的按钮。
+  const canPickDirectory = useHostCapabilities().has('dialog.directory');
   const {
     sessions,
     activeSessionId,
@@ -229,7 +233,7 @@ export function SessionList({
             expanded={projectsExpanded}
             toggleLabel="toggle-projects-section"
             onToggle={toggleProjectsExpanded}
-            actions={(
+            actions={canPickDirectory ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -242,7 +246,7 @@ export function SessionList({
                 </TooltipTrigger>
                 <TooltipContent side="right"><p>添加项目</p></TooltipContent>
               </Tooltip>
-            )}
+            ) : null}
           />
 
           {projectsExpanded && projects.map((project) => (
@@ -304,18 +308,20 @@ export function SessionList({
             <br />
             <span className="text-ui-caption">点击上方新建</span>
           </p>
-          <button
-            type="button"
-            onClick={onAddProject}
-            className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            添加项目
-          </button>
+          {canPickDirectory && (
+            <button
+              type="button"
+              onClick={onAddProject}
+              className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              添加项目
+            </button>
+          )}
         </div>
       )}
 
-      {projects.length === 0 && sessions.length > 0 && (
+      {canPickDirectory && projects.length === 0 && sessions.length > 0 && (
         <button
           type="button"
           onClick={onAddProject}

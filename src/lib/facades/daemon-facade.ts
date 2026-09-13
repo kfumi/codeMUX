@@ -28,7 +28,7 @@ import type {
 } from '../runtimeTypes';
 import type { DaemonClient, DaemonConnectionConfig } from '../daemon-client/client';
 import { createDaemonClient } from '../daemon-client/client';
-import { desktopBridge } from '../desktop-bridge';
+import { resolveDaemonConnectionConfig } from '../bootstrap';
 
 let activeClient: DaemonClient | null = null;
 let clientInitPromise: Promise<DaemonClient> | null = null;
@@ -38,32 +38,17 @@ export function getDaemonClientInitError(): string | null {
   return clientInitError;
 }
 
-async function resolveElectronDaemonConfig(): Promise<DaemonConnectionConfig> {
-  // Electron 壳(工单 05):token 读 app-data-dir/local-daemon-token,
-  // 端口来自 main 侧 supervisor(run-state / spawn 结果)。
-  // 工单 09:Tauri 壳退役,桥缺失(纯 Web)即显式报错,不再有 invoke 回退。
-  const bridge = desktopBridge;
-  if (!bridge) {
-    throw new Error('codemuxDesktop 桥不可用(Electron preload 未注入)');
-  }
-  const [token, info] = await Promise.all([bridge.getLocalDaemonToken(), bridge.getDaemonInfo()]);
-  if (!info.port) {
-    throw new Error('本机 Daemon 未就绪，请稍后重试或重启应用。');
-  }
-  return { baseUrl: `http://127.0.0.1:${info.port}`, token };
-}
-
 export async function ensureDaemonClient(): Promise<DaemonClient> {
   if (activeClient) return activeClient;
   if (!clientInitPromise) {
     clientInitPromise = (async () => {
-      // 工单 09:Tauri 壳退役,daemon 配置只能来自 Electron 壳桥。
-      const config = await resolveElectronDaemonConfig();
-      const health = await fetch(`${config.baseUrl}/api/health`);
-      if (!health.ok) {
-        throw new Error('本机 Daemon 未就绪，请稍后重试或重启应用。');
-      }
-      activeClient = createDaemonClient(config);
+      // 工单 02:连接来源由宿主引导单入口决定(壳桥注入 / 浏览器配对档案)。
+      const config: DaemonConnectionConfig = await resolveDaemonConnectionConfig();
+      const client = createDaemonClient(config);
+      await client.health().catch(() => {
+        throw new Error('无法连接到 CodeMUX 后台服务，请稍后重试。');
+      });
+      activeClient = client;
       clientInitError = null;
       return activeClient;
     })().catch((error) => {
@@ -343,6 +328,10 @@ export const daemonFacade = {
   // --- Protocol-backed (daemon client) ---
   ensureClient: ensureDaemonClient,
   resetClient: resetDaemonClient,
+  /** 回环浏览器配对确认(工单 02):桌面壳弹一次确认后调用。 */
+  decideLocalPairing: async (requestId: string, approve: boolean) => {
+    await (await ensureDaemonClient()).decideLocalPairing(requestId, approve);
+  },
   getInitError: getDaemonClientInitError,
   listSessions: listSessionsViaDaemon,
   listArchivedSessions: listArchivedSessionsViaDaemon,

@@ -3,12 +3,14 @@ import { buildAgentNotificationCandidate } from '../lib/agentNotifications';
 import { desktopBridge } from '../lib/desktop-bridge';
 import { createLogger } from '../lib/logger';
 import { shellFacade } from '../lib/facades/shell-facade';
+import { resolveNotificationChannel, showWebNotification } from '../lib/webNotifications';
 import type { AgentMessage } from '../stores/agentStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useSubagentStore } from '../stores/subagentStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { NotificationSound } from '../types/provider';
+import { useHostCapabilities } from './useHostCapabilities';
 
 const logger = createLogger('agentNotifications');
 
@@ -55,6 +57,18 @@ async function sendNativeAgentNotification(candidate: { title: string; body: str
   }
 }
 
+/**
+ * 浏览器形态的通知回退(工单 03):没有壳就没有系统通知,Web Notification
+ * 是可选旁路 —— 未授权时静默跳过,不阻塞任何业务。
+ */
+function sendWebAgentNotification(candidate: { title: string; body: string; sessionId: string }): void {
+  showWebNotification(candidate, {
+    onClick: (sessionId) => {
+      void showAppSession(sessionId);
+    },
+  });
+}
+
 function playNotificationSound(sound: NotificationSound) {
   try {
     const audio = new Audio(getSoundUrl(sound));
@@ -68,8 +82,11 @@ function playNotificationSound(sound: NotificationSound) {
 }
 
 async function showAppSession(sessionId: string) {
-  // 桌面壳:唤起主窗口(最小化/隐藏到托盘时)再聚焦会话。
-  await shellFacade.showMainWindow();
+  // 桌面壳:唤起主窗口(最小化/隐藏到托盘时)再聚焦会话;浏览器形态没有
+  // 可唤起的窗口,直接落到会话切换。
+  if (desktopBridge) {
+    await shellFacade.showMainWindow();
+  }
   let sessions = useSessionStore.getState().sessions;
   if (!sessions.some((session) => session.id === sessionId)) {
     await useSessionStore.getState().fetchSessions();
@@ -145,6 +162,7 @@ function hasRunningSubagents(sessionId: string): boolean {
 }
 
 export function useAgentNotifications() {
+  const capabilities = useHostCapabilities();
   const events = useAgentStore((state) => state.events);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps);
   const isRunningBySession = useAgentStore((state) => state.isRunning);
@@ -263,7 +281,12 @@ export function useAgentNotifications() {
         const isLiveEvent = eventTimestamp >= hookStartedAtRef.current;
 
         if (shouldSendNotification) {
-          void sendNativeAgentNotification(candidate);
+          const channel = resolveNotificationChannel(capabilities.presentation);
+          if (channel === 'system') {
+            void sendNativeAgentNotification(candidate);
+          } else if (channel === 'web') {
+            sendWebAgentNotification(candidate);
+          }
         }
 
         if (settings.sound_enabled && isTerminal && isLiveEvent) {
@@ -273,5 +296,5 @@ export function useAgentNotifications() {
         break; // Only notify once per session
       }
     }
-  }, [eventTimestamps, events, isAppInactive, isRunningBySession, notificationSettings, sessionTitles, subagentSessions]);
+  }, [capabilities.presentation, eventTimestamps, events, isAppInactive, isRunningBySession, notificationSettings, sessionTitles, subagentSessions]);
 }

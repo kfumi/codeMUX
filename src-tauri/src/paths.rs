@@ -50,12 +50,28 @@ impl PathRoots {
         manifest_dir.join("../src-mobile/dist")
     }
 
-    /// 网页端(统一前端)静态资源目录:仅查找打包资源根下的 dist-web。
-    /// 开发环境通过 CompanionConfig 的 web_static_dir 显式指定,避免源码树
-    /// 内的陈旧 dist 意外顶替移动端产物成为缺省页面。
+    /// 网页端(统一前端)静态资源目录:打包环境用资源根下的 dist-web;
+    /// 开发环境额外接受源码树里的 dist-web(由 `npm run build:web` 产出),
+    /// 这样浏览器直接访问回环端口即可验收统一前端,不必手改 config.json。
+    /// CompanionConfig 的 web_static_dir 仍是最高优先级覆盖(见 server.rs)。
     pub fn web_static_dir(&self) -> Option<PathBuf> {
-        let packaged = self.resource_dir.as_ref()?.join("dist-web");
-        packaged.exists().then_some(packaged)
+        self.web_static_dir_for(cfg!(debug_assertions))
+    }
+
+    fn web_static_dir_for(&self, development: bool) -> Option<PathBuf> {
+        if let Some(resource_dir) = &self.resource_dir {
+            let packaged = resource_dir.join("dist-web");
+            if packaged.exists() {
+                return Some(packaged);
+            }
+        }
+        if development {
+            let dev_dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web");
+            if dev_dist.exists() {
+                return Some(dev_dist);
+            }
+        }
+        None
     }
 }
 
@@ -132,7 +148,7 @@ mod tests {
             resource_dir: Some(temp.path().to_path_buf()),
         };
         assert_eq!(
-            roots.web_static_dir(),
+            roots.web_static_dir_for(false),
             None,
             "missing dist-web should keep the mobile fallback"
         );
@@ -140,9 +156,24 @@ mod tests {
         let packaged = temp.path().join("dist-web");
         std::fs::create_dir_all(&packaged).expect("mkdir");
         assert_eq!(
-            roots.web_static_dir(),
+            roots.web_static_dir_for(false),
             Some(packaged),
             "packaged dist-web should be served once present"
+        );
+    }
+
+    #[test]
+    fn web_static_dir_falls_back_to_source_tree_build_in_development() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
+        let dev_dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web");
+        assert_eq!(
+            roots.web_static_dir_for(true),
+            dev_dist.exists().then_some(dev_dist),
+            "开发环境按源码树里的 dist-web 是否存在决定是否接管网页端"
         );
     }
 

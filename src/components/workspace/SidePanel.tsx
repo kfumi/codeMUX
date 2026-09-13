@@ -1,6 +1,8 @@
 import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { cn } from '../../lib/utils';
@@ -27,8 +29,14 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelProps) {
+  // 工单 02:宿主能力清单决定壳独占入口(内置浏览器)是否可见。
+  const capabilities = useHostCapabilities();
+  // 工单 03:窄屏上面板没有横向空间可分享,直接占满内容区(聊天主视图留在
+  // 面板后面,关掉面板即回到会话)。
+  const isNarrow = useIsNarrowViewport();
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const isExpanded = useSidePanelStore((state) => state.isExpanded);
+  const occupiesFullWidth = isExpanded || isNarrow;
   const panelWidth = useSidePanelStore((state) => state.panelWidth);
   const isResizing = useSidePanelStore((state) => state.isResizing);
   const tabs = useSidePanelStore((state) => state.tabs);
@@ -172,20 +180,22 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       ref={panelRef}
       className={cn(
         `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
-        isExpanded ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
+        occupiesFullWidth ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
         !isVisible && 'pointer-events-none invisible',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
       aria-hidden={!isVisible}
-      style={{ width: isVisible && isExpanded ? '100%' : isVisible && isOpen ? panelWidth : 0 }}
+      style={{ width: isVisible && occupiesFullWidth ? '100%' : isVisible && isOpen ? panelWidth : 0 }}
     >
-      <div
-        className="group absolute inset-y-0 -left-1 z-40 w-2 cursor-col-resize"
-        onMouseDown={handleMouseDown}
-        aria-hidden="true"
-      >
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
-      </div>
+      {!isNarrow && !isExpanded && (
+        <div
+          className="group absolute inset-y-0 -left-1 z-40 w-2 cursor-col-resize"
+          onMouseDown={handleMouseDown}
+          aria-hidden="true"
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+        </div>
+      )}
 
       <div className="flex h-full w-full min-w-0 flex-col">
         <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-1">
@@ -247,22 +257,28 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                 >
                   终端
                 </DropdownMenuItem>
-                <DropdownMenuItem icon={<Globe className="h-3.5 w-3.5" />} onClick={openBrowser}>
-                  浏览器
-                </DropdownMenuItem>
+                {/* 工单 02:内置浏览器宿主是壳独占能力,浏览器/移动形态隐藏入口。 */}
+                {capabilities.has('browser.host') ? (
+                  <DropdownMenuItem icon={<Globe className="h-3.5 w-3.5" />} onClick={openBrowser}>
+                    浏览器
+                  </DropdownMenuItem>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
-            <TooltipHint content={isExpanded ? '恢复面宽' : '展开预览'}>
-              <button
-                type="button"
-                data-testid="side-panel-expand-toggle"
-                aria-label={isExpanded ? '恢复面宽' : '展开预览'}
-                onClick={toggleExpanded}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
-              >
-                {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-              </button>
-            </TooltipHint>
+            {/* 窄屏上面板已经是全宽,「展开预览」没有意义。 */}
+            {!isNarrow && (
+              <TooltipHint content={isExpanded ? '恢复面宽' : '展开预览'}>
+                <button
+                  type="button"
+                  data-testid="side-panel-expand-toggle"
+                  aria-label={isExpanded ? '恢复面宽' : '展开预览'}
+                  onClick={toggleExpanded}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
+                >
+                  {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipHint>
+            )}
           </div>
         </div>
 
@@ -334,6 +350,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               onOpenReview={openReview}
               onOpenTerminal={openTerminal}
               onOpenBrowser={openBrowser}
+              browserHostAvailable={capabilities.has('browser.host')}
             />
           )}
         </div>
@@ -438,11 +455,13 @@ function SidePanelEmpty({
   onOpenReview,
   onOpenTerminal,
   onOpenBrowser,
+  browserHostAvailable,
 }: {
   projectPath?: string | null;
   onOpenReview: () => void;
   onOpenTerminal: () => void;
   onOpenBrowser: () => void;
+  browserHostAvailable: boolean;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -467,13 +486,15 @@ function SidePanelEmpty({
           <Terminal className="h-5 w-5" />
           <span className="text-sm">终端</span>
         </button>
-        <button
-          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70"
-          onClick={onOpenBrowser}
-        >
-          <Globe className="h-5 w-5" />
-          <span className="text-sm">浏览器</span>
-        </button>
+        {browserHostAvailable ? (
+          <button
+            className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70"
+            onClick={onOpenBrowser}
+          >
+            <Globe className="h-5 w-5" />
+            <span className="text-sm">浏览器</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );

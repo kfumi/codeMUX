@@ -62,6 +62,58 @@ struct PairClaimResponse {
     device_id: String,
 }
 
+/// 回环浏览器申请本机配对(工单 02):仅 loopback 可调用,由壳/CLI 确认。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairRequest {
+    name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairStartResponse {
+    request_id: String,
+    code: String,
+    name: String,
+    desktop_id: String,
+    expires_at: String,
+}
+
+/// 壳/CLI 的确认决定:`approve = false` 即拒绝。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairDecisionRequest {
+    request_id: String,
+    approve: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairStatusResponse {
+    request_id: String,
+    status: String,
+    desktop_id: String,
+    token: Option<String>,
+    device_id: Option<String>,
+    expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairPendingResponse {
+    requests: Vec<LocalPairPendingEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPairPendingEntry {
+    request_id: String,
+    code: String,
+    name: String,
+    created_at: String,
+    expires_at: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendMessageRequest {
@@ -343,6 +395,10 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/health", get(health))
         .route("/pair/offer", get(pair_offer))
         .route("/pair/claim", post(pair_claim))
+        .route("/pair/local/request", post(pair_local_request))
+        .route("/pair/local/pending", get(pair_local_pending))
+        .route("/pair/local/decision", post(pair_local_decision))
+        .route("/pair/local/request/{request_id}", get(pair_local_status))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/timeline", get(session_timeline))
@@ -474,25 +530,7 @@ async fn pair_offer(
     if !companion_state.inner.is_lan_exposed() {
         return Err(ApiError::forbidden("Mobile companion is not enabled"));
     }
-    let (desktop_id, port, relay) = {
-        let app_state = ctx.daemon.app.clone();
-        let mut config = app_state
-            .config
-            .lock()
-            .map_err(|error| ApiError::internal(error.to_string()))?;
-        let had_desktop_id = config
-            .companion
-            .desktop_id
-            .as_ref()
-            .is_some_and(|value| !value.trim().is_empty());
-        let desktop_id = get_or_create_desktop_id(&mut config.companion);
-        let port = config.companion.port;
-        let relay = config.companion.relay.clone();
-        if !had_desktop_id {
-            crate::config::save_config(&ctx.daemon.roots, &config).map_err(ApiError::internal)?;
-        }
-        (desktop_id, port, relay)
-    };
+    let (desktop_id, port, relay) = resolve_desktop_identity(&ctx)?;
 
     let lan_ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
     let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
@@ -506,6 +544,176 @@ async fn pair_offer(
     )
     .map(Json)
     .map_err(ApiError::bad_request)
+}
+
+/// desktop_id / 端口 / 中继配置的解析(必要时创建 desktop_id 并落盘):
+/// QR 配对与回环简化配对共用同一条身份链。
+fn resolve_desktop_identity(
+    ctx: &ServerContext,
+) -> Result<(String, u16, crate::config::types::CompanionRelayConfig), ApiError> {
+    let app_state = ctx.daemon.app.clone();
+    let mut config = app_state
+        .config
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let had_desktop_id = config
+        .companion
+        .desktop_id
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let desktop_id = get_or_create_desktop_id(&mut config.companion);
+    let port = config.companion.port;
+    let relay = config.companion.relay.clone();
+    if !had_desktop_id {
+        crate::config::save_config(&ctx.daemon.roots, &config).map_err(ApiError::internal)?;
+    }
+    Ok((desktop_id, port, relay))
+}
+
+fn random_local_pairing_code() -> String {
+    use rand::Rng;
+    (0..6)
+        .map(|_| rand::thread_rng().gen_range(0..10).to_string())
+        .collect()
+}
+
+fn require_loopback_peer(peer: SocketAddr) -> Result<(), ApiError> {
+    if is_loopback_peer(Some(peer)) {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "Local browser pairing is available on loopback only",
+        ))
+    }
+}
+
+/// 同机浏览器申请一次本机配对:生成确认码并把请求推给桌面壳(或由 CLI 列出)。
+async fn pair_local_request(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<LocalPairRequest>,
+) -> Result<Json<LocalPairStartResponse>, ApiError> {
+    require_loopback_peer(peer)?;
+    let companion_state = ctx.daemon.companion.clone();
+    let (desktop_id, _port, _relay) = resolve_desktop_identity(&ctx)?;
+    let record = companion_state.inner.local_pairing.create(
+        uuid::Uuid::new_v4().to_string(),
+        random_local_pairing_code(),
+        body.name.as_deref(),
+    );
+    // 壳是同一台机器上的可信呈现面;没有壳(headless CLI 运行)时事件被丢弃,
+    // 浏览器仍在轮询,CLI 可经 /api/pair/local/pending 发现并确认。
+    ctx.daemon.ui_events.emit(
+        "web-pairing-request",
+        serde_json::json!({
+            "requestId": record.id,
+            "code": record.code,
+            "name": record.name,
+            "expiresAt": record.expires_at.to_rfc3339(),
+            "desktopId": desktop_id,
+        }),
+    );
+    Ok(Json(LocalPairStartResponse {
+        request_id: record.id,
+        code: record.code,
+        name: record.name,
+        desktop_id,
+        expires_at: record.expires_at.to_rfc3339(),
+    }))
+}
+
+/// 浏览器轮询配对结果:批准后一次性拿到 Pairing Token(仍限 loopback 来源)。
+async fn pair_local_status(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(request_id): Path<String>,
+) -> Result<Json<LocalPairStatusResponse>, ApiError> {
+    require_loopback_peer(peer)?;
+    let (desktop_id, _port, _relay) = resolve_desktop_identity(&ctx)?;
+    let record = ctx
+        .daemon
+        .companion
+        .inner
+        .local_pairing
+        .get(&request_id)
+        .ok_or_else(|| ApiError::not_found("Unknown pairing request"))?;
+    let status = record.status_at(chrono::Utc::now());
+    Ok(Json(LocalPairStatusResponse {
+        request_id: record.id,
+        status: status.as_str().to_string(),
+        desktop_id,
+        token: if status == crate::companion::local_pairing::LocalPairingStatus::Approved {
+            record.token.clone()
+        } else {
+            None
+        },
+        device_id: if status == crate::companion::local_pairing::LocalPairingStatus::Approved {
+            record.device_id.clone()
+        } else {
+            None
+        },
+        expires_at: record.expires_at.to_rfc3339(),
+    }))
+}
+
+/// 壳/CLI 的确认面:需要既有鉴权(Local Daemon Token / 已配对设备)。
+async fn pair_local_pending(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<LocalPairPendingResponse>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let pending = ctx
+        .daemon
+        .companion
+        .inner
+        .local_pairing
+        .pending()
+        .into_iter()
+        .map(|record| LocalPairPendingEntry {
+            request_id: record.id,
+            code: record.code,
+            name: record.name,
+            created_at: record.created_at.to_rfc3339(),
+            expires_at: record.expires_at.to_rfc3339(),
+        })
+        .collect();
+    Ok(Json(LocalPairPendingResponse { requests: pending }))
+}
+
+async fn pair_local_decision(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<LocalPairDecisionRequest>,
+) -> Result<Json<LocalPairStatusResponse>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let (desktop_id, _port, _relay) = resolve_desktop_identity(&ctx)?;
+    let companion_state = ctx.daemon.companion.clone();
+    let registry = &companion_state.inner.local_pairing;
+
+    let record = if body.approve {
+        let app_state = ctx.daemon.app.clone();
+        let paired =
+            complete_pairing(&app_state, Some("Local Browser")).map_err(ApiError::internal)?;
+        registry
+            .approve(&body.request_id, paired.device_id, paired.token)
+            .map_err(ApiError::conflict)?
+    } else {
+        registry
+            .deny(&body.request_id)
+            .map_err(ApiError::conflict)?
+    };
+
+    let status = record.status_at(chrono::Utc::now());
+    Ok(Json(LocalPairStatusResponse {
+        request_id: record.id,
+        status: status.as_str().to_string(),
+        desktop_id,
+        token: None,
+        device_id: record.device_id.clone(),
+        expires_at: record.expires_at.to_rfc3339(),
+    }))
 }
 
 async fn pair_claim(
@@ -1160,6 +1368,13 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+
     pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -1484,6 +1699,27 @@ mod web_static_tests {
         String::from_utf8_lossy(&bytes).to_string()
     }
 
+    async fn post_json(
+        app: &TestApp,
+        uri: &str,
+        peer: SocketAddr,
+        headers: &[(&str, &str)],
+        body: serde_json::Value,
+    ) -> axum::response::Response {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let mut request = builder
+            .body(Body::from(body.to_string()))
+            .expect("build request");
+        request.extensions_mut().insert(ConnectInfo(peer));
+        app.router.clone().oneshot(request).await.expect("oneshot")
+    }
+
     #[tokio::test]
     async fn static_service_serves_index_assets_and_spa_fallback() {
         let app = assemble_test_app(&[]).await;
@@ -1621,6 +1857,215 @@ mod web_static_tests {
         ("sec-websocket-version", "13"),
         ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
     ];
+
+    fn local_daemon_token(app: &TestApp) -> String {
+        crate::companion::local_daemon_token::ensure_local_daemon_token(
+            app._daemon_temp.path(),
+            false,
+        )
+        .expect("ensure local daemon token")
+    }
+
+    #[tokio::test]
+    async fn local_pair_request_is_loopback_only() {
+        let app = assemble_test_app(&[]).await;
+
+        let from_lan = post_json(
+            &app,
+            "/api/pair/local/request",
+            lan_peer(),
+            &[
+                ("host", "192.168.1.8:9240"),
+                ("origin", "http://192.168.1.8:9240"),
+            ],
+            serde_json::json!({ "name": "Chrome" }),
+        )
+        .await;
+        assert_eq!(
+            from_lan.status(),
+            StatusCode::FORBIDDEN,
+            "非回环来源不得申请本机配对"
+        );
+
+        let from_loopback = post_json(
+            &app,
+            "/api/pair/local/request",
+            loopback_peer(),
+            &[],
+            serde_json::json!({ "name": "Chrome" }),
+        )
+        .await;
+        assert_eq!(from_loopback.status(), StatusCode::OK);
+        let started: serde_json::Value =
+            serde_json::from_str(&body_text(from_loopback).await).expect("json");
+        assert_eq!(
+            started["code"].as_str().map(str::len),
+            Some(6),
+            "确认码为 6 位数字"
+        );
+        assert!(started["requestId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn local_pair_decision_requires_authorization_and_hands_out_token() {
+        let app = assemble_test_app(&[]).await;
+        let token = local_daemon_token(&app);
+
+        let started = post_json(
+            &app,
+            "/api/pair/local/request",
+            loopback_peer(),
+            &[],
+            serde_json::json!({}),
+        )
+        .await;
+        let started: serde_json::Value =
+            serde_json::from_str(&body_text(started).await).expect("json");
+        let request_id = started["requestId"]
+            .as_str()
+            .expect("requestId")
+            .to_string();
+
+        let unauthorized = post_json(
+            &app,
+            "/api/pair/local/decision",
+            loopback_peer(),
+            &[],
+            serde_json::json!({ "requestId": request_id, "approve": true }),
+        )
+        .await;
+        assert_eq!(
+            unauthorized.status(),
+            StatusCode::UNAUTHORIZED,
+            "确认面必须带既有鉴权(壳/CLI 持有 Local Daemon Token)"
+        );
+
+        let approved = post_json(
+            &app,
+            "/api/pair/local/decision",
+            loopback_peer(),
+            &[("authorization", &format!("Bearer {token}"))],
+            serde_json::json!({ "requestId": request_id, "approve": true }),
+        )
+        .await;
+        assert_eq!(approved.status(), StatusCode::OK);
+        let approved: serde_json::Value =
+            serde_json::from_str(&body_text(approved).await).expect("json");
+        assert_eq!(approved["status"], "approved");
+        assert_eq!(
+            approved["token"],
+            serde_json::Value::Null,
+            "确认响应不回传 token(token 只经回环轮询交给申请者)"
+        );
+
+        let status = respond(
+            &app,
+            &format!("/api/pair/local/request/{request_id}"),
+            loopback_peer(),
+            &[],
+        )
+        .await;
+        assert_eq!(status.status(), StatusCode::OK);
+        let status: serde_json::Value =
+            serde_json::from_str(&body_text(status).await).expect("json");
+        assert_eq!(status["status"], "approved");
+        assert!(
+            status["token"]
+                .as_str()
+                .is_some_and(|value| value.starts_with("cmx_")),
+            "浏览器拿到普通 Pairing Token"
+        );
+
+        let from_lan = respond(
+            &app,
+            &format!("/api/pair/local/request/{request_id}"),
+            lan_peer(),
+            &[("host", "192.168.1.8:9240")],
+        )
+        .await;
+        assert_eq!(
+            from_lan.status(),
+            StatusCode::FORBIDDEN,
+            "token 轮询同样限回环"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_pair_pending_requires_authorization_and_lists_requests() {
+        let app = assemble_test_app(&[]).await;
+        let token = local_daemon_token(&app);
+
+        let started = post_json(
+            &app,
+            "/api/pair/local/request",
+            loopback_peer(),
+            &[],
+            serde_json::json!({ "name": "Edge" }),
+        )
+        .await;
+        assert_eq!(started.status(), StatusCode::OK);
+
+        let unauthorized = respond(&app, "/api/pair/local/pending", loopback_peer(), &[]).await;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let listed = respond(
+            &app,
+            "/api/pair/local/pending",
+            loopback_peer(),
+            &[("authorization", &format!("Bearer {token}"))],
+        )
+        .await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed: serde_json::Value =
+            serde_json::from_str(&body_text(listed).await).expect("json");
+        assert_eq!(listed["requests"].as_array().map(Vec::len), Some(1));
+        assert_eq!(listed["requests"][0]["name"], "Edge");
+    }
+
+    #[tokio::test]
+    async fn local_pair_denial_is_reported_to_the_browser() {
+        let app = assemble_test_app(&[]).await;
+        let token = local_daemon_token(&app);
+
+        let started = post_json(
+            &app,
+            "/api/pair/local/request",
+            loopback_peer(),
+            &[],
+            serde_json::json!({}),
+        )
+        .await;
+        let started: serde_json::Value =
+            serde_json::from_str(&body_text(started).await).expect("json");
+        let request_id = started["requestId"]
+            .as_str()
+            .expect("requestId")
+            .to_string();
+
+        let denied = post_json(
+            &app,
+            "/api/pair/local/decision",
+            loopback_peer(),
+            &[("authorization", &format!("Bearer {token}"))],
+            serde_json::json!({ "requestId": request_id, "approve": false }),
+        )
+        .await;
+        assert_eq!(denied.status(), StatusCode::OK);
+
+        let status = respond(
+            &app,
+            &format!("/api/pair/local/request/{request_id}"),
+            loopback_peer(),
+            &[],
+        )
+        .await;
+        let status: serde_json::Value =
+            serde_json::from_str(&body_text(status).await).expect("json");
+        assert_eq!(status["status"], "denied");
+        assert_eq!(status["token"], serde_json::Value::Null);
+    }
 
     #[tokio::test]
     async fn ws_handshake_from_non_loopback_is_rejected_by_origin_guard() {

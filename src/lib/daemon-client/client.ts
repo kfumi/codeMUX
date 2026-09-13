@@ -4,7 +4,20 @@ import { createTerminalMethods, type TerminalMethods } from './terminal';
 export interface DaemonConnectionConfig {
   baseUrl: string;
   token: string;
+  /**
+   * 传输层覆盖(工单 02):浏览器形态在直连不可用时经既有中继/E2EE 通道
+   * 发请求(见 lib/companion-connection)。缺省走 fetch 直连。
+   */
+  transport?: DaemonTransport;
+  /** true = 用轮询代替 WebSocket(中继通道无法升级 WS 时的回退)。 */
+  polling?: boolean;
 }
+
+export interface DaemonTransport {
+  request(path: string, init?: RequestInit): Promise<{ status: number; body: string }>;
+}
+
+const POLLING_INTERVAL_MS = 2500;
 
 export interface DaemonStatus {
   loopbackReady: boolean;
@@ -64,6 +77,8 @@ interface DaemonClientCore {
   getAppConfig(): Promise<unknown>;
   patchAppConfig(body: Record<string, unknown>): Promise<void>;
   getSessionRuntimeState(sessionId: string): Promise<{ running: boolean }>;
+  /** 回环浏览器配对确认(工单 02):壳/CLI 用,需已鉴权。 */
+  decideLocalPairing(requestId: string, approve: boolean): Promise<void>;
   subscribeSession(
     sessionId: string,
     handlers: {
@@ -82,6 +97,16 @@ async function daemonFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  if (config.transport) {
+    const result = await config.transport.request(path, init);
+    if (result.status < 200 || result.status >= 300) {
+      throw new Error(result.body.trim() || `Daemon request failed: ${result.status}`);
+    }
+    if (!result.body.trim()) {
+      return undefined as T;
+    }
+    return JSON.parse(result.body) as T;
+  }
   const response = await fetch(`${config.baseUrl}${path}`, {
     ...init,
     headers: {
@@ -102,6 +127,76 @@ async function daemonFetch<T>(
     return undefined as T;
   }
   return JSON.parse(text) as T;
+}
+
+type SessionHandlers = {
+  onEvent: (event: unknown) => void;
+  onState?: (running: boolean) => void;
+  onReconnect?: () => void;
+  getInitialSequence?: () => number;
+};
+
+/**
+ * 轮询回退(工单 02/03):中继通道没有可升级的 WebSocket,改用
+ * `/api/sessions/:id/state` + 增量 timeline 拉取,语义与 WS 订阅一致:
+ * 先补 `after` 游标之后的事件,再回调最新运行态;拉取恢复时触发一次
+ * `onReconnect` 让上层重放时间线,避免断档。
+ */
+export function subscribeSessionByPolling(
+  config: DaemonConnectionConfig,
+  sessionId: string,
+  handlers: SessionHandlers,
+): () => void {
+  let closed = false;
+  let lastSequence = handlers.getInitialSequence?.() ?? -1;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let hadError = false;
+
+  const schedule = () => {
+    if (closed) return;
+    timer = setTimeout(() => {
+      void tick();
+    }, POLLING_INTERVAL_MS);
+  };
+
+  const tick = async () => {
+    if (closed) return;
+    try {
+      lastSequence = handlers.getInitialSequence?.() ?? lastSequence;
+      const query = lastSequence >= 0
+        ? `?direction=after&cursor=${lastSequence}&limit=200`
+        : '';
+      const page = await daemonFetch<{
+        events: Array<{ sequence?: number }>;
+      }>(config, `/api/sessions/${sessionId}/timeline${query}`);
+      for (const event of page.events ?? []) {
+        const sequence = typeof event?.sequence === 'number' ? event.sequence : undefined;
+        if (sequence != null) {
+          if (sequence <= lastSequence) continue;
+          lastSequence = sequence;
+        }
+        handlers.onEvent(event);
+      }
+      const state = await daemonFetch<{ running: boolean }>(
+        config,
+        `/api/sessions/${sessionId}/state`,
+      );
+      handlers.onState?.(Boolean(state?.running));
+      if (hadError) {
+        hadError = false;
+        handlers.onReconnect?.();
+      }
+    } catch {
+      hadError = true;
+    }
+    schedule();
+  };
+
+  void tick();
+  return () => {
+    closed = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient {
@@ -219,7 +314,16 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
     },
     getSessionRuntimeState: (sessionId) =>
       daemonFetch(config, `/api/sessions/${sessionId}/state`),
+    decideLocalPairing: async (requestId, approve) => {
+      await daemonFetch(config, '/api/pair/local/decision', {
+        method: 'POST',
+        body: JSON.stringify({ requestId, approve }),
+      });
+    },
     subscribeSession(sessionId, handlers) {
+      if (config.polling) {
+        return subscribeSessionByPolling(config, sessionId, handlers);
+      }
       const wsUrl = new URL('/api/ws', config.baseUrl.replace(/^http/, 'ws'));
       wsUrl.searchParams.set('token', config.token);
       wsUrl.searchParams.set('sessionId', sessionId);

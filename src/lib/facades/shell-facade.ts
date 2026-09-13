@@ -7,7 +7,7 @@
 import type { BrowserDataScope, BrowserHost, BrowserPageBounds } from '../browserHost';
 import type { OpenTarget } from '../openTargets';
 import { electronBrowserHost } from '../browser/electronBrowserHost';
-import { requireDesktopBridge } from '../desktop-bridge';
+import { desktopBridge, requireDesktopBridge } from '../desktop-bridge';
 
 export const shellFacade = {
   /** 渲染层 <webview> 托管的完整 BrowserHost 实现(13 方法契约,工单 07)。 */
@@ -32,8 +32,25 @@ export const shellFacade = {
     requireDesktopBridge().readHomeFile(relativePath),
   openInExplorer: (path: string, reveal?: boolean): Promise<void> =>
     requireDesktopBridge().openInExplorer(path, reveal),
-  /** 外链(工单 09):main 侧 shell.openExternal,仅放行 http/https。 */
-  openExternal: (url: string): Promise<void> => requireDesktopBridge().openExternal(url),
+  /**
+   * 外链(工单 09):壳内走 main 侧 shell.openExternal(仅放行 http/https)。
+   *
+   * 浏览器形态(工单 03)没有壳桥:外链是**内容**而不是壳独占控件,不能
+   * 「隐藏」,退化为新标签页打开 —— 否则消息里的链接在网页端会变成死链。
+   */
+  openExternal: (url: string): Promise<void> => {
+    if (!desktopBridge) {
+      if (typeof window !== 'undefined') {
+        try {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } catch {
+          // 弹窗被拦截:忽略(与壳内 openExternal 失败同等对待)。
+        }
+      }
+      return Promise.resolve();
+    }
+    return desktopBridge.openExternal(url);
+  },
   /** 窗口控制(工单 09,自绘标题栏):最小化 / 最大化切换 / 关闭(隐藏到托盘)。 */
   minimizeWindow: (): Promise<void> => requireDesktopBridge().minimizeWindow(),
   toggleMaximizeWindow: (): Promise<void> => requireDesktopBridge().toggleMaximizeWindow(),

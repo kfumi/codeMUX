@@ -31,6 +31,10 @@ extraResources:
   # daemon 独立二进制(工单 03)→ 资源根 daemon/
   - from: ../src-tauri/target/release/codemux-daemon.exe
     to: daemon/codemux-daemon.exe
+  # 统一前端产物(工单 02):daemon 经资源根 dist-web 把它服务给浏览器/移动形态,
+  # 与壳内 renderer-dist 同源同一次构建(npm run build:web)。
+  - from: ../dist-web
+    to: dist-web
   # 托盘/应用图标
   - from: ../src-tauri/icons/icon.ico
     to: icons/icon.ico

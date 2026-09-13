@@ -52,6 +52,8 @@ pub struct CompanionInner {
     pub daemon_error: RwLock<Option<String>>,
     /// 浏览器自动化接缝(工单 08):挂起请求表 + 等待超时。
     pub browser_automation: crate::companion::browser_automation::AutomationRegistry,
+    /// 回环浏览器简化配对(工单 02):同机浏览器的待确认配对请求表。
+    pub local_pairing: crate::companion::local_pairing::LocalPairingRegistry,
 }
 
 impl CompanionInner {
@@ -75,6 +77,7 @@ impl CompanionInner {
             e2ee_public_key_b64: RwLock::new(None),
             daemon_error: RwLock::new(None),
             browser_automation: crate::companion::browser_automation::AutomationRegistry::new(),
+            local_pairing: crate::companion::local_pairing::LocalPairingRegistry::new(),
         }
     }
 

@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { toast, Toaster } from 'sonner';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { WebPairingConfirmHost } from './components/bootstrap/WebPairingConfirmHost';
 import { DaemonStatusOverlay } from './components/layout/DaemonStatusOverlay';
 import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
@@ -460,6 +461,7 @@ function App() {
             )}
           </ErrorBoundary>
         </MainLayout>
+        <WebPairingConfirmHost />
         <DaemonStatusOverlay />
         <Toaster position="top-center" richColors />
       </TooltipProvider>

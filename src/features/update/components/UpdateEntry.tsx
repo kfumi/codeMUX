@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 import { cn } from '@/lib/utils';
 
 import type { UpdateProgress, UpdateStage } from '../hooks/useUpdater';
@@ -67,10 +68,12 @@ const getEntryState = (stage: UpdateStage, progress?: UpdateProgress) => {
 
 export function UpdateEntry() {
   const updater = useUpdaterContext();
+  // 工单 02:自动更新是壳独占能力,浏览器/移动形态隐藏入口而非留一个死按钮。
+  const capabilities = useHostCapabilities();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const entry = getEntryState(updater.stage, updater.progress);
 
-  if (!entry) {
+  if (!entry || !capabilities.has('updater')) {
     return null;
   }
 

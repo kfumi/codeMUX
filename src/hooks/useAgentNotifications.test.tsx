@@ -6,6 +6,7 @@ import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useSubagentStore } from '../stores/subagentStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useDaemonConnectionStore } from '../stores/daemonConnectionStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
 
@@ -69,6 +70,7 @@ function Harness() {
 describe('useAgentNotifications', () => {
   afterEach(() => {
     cleanup();
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
   });
 
   beforeEach(() => {
@@ -601,6 +603,46 @@ describe('useAgentNotifications', () => {
     });
     // 渲染层 Notification 构造器不得被使用(原生通知归属 main 进程,工单 09)。
     expect(notificationInstances).toHaveLength(0);
+  });
+
+  it('browser hosts fall back to the Web Notification API instead of the shell bridge', async () => {
+    // 浏览器形态:没有壳也就没有原生通知,改走 Web Notification(工单 03)。
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(1);
+    });
+    expect(notificationInstances[0].title).toBe('任务已完成');
+    expect(notificationInstances[0].options?.tag).toBe('codemux:session-1');
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('browser hosts stay silent while the notification permission is unset', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    vi.stubGlobal('Notification', class {
+      static permission = 'default';
+      static requestPermission = vi.fn(async () => 'default');
+      onclick: (() => void) | null = null;
+      constructor() {
+        notificationInstances.push({ title: 'unexpected', onclick: null });
+      }
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notificationInstances).toHaveLength(0);
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
   });
 
   it('subscribes notification clicks via the Electron preload bridge (工单 09 终态)', async () => {

@@ -1,6 +1,13 @@
-import { Bell, Volume2 } from 'lucide-react';
+import { Bell, BellRing, Volume2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { normalizeNotificationSettings } from '../../lib/notificationSettings';
+import {
+  requestWebNotificationPermission,
+  webNotificationSupport,
+  type WebNotificationSupport,
+} from '../../lib/webNotifications';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { NotificationSound } from '../../types/provider';
 import { Button } from '../ui/button';
@@ -29,6 +36,13 @@ function playPreview(sound: NotificationSound) {
 export function NotificationSettingsSection() {
   const config = useSettingsStore((state) => state.config);
   const setNotificationSettings = useSettingsStore((state) => state.setNotificationSettings);
+  const { presentation } = useHostCapabilities();
+  const [webSupport, setWebSupport] = useState<WebNotificationSupport>(() => webNotificationSupport());
+
+  // 权限可能在别的标签页被改动,挂载时重新读一次。
+  useEffect(() => {
+    setWebSupport(webNotificationSupport());
+  }, []);
 
   if (!config) return null;
 
@@ -38,24 +52,51 @@ export function NotificationSettingsSection() {
     <div className="space-y-3">
       <label className="text-sm text-foreground/74">通知</label>
       <div className="space-y-3 rounded-xl bg-muted/40 p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
-              <Bell className="h-4 w-4 text-foreground/58" />
-              系统通知
+        {presentation.systemNotifications ? (
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
+                <Bell className="h-4 w-4 text-foreground/58" />
+                系统通知
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+                CodeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
+              </p>
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              CodeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
-            </p>
+            <Switch
+              aria-label="系统通知"
+              checked={settings.system_enabled}
+              onCheckedChange={(checked) => {
+                void setNotificationSettings({ ...settings, system_enabled: checked });
+              }}
+            />
           </div>
-          <Switch
-            aria-label="系统通知"
-            checked={settings.system_enabled}
-            onCheckedChange={(checked) => {
-              void setNotificationSettings({ ...settings, system_enabled: checked });
-            }}
-          />
-        </div>
+        ) : presentation.webNotifications ? (
+          /* 浏览器形态(工单 03):系统通知由壳承担,这里退化为可选的 Web Notification,
+             未授权时静默不提示,不阻塞任何功能。 */
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
+                <BellRing className="h-4 w-4 text-foreground/58" />
+                浏览器通知
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+                需要浏览器的通知权限。未授权时不会弹出任何提示，功能不受影响。
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={webSupport === 'granted' || webSupport === 'denied' || webSupport === 'unsupported'}
+              onClick={() => {
+                void requestWebNotificationPermission().then(setWebSupport);
+              }}
+            >
+              {WEB_SUPPORT_LABEL[webSupport]}
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-between gap-4 border-t border-border/55 pt-3">
           <div className="min-w-0">
@@ -111,3 +152,10 @@ export function NotificationSettingsSection() {
     </div>
   );
 }
+
+const WEB_SUPPORT_LABEL: Record<WebNotificationSupport, string> = {
+  granted: '已开启',
+  denied: '已被浏览器拒绝',
+  unsupported: '浏览器不支持',
+  default: '授权',
+};

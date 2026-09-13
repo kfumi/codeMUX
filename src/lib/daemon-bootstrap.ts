@@ -1,21 +1,13 @@
-import { daemonFacade } from './facades/daemon-facade';
-import { createLogger } from './logger';
-
-const logger = createLogger('daemon-bootstrap');
-
-let started = false;
-
-export async function initDaemonClient(): Promise<void> {
-  if (started) return;
-  started = true;
-  try {
-    await daemonFacade.ensureClient();
-    logger.info('Desktop daemon client connected');
-  } catch (error) {
-    logger.warn('Desktop daemon client not ready', { error: String(error) });
-  }
-}
-
-export function getDaemonStartupError(): string | null {
-  return daemonFacade.getInitError();
-}
+/**
+ * 兼容导出(工单 02):引导逻辑迁到 [`lib/bootstrap`](./bootstrap/index.ts),
+ * 三宿主形态(桌面壳 / 浏览器 / 移动)统一从那一个入口解析连接。
+ *
+ * 保留本文件是为了不打断既有调用点(SessionList 的「重试」入口等)。
+ */
+export {
+  bootstrapDaemonConnection as initDaemonClient,
+  getDaemonStartupError,
+  disconnectBrowserConnection,
+  submitRemotePairing,
+  startLoopbackPairing,
+} from './bootstrap';

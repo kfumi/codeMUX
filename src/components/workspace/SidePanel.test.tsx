@@ -89,6 +89,7 @@ vi.mock('../ui/tooltip', () => ({
 }));
 
 import { SidePanel } from './SidePanel';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
 describe('SidePanel', () => {
   afterEach(() => {
@@ -118,6 +119,8 @@ describe('SidePanel', () => {
   });
 
   it('allows opening the browser empty-state entry without a project', () => {
+    // 内置浏览器宿主是壳独占能力:壳内才提供入口。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     const previousTabs = sidePanelState.tabs;
     const previousActiveTabId = sidePanelState.activeTabId;
     sidePanelState.tabs = [];
@@ -131,6 +134,24 @@ describe('SidePanel', () => {
     } finally {
       sidePanelState.tabs = previousTabs;
       sidePanelState.activeTabId = previousActiveTabId;
+    }
+  });
+
+  it('hides the built-in browser entry outside the desktop shell', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    const previousTabs = sidePanelState.tabs;
+    const previousActiveTabId = sidePanelState.activeTabId;
+    sidePanelState.tabs = [];
+    sidePanelState.activeTabId = null;
+
+    try {
+      render(<SidePanel projectPath={null} scopeId="session-a" />);
+      expect(screen.queryByRole('button', { name: '浏览器' })).toBeNull();
+      expect(screen.getByRole('button', { name: '审查' })).toBeTruthy();
+    } finally {
+      sidePanelState.tabs = previousTabs;
+      sidePanelState.activeTabId = previousActiveTabId;
+      useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     }
   });
 });

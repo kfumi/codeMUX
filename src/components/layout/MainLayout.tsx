@@ -1,8 +1,11 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
+import { useNavigationStore } from '../../stores/navigationStore';
+import { useShellLayoutStore } from '../../stores/shellLayoutStore';
 import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
@@ -54,6 +57,12 @@ export function MainLayout({
 }: MainLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 窄屏(工单 03):侧栏改为抽屉式覆盖层。响应式是布局问题,不是代码分叉 ——
+  // 内容树完全复用,只有导航形态与尺寸不同。
+  const isNarrow = useIsNarrowViewport();
+  const narrowSidebarOpen = useShellLayoutStore((state) => state.narrowSidebarOpen);
+  const setNarrowSidebarOpen = useShellLayoutStore((state) => state.setNarrowSidebarOpen);
+  const navigationLocation = useNavigationStore((state) => state.current);
   const sidebarDragging = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -63,6 +72,14 @@ export function MainLayout({
   useLayoutEffect(() => {
     sidebarExistsRef.current = sidebar != null;
   }, [sidebar != null]);
+
+  // 抽屉里的导航动作(选会话/设置/自动化)发生后自动收起,避免遮住刚打开的
+  // 内容。放在布局层订阅导航状态,任何来源的导航都遵守同一规则。
+  useEffect(() => {
+    if (isNarrow) {
+      setNarrowSidebarOpen(false);
+    }
+  }, [isNarrow, navigationLocation, setNarrowSidebarOpen]);
 
   const handleSidebarMouseDown = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
@@ -93,20 +110,30 @@ export function MainLayout({
   }, []);
 
   const toggleSidebar = useCallback(() => {
+    if (isNarrow) {
+      useShellLayoutStore.getState().toggleNarrowSidebar();
+      return;
+    }
     setSidebarCollapsed((value) => !value);
-  }, []);
+  }, [isNarrow]);
+
+  // 侧栏是否可见:桌面看收起状态,窄屏看抽屉开关。
+  const sidebarVisible = isNarrow ? narrowSidebarOpen : !sidebarCollapsed;
+  // 控制条(收起/后退/前进)的落点:桌面收起到标题栏,窄屏关抽屉时落标题栏、
+  // 开抽屉时落抽屉内部。
+  const controlsInTitleBar = isNarrow ? !narrowSidebarOpen : sidebarCollapsed;
 
   const sidebarToggleButton = sidebar != null ? (
-    <TooltipHint content={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}>
+    <TooltipHint content={sidebarVisible ? '收起侧栏' : '展开侧栏'}>
       <button
         type="button"
         onClick={toggleSidebar}
-        aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+        aria-label={sidebarVisible ? '收起侧栏' : '展开侧栏'}
         className={cn(
           'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
         )}
       >
-        <RoundedPanelIcon side="left" expanded={!sidebarCollapsed} className="h-4 w-4" />
+        <RoundedPanelIcon side="left" expanded={sidebarVisible} className="h-4 w-4" />
       </button>
     </TooltipHint>
   ) : null;
@@ -145,30 +172,67 @@ export function MainLayout({
   ) : null;
 
   return (
-    <div className="app-shell flex h-screen bg-background text-foreground">
-      {sidebar != null && !sidebarCollapsed && (
+    <div className={cn('app-shell flex bg-background text-foreground', isNarrow ? 'h-[100dvh]' : 'h-screen')}>
+      {/* 桌面:侧栏展开时把控制条浮在侧栏左上角(CSS 固定定位,与侧栏同层)。 */}
+      {sidebar != null && sidebarVisible && !isNarrow && (
         <div className="fixed left-2 top-2 z-40">
           {sidebarControls}
         </div>
       )}
 
+      {/* 窄屏:抽屉打开时页面上盖一层遮罩,点它收起抽屉(触屏的常见手势)。 */}
+      {sidebar != null && isNarrow && narrowSidebarOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setNarrowSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-[hsl(var(--surface-shadow-strong)/0.42)] backdrop-blur-[1px]"
+        />
+      )}
+
       {sidebar != null && (
         <aside
           className={cn(
-            `relative shrink-0 overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl`,
-            sidebarResizing ? 'transition-none' : 'transition-[width,opacity] duration-300 ease-in-out',
+            'overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl',
+            isNarrow
+              ? 'fixed inset-y-0 left-0 z-50 w-[86vw] max-w-80 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)] [&_button]:min-h-9'
+              : 'relative shrink-0',
+            sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-300 ease-in-out',
           )}
-          style={{ width: sidebarCollapsed ? 0 : sidebarWidth, opacity: sidebarCollapsed ? 0 : 1, transitionDuration: sidebarInstant ? '0ms' : undefined }}
+          style={isNarrow
+            ? {
+                transform: narrowSidebarOpen ? 'translateX(0)' : 'translateX(-101%)',
+                opacity: narrowSidebarOpen ? 1 : 0,
+                visibility: narrowSidebarOpen ? 'visible' : 'hidden',
+              }
+            : {
+                width: sidebarCollapsed ? 0 : sidebarWidth,
+                opacity: sidebarCollapsed ? 0 : 1,
+                transitionDuration: sidebarInstant ? '0ms' : undefined,
+              }}
+          aria-hidden={isNarrow ? !narrowSidebarOpen : sidebarCollapsed}
         >
-          <div className="relative z-10 flex h-full flex-col" style={{ width: sidebarWidth }}>
+          <div
+            className="relative z-10 flex h-full flex-col"
+            style={isNarrow ? undefined : { width: sidebarWidth }}
+          >
+            {/* 窄屏:抽屉盖住了标题栏,收起按钮必须放在抽屉内部才点得到。
+                Sidebar 自身的顶部留白(pt-11)正好让出这一条控制区。 */}
+            {isNarrow && (
+              <div className="absolute left-2 top-2 z-40">
+                {sidebarControls}
+              </div>
+            )}
             {sidebar}
           </div>
-          <div
-            className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
-            onMouseDown={handleSidebarMouseDown}
-          >
-            <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
-          </div>
+          {/* 窄屏不做拖拽改宽:抽屉宽度由视口决定。 */}
+          {!isNarrow && (
+            <div
+              className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
+              onMouseDown={handleSidebarMouseDown}
+            >
+              <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+            </div>
+          )}
         </aside>
       )}
 
@@ -210,7 +274,7 @@ export function MainLayout({
             />
           </svg>
           <TitleBar
-            leftContent={sidebarCollapsed ? sidebarControls : undefined}
+            leftContent={controlsInTitleBar ? sidebarControls : undefined}
             rightContent={headerContent}
             projectOpenPath={projectOpenPath}
             sidePanelAvailable={sidePanelAvailable}
@@ -218,7 +282,10 @@ export function MainLayout({
           />
 
           <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
-            <div className="flex min-w-110 flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
+            {/* 窄屏下聊天列不再要求最小宽度,否则 420px 视口里会被挤出横向滚动。 */}
+            <div className={cn('flex flex-1 flex-col bg-[hsl(var(--background))]', isNarrow ? 'min-w-0' : 'min-w-110')}>
+              {children}
+            </div>
             <SidePanel
               projectPath={sidePanelProjectPath}
               scopeId={sidePanelScopeId}

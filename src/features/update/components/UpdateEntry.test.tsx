@@ -3,6 +3,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useDaemonConnectionStore } from '@/stores/daemonConnectionStore';
+
 type MockUpdaterState = {
   stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
   version?: string;
@@ -35,6 +37,8 @@ describe('UpdateEntry', () => {
   });
 
   beforeEach(() => {
+    // 自动更新是壳独占能力:这些用例覆盖壳内入口行为。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     mockUpdaterState = {
       stage: 'idle',
       version: undefined,
@@ -102,5 +106,16 @@ describe('UpdateEntry', () => {
 
     expect(screen.queryByRole('button', { name: /更新失败|更新/ })).toBeNull();
     expect(mockUpdaterState.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('浏览器形态隐藏壳独占的更新入口', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    mockUpdaterState.stage = 'available';
+    mockUpdaterState.version = '1.2.3';
+    const { UpdateEntry } = await import('./UpdateEntry');
+
+    render(<UpdateEntry />);
+
+    expect(screen.queryByRole('button', { name: /更新/ })).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ pub mod desktop_id;
 pub mod e2ee;
 pub mod events;
 pub mod local_daemon_token;
+pub mod local_pairing;
 pub mod offer;
 pub mod origin;
 pub mod pairing;
