@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ReactNo
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
+import { useWindowMaximized } from '../../hooks/useWindowMaximized';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useShellLayoutStore } from '../../stores/shellLayoutStore';
 import type { TodoItem } from '../../types/agent';
@@ -122,6 +124,14 @@ export function MainLayout({
   // 控制条(收起/后退/前进)的落点:桌面收起到标题栏,窄屏关抽屉时落标题栏、
   // 开抽屉时落抽屉内部。
   const controlsInTitleBar = isNarrow ? !narrowSidebarOpen : sidebarCollapsed;
+  const hostForm = useDaemonConnectionStore((state) => state.hostForm);
+  const windowMaximized = useWindowMaximized();
+  // 圆角缺口(主面板左上/左下圆角 + 弧线分割线)是**窗口化桌面壳**专属的装饰:
+  // 靠这两个圆角把紧邻的侧栏表面露出来当缺口。窗口最大化、浏览器与手机形态,
+  // 以及侧栏收起/窄屏抽屉时,面板左缘就是窗口或视口边缘,圆角只会剩一条没来由
+  // 的缺角,所以这些情况一律直线到底。
+  const sidebarDocked = sidebar != null && sidebarVisible && !isNarrow;
+  const showsCornerNotch = sidebarDocked && hostForm === 'desktop' && !windowMaximized;
 
   const sidebarToggleButton = sidebar != null ? (
     <TooltipHint content={sidebarVisible ? '收起侧栏' : '展开侧栏'}>
@@ -237,42 +247,59 @@ export function MainLayout({
       )}
 
       <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--surface-2)/0.88)]">
-        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-2xl rounded-bl-2xl bg-[hsl(var(--background))]">
-          {/* 分割线：直线段用 1px 实线保持锐利；两个圆角段用 1.5px 的 SVG 弧线
-              补偿抗锯齿覆盖率损耗（斜线段每个像素只被覆盖约一半，需要更宽的墨量
-              才能与直线段视觉等粗）。尺寸绑定 --radius-2xl，与圆角始终对齐。 */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-0 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] z-30 w-px bg-[hsl(var(--layout-divider))]"
-          />
-          <svg
-            aria-hidden="true"
-            className="pointer-events-none absolute left-0 top-0 z-30"
-            style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
-            viewBox="0 0 12 12"
-            fill="none"
-          >
-            <path
-              d="M0.5 12 A11.5 11.5 0 0 1 12 0.5"
-              stroke="hsl(var(--layout-divider))"
-              strokeWidth="1.5"
-              vectorEffect="non-scaling-stroke"
+        <section
+          className={cn(
+            'relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[hsl(var(--background))]',
+            showsCornerNotch && 'rounded-tl-2xl rounded-bl-2xl',
+          )}
+        >
+          {/* 分割线：直线段用 1px 实线保持锐利；圆角形态下两个圆角段用 1.5px 的
+              SVG 弧线补偿抗锯齿覆盖率损耗（斜线段每个像素只被覆盖约一半，需要更
+              宽的墨量才能与直线段视觉等粗）。尺寸绑定 --radius-2xl，与圆角对齐。
+              侧栏没有停靠（收起/抽屉）时面板左缘就是窗口边缘，不画任何分割线。 */}
+          {sidebarDocked && (
+            <div
+              aria-hidden="true"
+              className={cn(
+                'pointer-events-none absolute left-0 z-30 w-px bg-[hsl(var(--layout-divider))]',
+                showsCornerNotch
+                  ? 'top-[var(--radius-2xl)] bottom-[var(--radius-2xl)]'
+                  : 'inset-y-0',
+              )}
             />
-          </svg>
-          <svg
-            aria-hidden="true"
-            className="pointer-events-none absolute bottom-0 left-0 z-30"
-            style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
-            viewBox="0 0 12 12"
-            fill="none"
-          >
-            <path
-              d="M0.5 0 A11.5 11.5 0 0 0 12 11.5"
-              stroke="hsl(var(--layout-divider))"
-              strokeWidth="1.5"
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
+          )}
+          {showsCornerNotch && (
+            <>
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0 z-30"
+                style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
+                viewBox="0 0 12 12"
+                fill="none"
+              >
+                <path
+                  d="M0.5 12 A11.5 11.5 0 0 1 12 0.5"
+                  stroke="hsl(var(--layout-divider))"
+                  strokeWidth="1.5"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-0 left-0 z-30"
+                style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
+                viewBox="0 0 12 12"
+                fill="none"
+              >
+                <path
+                  d="M0.5 0 A11.5 11.5 0 0 0 12 11.5"
+                  stroke="hsl(var(--layout-divider))"
+                  strokeWidth="1.5"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+            </>
+          )}
           <TitleBar
             leftContent={controlsInTitleBar ? sidebarControls : undefined}
             rightContent={headerContent}

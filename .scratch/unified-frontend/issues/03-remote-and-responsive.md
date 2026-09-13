@@ -33,3 +33,15 @@
 回归测试：`src/components/workspace/SidePanel.test.tsx` 新增「SidePanel 占位」5 例（窄屏关 / 窄屏开 / 宽屏分栏 / 宽屏展开 / 关闭态残留展开标记），按 `innerWidth` 切换形态断言面板的 `width` 与覆盖类名；修复前窄屏两例为红（实测 `100%`），修复后全绿。
 
 注意：浏览器形态由 daemon 提供 `dist-web` 静态产物，窄屏验证前需 `npm run build:web`（桌面开发态走 Vite HMR，无需构建）。
+
+**2026-09-13 变更说明（主面板圆角缺口只在窗口化桌面壳出现）**
+
+诉求：中间会话面板左上/左下那对圆角（缺口）在**全屏（窗口最大化）、PC 浏览器、手机端**都不要，改直线展示。
+
+实现（`MainLayout`）：圆角缺口的存在条件是「有停靠的侧栏可被缺口让出」——`showsCornerNotch = sidebarDocked && hostForm === 'desktop' && !windowMaximized`（`sidebarDocked = 有侧栏 && 侧栏可见 && 非窄屏`）。判为直线时同时收敛三件事：去掉 `rounded-tl-2xl/rounded-bl-2xl`、不画两条补偿圆角的 SVG 弧线、分割线由「直线段 + 弧线」改为（仅在侧栏仍停靠时）直线到底 `inset-y-0`；侧栏收起或窄屏抽屉时面板左缘就是窗口/视口边缘，连分割线一并不画，避免边缘出现一条没来由的竖线。
+
+新增 `useWindowMaximized`（壳桥 `isWindowMaximized` + `window-maximize-changed`，浏览器形态恒 false）作为「窗口化」判据；宿主形态取既有的 `daemonConnectionStore.hostForm`（工单 02 的能力分流同源）。
+
+保留：桌面壳**窗口化**且侧栏停靠时的圆角缺口（该装饰的原始适用场景）。
+
+测试：`MainLayout.test.tsx` 新增 4 例（浏览器形态 / 窄屏抽屉 / 窗口最大化 / 侧栏收起后直线到底，且断言分割线是否保留），逐一验证过「改回旧行为即变红」；新增 `useWindowMaximized.test.tsx` 2 例覆盖查询与事件驱动。

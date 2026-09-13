@@ -4,8 +4,15 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MainLayout } from './MainLayout';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
 const titleBarProps: Record<string, unknown>[] = [];
+
+const windowState = vi.hoisted(() => ({ maximized: false }));
+
+vi.mock('../../hooks/useWindowMaximized', () => ({
+  useWindowMaximized: () => windowState.maximized,
+}));
 
 vi.mock('./TitleBar', () => ({
   TitleBar: (props: Record<string, unknown>) => {
@@ -26,6 +33,9 @@ describe('MainLayout', () => {
     vi.clearAllMocks();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 820 });
+    // 默认代表「桌面壳 + 窗口化」:圆角缺口成立的那一种形态,其余形态各自覆盖。
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+    windowState.maximized = false;
   });
 
   afterEach(() => {
@@ -106,7 +116,7 @@ describe('MainLayout', () => {
     expect(sidebar?.className).not.toContain('border-r');
   });
 
-  it('rounds the whole workspace section over a notch background matching the sidebar', () => {
+  it('keeps the workspace notch while the desktop shell is windowed', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -121,6 +131,77 @@ describe('MainLayout', () => {
     expect(section?.className).toContain('overflow-hidden');
     expect(section?.className).not.toContain('border-l');
     expect(notchBackdrop?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+  });
+
+  it('drops the notch and the corner arcs in browser-host forms', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const section = document.querySelector('section');
+    const divider = section?.querySelector('div[aria-hidden="true"]');
+
+    expect(section?.className).not.toContain('rounded-tl-2xl');
+    expect(section?.className).not.toContain('rounded-bl-2xl');
+    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
+    // 侧栏仍然停靠,所以保留直线到底的分割线。
+    expect(divider?.className).toContain('w-px');
+    expect(divider?.className).toContain('inset-y-0');
+  });
+
+  it('drops the notch on narrow viewports where the sidebar is a drawer', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const section = document.querySelector('section');
+
+    expect(section?.className).not.toContain('rounded-tl-2xl');
+    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
+    // 抽屉收起时面板左缘就是视口边缘,没有需要分隔的侧栏。
+    expect(section?.querySelector('div[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('drops the notch once the shell window is maximized', () => {
+    windowState.maximized = true;
+
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const section = document.querySelector('section');
+    const divider = section?.querySelector('div[aria-hidden="true"]');
+
+    expect(section?.className).not.toContain('rounded-tl-2xl');
+    expect(section?.className).not.toContain('rounded-bl-2xl');
+    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
+    expect(divider?.className).toContain('inset-y-0');
+  });
+
+  it('drops the notch and its divider once the sidebar is collapsed', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    fireEvent.click(document.querySelector('button[aria-label="收起侧栏"]')!);
+
+    const section = document.querySelector('section');
+
+    expect(section?.className).not.toContain('rounded-tl-2xl');
+    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
+    expect(section?.querySelector('div[aria-hidden="true"]')).toBeNull();
   });
 
   it('draws the workspace divider as a crisp straight run plus corner arcs that follow the radius', () => {
