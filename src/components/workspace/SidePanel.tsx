@@ -36,7 +36,11 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const isNarrow = useIsNarrowViewport();
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const isExpanded = useSidePanelStore((state) => state.isExpanded);
-  const occupiesFullWidth = isExpanded || isNarrow;
+  // 面板只有在「宿主可用且已打开」时才占位。窄屏与展开预览两种形态都是绝对定位
+  // 覆盖内容区 —— 但覆盖的前提仍是打开:此前只看窄屏就占满,于是窄屏上关掉面板
+  // 也收不起来(空态盖住会话,「收起面板」按了没反应)。
+  const isShown = isVisible && isOpen;
+  const coversContent = isShown && (isExpanded || isNarrow);
   const panelWidth = useSidePanelStore((state) => state.panelWidth);
   const isResizing = useSidePanelStore((state) => state.isResizing);
   const tabs = useSidePanelStore((state) => state.tabs);
@@ -180,12 +184,12 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       ref={panelRef}
       className={cn(
         `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
-        occupiesFullWidth ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
+        coversContent ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
         !isVisible && 'pointer-events-none invisible',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
       aria-hidden={!isVisible}
-      style={{ width: isVisible && occupiesFullWidth ? '100%' : isVisible && isOpen ? panelWidth : 0 }}
+      style={{ width: coversContent ? '100%' : isShown ? panelWidth : 0 }}
     >
       {!isNarrow && !isExpanded && (
         <div

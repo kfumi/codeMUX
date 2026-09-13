@@ -91,6 +91,16 @@ vi.mock('../ui/tooltip', () => ({
 import { SidePanel } from './SidePanel';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
+/** jsdom 默认没有 matchMedia,窄屏判定会退化为按 innerWidth 比较(与实现一致)。 */
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: undefined });
+}
+
+function panelElement(): HTMLElement {
+  return document.querySelector('aside') as HTMLElement;
+}
+
 describe('SidePanel', () => {
   afterEach(() => {
     cleanup();
@@ -153,5 +163,70 @@ describe('SidePanel', () => {
       sidePanelState.activeTabId = previousActiveTabId;
       useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     }
+  });
+});
+
+describe('SidePanel 占位', () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    sidePanelState.isOpen = true;
+    sidePanelState.isExpanded = false;
+    setViewportWidth(1024);
+  });
+
+  it('窄屏且面板已关闭时不占内容区', () => {
+    setViewportWidth(390);
+    sidePanelState.isOpen = false;
+
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(panelElement().style.width).toBe('0px');
+    expect(panelElement().className).not.toContain('w-full');
+  });
+
+  it('窄屏且面板已打开时占满内容区', () => {
+    setViewportWidth(390);
+    sidePanelState.isOpen = true;
+
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(panelElement().style.width).toBe('100%');
+    expect(panelElement().className).toContain('absolute');
+    expect(panelElement().className).toContain('w-full');
+  });
+
+  it('宽屏保持分栏宽度', () => {
+    setViewportWidth(1280);
+    sidePanelState.isOpen = true;
+    sidePanelState.isExpanded = false;
+
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(panelElement().style.width).toBe('520px');
+    expect(panelElement().className).toContain('shrink-0');
+    expect(panelElement().className).not.toContain('w-full');
+  });
+
+  it('宽屏展开预览时占满内容区', () => {
+    setViewportWidth(1280);
+    sidePanelState.isOpen = true;
+    sidePanelState.isExpanded = true;
+
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(panelElement().style.width).toBe('100%');
+    expect(panelElement().className).toContain('absolute');
+  });
+
+  it('关闭的面板即便残留展开标记也不占内容区', () => {
+    setViewportWidth(1280);
+    sidePanelState.isOpen = false;
+    sidePanelState.isExpanded = true;
+
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(panelElement().style.width).toBe('0px');
+    expect(panelElement().className).not.toContain('w-full');
   });
 });
