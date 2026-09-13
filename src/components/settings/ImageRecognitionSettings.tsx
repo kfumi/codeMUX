@@ -8,6 +8,7 @@ import {
   DEFAULT_IMAGE_RECOGNITION_CONFIG,
   type ImageRecognitionConfig,
 } from '@/types/provider';
+import { SettingsRow } from './SettingsRow';
 
 function buildImageRecognitionConfig(
   current: ImageRecognitionConfig | undefined,
@@ -32,21 +33,21 @@ export function ImageRecognitionSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground/90">启用图片识别</div>
-          <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-            当会话模型未勾选「视觉」输入模态时，自动调用下方配置的 vision 模型解析图片，并将结果注入对话上下文。
-          </p>
-        </div>
-        <Switch
-          aria-label="启用图片识别"
-          checked={imageRecognition.enabled}
-          onCheckedChange={(checked) => {
-            updateConfig({ enabled: checked });
-          }}
-        />
-      </div>
+      <SettingsRow
+        surface
+        inlineControl
+        label="启用图片识别"
+        description="当会话模型未勾选「视觉」输入模态时，自动调用下方配置的 vision 模型解析图片，并将结果注入对话上下文。"
+        control={
+          <Switch
+            aria-label="启用图片识别"
+            checked={imageRecognition.enabled}
+            onCheckedChange={(checked) => {
+              updateConfig({ enabled: checked });
+            }}
+          />
+        }
+      />
 
       <div className="space-y-4 rounded-xl border border-border/60 p-4">
         <div className="grid gap-2">

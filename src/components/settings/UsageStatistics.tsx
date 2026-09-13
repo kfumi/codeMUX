@@ -26,8 +26,8 @@ interface FormSectionProps {
 function FormSection({ label, hint, rightContent, children }: FormSectionProps) {
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h3 className="text-ui-compact font-medium text-foreground/70">{label}</h3>
           {hint && <span className="text-xs text-foreground/38">{hint}</span>}
         </div>
@@ -85,12 +85,14 @@ interface OverviewCardProps {
 
 function OverviewCard({ label, loading, value }: OverviewCardProps) {
   return (
-    <div className="rounded-lg border border-border/55 bg-muted/25 p-4">
+    <div className="min-w-0 rounded-lg border border-border/55 bg-muted/25 p-3 sm:p-4">
       <div className="text-xs text-foreground/55">{label}</div>
       {loading ? (
         <div className="mt-2 h-7 w-20 animate-pulse rounded bg-muted/60" />
       ) : (
-        <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
+        <div className="mt-1 truncate text-ui-heading-sm font-semibold tabular-nums text-foreground sm:text-2xl">
+          {value}
+        </div>
       )}
     </div>
   );
@@ -213,9 +215,9 @@ export function UsageStatistics() {
   return (
     <div className="space-y-8">
       {/* Filter bar */}
-      <div className="flex flex-row items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Select value={agentKind} onValueChange={setAgentKind}>
-          <SelectTrigger className="h-9 w-[180px]">
+          <SelectTrigger className="h-9 w-full sm:w-[180px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -240,7 +242,7 @@ export function UsageStatistics() {
               type="button"
               size="sm"
               variant={days === opt.value ? 'secondary' : 'ghost'}
-              className={cn('h-7 px-3 text-xs', days === opt.value && 'shadow-sm')}
+              className={cn('h-7 flex-1 px-3 text-xs', days === opt.value && 'shadow-sm')}
               onClick={() => setDays(opt.value)}
             >
               {opt.label}
@@ -251,7 +253,8 @@ export function UsageStatistics() {
 
       {/* Overview cards */}
       <FormSection label="概览">
-        <div className="grid grid-cols-4 gap-3">
+        {/* 窄屏两列:一行四张会把数值挤出卡片。 */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <OverviewCard
             label="Token 总用量"
             loading={loadingTokens}
@@ -308,7 +311,7 @@ export function UsageStatistics() {
                 const agentDef = getAgentDefinition(item.agentKind as never);
                 return (
                   <div key={item.agentKind} className="flex items-center gap-3 text-sm">
-                    <span className="flex w-28 shrink-0 items-center gap-2 truncate text-foreground/72">
+                    <span className="flex w-24 shrink-0 items-center gap-1.5 truncate text-foreground/72 sm:w-28 sm:gap-2">
                       {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
                       {agentLabel(item.agentKind)}
                     </span>
@@ -318,7 +321,7 @@ export function UsageStatistics() {
                         style={{ width: `${percent}%` }}
                       />
                     </div>
-                    <span className="w-32 shrink-0 text-right tabular-nums text-foreground/60">
+                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground/60 sm:w-32 sm:text-sm">
                       {formatTokenValue(item.totalTokens)} · {percent.toFixed(1)}%
                     </span>
                   </div>
@@ -336,13 +339,13 @@ export function UsageStatistics() {
             暂无模型统计数据
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border/55">
+          <div className="overflow-x-auto rounded-lg border border-border/55">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/55 bg-muted/30 text-left text-xs text-foreground/55">
-                  <th className="px-4 py-2.5 font-medium">模型名称</th>
-                  <th className="px-4 py-2.5 text-right font-medium">会话数</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Token 用量</th>
+                  <th className="px-3 py-2.5 font-medium sm:px-4">模型名称</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium sm:px-4">会话数</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium sm:px-4">Token 用量</th>
                 </tr>
               </thead>
               <tbody>
@@ -351,13 +354,13 @@ export function UsageStatistics() {
                     key={`${item.model}-${item.sessionCount}`}
                     className="border-b border-border/40 last:border-b-0"
                   >
-                    <td className="px-4 py-2.5 text-foreground/82">
+                    <td className="break-words px-3 py-2.5 text-foreground/82 sm:px-4">
                       {item.model || '未知模型'}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-foreground/72">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground/72 sm:px-4">
                       {item.sessionCount}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-foreground/72">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground/72 sm:px-4">
                       {formatTokenValue(item.totalTokens)}
                     </td>
                   </tr>

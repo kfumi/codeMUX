@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -10,6 +10,10 @@ const CELL_GAP = 2;
 const MAX_CELL_SIZE = 13;
 const MIN_CELL_SIZE = 4;
 const DEFAULT_CELL_SIZE = 13;
+/** 低于该尺寸的格子看不清,窄屏改为横向滚动而不是继续压缩。 */
+const READABLE_CELL_SIZE = 9;
+/** 月份标签的最小间距(px):靠得太近就跳过,避免窄屏互相重叠。 */
+const MIN_MONTH_LABEL_GAP = 30;
 
 export function UsageHeatmapLegend() {
   return (
@@ -92,8 +96,8 @@ interface MonthLabel {
 }
 
 export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [cellSize, setCellSize] = useState(DEFAULT_CELL_SIZE);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const { weeks, monthLabels } = useMemo<{
     weeks: HeatmapCell[][];
@@ -146,19 +150,37 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
     return { weeks, monthLabels };
   }, [data, tokenMap]);
 
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  /**
+   * 宽度用 callback ref + ResizeObserver 测:早先的 useLayoutEffect 在「先渲染空态、
+   * 再渲染数据」的时序里拿到的是 null ref,自适应尺寸从来没生效过。
+   */
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const attachContainer = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (!node) return;
 
-    const update = () => {
-      setCellSize(fitCellSize(el.getBoundingClientRect().width, weeks.length));
-    };
+    const update = () => setContainerWidth(node.getBoundingClientRect().width);
     update();
 
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [weeks.length]);
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    resizeObserverRef.current = observer;
+  }, []);
+
+  // 窄屏:格子被压到看不清时改为固定可读尺寸 + 横向滚动。
+  // 派生值必须算在空数据提前返回之前,否则下面的 effect 会读到未初始化的绑定。
+  const fittedCellSize = fitCellSize(containerWidth, weeks.length);
+  const needsScroll = containerWidth > 0 && fittedCellSize < READABLE_CELL_SIZE;
+  const cellSize = needsScroll ? READABLE_CELL_SIZE : fittedCellSize;
+
+  // 横向滚动时默认停在最近几周:手机用户最关心的是当前活跃度。
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !needsScroll) return;
+    node.scrollLeft = node.scrollWidth;
+  }, [needsScroll]);
 
   if (data.length === 0) {
     return (
@@ -168,13 +190,34 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
     );
   }
 
+  const weekPitch = cellSize + CELL_GAP;
+  const gridWidth =
+    DAY_LABEL_WIDTH + OUTER_GAP + weeks.length * cellSize + Math.max(weeks.length - 1, 0) * CELL_GAP;
+
+  // 月份标签按实际列宽去重叠:间距不足就跳过该月,避免糊成一团。
+  const visibleMonthWeeks = new Set<number>();
+  let lastLabelX = Number.NEGATIVE_INFINITY;
+  for (const monthLabel of monthLabels) {
+    const x = monthLabel.weekIndex * weekPitch;
+    if (x - lastLabelX >= MIN_MONTH_LABEL_GAP) {
+      visibleMonthWeeks.add(monthLabel.weekIndex);
+      lastLabelX = x;
+    }
+  }
+
   const monthLabelPad = DAY_LABEL_WIDTH + OUTER_GAP;
   const cellStyle = { width: cellSize, height: cellSize };
 
   return (
-    <div ref={containerRef} className="w-full overflow-hidden">
-      <div className="flex justify-center">
-        <div className="inline-flex max-w-full flex-col">
+    <div
+      ref={attachContainer}
+      className={cn('w-full', needsScroll ? 'overflow-x-auto pb-1' : 'overflow-hidden')}
+    >
+      <div className={cn('flex', needsScroll ? 'w-max' : 'justify-center')}>
+        <div
+          className="inline-flex flex-col"
+          style={needsScroll ? { width: gridWidth } : undefined}
+        >
           <div
             className="mb-[3px] flex h-4"
             style={{ gap: CELL_GAP, paddingLeft: monthLabelPad }}
@@ -187,7 +230,7 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
                   className="overflow-visible whitespace-nowrap text-ui-micro leading-4 text-muted-foreground"
                   style={{ width: cellSize }}
                 >
-                  {label?.label ?? ''}
+                  {label && visibleMonthWeeks.has(wi) ? label.label : ''}
                 </div>
               );
             })}
@@ -195,7 +238,11 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
 
           <div className="flex" style={{ gap: OUTER_GAP }}>
             <div
-              className="flex flex-col"
+              className={cn(
+                'flex flex-col',
+                // 横向滚动时把星期标签钉在左侧,滚动后仍知道每行是周几。
+                needsScroll && 'sticky left-0 z-10 bg-[hsl(var(--background))]',
+              )}
               style={{ width: DAY_LABEL_WIDTH, gap: CELL_GAP }}
             >
               {DAY_LABELS.map((label, i) => (

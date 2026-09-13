@@ -204,7 +204,8 @@ export function MainLayout({
           className={cn(
             'overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl',
             isNarrow
-              ? 'fixed inset-y-0 left-0 z-50 w-[86vw] max-w-80 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)] [&_button]:min-h-9'
+              // 抽屉是触屏界面:按钮统一到 44px 最小触控高度(HIG/Material 标准)。
+              ? 'fixed inset-y-0 left-0 z-50 w-[86vw] max-w-80 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)] [&_button]:min-h-11'
               : 'relative shrink-0',
             sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-300 ease-in-out',
           )}

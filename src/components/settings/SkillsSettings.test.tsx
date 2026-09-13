@@ -74,8 +74,8 @@ describe('SkillsSettingsPanel', () => {
 
     expect(screen.getByLabelText('toggle-s1-claude')).toBeTruthy();
     expect(screen.getByLabelText('toggle-s1-codex')).toBeTruthy();
-    expect(screen.getByLabelText('toggle-s1-gemini')).toBeTruthy();
     expect(screen.getByLabelText('toggle-s1-opencode')).toBeTruthy();
+    expect(screen.getByLabelText('toggle-s1-pi')).toBeTruthy();
 
     expect(screen.getByLabelText('toggle-s2-claude')).toBeTruthy();
     expect(screen.getByLabelText('toggle-s2-codex')).toBeTruthy();
@@ -88,8 +88,8 @@ describe('SkillsSettingsPanel', () => {
     fireEvent.click(screen.getByLabelText('toggle-s1-codex'));
     expect(toggleApp).toHaveBeenCalledWith('s1', 'codex', true);
 
-    fireEvent.click(screen.getByLabelText('toggle-s1-gemini'));
-    expect(toggleApp).toHaveBeenCalledWith('s1', 'gemini', true);
+    fireEvent.click(screen.getByLabelText('toggle-s1-pi'));
+    expect(toggleApp).toHaveBeenCalledWith('s1', 'pi', true);
   });
 
   it('shows uninstall button for all skills', async () => {

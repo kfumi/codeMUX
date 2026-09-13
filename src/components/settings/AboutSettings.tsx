@@ -24,9 +24,9 @@ interface AppInfo {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-2">
-      <span className="text-sm text-foreground/60">{label}</span>
-      <span className="text-sm font-medium text-foreground/90">{value}</span>
+    <div className="flex items-center justify-between gap-3 py-2">
+      <span className="shrink-0 text-sm text-foreground/60">{label}</span>
+      <span className="min-w-0 truncate text-right text-sm font-medium text-foreground/90">{value}</span>
     </div>
   );
 }

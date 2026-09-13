@@ -88,8 +88,8 @@ describe('McpSettingsPanel', () => {
     expect(builtinBadge.length).toBeGreaterThanOrEqual(1);
     expect(headings[0].compareDocumentPosition(builtinBadge[0]) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
 
-    // 五个 app 图标都渲染,但全部 disabled(不触发 toggleApp)。
-    for (const app of ['claude', 'codex', 'gemini', 'opencode', 'pi']) {
+    // 四个 app 图标都渲染,但全部 disabled(不触发 toggleApp)。
+    for (const app of ['claude', 'codex', 'opencode', 'pi']) {
       const button = screen.getByLabelText(`toggle-codemux-browser-${app}`) as HTMLButtonElement;
       expect(button.disabled).toBe(true);
     }

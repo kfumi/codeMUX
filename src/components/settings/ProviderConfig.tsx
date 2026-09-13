@@ -679,9 +679,12 @@ export function ProviderConfigPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 gap-0">
-      <div className="flex w-60 shrink-0 flex-col border-r border-border/60">
-        <div className="px-3 pb-2 pt-1">
+    // 用容器查询而非视口断点:设置页的内容区还要减去侧边栏宽度,视口到 1024px 时
+    // 实际只剩约 620px,左右两栏会把详情挤扁;按内容区宽度分栏更准确。
+    // 查询容器由 SettingsContent 的内容区提供。
+    <div className="flex h-full min-h-0 flex-col gap-3 @min-[46rem]:flex-row @min-[46rem]:gap-0">
+      <div className="flex w-full shrink-0 flex-col border-b border-border/60 pb-2 @min-[46rem]:w-60 @min-[46rem]:border-b-0 @min-[46rem]:border-r @min-[46rem]:pb-0">
+        <div className="pb-2 pt-1 @min-[46rem]:px-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
             <Input
@@ -693,7 +696,8 @@ export function ProviderConfigPanel() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {/* 上下堆叠时给列表一个高度上限,否则平台多了会把详情表单顶到屏幕外。 */}
+        <div className="min-h-0 max-h-[45vh] flex-1 overflow-y-auto px-2 pb-2 @min-[46rem]:max-h-none @min-[46rem]:pb-3">
           <div className="space-y-0.5">
             {filteredCatalog.map((row) => {
               const selected =
@@ -751,10 +755,11 @@ export function ProviderConfigPanel() {
         onSubmit={handleAddCustomProvider}
       />
 
-      <div className="min-w-0 flex-1 overflow-y-auto px-5 py-2">
+      <div className="min-w-0 flex-1 overflow-y-auto py-2 @min-[46rem]:px-5">
         {!draft ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            从左侧选择模型平台
+          <div className="flex h-full items-center justify-center px-2 text-center text-sm text-muted-foreground">
+            <span className="@min-[46rem]:hidden">请从上方选择一个模型平台</span>
+            <span className="hidden @min-[46rem]:inline">从左侧选择模型平台</span>
           </div>
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-5 pb-8">
@@ -831,7 +836,7 @@ export function ProviderConfigPanel() {
             </div>
 
             <div className="grid gap-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <label className="text-sm font-medium">API 地址</label>
                 <span className="text-xs text-muted-foreground">
                   可同时配置 Anthropic / OpenAI 兼容 / OpenAI Responses 端点
@@ -886,8 +891,8 @@ export function ProviderConfigPanel() {
                   placeholder="https://api.example.com/v1"
                 />
               </div>
-              <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
-                <div>
+              <div className="flex flex-col gap-2 rounded-lg border border-border/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <div className="min-w-0">
                   <div className="text-sm font-medium">Codex 需要兼容代理</div>
                   <div className="text-xs text-muted-foreground">
                     仅对 OpenAI 兼容端点生效；已配置 Responses 端点时 Codex 优先直连
@@ -906,9 +911,9 @@ export function ProviderConfigPanel() {
             </div>
 
             <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm font-medium">模型</label>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <Button
                     type="button"
                     variant="outline"
@@ -924,8 +929,8 @@ export function ProviderConfigPanel() {
                   </Button>
                 </div>
               </div>
-              <div className="overflow-hidden rounded-lg border border-border/60">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-lg border border-border/60">
+                <table className="w-full min-w-100 text-sm">
                   <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 font-medium">模型 ID</th>

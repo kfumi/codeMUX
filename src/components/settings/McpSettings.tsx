@@ -310,43 +310,49 @@ export function McpSettingsPanel() {
   const renderServerRow = (server: McpServer) => {
     const serverType = (server.server.type ?? 'stdio') as string;
     const anyEnabled = server.builtin || Object.values(server.apps).some(Boolean);
+    const statusClass = anyEnabled
+      ? probeStatus[server.id] === 'connected'
+        ? 'bg-[hsl(var(--success))]'
+        : probeStatus[server.id] === 'pending'
+          ? 'bg-[hsl(var(--warning))]'
+          : probeStatus[server.id] === 'failed'
+            ? 'bg-[hsl(var(--destructive))]'
+            : 'bg-muted-foreground/45'
+      : 'bg-muted-foreground/28';
     return (
-      <div
+      <article
         key={server.id}
-        className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-muted/65 transition-colors"
+        className="flex h-full flex-col gap-2 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/65"
       >
-        <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span
-                className={`h-2 w-2 rounded-full shrink-0 ${
-                  anyEnabled
-                    ? probeStatus[server.id] === 'connected' ? 'bg-[hsl(var(--success))]'
-                      : probeStatus[server.id] === 'pending' ? 'bg-[hsl(var(--warning))]'
-                        : probeStatus[server.id] === 'failed' ? 'bg-[hsl(var(--destructive))]'
-                          : 'bg-muted-foreground/45'
-                    : 'bg-muted-foreground/28'
-                }`}
-              />
-              <span className="font-medium text-sm truncate">{server.name}</span>
+        <div className="flex items-start gap-2">
+          <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', statusClass)} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <TooltipHint content={server.name}>
+                <span className="truncate text-ui-compact font-medium">{server.name}</span>
+              </TooltipHint>
               {server.builtin ? (
                 <TooltipHint content="daemon 内置提供,不可修改或删除">
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-[hsl(var(--primary)/0.10)] text-[hsl(var(--primary))] border border-[hsl(var(--primary)/0.16)]">
+                  <span className="shrink-0 rounded border border-[hsl(var(--primary)/0.16)] bg-[hsl(var(--primary)/0.10)] px-1.5 py-0.5 text-xs text-[hsl(var(--primary))]">
                     内置
                   </span>
                 </TooltipHint>
               ) : (
-                transportBadge(serverType)
+                <span className="shrink-0">{transportBadge(serverType)}</span>
               )}
             </div>
-            {server.description && (
-              <TooltipHint content={server.description} side="bottom">
-                <p className="text-xs text-muted-foreground truncate mt-0.5 ml-4 cursor-default">
-                  {server.description}
-                </p>
-              </TooltipHint>
-            )}
           </div>
+        </div>
+
+        {server.description && (
+          <TooltipHint content={server.description} side="bottom">
+            <p className="line-clamp-2 cursor-default text-xs leading-4 text-muted-foreground">
+              {server.description}
+            </p>
+          </TooltipHint>
+        )}
+
+        <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/50 pt-2">
           <div className="flex items-center gap-1">
             {APP_ORDER.map((app) => (
               <TooltipHint
@@ -372,13 +378,13 @@ export function McpSettingsPanel() {
             ))}
           </div>
           {server.builtin ? (
-            <div className="flex items-center text-muted-foreground/50 pr-2">
+            <div className="flex items-center pr-1 text-muted-foreground/50">
               <TooltipHint content="内置 server:不可修改或删除">
                 <Lock className="h-3.5 w-3.5" aria-label={`builtin-${server.id}`} />
               </TooltipHint>
             </div>
           ) : (
-            <div className="flex items-center -space-x-1">
+            <div className="flex items-center gap-0.5">
               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => probeServer(server.id)}>
                 <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
               </Button>
@@ -396,7 +402,7 @@ export function McpSettingsPanel() {
             </div>
           )}
         </div>
-      </div>
+      </article>
     );
   };
 
@@ -410,7 +416,9 @@ export function McpSettingsPanel() {
         <span className="text-xs text-muted-foreground">{rows.length}</span>
       </div>
       {rows.length > 0 ? (
-        <div className="space-y-2">{rows.map(renderServerRow)}</div>
+        <div className="grid gap-2.5 @min-[36rem]:grid-cols-2 @min-[54rem]:grid-cols-3">
+          {rows.map(renderServerRow)}
+        </div>
       ) : (
         emptyHint
       )}
@@ -418,7 +426,7 @@ export function McpSettingsPanel() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="@container space-y-4">
       <div className="flex items-center justify-end gap-2">
         <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>
           {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}

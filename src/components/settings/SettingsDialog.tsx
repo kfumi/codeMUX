@@ -114,7 +114,8 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
+      {/* 窄屏抽屉里条目会超出视口高度,主分组必须能独立滚动。 */}
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3">
         {visiblePrimaryTabs.map(renderNavItem)}
       </nav>
 
@@ -134,14 +135,17 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
   return (
     <section className="min-w-0 flex-1 overflow-auto bg-[hsl(var(--background))]">
       <header className="sticky top-0 z-10 border-b border-border/45 bg-[hsl(var(--background)/0.82)] backdrop-blur-md">
-        <div className="mx-auto w-full max-w-5xl px-12 py-6">
+        {/* 手机/窄屏:48px 的桌面内边距会把内容压到 300px 以内,逐级收敛。 */}
+        <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 sm:py-5 lg:px-12 lg:py-6">
           <h2 className="text-ui-heading-sm font-semibold tracking-tight text-foreground">{activeLabel}</h2>
           {activeDescription && (
-            <p className="mt-1.5 text-ui-body leading-relaxed text-foreground/55">{activeDescription}</p>
+            <p className="mt-1.5 text-ui-compact leading-relaxed text-foreground/55 sm:text-ui-body">{activeDescription}</p>
           )}
         </div>
       </header>
-      <div className="mx-auto w-full max-w-5xl px-12 py-8">
+      {/* @container:让面板按「内容区实际宽度」而不是视口宽度做自适应
+          (侧边栏可拖拽改宽,视口断点会算错)。 */}
+      <div className="@container mx-auto w-full max-w-5xl px-4 py-5 sm:px-6 sm:py-6 lg:px-12 lg:py-8">
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
         {activeTab === 'provider' && <ProviderConfigPanel />}

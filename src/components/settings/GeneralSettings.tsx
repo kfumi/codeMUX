@@ -10,6 +10,7 @@ import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
+import { SettingsRow } from './SettingsRow';
 import type { ImmediateRunMode } from '../../types/provider';
 
 export function GeneralSettings() {
@@ -54,39 +55,37 @@ export function GeneralSettings() {
     <div className="space-y-6">
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">显示偏好</label>
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground/90">精简 AI 输出</div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              开启后，每轮完成时折叠总结前的过程消息，仅保留最终总结。
-            </p>
-          </div>
-          <Switch
+        <SettingsRow
+          surface
+          inlineControl
+          label="精简 AI 输出"
+          description="开启后，每轮完成时折叠总结前的过程消息，仅保留最终总结。"
+          control={
+            <Switch
             aria-label="精简 AI 输出"
             checked={compactAiOutput}
             onCheckedChange={(checked) => {
               void setCompactAiOutput(checked);
             }}
-          />
-        </div>
+            />
+          }
+        />
       </div>
 
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">对话</label>
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground/90">「立即」的行为</div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              运行中点排队消息的「立即」时，优先引导进当前轮，还是中断当前轮再发送。斜杠命令和不支持引导的智能体仍会中断。
-            </p>
-          </div>
-          <Select
+        <SettingsRow
+          surface
+          label="「立即」的行为"
+          description="运行中点排队消息的「立即」时，优先引导进当前轮，还是中断当前轮再发送。斜杠命令和不支持引导的智能体仍会中断。"
+          control={
+            <Select
             value={immediateRunMode}
             onValueChange={(value) => {
               void setImmediateRunMode(value as ImmediateRunMode);
             }}
           >
-            <SelectTrigger aria-label="立即的行为" className="h-9 w-28 shrink-0 rounded-lg">
+            <SelectTrigger aria-label="立即的行为" className="h-9 w-full shrink-0 rounded-lg sm:w-28">
               <SelectValue>
                 {immediateRunMode === 'interrupt' ? '中断' : '引导'}
               </SelectValue>
@@ -95,26 +94,25 @@ export function GeneralSettings() {
               <SelectItem value="steer">引导</SelectItem>
               <SelectItem value="interrupt">中断</SelectItem>
             </SelectContent>
-          </Select>
-        </div>
+            </Select>
+          }
+        />
       </div>
 
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">项目打开</label>
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground/90">默认文件打开目标</div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              设置默认打开文件和文件夹的位置，对话页项目打开按钮会默认使用此项。
-            </p>
-          </div>
-          <Select
+        <SettingsRow
+          surface
+          label="默认文件打开目标"
+          description="设置默认打开文件和文件夹的位置，对话页项目打开按钮会默认使用此项。"
+          control={
+            <Select
             value={defaultOpenTarget}
             onValueChange={(value) => {
               void setDefaultOpenTarget(value as OpenTarget);
             }}
           >
-            <SelectTrigger aria-label="默认文件打开目标" className="h-9 w-44 shrink-0 rounded-lg">
+            <SelectTrigger aria-label="默认文件打开目标" className="h-9 w-full shrink-0 rounded-lg sm:w-44">
               <SelectValue>
                 {(() => {
                   const option = getOpenTargetOption(defaultOpenTarget);
@@ -141,8 +139,9 @@ export function GeneralSettings() {
                 );
               })}
             </SelectContent>
-          </Select>
-        </div>
+            </Select>
+          }
+        />
       </div>
 
       <NotificationSettingsSection />

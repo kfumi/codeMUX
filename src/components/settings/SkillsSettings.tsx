@@ -4,7 +4,7 @@ import type { ImportableSkill, Skill, SkillApps } from '../../types/skill';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { TooltipHint } from '../ui/tooltip';
-import { Trash2, Loader2, Eye, RefreshCw, Download, Check } from 'lucide-react';
+import { Trash2, Loader2, Eye, RefreshCw, Download, Check, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 import { cn } from '../../lib/utils';
@@ -157,7 +157,7 @@ export function SkillsSettingsPanel() {
   }, [importable]);
 
   return (
-    <div className="space-y-4">
+    <div className="@container space-y-4">
       <div className="flex items-center justify-end gap-2">
         <Button size="sm" variant="outline" onClick={handleOpenImport}>
           <Download className="h-4 w-4 mr-1" />
@@ -175,64 +175,85 @@ export function SkillsSettingsPanel() {
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="grid gap-2.5 @min-[36rem]:grid-cols-2 @min-[54rem]:grid-cols-3">
         {installedSkills.map((skill) => (
-          <div
+          <article
             key={skill.id}
-            className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/65 transition-colors"
+            className="flex h-full flex-col gap-2 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/65"
           >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-sm truncate">
-                  {skill.display_name || skill.name}
-                </span>
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/45 text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <TooltipHint content={skill.display_name || skill.name}>
+                  <span className="block truncate text-ui-compact font-medium">
+                    {skill.display_name || skill.name}
+                  </span>
+                </TooltipHint>
+                {skill.disk_path && (
+                  <TooltipHint content={skill.disk_path}>
+                    <p className="mt-0.5 truncate font-mono text-ui-micro text-muted-foreground/60">
+                      {skill.disk_path}
+                    </p>
+                  </TooltipHint>
+                )}
               </div>
-              {skill.description && (
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
+            </div>
+
+            {skill.description && (
+              <TooltipHint content={skill.description} side="bottom">
+                <p className="line-clamp-2 cursor-default text-xs leading-4 text-muted-foreground">
                   {skill.description}
                 </p>
-              )}
-              {skill.disk_path && (
-                <TooltipHint content={skill.disk_path}>
-                  <p
-                    className="text-ui-micro text-muted-foreground/60 truncate mt-0.5 font-mono"
+              </TooltipHint>
+            )}
+
+            <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/50 pt-2">
+              <div className="flex items-center gap-1">
+                {APP_ORDER.map((app) => (
+                  <TooltipHint key={app} content={APP_LABELS[app]}>
+                    <button
+                      aria-label={`toggle-${skill.id}-${app}`}
+                      onClick={() => toggleApp(skill.id, app, !skill.apps[app])}
+                      className={cn(
+                        'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
+                        skill.apps[app]
+                          ? 'bg-primary/10 border-primary/30'
+                          : 'bg-background border-transparent opacity-40 hover:opacity-70',
+                      )}
+                    >
+                      <AppIcon app={app} size={16} />
+                    </button>
+                  </TooltipHint>
+                ))}
+              </div>
+              <div className="flex items-center gap-0.5">
+                <TooltipHint content="预览内容">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    aria-label={`preview-${skill.id}`}
+                    onClick={() => handlePreview(skill)}
                   >
-                    {skill.disk_path}
-                  </p>
+                    <Eye className="h-4 w-4" />
+                  </Button>
                 </TooltipHint>
-              )}
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => handlePreview(skill)}>
-              <Eye className="h-4 w-4" />
-            </Button>
-            <div className="flex items-center gap-1">
-              {APP_ORDER.map((app) => (
-                <TooltipHint content={APP_LABELS[app]}>
-                  <button
-                    key={app}
-                    aria-label={`toggle-${skill.id}-${app}`}
-                    onClick={() => toggleApp(skill.id, app, !skill.apps[app])}
-                    className={cn(
-                      'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
-                      skill.apps[app]
-                        ? 'bg-primary/10 border-primary/30'
-                        : 'bg-background border-transparent opacity-40 hover:opacity-70',
-                    )}
+                <TooltipHint content="卸载">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`uninstall-${skill.id}`}
+                    onClick={() => { setDeletingId(skill.id); setDeleteConfirm(true); }}
+                    className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                   >
-                    <AppIcon app={app} size={16} />
-                  </button>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </TooltipHint>
-              ))}
+              </div>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { setDeletingId(skill.id); setDeleteConfirm(true); }}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+          </article>
         ))}
       </div>
 
