@@ -8,6 +8,7 @@ pub mod e2ee;
 pub mod events;
 pub mod local_daemon_token;
 pub mod offer;
+pub mod origin;
 pub mod pairing;
 pub mod pairing_code;
 pub mod relay;

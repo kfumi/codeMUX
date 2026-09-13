@@ -49,6 +49,14 @@ impl PathRoots {
         }
         manifest_dir.join("../src-mobile/dist")
     }
+
+    /// 网页端(统一前端)静态资源目录:仅查找打包资源根下的 dist-web。
+    /// 开发环境通过 CompanionConfig 的 web_static_dir 显式指定,避免源码树
+    /// 内的陈旧 dist 意外顶替移动端产物成为缺省页面。
+    pub fn web_static_dir(&self) -> Option<PathBuf> {
+        let packaged = self.resource_dir.as_ref()?.join("dist-web");
+        packaged.exists().then_some(packaged)
+    }
 }
 
 #[cfg(test)]
@@ -114,6 +122,28 @@ mod tests {
         // 源码树内 dist-mobile 或 src-mobile/dist 至少存在其一(仓库检出的常态)。
         let fallback = roots.mobile_static_dir();
         assert!(fallback.ends_with("dist-mobile") || fallback.ends_with("src-mobile/dist"));
+    }
+
+    #[test]
+    fn web_static_dir_serves_packaged_dir_only_when_present() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
+        assert_eq!(
+            roots.web_static_dir(),
+            None,
+            "missing dist-web should keep the mobile fallback"
+        );
+
+        let packaged = temp.path().join("dist-web");
+        std::fs::create_dir_all(&packaged).expect("mkdir");
+        assert_eq!(
+            roots.web_static_dir(),
+            Some(packaged),
+            "packaged dist-web should be served once present"
+        );
     }
 
     #[test]

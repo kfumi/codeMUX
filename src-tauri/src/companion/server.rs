@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
@@ -27,6 +28,7 @@ use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
 use crate::companion::offer::build_pairing_offer;
+use crate::companion::origin::{validate_web_origin, AllowedOrigins, WebOriginDecision};
 use crate::companion::pairing::complete_pairing;
 use crate::companion::routes_agent_runtime;
 use crate::companion::routes_app_config;
@@ -42,6 +44,8 @@ use crate::db::operations;
 #[derive(Clone)]
 pub(crate) struct ServerContext {
     pub daemon: std::sync::Arc<crate::daemon::DaemonState>,
+    /// 网页端放行的跨源 Origin(启动时解析,修改随 server 重启生效)。
+    pub(crate) web_origin_allowlist: std::sync::Arc<AllowedOrigins>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,9 +192,11 @@ async fn start_daemon_server_body(
         *stored_port = port;
     }
 
-    let static_dir = daemon.roots.mobile_static_dir();
+    let (web_static_override, web_origin_allowlist) = read_web_serve_config(&daemon)?;
+    let static_dir = resolve_static_dir(&daemon, web_static_override);
     let ctx = ServerContext {
         daemon: daemon.clone(),
+        web_origin_allowlist: std::sync::Arc::new(web_origin_allowlist),
     };
     let router = build_router(ctx, static_dir);
 
@@ -371,17 +377,84 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
     let api = browser_automation::extend_api_router(api);
 
     let index_file = static_dir.join("index.html");
-    let static_service = ServeDir::new(static_dir).not_found_service(ServeFile::new(index_file));
+    // SPA 回退用 fallback 而非 not_found_service:后者会把回退响应状态强制
+    // 改写为 404,深链刷新时前端拿到的入口页会带 404 状态。
+    let static_service = ServeDir::new(static_dir).fallback(ServeFile::new(index_file));
 
     Router::new()
         .nest("/api", api)
         .fallback_service(static_service)
+        .layer(middleware::from_fn_with_state(
+            ctx.clone(),
+            origin_guard_middleware,
+        ))
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store"),
         ))
         .layer(CorsLayer::permissive())
         .with_state(ctx)
+}
+
+async fn origin_guard_middleware(
+    State(ctx): State<ServerContext>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    if validate_web_origin(peer, request.headers(), &ctx.web_origin_allowlist)
+        == WebOriginDecision::Reject
+    {
+        return ApiError::forbidden("Request origin is not allowed").into_response();
+    }
+    next.run(request).await
+}
+
+/// 读取网页端托管配置(静态目录覆盖 + 放行 Origin 列表),一次锁内快照;
+/// 修改随 server 重启生效(与监听地址一致)。
+fn read_web_serve_config(
+    daemon: &crate::daemon::DaemonState,
+) -> Result<(Option<PathBuf>, AllowedOrigins), String> {
+    let config = daemon
+        .app
+        .config
+        .lock()
+        .map_err(|error| format!("config lock poisoned: {error}"))?;
+    let static_dir_override = config
+        .companion
+        .web_static_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    Ok((
+        static_dir_override,
+        AllowedOrigins::parse(&config.companion.web_allowed_origins),
+    ))
+}
+
+/// 网页端静态目录解析:配置覆盖(目录需存在) → 打包资源 dist-web → 移动端产物兜底。
+fn resolve_static_dir(
+    daemon: &crate::daemon::DaemonState,
+    override_dir: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(dir) = override_dir {
+        if dir.exists() {
+            return dir;
+        }
+        warn!(
+            target: "companion",
+            "Configured web_static_dir does not exist, falling back: {}",
+            dir.display()
+        );
+    }
+    if let Some(web_dir) = daemon.roots.web_static_dir() {
+        return web_dir;
+    }
+    daemon.roots.mobile_static_dir()
 }
 
 async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
@@ -1317,6 +1390,322 @@ mod headless_tests {
             response.starts_with("HTTP/1.1 200"),
             "loopback /api/health should answer 200 without a window, got: {response}"
         );
+
+        super::stop_daemon_for_state(&daemon.companion)
+            .await
+            .expect("stop daemon");
+    }
+}
+
+#[cfg(test)]
+mod web_static_tests {
+    use super::{build_router, ServerContext};
+    use crate::daemon::DaemonState;
+    use crate::paths::PathRoots;
+    use axum::body::{to_bytes, Body};
+    use axum::extract::ConnectInfo;
+    use axum::http::{Request, StatusCode};
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    struct TestApp {
+        router: axum::Router,
+        _daemon_temp: tempfile::TempDir,
+        _static_temp: tempfile::TempDir,
+    }
+
+    const INDEX_MARKER: &str = "<html>unified-frontend-index</html>";
+    const ASSET_BODY: &str = "export const app = 'asset';";
+
+    async fn assemble_test_app(allowed_origins: &[&str]) -> TestApp {
+        let daemon_temp = tempfile::tempdir().expect("tempdir");
+        let static_temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(static_temp.path().join("index.html"), INDEX_MARKER).expect("write index");
+        std::fs::create_dir_all(static_temp.path().join("assets")).expect("mkdir assets");
+        std::fs::write(static_temp.path().join("assets/app.js"), ASSET_BODY).expect("write asset");
+
+        let daemon = Arc::new(
+            DaemonState::assemble(
+                PathRoots {
+                    app_data_dir: daemon_temp.path().to_path_buf(),
+                    resource_dir: None,
+                },
+                Arc::new(crate::daemon::NullUiEventSink),
+            )
+            .expect("assemble"),
+        );
+        let router = build_router(
+            ServerContext {
+                daemon: daemon.clone(),
+                web_origin_allowlist: std::sync::Arc::new(super::AllowedOrigins::parse(
+                    &allowed_origins
+                        .iter()
+                        .map(|entry| entry.to_string())
+                        .collect::<Vec<_>>(),
+                )),
+            },
+            static_temp.path().to_path_buf(),
+        );
+        TestApp {
+            router,
+            _daemon_temp: daemon_temp,
+            _static_temp: static_temp,
+        }
+    }
+
+    fn loopback_peer() -> SocketAddr {
+        SocketAddr::from(([127, 0, 0, 1], 51000))
+    }
+
+    fn lan_peer() -> SocketAddr {
+        SocketAddr::from(([192, 168, 1, 8], 51000))
+    }
+
+    async fn respond(
+        app: &TestApp,
+        uri: &str,
+        peer: SocketAddr,
+        headers: &[(&str, &str)],
+    ) -> axum::response::Response {
+        let mut builder = Request::builder().uri(uri);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let mut request = builder.body(Body::empty()).expect("build request");
+        request.extensions_mut().insert(ConnectInfo(peer));
+        app.router.clone().oneshot(request).await.expect("oneshot")
+    }
+
+    async fn body_text(response: axum::response::Response) -> String {
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("read body");
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    #[tokio::test]
+    async fn static_service_serves_index_assets_and_spa_fallback() {
+        let app = assemble_test_app(&[]).await;
+
+        for uri in ["/", "/sessions/some-id", "/deep/nested/link"] {
+            let response = respond(&app, uri, loopback_peer(), &[]).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "GET {uri} should hit SPA"
+            );
+            assert_eq!(body_text(response).await, INDEX_MARKER, "GET {uri}");
+        }
+
+        let asset = respond(&app, "/assets/app.js", loopback_peer(), &[]).await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(body_text(asset).await, ASSET_BODY);
+    }
+
+    #[tokio::test]
+    async fn static_responses_carry_no_store() {
+        let app = assemble_test_app(&[]).await;
+        let response = respond(&app, "/", loopback_peer(), &[]).await;
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store"),
+            "网页端产物禁止中间缓存"
+        );
+    }
+
+    #[tokio::test]
+    async fn loopback_requests_skip_origin_validation() {
+        let app = assemble_test_app(&[]).await;
+        let response = respond(
+            &app,
+            "/api/health",
+            loopback_peer(),
+            &[("host", "evil.example"), ("origin", "http://evil.example")],
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "回环请求不受 Origin/Host 校验约束"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_loopback_cross_origin_and_domain_host_are_rejected() {
+        let app = assemble_test_app(&[]).await;
+
+        let cross_origin = respond(
+            &app,
+            "/api/health",
+            lan_peer(),
+            &[
+                ("host", "192.168.1.8:9240"),
+                ("origin", "http://evil.example"),
+            ],
+        )
+        .await;
+        assert_eq!(cross_origin.status(), StatusCode::FORBIDDEN);
+
+        let rebinding = respond(
+            &app,
+            "/api/health",
+            lan_peer(),
+            &[
+                ("host", "attacker.example:9240"),
+                ("origin", "http://attacker.example:9240"),
+            ],
+        )
+        .await;
+        assert_eq!(
+            rebinding.status(),
+            StatusCode::FORBIDDEN,
+            "域名 Host 即便与 Origin 同源也拒绝(rebinding)"
+        );
+
+        let static_via_domain =
+            respond(&app, "/", lan_peer(), &[("host", "attacker.example")]).await;
+        assert_eq!(
+            static_via_domain.status(),
+            StatusCode::FORBIDDEN,
+            "静态资源同样在守卫之后"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_loopback_same_origin_and_allowed_list_pass() {
+        let app = assemble_test_app(&["http://localhost:1420"]).await;
+
+        let same_origin = respond(
+            &app,
+            "/api/health",
+            lan_peer(),
+            &[
+                ("host", "192.168.1.8:9240"),
+                ("origin", "http://192.168.1.8:9240"),
+            ],
+        )
+        .await;
+        assert_eq!(
+            same_origin.status(),
+            StatusCode::OK,
+            "自 serve 的 SPA 同源放行"
+        );
+
+        let listed_origin = respond(
+            &app,
+            "/api/health",
+            lan_peer(),
+            &[
+                ("host", "192.168.1.8:9240"),
+                ("origin", "http://localhost:1420"),
+            ],
+        )
+        .await;
+        assert_eq!(listed_origin.status(), StatusCode::OK, "列表内 Origin 放行");
+
+        let listed_host = respond(&app, "/", lan_peer(), &[("host", "localhost:1420")]).await;
+        assert_eq!(
+            listed_host.status(),
+            StatusCode::OK,
+            "列表内 Origin 对应 Host 的顶层导航放行"
+        );
+    }
+
+    const WS_UPGRADE_HEADERS: &[(&str, &str)] = &[
+        ("connection", "Upgrade"),
+        ("upgrade", "websocket"),
+        ("sec-websocket-version", "13"),
+        ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+    ];
+
+    #[tokio::test]
+    async fn ws_handshake_from_non_loopback_is_rejected_by_origin_guard() {
+        let app = assemble_test_app(&[]).await;
+        let token = crate::companion::local_daemon_token::ensure_local_daemon_token(
+            app._daemon_temp.path(),
+            false,
+        )
+        .expect("ensure local daemon token");
+
+        let rejected = respond(
+            &app,
+            &format!("/api/ws?token={token}"),
+            lan_peer(),
+            &[
+                ("host", "192.168.1.8:9240"),
+                ("origin", "http://evil.example"),
+            ]
+            .iter()
+            .copied()
+            .chain(WS_UPGRADE_HEADERS.iter().copied())
+            .collect::<Vec<_>>(),
+        )
+        .await;
+        assert_eq!(
+            rejected.status(),
+            StatusCode::FORBIDDEN,
+            "非回环 WS 握手同样经过 Origin 守卫(升级前拒绝)"
+        );
+    }
+
+    /// oneshot 无法模拟真实连接升级(axum 会报 "no upgrade state"),
+    /// 回环 WS 升级用真实 TCP 握手验证——同 headless 健康检查模式。
+    #[tokio::test]
+    async fn loopback_ws_upgrade_completes_with_valid_token() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let daemon = Arc::new(
+            DaemonState::assemble(
+                PathRoots {
+                    app_data_dir: temp.path().to_path_buf(),
+                    resource_dir: None,
+                },
+                Arc::new(crate::daemon::NullUiEventSink),
+            )
+            .expect("assemble"),
+        );
+
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe");
+        let port = probe.local_addr().expect("addr").port();
+        drop(probe);
+
+        super::start_daemon_server(daemon.clone(), port, false, "127.0.0.1".to_string())
+            .await
+            .expect("start daemon server");
+        let token =
+            crate::companion::local_daemon_token::ensure_local_daemon_token(temp.path(), false)
+                .expect("ensure local daemon token");
+
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET /api/ws?token={token} HTTP/1.1\r\n\
+             Host: 127.0.0.1:{port}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n"
+        );
+        stream.write_all(request.as_bytes()).await.expect("write");
+        // WS 升级后连接保持打开,只读首个响应块断言握手结果。
+        let mut buf = vec![0_u8; 1024];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+            .await
+            .expect("handshake read timeout")
+            .expect("read handshake response");
+        let response = String::from_utf8_lossy(&buf[..read]).to_string();
+        assert!(
+            response.starts_with("HTTP/1.1 101"),
+            "回环 WS 握手应完成 101 升级, got: {response}"
+        );
+        drop(stream);
 
         super::stop_daemon_for_state(&daemon.companion)
             .await
