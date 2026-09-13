@@ -68,8 +68,8 @@
 
 - 业务权威是独立的 Rust 进程 `codemux-daemon`：拥有 SQLite、会话、Agent 编排、Sidecar、MCP、Skills与定时任务，壳崩溃不影响权威
 - Electron 壳只做窗口、托盘、单实例、通知、自动更新与 Browser Host，并作为 supervisor 拉起/守护 daemon（版本配对仲裁）
-- 桌面 UI、移动伴侣与 CLI 都是 Daemon Client，统一走回环 Companion REST/WS + CodeMUX Event 协议，本机连接使用 Local Daemon Token
-- 移动伴侣（PWA）扫码配对后可在手机上查看与驱动桌面会话；`src-cli` 提供本机命令行客户端
+- 桌面 UI、浏览器/手机网页端与 CLI 都是 Daemon Client，统一走回环 Companion REST/WS + CodeMUX Event 协议，本机连接使用 Local Daemon Token
+- 前端只有一套产物：`npm run build:web` 产出 `dist-web/`，由 daemon 直接服务；同机浏览器走简化配对（壳内确认一次），手机/远程浏览器扫码配对后即可查看与驱动桌面会话；`src-cli` 提供本机命令行客户端
 
 ### 面向真实编码流程，而不是单纯聊天
 
@@ -239,10 +239,6 @@ npx vitest run
 cd src-tauri/sidecar
 npx vitest run
 
-# 移动端测试
-cd src-mobile
-npx vitest run
-
 # Electron 壳类型检查
 cd desktop-electron
 npm run typecheck
@@ -388,7 +384,7 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 | 终端 | `@xterm/xterm`, `@xterm/addon-fit` |
 | 桌面壳 | Electron 33（窗口、托盘、单实例、通知、electron-updater、Browser Host） |
 | 后端 | Rust 2021 daemon（`codemux-daemon`）: Tokio, Reqwest, Rusqlite，内嵌 Companion Server（回环 REST/WS） |
-| 客户端协议 | Companion REST/WS + CodeMUX Event（桌面渲染层 / 移动伴侣 / CLI 共用） |
+| 客户端协议 | Companion REST/WS + CodeMUX Event（桌面渲染层 / 浏览器与手机网页端 / CLI 共用） |
 | 本地数据库 | SQLite |
 | Sidecar | Node.js + TypeScript |
 | Agent SDK | 由 CodeMUX 使用本机 npm 安装到托管 Runtime 目录：`@anthropic-ai/claude-agent-sdk`、`@openai/codex`（CLI，供 app-server 使用）、`@opencode-ai/sdk` |
@@ -447,7 +443,7 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 
 ```text
 codeMUX/
-├─ src/                     # React 渲染层（桌面 UI）
+├─ src/                     # React 统一前端（桌面 UI、PC 浏览器、手机浏览器共用一套构建）
 │  ├─ components/agent/     # 对话面板、工具卡片、权限卡片、上下文进度
 │  ├─ components/settings/  # 设置页（Provider / MCP / Skills / 通知 / 使用统计 / 日志）
 │  ├─ components/workspace/ # Review / Terminal / Plan 等侧边面板
@@ -464,7 +460,6 @@ codeMUX/
 │  ├─ src/model_providers/  # Model Provider 服务
 │  └─ src/scheduled_tasks/  # 定时任务
 ├─ src-tauri/sidecar/src/   # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
-├─ src-mobile/              # 移动伴侣 PWA（独立 Vite 构建，构建产物进 dist-mobile/）
 ├─ src-cli/                 # 本机命令行 Daemon Client
 ├─ public/                  # 静态资源与截图
 ├─ docs/                    # 设计文档、ADR 与实现说明

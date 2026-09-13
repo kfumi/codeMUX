@@ -36,16 +36,16 @@ echo ""
 echo "==> Relay 本机测试"
 curl -sf http://127.0.0.1:8787 && echo "" || echo "(curl 127.0.0.1:8787 失败，执行: $PM2_BIN logs codemux-relay)"
 
-if [ -d mobile-web ]; then
+if [ -d web ]; then
   echo ""
-  echo "==> 部署手机网页到 $SITE_ROOT"
+  echo "==> 部署统一网页端到 $SITE_ROOT"
   mkdir -p "$SITE_ROOT"
-  cp -a mobile-web/. "$SITE_ROOT/"
+  cp -a web/. "$SITE_ROOT/"
   chown -R www:www "$SITE_ROOT" 2>/dev/null || true
   echo "    已复制 index.html 与 assets/"
 else
   echo ""
-  echo "==> 未找到 mobile-web/，跳过网页部署"
+  echo "==> 未找到 web/，跳过网页部署"
 fi
 
 echo ""
@@ -56,7 +56,7 @@ echo "1. 网站 -> relay.fumi-blog.top -> 网站目录 设为:"
 echo "   $SITE_ROOT"
 echo "2. 删除「整站反向代理到 8787」的配置（若有）"
 echo "3. 网站 -> 配置文件，在 server { } 内加入 baota-nginx-snippet.conf 内容"
-echo "   （仅 /ws 走 8787，其余走静态手机页）"
+echo "   （仅 /ws 走 8787，其余走静态网页端）"
 echo "4. SSL 证书配好后，访问 https://relay.fumi-blog.top 应看到配对页"
-echo "5. 桌面 CodeMUX 启用中继 -> 刷新二维码 -> 手机扫码"
+echo "5. 桌面 CodeMUX 启用中继 -> 刷新二维码 -> 手机/浏览器扫码"
 echo "=========================================="

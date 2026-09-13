@@ -1,31 +1,28 @@
-# 构建手机网页 + 打包 relay 与中继部署包（含 mobile-web，供跨网扫码）
+# 构建统一网页端 + 打包 relay 与中继部署包（含 web，供跨网扫码）
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Out = Join-Path $Root 'codemux-relay-full-deploy.zip'
 
-Write-Host "==> 构建手机网页..."
+Write-Host "==> 构建统一网页端..."
 Set-Location $Root
-Push-Location (Join-Path $Root 'src-mobile')
-npm run build
-if ($LASTEXITCODE -ne 0) { throw 'src-mobile build failed' }
-Pop-Location
-node (Join-Path $Root 'scripts\copy-mobile-dist.mjs')
-$MobileSrc = Join-Path $Root 'dist-mobile'
-if (-not (Test-Path (Join-Path $MobileSrc 'index.html'))) {
-  throw "dist-mobile 构建失败"
+npm run build:web
+if ($LASTEXITCODE -ne 0) { throw 'build:web failed' }
+$WebSrc = Join-Path $Root 'dist-web'
+if (-not (Test-Path (Join-Path $WebSrc 'index.html'))) {
+  throw "dist-web 构建失败"
 }
 
 $staging = Join-Path $env:TEMP "codemux-relay-full-deploy"
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Path $staging | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $staging 'mobile-web') | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $staging 'web') | Out-Null
 
 Copy-Item (Join-Path $Root 'scripts\companion-relay.mjs') (Join-Path $staging 'companion-relay.mjs')
 Copy-Item (Join-Path $Root 'scripts\companion-relay-bridge.mjs') (Join-Path $staging 'companion-relay-bridge.mjs')
 Copy-Item (Join-Path $Root 'scripts\relay\package.json') (Join-Path $staging 'package.json')
 Copy-Item (Join-Path $Root 'scripts\relay\baota-install.sh') (Join-Path $staging 'baota-install.sh')
 Copy-Item (Join-Path $Root 'scripts\relay\baota-nginx-snippet.conf') (Join-Path $staging 'baota-nginx-snippet.conf')
-Copy-Item -Recurse (Join-Path $MobileSrc '*') (Join-Path $staging 'mobile-web')
+Copy-Item -Recurse (Join-Path $WebSrc '*') (Join-Path $staging 'web')
 
 foreach ($sh in @('baota-install.sh')) {
   $path = Join-Path $staging $sh

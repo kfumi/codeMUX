@@ -8,6 +8,8 @@ accepted — amended 2026-09 by [ADR 0011](./0011-daemon-authority-local-token.m
 
 > **Amendment (daemon-boundary):** Companion Server 在桌面进程启动后于回环地址常开，不再仅随「移动伴侣」开关启动。`companion.enabled` 仅控制局域网/中继暴露与配对 UI；关闭移动伴侣不停回环、不停 Scheduled Task、不撤销 Local Daemon Token。桌面 Shell 经 Local Daemon Token 访问回环；手机仍用 Pairing Token。详见 ADR 0011。
 
+> **Amendment (unified-frontend, 2026-09):** Decision 7 中「移动端前端为同仓 `src-mobile/`」已被取代：桌面渲染层改造为宿主无关的统一前端，`src-mobile/` 与 `npm run build:mobile` 已退役。三种宿主形态（Electron 壳、PC 浏览器、手机浏览器/PWA）共用 `src/` 一套代码与 `npm run build:web` 产出的 `dist-web/`，由 daemon 的 Companion 静态服务直接提供；配对、Connection Offer、中继/E2EE 与轮询回退逻辑已并入共享客户端。本文档其余决策（thin client、桌面权威、Pairing Token、复用 CodeMUX Event、PWA 形态）不变。
+
 ## Context
 
 用户希望能在手机上连接桌面端、实时同步对话，并在移动端使用基本功能。桌面端是 Tauri 2 应用：React/Vite 前端、Rust 后端、Node sidecar；会话权威存储是 SQLite 中的 `session_event_snapshots`（CodeMUX Event 时间线，ADR 0003）。前端经 Tauri command + event 与 Rust 通信，目前没有任何对外 HTTP/WS 服务。

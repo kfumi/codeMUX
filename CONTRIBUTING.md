@@ -126,7 +126,7 @@ src/                        # React 渲染层（桌面 UI）
   components/workspace/     # Review / Terminal / Plan 等侧边面板
   components/browser/       # Browser Host 浏览页 UI（沙箱 webview）
   components/automation/    # daemon→壳受控自动化相关 UI
-  components/companion/     # 移动伴侣配对与连接 UI
+  components/companion/     # 配对与连接 UI（桌面与浏览器/手机网页端共用）
   components/dev/           # 开发模式性能诊断覆盖层
   features/update/          # 自动更新入口
   stores/                   # Zustand 状态（agent / session / mcp / skill 等）
@@ -149,7 +149,6 @@ src-tauri/                  # Rust daemon crate（目录名保留，Tauri 壳已
   src/scheduled_tasks/      # 定时任务
   sidecar/src/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
 
-src-mobile/                 # 移动伴侣 PWA（独立 Vite 构建与测试）
 src-cli/                    # 本机命令行 Daemon Client
 ```
 

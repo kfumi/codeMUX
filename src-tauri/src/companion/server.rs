@@ -390,7 +390,7 @@ async fn bind_reusable_listener(addr: SocketAddr) -> Result<tokio::net::TcpListe
     tokio::net::TcpListener::from_std(std_listener).map_err(|error| error.to_string())
 }
 
-fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
+fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/pair/offer", get(pair_offer))
@@ -432,14 +432,16 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
     let api = routes_terminal::extend_api_router(api);
     let api = browser_automation::extend_api_router(api);
 
-    let index_file = static_dir.join("index.html");
-    // SPA 回退用 fallback 而非 not_found_service:后者会把回退响应状态强制
-    // 改写为 404,深链刷新时前端拿到的入口页会带 404 状态。
-    let static_service = ServeDir::new(static_dir).fallback(ServeFile::new(index_file));
+    let mut router = Router::new().nest("/api", api);
+    if let Some(static_dir) = static_dir {
+        let index_file = static_dir.join("index.html");
+        // SPA 回退用 fallback 而非 not_found_service:后者会把回退响应状态强制
+        // 改写为 404,深链刷新时前端拿到的入口页会带 404 状态。
+        let static_service = ServeDir::new(static_dir).fallback(ServeFile::new(index_file));
+        router = router.fallback_service(static_service);
+    }
 
-    Router::new()
-        .nest("/api", api)
-        .fallback_service(static_service)
+    router
         .layer(middleware::from_fn_with_state(
             ctx.clone(),
             origin_guard_middleware,
@@ -492,14 +494,16 @@ fn read_web_serve_config(
     ))
 }
 
-/// 网页端静态目录解析:配置覆盖(目录需存在) → 打包资源 dist-web → 移动端产物兜底。
+/// 浏览器形态静态目录解析:配置覆盖(目录需存在) → 打包资源 dist-web →
+/// 源码树 dist-web(仅开发)。工单 04 起没有移动端产物兜底 —— 统一前端是
+/// 唯一产物,解析不到就不给浏览器入口(API 仍照常工作)。
 fn resolve_static_dir(
     daemon: &crate::daemon::DaemonState,
     override_dir: Option<PathBuf>,
-) -> PathBuf {
+) -> Option<PathBuf> {
     if let Some(dir) = override_dir {
         if dir.exists() {
-            return dir;
+            return Some(dir);
         }
         warn!(
             target: "companion",
@@ -507,10 +511,7 @@ fn resolve_static_dir(
             dir.display()
         );
     }
-    if let Some(web_dir) = daemon.roots.web_static_dir() {
-        return web_dir;
-    }
-    daemon.roots.mobile_static_dir()
+    daemon.roots.web_static_dir()
 }
 
 async fn health(State(ctx): State<ServerContext>) -> impl IntoResponse {
@@ -1634,11 +1635,20 @@ mod web_static_tests {
     const ASSET_BODY: &str = "export const app = 'asset';";
 
     async fn assemble_test_app(allowed_origins: &[&str]) -> TestApp {
+        assemble_test_app_with_static(allowed_origins, true).await
+    }
+
+    /// `with_static = false` 模拟没跑 `npm run build:web` 的机器。
+    async fn assemble_test_app_with_static(allowed_origins: &[&str], with_static: bool) -> TestApp {
         let daemon_temp = tempfile::tempdir().expect("tempdir");
         let static_temp = tempfile::tempdir().expect("tempdir");
-        std::fs::write(static_temp.path().join("index.html"), INDEX_MARKER).expect("write index");
-        std::fs::create_dir_all(static_temp.path().join("assets")).expect("mkdir assets");
-        std::fs::write(static_temp.path().join("assets/app.js"), ASSET_BODY).expect("write asset");
+        if with_static {
+            std::fs::write(static_temp.path().join("index.html"), INDEX_MARKER)
+                .expect("write index");
+            std::fs::create_dir_all(static_temp.path().join("assets")).expect("mkdir assets");
+            std::fs::write(static_temp.path().join("assets/app.js"), ASSET_BODY)
+                .expect("write asset");
+        }
 
         let daemon = Arc::new(
             DaemonState::assemble(
@@ -1660,7 +1670,7 @@ mod web_static_tests {
                         .collect::<Vec<_>>(),
                 )),
             },
-            static_temp.path().to_path_buf(),
+            with_static.then(|| static_temp.path().to_path_buf()),
         );
         TestApp {
             router,
@@ -1750,6 +1760,29 @@ mod web_static_tests {
                 .and_then(|value| value.to_str().ok()),
             Some("no-store"),
             "网页端产物禁止中间缓存"
+        );
+    }
+
+    /// 没有 `npm run build:web` 产物的机器:浏览器入口不存在(404),但
+    /// 协议 API 照常工作——静态服务不是 API 的前置条件。
+    #[tokio::test]
+    async fn missing_web_build_keeps_api_alive_without_browser_entry() {
+        let app = assemble_test_app_with_static(&[], false).await;
+
+        let page = respond(&app, "/", loopback_peer(), &[]).await;
+        assert_eq!(
+            page.status(),
+            StatusCode::NOT_FOUND,
+            "没有统一前端产物时不再回退到任何旧构建"
+        );
+        let deep_link = respond(&app, "/sessions/some-id", loopback_peer(), &[]).await;
+        assert_eq!(deep_link.status(), StatusCode::NOT_FOUND, "无 SPA 回退");
+
+        let health = respond(&app, "/api/health", loopback_peer(), &[]).await;
+        assert_eq!(
+            health.status(),
+            StatusCode::OK,
+            "API 不依赖静态产物,daemon 仍可用"
         );
     }
 

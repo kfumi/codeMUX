@@ -65,16 +65,7 @@ function killAll() {
   }
 }
 
-// 1. 移动端构建产物(幂等,与 `npm run dev` 行为一致)
-const mobile = spawnSync(process.execPath, ['scripts/copy-mobile-dist.mjs'], {
-  cwd: rootDir,
-  stdio: 'inherit',
-});
-if (mobile.status !== 0) {
-  process.exit(mobile.status ?? 1);
-}
-
-// 2. Vite 渲染层:1420 已有服务则复用(strictPort,端口不会漂移),否则拉起
+// Vite 渲染层:1420 已有服务则复用(strictPort,端口不会漂移),否则拉起
 let vite = null;
 if (await isServerUp(DEV_SERVER_URL)) {
   console.log('[dev-desktop] 1420 已有 dev server,复用现有 Vite');

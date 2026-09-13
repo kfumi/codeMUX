@@ -1,10 +1,10 @@
 {
   "scripts": {
     "dev": {
-      "command": "npm run tauri dev"
+      "command": "npm run dev:desktop"
     },
-    "build mobile": {
-      "command": "npm run build:mobile"
+    "build web": {
+      "command": "npm run build:web"
     }
   },
   "metadataGeneration": {

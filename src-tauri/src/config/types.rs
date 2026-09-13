@@ -124,7 +124,8 @@ pub struct CompanionConfig {
     #[serde(default)]
     pub last_lan_ip: Option<String>,
     /// 网页端(统一前端)静态资源目录的绝对路径覆盖。为空时按内置解析链回退
-    /// (打包资源 dist-web → 源码树 dist → 移动端产物)。
+    /// (打包资源 dist-web → 源码树 dist-web,仅开发环境);解析不到则不提供
+    /// 浏览器入口,协议 API 不受影响。
     #[serde(default)]
     pub web_static_dir: Option<String>,
     /// 网页端额外放行的跨源 Origin 完整列表(如开发服务器源)。

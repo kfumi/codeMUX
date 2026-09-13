@@ -1,6 +1,6 @@
 # Spec: 统一前端——桌面 / 网页 / 移动共用一套渲染层连 daemon
 
-Status: ready-for-agent
+Status: implemented（阶段一~三已交付，三形态人工验收待补）
 
 ## Problem Statement
 

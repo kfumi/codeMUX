@@ -4,7 +4,7 @@
   "version": "0.3.1",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/copy-mobile-dist.mjs && vite",
+    "dev": "vite",
     "build": "tsc && vite build",
     "build:web": "vite build --outDir dist-web --emptyOutDir",
     "build:daemon": "cd src-tauri && cargo build --bin codemux-daemon",
@@ -14,7 +14,6 @@
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "dev:electron": "cd desktop-electron && npm run dev",
     "build:sidecar": "cd src-tauri/sidecar && npm run build",
-    "build:mobile": "cd src-mobile && npm ci && npm run build && cd .. && node scripts/copy-mobile-dist.mjs",
     "preview": "vite preview",
     "release:prepare": "node scripts/prepare-release.mjs",
     "release:ship": "node scripts/release-ship.mjs",
@@ -22,8 +21,7 @@
     "relay:pack-vps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-for-vps.ps1",
     "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1",
     "test": "vitest run",
-    "test:sidecar": "cd src-tauri/sidecar && npm run test",
-    "test:mobile": "cd src-mobile && npm run test"
+    "test:sidecar": "cd src-tauri/sidecar && npm run test"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",
