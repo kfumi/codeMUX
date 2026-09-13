@@ -289,8 +289,8 @@ export const providersViaDaemon = {
 export type { TerminalEvent } from '../daemon-client/terminal';
 
 export const companionViaDaemon = {
-  // Companion(移动伴侣配对):走 daemon client 的 /api/companion/* 面
-  // (daemon 路由未落地前调用以显式错误失败,UI 走既有降级路径)。
+  // Companion(移动伴侣配对):走 daemon client 的 /api/companion/* 管理面
+  // (daemon 限回环来源 + Local Daemon Token)。
   getStatus: async (): Promise<CompanionStatus> =>
     (await ensureDaemonClient()).companionGetStatus() as Promise<CompanionStatus>,
   setEnabled: async (enabled: boolean): Promise<CompanionStatus> =>
@@ -670,7 +670,7 @@ export const daemonFacade = {
   },
 
   // Companion(移动伴侣配对):走 daemon client 的 /api/companion/* 面
-  // (daemon 路由未落地前调用以显式错误失败,UI 走既有降级路径)。
+  // (daemon 限回环来源 + Local Daemon Token)。
   getCompanionStatus: (): Promise<CompanionStatus> =>
     companionViaDaemon.getStatus(),
   setCompanionEnabled: (enabled: boolean): Promise<CompanionStatus> =>

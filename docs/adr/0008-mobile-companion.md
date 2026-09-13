@@ -8,6 +8,8 @@ accepted — amended 2026-09 by [ADR 0011](./0011-daemon-authority-local-token.m
 
 > **Amendment (daemon-boundary):** Companion Server 在桌面进程启动后于回环地址常开，不再仅随「移动伴侣」开关启动。`companion.enabled` 仅控制局域网/中继暴露与配对 UI；关闭移动伴侣不停回环、不停 Scheduled Task、不撤销 Local Daemon Token。桌面 Shell 经 Local Daemon Token 访问回环；手机仍用 Pairing Token。详见 ADR 0011。
 
+> **Amendment (daemon-boundary, 实现面):** 开关这套管理面属于 Daemon：`/api/companion/{status,enabled,pairing-code/refresh,relay/enabled,relay/config}`。因为暴露策略是桌面本机的安全边界，这 5 条路由只接受**回环来源 + 有效令牌**，已配对手机不能远程开关。开关只重绑监听器（局域网 ↔ 回环），不重建 Daemon。
+
 > **Amendment (unified-frontend, 2026-09):** Decision 7 中「移动端前端为同仓 `src-mobile/`」已被取代：桌面渲染层改造为宿主无关的统一前端，`src-mobile/` 与 `npm run build:mobile` 已退役。三种宿主形态（Electron 壳、PC 浏览器、手机浏览器/PWA）共用 `src/` 一套代码与 `npm run build:web` 产出的 `dist-web/`，由 daemon 的 Companion 静态服务直接提供；配对、Connection Offer、中继/E2EE 与轮询回退逻辑已并入共享客户端。本文档其余决策（thin client、桌面权威、Pairing Token、复用 CodeMUX Event、PWA 形态）不变。
 
 ## Context

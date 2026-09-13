@@ -1142,6 +1142,22 @@ pub fn verify_pairing_token(conn: &Connection, token: &str) -> Result<Option<Pai
     Ok(None)
 }
 
+/// 已配对设备清单(移动伴侣面板展示「设备在线」用)。最新配对排在最前。
+pub fn list_paired_devices(conn: &Connection) -> Result<Vec<PairedDevice>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, paired_at, last_seen_at FROM companion_paired_devices ORDER BY paired_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(PairedDevice {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            paired_at: row.get(2)?,
+            last_seen_at: row.get(3)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
 fn timeline_event_with_sequence(sequence: i64, raw: &str) -> Result<Value> {
     let mut event: Value = serde_json::from_str(raw).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))

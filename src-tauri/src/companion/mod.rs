@@ -15,6 +15,7 @@ pub mod pairing_code;
 pub mod relay;
 pub mod routes_agent_runtime;
 pub mod routes_app_config;
+pub mod routes_companion;
 pub mod routes_control_plane;
 pub mod routes_extended;
 pub mod routes_history_import;

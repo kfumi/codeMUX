@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
@@ -37,6 +37,10 @@ pub struct CompanionInner {
     pub loopback_running: AtomicBool,
     /// LAN / relay exposure enabled (user-facing "移动伴侣").
     pub lan_exposed: AtomicBool,
+    /// 监听器代次:每次启动/停止监听都自增。旧监听器的收尾任务只在代次
+    /// 仍然匹配时才清运行标志 —— 否则「开/关移动伴侣」触发重启时,正在
+    /// 退出的旧任务会把新监听器的状态抹成「未运行」。
+    pub server_generation: AtomicU64,
     pub turn_active: Mutex<HashSet<String>>,
     pub message_queues: Mutex<HashMap<String, VecDeque<QueuedCompanionMessage>>>,
     /// Subagent ids currently believed running per session, maintained from
@@ -68,6 +72,7 @@ impl CompanionInner {
             port: RwLock::new(crate::config::types::CompanionConfig::default().port),
             loopback_running: AtomicBool::new(false),
             lan_exposed: AtomicBool::new(false),
+            server_generation: AtomicU64::new(0),
             turn_active: Mutex::new(HashSet::new()),
             message_queues: Mutex::new(HashMap::new()),
             running_subagents: Mutex::new(HashMap::new()),
@@ -95,6 +100,15 @@ impl CompanionInner {
 
     pub fn set_lan_exposed(&self, exposed: bool) {
         self.lan_exposed.store(exposed, Ordering::SeqCst);
+    }
+
+    /// 认领一代监听器:返回本代编号,供收尾任务判断自己是否仍是最新。
+    pub fn claim_server_generation(&self) -> u64 {
+        self.server_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn is_current_server_generation(&self, generation: u64) -> bool {
+        self.server_generation.load(Ordering::SeqCst) == generation
     }
 
     /// Backward-compatible alias: true when loopback daemon is listening.
@@ -435,5 +449,29 @@ mod tests {
         inner.set_loopback_running(false);
         assert!(!inner.is_loopback_running());
         assert!(!inner.is_enabled());
+    }
+
+    /// 开/关移动伴侣在请求内重启监听器:正在退出的旧监听器不得把新监听器
+    /// 的运行标志抹掉,否则 UI 会一直停在「未开启」。
+    #[test]
+    fn stale_listener_generation_cannot_clear_live_flags() {
+        let inner = CompanionInner::new();
+
+        let first = inner.claim_server_generation();
+        inner.set_loopback_running(true);
+        inner.set_lan_exposed(true);
+
+        // 第二代监听器已经接管(开关触发的重绑)。
+        let second = inner.claim_server_generation();
+        assert!(!inner.is_current_server_generation(first));
+        assert!(inner.is_current_server_generation(second));
+
+        // 旧监听器的收尾任务到这时才跑完 —— 它必须放手。
+        if inner.is_current_server_generation(first) {
+            inner.set_loopback_running(false);
+            inner.set_lan_exposed(false);
+        }
+        assert!(inner.is_loopback_running(), "新监听器仍在运行");
+        assert!(inner.is_lan_exposed(), "新监听器的暴露状态未被抹掉");
     }
 }

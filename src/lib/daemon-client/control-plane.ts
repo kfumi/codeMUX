@@ -274,8 +274,8 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
     providersFetchOpenCodeFreeModels: () =>
       fetch<unknown[]>(config, '/providers/opencode-free-models'),
 
-    // Companion(移动伴侣配对):daemon 侧 /api/companion/* 路由尚未落地,
-    // 未就绪时调用以显式错误失败,UI 走既有错误路径降级。
+    // Companion(移动伴侣配对):daemon 侧管理面路由(状态/开关/配对码/中继),
+    // 限回环来源 + Local Daemon Token。
     companionGetStatus: () => fetch(config, '/companion/status'),
     companionSetEnabled: (enabled: boolean) =>
       fetch(config, '/companion/enabled', {

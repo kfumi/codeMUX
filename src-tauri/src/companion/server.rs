@@ -32,6 +32,7 @@ use crate::companion::origin::{validate_web_origin, AllowedOrigins, WebOriginDec
 use crate::companion::pairing::complete_pairing;
 use crate::companion::routes_agent_runtime;
 use crate::companion::routes_app_config;
+use crate::companion::routes_companion;
 use crate::companion::routes_control_plane;
 use crate::companion::routes_extended;
 use crate::companion::routes_history_import;
@@ -233,11 +234,14 @@ async fn start_daemon_server_body(
     let companion_state = daemon.companion.clone();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
 
+    // 冷启动(没人在听)才轮换 Local Daemon Token;开关移动伴侣触发的重绑
+    // 不该把已经连着的桌面端 / CLI 踢下线(它们持的是上一次读到的令牌)。
+    let cold_start = !companion_state.inner.is_loopback_running();
     stop_daemon_server_inner(&companion_state).await?;
 
     let app_data_dir = daemon.app.app_data_dir.clone();
     let _token =
-        crate::companion::local_daemon_token::ensure_local_daemon_token(&app_data_dir, true)?;
+        crate::companion::local_daemon_token::ensure_local_daemon_token(&app_data_dir, cold_start)?;
 
     {
         let mut stored_port = companion_state.inner.port.write().await;
@@ -269,6 +273,10 @@ async fn start_daemon_server_body(
         *waiter = Some(stopped_rx);
     }
 
+    // 认领本代监听器:退出收尾只在代次仍然匹配时清状态。开/关移动伴侣会
+    // 在请求内重启监听器,旧监听器的收尾任务完成时新监听器可能已经在跑,
+    // 没有这道判断就会把新监听器抹成「未运行 / 未暴露」。
+    let generation = companion_state.inner.claim_server_generation();
     companion_state.inner.set_loopback_running(true);
     companion_state.inner.set_lan_exposed(expose_lan);
     info!(
@@ -299,8 +307,10 @@ async fn start_daemon_server_body(
         if let Err(error) = result {
             warn!(target: "companion", "Daemon server stopped with error: {}", error);
         }
-        companion_for_shutdown.set_loopback_running(false);
-        companion_for_shutdown.set_lan_exposed(false);
+        if companion_for_shutdown.is_current_server_generation(generation) {
+            companion_for_shutdown.set_loopback_running(false);
+            companion_for_shutdown.set_lan_exposed(false);
+        }
         let _ = stopped_tx.send(());
     });
 
@@ -426,6 +436,7 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
     let api = routes_extended::extend_api_router(api);
     let api = routes_agent_runtime::extend_api_router(api);
     let api = routes_history_import::extend_api_router(api);
+    let api = routes_companion::extend_api_router(api);
     let api = routes_app_config::extend_api_router(api);
     let api = routes_control_plane::extend_api_router(api);
     let api = routes_providers::extend_api_router(api);
@@ -1614,7 +1625,7 @@ mod headless_tests {
 }
 
 #[cfg(test)]
-mod web_static_tests {
+pub(crate) mod server_tests {
     use super::{build_router, ServerContext};
     use crate::daemon::DaemonState;
     use crate::paths::PathRoots;
@@ -1625,8 +1636,11 @@ mod web_static_tests {
     use std::sync::Arc;
     use tower::ServiceExt;
 
-    struct TestApp {
-        router: axum::Router,
+    /// 测试用最小 daemon + 路由(与生产 `build_router` 同构)。静态产物只
+    /// 在 `with_static = true` 时写入临时目录。
+    pub(crate) struct TestApp {
+        pub(crate) router: axum::Router,
+        pub(crate) daemon: Arc<DaemonState>,
         _daemon_temp: tempfile::TempDir,
         _static_temp: tempfile::TempDir,
     }
@@ -1634,12 +1648,15 @@ mod web_static_tests {
     const INDEX_MARKER: &str = "<html>unified-frontend-index</html>";
     const ASSET_BODY: &str = "export const app = 'asset';";
 
-    async fn assemble_test_app(allowed_origins: &[&str]) -> TestApp {
+    pub(crate) async fn assemble_test_app(allowed_origins: &[&str]) -> TestApp {
         assemble_test_app_with_static(allowed_origins, true).await
     }
 
     /// `with_static = false` 模拟没跑 `npm run build:web` 的机器。
-    async fn assemble_test_app_with_static(allowed_origins: &[&str], with_static: bool) -> TestApp {
+    pub(crate) async fn assemble_test_app_with_static(
+        allowed_origins: &[&str],
+        with_static: bool,
+    ) -> TestApp {
         let daemon_temp = tempfile::tempdir().expect("tempdir");
         let static_temp = tempfile::tempdir().expect("tempdir");
         if with_static {
@@ -1674,20 +1691,21 @@ mod web_static_tests {
         );
         TestApp {
             router,
+            daemon,
             _daemon_temp: daemon_temp,
             _static_temp: static_temp,
         }
     }
 
-    fn loopback_peer() -> SocketAddr {
+    pub(crate) fn loopback_peer() -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], 51000))
     }
 
-    fn lan_peer() -> SocketAddr {
+    pub(crate) fn lan_peer() -> SocketAddr {
         SocketAddr::from(([192, 168, 1, 8], 51000))
     }
 
-    async fn respond(
+    pub(crate) async fn respond(
         app: &TestApp,
         uri: &str,
         peer: SocketAddr,
@@ -1702,14 +1720,14 @@ mod web_static_tests {
         app.router.clone().oneshot(request).await.expect("oneshot")
     }
 
-    async fn body_text(response: axum::response::Response) -> String {
+    pub(crate) async fn body_text(response: axum::response::Response) -> String {
         let bytes = to_bytes(response.into_body(), 64 * 1024)
             .await
             .expect("read body");
         String::from_utf8_lossy(&bytes).to_string()
     }
 
-    async fn post_json(
+    pub(crate) async fn post_json(
         app: &TestApp,
         uri: &str,
         peer: SocketAddr,

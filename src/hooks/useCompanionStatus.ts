@@ -8,6 +8,11 @@ interface UseCompanionStatusOptions {
   polling?: boolean;
 }
 
+/** 展示用错误文案:`Error: ` 前缀对用户没意义,只保留 message。 */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
   const { pollIntervalMs = 12_000, polling = true } = options;
   const [status, setStatus] = useState<CompanionStatus | null>(null);
@@ -22,7 +27,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
       const next = await companionViaDaemon.getStatus();
       setStatus(next);
     } catch (err) {
-      setError(String(err));
+      setError(messageOf(err));
     } finally {
       setLoading(false);
     }
@@ -48,7 +53,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
       setStatus(next);
       return next;
     } catch (err) {
-      setError(String(err));
+      setError(messageOf(err));
       throw err;
     } finally {
       setBusy(false);
@@ -63,7 +68,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
       setStatus(next);
       return next;
     } catch (err) {
-      setError(String(err));
+      setError(messageOf(err));
       throw err;
     } finally {
       setBusy(false);
@@ -78,7 +83,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
       setStatus(next);
       return next;
     } catch (err) {
-      setError(String(err));
+      setError(messageOf(err));
       throw err;
     } finally {
       setBusy(false);
@@ -93,7 +98,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
       setStatus(next);
       return next;
     } catch (err) {
-      setError(String(err));
+      setError(messageOf(err));
       throw err;
     } finally {
       setBusy(false);

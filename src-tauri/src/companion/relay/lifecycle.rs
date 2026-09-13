@@ -23,7 +23,10 @@ pub async fn sync_relay_transport(
             config.companion.relay.clone(),
             config.companion.port,
             config.companion.desktop_id.clone().unwrap_or_default(),
-            companion_state.inner.is_enabled(),
+            // 中继属于「对外暴露」的一部分:关闭移动伴侣时不停回环,但中继必须停
+            // (工单 10 / ADR 0008 amendment)。is_enabled() 只是回环运行别名,
+            // 不能用来判定是否该连中继。
+            companion_state.inner.is_lan_exposed(),
         )
     };
 

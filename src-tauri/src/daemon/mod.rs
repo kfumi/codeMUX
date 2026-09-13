@@ -8,7 +8,7 @@
 //! 事件,Electron 壳经其 daemon WS 客户端承接后转发渲染层,headless
 //! 运行与测试传 [`NullUiEventSink`]。
 
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
 
 use crate::agent::session_lifecycle::AgentState;
@@ -123,15 +123,37 @@ pub async fn run_daemon_standalone(
     ui_sink.attach(daemon.companion.clone());
     // 一次性遗留数据迁移:原先由壳进程在启动时执行,现随权威 daemon 走。
     crate::agent::history_import::cleanup_legacy_timeline_artifacts(&daemon).await;
-    let (port, listen_address) = {
+    let (port, expose_lan, listen_address) = {
         let config = daemon.app.config.lock().unwrap();
         (
             port_override.unwrap_or(config.companion.port),
+            // 移动伴侣开关是持久设置:上次开着就按局域网暴露启动(ADR 0008
+            // amendment,companion.enabled 只控制对外暴露)。
+            config.companion.enabled,
             config.companion.listen_address.clone(),
         )
     };
 
-    crate::companion::start_daemon_server(daemon.clone(), port, false, listen_address).await?;
+    let started_exposed = expose_lan
+        && crate::companion::start_daemon_server(
+            daemon.clone(),
+            port,
+            true,
+            listen_address.clone(),
+        )
+        .await
+        .is_ok();
+    if !started_exposed {
+        if expose_lan {
+            // 局域网绑定失败(地址被占等)不能让 daemon 起不来:退回归环,由设置页
+            // 的开关重新触发。daemon_error 已由 start_daemon_server 记录。
+            warn!(
+                target: "daemon",
+                "Failed to expose mobile companion on LAN; falling back to loopback only"
+            );
+        }
+        crate::companion::start_daemon_server(daemon.clone(), port, false, listen_address).await?;
+    }
     run_state::write(
         &daemon.roots,
         &run_state::DaemonRunState {
