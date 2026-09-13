@@ -1533,7 +1533,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
               'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
             )}
           >
-            <DotMatrix state="loading" className="size-5" label="正在执行" />
+            <DotMatrix state="loading" className="size-4" label="正在执行" />
             <RunningElapsedTimer startTime={queryStartTime} label="正在执行" />
           </div>
         ) : null}

@@ -818,6 +818,21 @@ pub fn get_agent_session_mapping(
     }))
 }
 
+/// 反向查映射：某个 provider 原生会话是否已被任一 CodeMUX 会话占用。
+/// 导入扫描用它跳过原生在用的会话（导入会触发"原生会话冲突"）。
+pub fn agent_session_mapping_exists_for_native(
+    conn: &Connection,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM agent_session_mappings WHERE agent_kind = ?1 AND agent_session_id = ?2",
+        params![agent_kind.as_str(), agent_session_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 pub fn delete_agent_session_mapping(
     conn: &Connection,
     app_session_id: &str,
@@ -1743,15 +1758,17 @@ pub fn has_running_session_subagents(conn: &Connection, session_id: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        append_timeline_events, archive_session, clear_session_timeline, create_forked_session,
-        delete_agent_session_mapping, fetch_session_timeline, filter_new_timeline_event_indexes,
+        append_session_subagent_event, append_timeline_events, archive_session,
+        clear_session_timeline, create_forked_session, delete_agent_session_mapping,
+        delete_session, fetch_session_timeline, filter_new_timeline_event_indexes,
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
         get_all_sessions, get_model_distribution, get_session, get_session_events_after,
         get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
         list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline,
         sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
         unarchive_session, update_session_provider, update_session_reasoning_effort,
-        update_session_settings, upsert_agent_session_mapping, ImportedSessionSnapshot,
+        update_session_settings, upsert_agent_session_mapping, upsert_session_subagent,
+        ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -1771,6 +1788,116 @@ mod tests {
         let error = get_all_sessions(&conn).unwrap_err();
 
         assert!(error.to_string().contains("Unsupported agent kind"));
+    }
+
+    #[test]
+    fn detects_native_mapping_by_agent_session_id() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "pi", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        assert!(!super::agent_session_mapping_exists_for_native(
+            &conn,
+            AgentKind::Pi,
+            "native-pi-1"
+        )
+        .unwrap());
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::Pi, "native-pi-1").unwrap();
+        assert!(super::agent_session_mapping_exists_for_native(
+            &conn,
+            AgentKind::Pi,
+            "native-pi-1"
+        )
+        .unwrap());
+        assert!(!super::agent_session_mapping_exists_for_native(
+            &conn,
+            AgentKind::Pi,
+            "native-pi-2"
+        )
+        .unwrap());
+        assert!(!super::agent_session_mapping_exists_for_native(
+            &conn,
+            AgentKind::Codex,
+            "native-pi-1"
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn delete_session_cascades_to_all_session_scoped_rows() {
+        // 各智能体删除会话时，关联数据（映射、导入来源、时间线、子智能体及
+        // 其事件、原生会话登记）都靠外键级联清理；这条测试锁死该保证。
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "opencode", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::Opencode, "ses_native")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO session_sources (app_session_id, agent_kind, agent_session_id, source_locator, source_fingerprint, imported_at) VALUES ('session-1', 'opencode', 'ses_imported', 'loc', 'fp', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({"type": "user_message", "event_id": "evt-1", "content": "hi"})],
+        )
+        .unwrap();
+        upsert_session_subagent(
+            &mut conn,
+            &serde_json::json!({"session_id": "session-1", "subagent_id": "agent-1", "provider": "claude"}),
+        )
+        .unwrap();
+        append_session_subagent_event(
+            &mut conn,
+            &serde_json::json!({"session_id": "session-1", "subagent_id": "agent-1", "event": {"type": "assistant_message", "event_id": "sub-evt-1"}}),
+        )
+        .unwrap();
+
+        delete_session(&conn, "session-1").unwrap();
+
+        for (label, table, column) in [
+            ("sessions", "sessions", "id"),
+            (
+                "agent_session_mappings",
+                "agent_session_mappings",
+                "app_session_id",
+            ),
+            ("session_sources", "session_sources", "app_session_id"),
+            (
+                "session_event_snapshots",
+                "session_event_snapshots",
+                "session_id",
+            ),
+            ("session_subagents", "session_subagents", "session_id"),
+            (
+                "session_subagent_events",
+                "session_subagent_events",
+                "session_id",
+            ),
+            (
+                "session_native_sessions",
+                "session_native_sessions",
+                "session_id",
+            ),
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {column} = 'session-1'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{label} 应随会话级联删除");
+        }
     }
 
     #[test]

@@ -253,7 +253,12 @@ export class CodexAppServerRuntime {
         `[codex-app-server] Session ensured: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${this.threadId}\n`,
       );
       this.emitEvent({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-      this.emitEvent({ type: 'proxy_status', ...proxyManager.getStatus() });
+      this.emitEvent({
+        type: 'proxy_status',
+        // daemon 按 session_id 路由广播;缺失会被 timeline 过滤器丢弃
+        session_id: cmd.sessionId || '',
+        ...proxyManager.getStatus(),
+      });
       return;
     }
 
@@ -388,7 +393,12 @@ export class CodexAppServerRuntime {
     });
 
     this.emitEvent({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-    this.emitEvent({ type: 'proxy_status', ...proxyManager.getStatus() });
+    this.emitEvent({
+      type: 'proxy_status',
+      // daemon 按 session_id 路由广播;缺失会被 timeline 过滤器丢弃
+      session_id: requestedConfig.sessionId ?? '',
+      ...proxyManager.getStatus(),
+    });
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {

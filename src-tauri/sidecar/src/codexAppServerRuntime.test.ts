@@ -1981,6 +1981,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
           | Record<string, unknown>
           | undefined;
         expect(proxyStatus).toMatchObject({ running: true });
+        expect(proxyStatus?.session_id).toBe('sess_1');
         expect(String(proxyStatus?.upstreamBaseUrl)).toContain('gateway.example.com');
       } finally {
         await runtime.shutdown();

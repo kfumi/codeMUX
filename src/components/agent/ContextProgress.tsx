@@ -11,7 +11,7 @@ export function ContextProgress({ usedTokens, totalTokens }: ContextProgressProp
   const pct = Math.min(usedTokens / totalTokens, 1);
   const pctDisplay = (pct * 100).toFixed(1);
 
-  const color = pct > 0.8 ? 'text-[hsl(var(--destructive))]' : pct > 0.5 ? 'text-[hsl(var(--warning))]' : 'text-[hsl(var(--success))]';
+  const color = pct > 0.8 ? 'text-[hsl(var(--destructive))]' : pct > 0.5 ? 'text-[hsl(var(--warning))]' : 'text-muted-foreground/50';
 
   const r = 7;
   const circumference = 2 * Math.PI * r;

@@ -1925,6 +1925,16 @@ function createSessionEventHandler(
       return;
     }
 
+    // Side-band runtime status (compat proxy indicator): never enters the
+    // message timeline.
+    if (event.kind === 'proxy_status') {
+      const localUrl = event.data.running && event.data.port
+        ? `http://127.0.0.1:${event.data.port}`
+        : null;
+      useSettingsStore.getState().setProxyRunning(event.data.running, localUrl);
+      return;
+    }
+
     // Handle streaming events (thinking/text deltas + tool_use) separately
     if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
       if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
@@ -2491,13 +2501,6 @@ function createSessionEventHandler(
           mcpRuntimeStatus: { ...s.mcpRuntimeStatus, [sessionId]: event.data.status || null },
         }));
       }
-    }
-    // Update proxy status with local URL from sidecar
-    if (event.kind === 'proxy_status') {
-      const localUrl = event.data.running && event.data.port
-        ? `http://127.0.0.1:${event.data.port}`
-        : null;
-      useSettingsStore.getState().setProxyRunning(event.data.running, localUrl);
     }
 
     const isTerminalEvent = isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error));

@@ -273,6 +273,33 @@ describe('runtimeLoader', () => {
       expect(resolved).toBe(nested);
     });
 
+    it('resolves bin/ layout vendor binary (codex ≥0.146)', () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.146.1');
+      createRuntimePack(runtimePath);
+
+      const triple =
+        process.platform === 'win32'
+          ? process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
+          : process.platform === 'darwin'
+            ? process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
+            : process.arch === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl';
+      const binaryPath = path.join(
+        runtimePath,
+        'node_modules',
+        `@openai/codex-${process.platform}${process.arch === 'arm64' ? '-arm64' : '-x64'}`,
+        'vendor',
+        triple,
+        'bin',
+        process.platform === 'win32' ? 'codex.exe' : 'codex',
+      );
+      fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
+      fs.writeFileSync(binaryPath, 'binary');
+
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+      const resolved = resolveCodexFromRuntime(loaded);
+      expect(resolved).toBe(binaryPath);
+    });
+
     it('falls back to .bin shim', () => {
       const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
       createRuntimePack(runtimePath);

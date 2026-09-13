@@ -22,6 +22,7 @@ const CODE_MUX_DOMAIN_EVENT_TYPES: &[&str] = &[
     "diagnostic",
     "error",
     "turn_finished",
+    "proxy_status",
 ];
 
 /// Live-streaming scaffolding is broadcast to clients but never persisted: the
@@ -37,6 +38,10 @@ const LIVE_STREAMING_EVENT_TYPES: &[&str] = &[
     "content_finished",
 ];
 
+/// 会话侧带运行状态(如 compat 代理启停):只广播给在线客户端,不进时间线。
+/// 刷新/重放后由下一次 ensure 触发的新 proxy_status 刷新指示。
+const BROADCAST_ONLY_EVENT_TYPES: &[&str] = &["proxy_status"];
+
 pub(crate) fn is_code_mux_domain_event(value: &Value) -> bool {
     let Some(event_type) = value.get("type").and_then(|item| item.as_str()) else {
         return false;
@@ -50,6 +55,9 @@ pub(crate) fn should_persist_domain_event(value: &Value) -> bool {
     }
     let event_type = value.get("type").and_then(|item| item.as_str());
     if event_type.is_some_and(|event_type| LIVE_STREAMING_EVENT_TYPES.contains(&event_type)) {
+        return false;
+    }
+    if event_type.is_some_and(|event_type| BROADCAST_ONLY_EVENT_TYPES.contains(&event_type)) {
         return false;
     }
     if event_type != Some("system_event") {
@@ -253,6 +261,18 @@ mod tests {
                 "{event_type} must not persist"
             );
         }
+    }
+
+    #[test]
+    fn proxy_status_is_broadcast_only_domain_event() {
+        let event = serde_json::json!({
+            "type": "proxy_status",
+            "session_id": "s1",
+            "running": true,
+            "port": 15722,
+        });
+        assert!(is_code_mux_domain_event(&event));
+        assert!(!should_persist_domain_event(&event));
     }
 
     #[test]

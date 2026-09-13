@@ -471,7 +471,7 @@ function UsageRing({ percentage }: { percentage: number }) {
 function getProgressColor(percentage: number): string {
   if (percentage >= 90) return 'hsl(var(--destructive))';
   if (percentage >= 70) return 'hsl(var(--warning))';
-  return 'hsl(var(--success))';
+  return 'hsl(var(--muted-foreground))';
 }
 
 function ContextUsageSummary({ usage }: { usage: MobileContextUsage | null }) {

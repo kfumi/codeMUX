@@ -291,20 +291,25 @@ export function resolveCodexFromRuntime(
   const triple = codexTargetTriple(platform, arch);
   const binaryName = platform === 'win32' ? 'codex.exe' : 'codex';
   if (triple) {
-    const vendorRelative = ['vendor', triple, 'codex', binaryName];
+    // 平台包 vendor 布局:0.146 起二进制位于 `bin/` 子目录,旧版本位于
+    // `codex/`。回退到 .bin 的 .cmd shim 时参数会经 cmd.exe 重解析,JSON
+    // 引号被剥掉导致 codex 配置解析失败,因此必须优先命中真实二进制。
+    const vendorLayouts = [
+      ['vendor', triple, 'bin', binaryName],
+      ['vendor', triple, 'codex', binaryName],
+    ];
     const aliasPackage = `@openai/codex-${codexPlatformTag(platform)}-${codexArchTag(arch)}`;
     const candidates = [
-      path.join(loaded.nodeModulesPath, aliasPackage, ...vendorRelative),
+      path.join(loaded.nodeModulesPath, aliasPackage),
       path.join(
         loaded.nodeModulesPath,
         '@openai',
         'codex',
         'node_modules',
         aliasPackage,
-        ...vendorRelative,
       ),
-      path.join(loaded.nodeModulesPath, '@openai', 'codex', ...vendorRelative),
-    ];
+      path.join(loaded.nodeModulesPath, '@openai', 'codex'),
+    ].flatMap((baseDir) => vendorLayouts.map((layout) => path.join(baseDir, ...layout)));
     const found = candidates.find((candidate) => fs.existsSync(candidate));
     if (found) return found;
   }

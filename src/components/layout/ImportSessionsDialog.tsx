@@ -199,6 +199,7 @@ export function ImportSessionsDialog({
                 <SelectItem value="claude_code">Claude Code</SelectItem>
                 <SelectItem value="codex">Codex</SelectItem>
                 <SelectItem value="opencode">OpenCode</SelectItem>
+                <SelectItem value="pi">pi</SelectItem>
                 <SelectItem value="all">全部来源（较慢）</SelectItem>
               </SelectContent>
             </Select>

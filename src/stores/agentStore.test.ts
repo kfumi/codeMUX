@@ -532,8 +532,47 @@ describe('agent store Codex history loading', () => {
     expect(sessionHandlers.has(session.id)).toBe(true);
   });
 
-  it('attachLiveSession is a no-op when the daemon turn is not active', async () => {
+  it('proxy_status updates the settings indicator without entering the timeline', async () => {
     const { useAgentStore } = await import('./agentStore');
+    const { useSettingsStore } = await import('./settingsStore');
+    const { daemonFacade } = await import('../lib/facades/daemon-facade');
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+
+    expect(await useAgentStore.getState().attachLiveSession(session.id)).toBe(true);
+
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'proxy_status',
+      session_id: session.id,
+      running: true,
+      port: 15722,
+      upstreamBaseUrl: 'https://gateway.example.com/v1',
+    }));
+
+    await vi.waitFor(() => {
+      expect(useSettingsStore.getState().proxyRunning).toBe(true);
+    });
+    expect(useSettingsStore.getState().proxyUrl).toBe('http://127.0.0.1:15722');
+    expect(
+      (useAgentStore.getState().events[session.id] ?? []).some((entry) => entry.kind === 'proxy_status'),
+    ).toBe(false);
+
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'proxy_status',
+      session_id: session.id,
+      running: false,
+      port: null,
+      upstreamBaseUrl: null,
+    }));
+
+    await vi.waitFor(() => {
+      expect(useSettingsStore.getState().proxyRunning).toBe(false);
+    });
+    expect(useSettingsStore.getState().proxyUrl).toBeNull();
+  });
+
+  it('attachLiveSession is a no-op when the daemon turn is not active', async () => {    const { useAgentStore } = await import('./agentStore');
     const { daemonFacade } = await import('../lib/facades/daemon-facade');
     const session = await primeSession('codex');
     sessionHandlers.clear();

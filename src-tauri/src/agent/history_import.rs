@@ -74,14 +74,17 @@ pub async fn discover_importable_sessions_for_companion(
 ) -> Result<Vec<ImportCandidate>, String> {
     let home = home_dir()?;
     let agent_kind = parse_agent_kind_filter(agent_kind)?;
-    let discovered = tokio::task::spawn_blocking(move || discover_all(&home, agent_kind))
-        .await
-        .map_err(|error| format!("扫描外部会话失败: {}", error))??;
+    let managed_pi_root = managed_pi_sessions_root(state);
+    let discovered = tokio::task::spawn_blocking(move || {
+        discover_all(&home, managed_pi_root.as_deref(), agent_kind)
+    })
+    .await
+    .map_err(|error| format!("扫描外部会话失败: {}", error))??;
     let db = state.db.lock().unwrap();
 
     Ok(discovered
         .into_iter()
-        .map(|snapshot| {
+        .filter_map(|snapshot| {
             let already_imported = operations::get_imported_source(
                 &db,
                 snapshot.candidate.agent_kind,
@@ -90,10 +93,22 @@ pub async fn discover_importable_sessions_for_companion(
             .ok()
             .flatten()
             .is_some();
-            ImportCandidate {
+            // 已被某个 CodeMUX 会话映射（原生在用）且不是导入来源的候选，
+            // 导入必然触发"原生会话冲突"，直接跳过不展示。
+            if !already_imported
+                && operations::agent_session_mapping_exists_for_native(
+                    &db,
+                    snapshot.candidate.agent_kind,
+                    &snapshot.candidate.agent_session_id,
+                )
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            Some(ImportCandidate {
                 already_imported,
                 ..snapshot.candidate
-            }
+            })
         })
         .collect())
 }
@@ -104,7 +119,8 @@ pub fn import_sessions_for_companion(
 ) -> Result<ImportSessionsResult, String> {
     let home = home_dir()?;
     let agent_kind = parse_agent_kind_filter(request.agent_kind.clone())?;
-    let discovered = discover_all(&home, agent_kind)?;
+    let managed_pi_root = managed_pi_sessions_root(state);
+    let discovered = discover_all(&home, managed_pi_root.as_deref(), agent_kind)?;
     let by_key: HashMap<String, DiscoveredSnapshot> = discovered
         .into_iter()
         .map(|snapshot| (snapshot.candidate.key.clone(), snapshot))
@@ -727,8 +743,20 @@ fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, S
         .transpose()
 }
 
+/// CodeMUX 托管 pi 运行时的会话目录（PI_CODING_AGENT_DIR 重定向目标，
+/// 见 session_lifecycle 的 piConfigDir）。托管目录里未被任何 CodeMUX 会话
+/// 映射的 pi 会话文件（如清理失败的遗留）也应可被导入。
+fn managed_pi_sessions_root(state: &crate::AppState) -> Option<PathBuf> {
+    state
+        .runtime_resolver
+        .root()
+        .parent()
+        .map(|root| root.join("pi-agent").join("sessions"))
+}
+
 fn discover_all(
     home: &Path,
+    managed_pi_root: Option<&Path>,
     agent_kind: Option<AgentKind>,
 ) -> Result<Vec<DiscoveredSnapshot>, String> {
     let mut snapshots = Vec::new();
@@ -742,7 +770,7 @@ fn discover_all(
         snapshots.extend(discover_opencode(home));
     }
     if agent_kind.is_none() || agent_kind == Some(AgentKind::Pi) {
-        snapshots.extend(discover_pi(home));
+        snapshots.extend(discover_pi(home, managed_pi_root));
     }
     snapshots.sort_by(|left, right| right.candidate.updated_at.cmp(&left.candidate.updated_at));
     Ok(snapshots)
@@ -884,8 +912,27 @@ fn opencode_session_directories(connection: &Connection) -> HashMap<String, Stri
         .collect()
 }
 
-fn discover_pi(home: &Path) -> Vec<DiscoveredSnapshot> {
-    discover_pi_in_root(&pi_native_sessions_root(home))
+/// pi 存量会话发现：同时扫描用户原生 pi CLI 的会话目录（`~/.pi/agent/sessions/`
+/// 等按 pi 自身规则解析，见 `pi_native_sessions_root`）与 CodeMUX 托管 pi 运行时
+/// 的会话目录。严格校验 `type:"session"` 头，非会话 JSONL 直接跳过（宁漏勿错）；
+/// 树形会话只取活动分支链（`convert_pi_history_values_to_events` 内处理）。
+/// pi 的 native mapping 是会话文件绝对路径（`--session <file>` 恢复语义），
+/// 同一文件在多个根出现时按路径去重。
+fn discover_pi(home: &Path, managed_root: Option<&Path>) -> Vec<DiscoveredSnapshot> {
+    let mut roots = vec![pi_native_sessions_root(home)];
+    if let Some(managed_root) = managed_root {
+        roots.push(managed_root.to_path_buf());
+    }
+    let mut snapshots = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+    for root in roots {
+        for snapshot in discover_pi_in_root(&root) {
+            if seen_paths.insert(snapshot.candidate.agent_session_id.clone()) {
+                snapshots.push(snapshot);
+            }
+        }
+    }
+    snapshots
 }
 
 /// pi 存量会话发现：扫描用户原生 pi CLI 的会话目录（`~/.pi/agent/sessions/`，
@@ -1323,6 +1370,60 @@ mod tests {
             .iter()
             .all(|event| event.get("cwd").and_then(Value::as_str)
                 == Some("D:/project/ai-code/codeMUX")));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn discovers_pi_sessions_from_native_and_managed_roots() {
+        let home = test_home("pi-roots");
+        let session_jsonl = concat!(
+            "{\"type\":\"session\",\"version\":3,\"id\":\"pi-uuid-1\",\"timestamp\":\"2026-09-03T08:00:00.000Z\",\"cwd\":\"C:/demo\"}\n",
+            "{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-09-03T08:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"导入我\"}]}}\n",
+            "{\"type\":\"message\",\"id\":\"a1\",\"parentId\":\"u1\",\"timestamp\":\"2026-09-03T08:00:06.000Z\",\"message\":{\"role\":\"assistant\",\"stopReason\":\"stop\",\"content\":[{\"type\":\"text\",\"text\":\"好的\"}]}}\n"
+        );
+        let native_dir = home
+            .join(".pi")
+            .join("agent")
+            .join("sessions")
+            .join("--C--demo--");
+        fs::create_dir_all(&native_dir).unwrap();
+        let native_file = native_dir.join("20260903_ab12cd34.jsonl");
+        fs::write(&native_file, session_jsonl).unwrap();
+
+        // CodeMUX 托管 pi 运行时目录（<runtimeRoot>/pi-agent/sessions）。
+        let managed_root = home.join("managed").join("pi-agent").join("sessions");
+        let managed_dir = managed_root.join("--D--managed--");
+        fs::create_dir_all(&managed_dir).unwrap();
+        let managed_file = managed_dir.join("20260904_cd34ab12.jsonl");
+        fs::write(&managed_file, session_jsonl).unwrap();
+
+        let snapshots = discover_pi(&home, Some(&managed_root));
+        let paths: std::collections::HashSet<&str> = snapshots
+            .iter()
+            .map(|snapshot| snapshot.candidate.agent_session_id.as_str())
+            .collect();
+        assert_eq!(paths.len(), 2, "原生根与托管根各出一个候选: {paths:?}");
+        assert!(
+            paths.contains(native_file.to_string_lossy().as_ref()),
+            "应包含原生根会话: {paths:?}"
+        );
+        assert!(paths.contains(managed_file.to_string_lossy().as_ref()));
+
+        // 托管根与原生根相同（或包含同一文件）时按路径去重。
+        let deduped = discover_pi(
+            &home,
+            Some(&home.join(".pi").join("agent").join("sessions")),
+        );
+        assert_eq!(deduped.len(), 1);
+
+        // 不传托管根时只扫原生目录。
+        let native_only = discover_pi(&home, None);
+        assert_eq!(native_only.len(), 1);
+        assert_eq!(
+            native_only[0].candidate.agent_session_id,
+            native_file.to_string_lossy()
+        );
 
         let _ = fs::remove_dir_all(home);
     }
