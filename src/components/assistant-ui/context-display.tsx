@@ -1,7 +1,6 @@
 "use client";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 type ContextDisplayProps = {
   usedTokens: number;
@@ -31,7 +30,7 @@ export function ContextDisplay({
 
   const rows = [
     { label: '输入', value: inputTokens },
-    { label: '缓存', value: cachedTokens },
+    { label: '缓存输入', value: cachedTokens },
     { label: '输出', value: outputTokens },
     { label: '思考', value: reasoningTokens },
   ].filter((row) => typeof row.value === 'number' && row.value > 0);
@@ -41,7 +40,8 @@ export function ContextDisplay({
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-8 shrink-0 self-center items-center gap-2 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          data-slot="context-display-trigger"
+          className="inline-flex h-8 shrink-0 self-center items-center justify-center rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           aria-label="查看上下文使用情况"
         >
           <UsageRing percentage={percentage} />
@@ -52,31 +52,42 @@ export function ContextDisplay({
         side="bottom"
         align="end"
         sideOffset={8}
-        className="w-56 rounded-xl border border-border bg-popover p-0 text-popover-foreground shadow-lg"
+        data-slot="context-display-popover"
+        className="w-64 rounded-xl border border-border p-0 text-popover-foreground shadow-lg !bg-popover !dark:bg-popover"
       >
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-sm font-medium text-foreground">上下文</span>
-          <span
-            className="text-sm font-medium text-foreground"
-          >
-            {percentageLabel}
+          <span className="text-sm font-medium tabular-nums text-foreground">
+            {formatCompactTokens(usedTokens)}/{formatCompactTokens(totalTokens)} ({percentageLabel})
           </span>
         </div>
 
-        <div className="border-t border-border px-4 py-3">
-          <div className="space-y-2">
-            {rows.map((row) => (
-              <StatRow key={row.label} label={row.label} value={row.value!} />
-            ))}
+        <div className="px-4 pb-3">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${Math.max(percentage, 0.5)}%`,
+                backgroundColor: getProgressColor(percentage),
+              }}
+            />
           </div>
         </div>
 
+        {rows.length > 0 && (
+          <div className="border-t border-border px-4 py-3">
+            <div className="space-y-2">
+              {rows.map((row) => (
+                <StatRow key={row.label} label={row.label} value={row.value!} />
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between border-t border-border px-4 py-3">
-          <span className="text-sm font-medium text-foreground">总计</span>
-          <span
-            className="text-sm font-medium text-foreground"
-          >
-            {formatCompactTokens(usedTokens)} / {formatCompactTokens(totalTokens)}
+          <span className="text-sm font-medium text-foreground">平均缓存命中率</span>
+          <span className="text-sm font-medium tabular-nums text-foreground">
+            {getCacheHitRate(inputTokens, cachedTokens)}
           </span>
         </div>
       </TooltipContent>
@@ -123,9 +134,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
       <span className="text-muted-foreground/82">{label}</span>
-      <span
-        className={cn('font-medium text-foreground')}
-      >
+      <span className="font-medium tabular-nums text-foreground">
         {formatCompactTokens(value)}
       </span>
     </div>
@@ -133,8 +142,8 @@ function StatRow({ label, value }: { label: string; value: number }) {
 }
 
 function getProgressColor(percentage: number) {
-  if (percentage >= 90) return 'hsl(var(--destructive))';
-  if (percentage >= 70) return 'hsl(var(--warning))';
+  if (percentage >= 85) return 'hsl(var(--destructive))';
+  if (percentage >= 65) return 'hsl(var(--warning))';
   return 'hsl(var(--muted-foreground))';
 }
 
@@ -142,4 +151,13 @@ function formatCompactTokens(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
   return value.toLocaleString();
+}
+
+function getCacheHitRate(inputTokens?: number, cachedTokens?: number): string {
+  const input = inputTokens ?? 0;
+  const cached = cachedTokens ?? 0;
+  const total = input + cached;
+  if (total <= 0) return '--';
+  const rate = (cached / total) * 100;
+  return `${Math.round(rate)}%`;
 }
