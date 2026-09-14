@@ -703,7 +703,7 @@ function UserMessage({
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
       data-message-row
-      className="group/message-row relative mb-3 flex w-full justify-end"
+      className="group/message-row mb-3 flex w-full justify-end"
     >
       <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
         {imageAttachments.length > 0 ? (
@@ -727,8 +727,8 @@ function UserMessage({
             onToggle={() => setExpanded((value) => !value)}
           />
         ) : null}
-        <div className="pointer-events-none absolute bottom-0 right-0 z-10 flex items-center justify-end gap-1 rounded-md bg-[hsl(var(--background))]/88 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 group-focus-within/message-row:pointer-events-auto group-focus-within/message-row:opacity-100 group-hover/message-row:pointer-events-auto group-hover/message-row:opacity-100">
-          <MessageFooter timestamp={timestamp} className="-mt-1.5 justify-end" revealOnHover />
+        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-focus-within/message-row:opacity-100 group-hover/message-row:opacity-100">
+          <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
             <DropdownMenu>
               <Tooltip>
