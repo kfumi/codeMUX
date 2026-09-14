@@ -1461,7 +1461,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('21:40')).toBeNull();
 
     const row = screen.getByText('timestamp only assistant').closest('[data-message-row]');
-    expect(row?.className).toContain('mb-5');
+    // 末行间距由 LastMessageIdContext 决定（mb-2），与 footer 是否渲染解耦。
+    expect(row?.className).toContain('mb-2');
   });
 
   it('keeps final message footer hidden until the full message row is hovered', () => {

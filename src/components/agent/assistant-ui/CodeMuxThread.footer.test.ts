@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { shouldRenderAssistantFooter } from './CodeMuxThread';
+import { assistantMessageBottomSpacing, shouldRenderAssistantFooter } from './CodeMuxThread';
 
 const baseInput = {
   role: 'assistant' as const,
@@ -64,5 +64,38 @@ describe('shouldRenderAssistantFooter', () => {
       ...baseInput,
       turnId: undefined,
     })).toBe(false);
+  });
+});
+
+describe('assistantMessageBottomSpacing', () => {
+  it('紧邻发送框的最后一条消息只保留小间距', () => {
+    expect(assistantMessageBottomSpacing({
+      isLastRow: true,
+      isToggleMessage: false,
+      shouldRenderFooter: true,
+    })).toBe('mb-2');
+    expect(assistantMessageBottomSpacing({
+      isLastRow: true,
+      isToggleMessage: false,
+      shouldRenderFooter: false,
+    })).toBe('mb-2');
+  });
+
+  it('历史消息保持原有节奏：footer 行 mb-4，其余 mb-5', () => {
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: false,
+      shouldRenderFooter: true,
+    })).toBe('mb-4');
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: false,
+      shouldRenderFooter: false,
+    })).toBe('mb-5');
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: true,
+      shouldRenderFooter: false,
+    })).toBe('mb-4');
   });
 });

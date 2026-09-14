@@ -83,8 +83,6 @@ type CodeMuxThreadRenderContextValue = {
   sessionId: string;
   compactAiOutput: boolean;
   isRunning: boolean;
-  events: AgentMessage[];
-  latestRewindableUserIndex: number | null;
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
@@ -120,6 +118,23 @@ const GROUP_BY_PART = (
 };
 const CodeMuxThreadRenderContext = createContext<CodeMuxThreadRenderContextValue | null>(null);
 
+/** Turn layout signature: everything message rows derive from a turn
+ * (footer status, duration, event placement, ordinal stability). */
+function turnSignatureEqual(a: ConversationTurn<AgentMessage>, b: ConversationTurn<AgentMessage>): boolean {
+  return a.id === b.id
+    && a.status === b.status
+    && a.durationMs === b.durationMs
+    && a.footerAnchorEventIndex === b.footerAnchorEventIndex
+    && a.eventIndices.length === b.eventIndices.length
+    && a.eventIndices.every((index, i) => index === b.eventIndices[i]);
+}
+const LastMessageIdContext = createContext<string | null>(null);
+
+function useIsLastMessage(message: MessageState): boolean {
+  const lastMessageId = useContext(LastMessageIdContext);
+  return lastMessageId != null && message.id === lastMessageId;
+}
+
 /** Main-thread footer rule: public rule + a completed, non-system turn.
  * Footer suppression is turn-scoped — only the turn still in flight
  * (`turnId === pendingTurnId`) waits for the async subagent flow to settle;
@@ -141,6 +156,24 @@ export function shouldRenderAssistantFooter(input: {
     && input.turnId !== undefined
     && input.turnId !== input.pendingTurnId;
 }
+
+/** Bottom margin of an assistant row: the row right above the composer keeps
+ * only a small tail — the composer's sticky footer already adds its own
+ * breathing room. */
+export function assistantMessageBottomSpacing(input: {
+  isLastRow: boolean;
+  isToggleMessage: boolean;
+  shouldRenderFooter: boolean;
+}): string {
+  if (input.isLastRow) {
+    return 'mb-2';
+  }
+  if (input.isToggleMessage || input.shouldRenderFooter) {
+    return 'mb-4';
+  }
+  return 'mb-5';
+}
+
 const MESSAGE_COMPONENTS = {
   UserMessage: CodeMuxUserMessage,
   UserEditComposer: CodeMuxUserEditComposer,
@@ -230,14 +263,34 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return newResult;
   }, [events]);
 
-  const turnByEventIndex = useMemo(
-    () => buildConversationTurnIndex(conversationTurns),
-    [conversationTurns],
-  );
-  const turnOrdinalById = useMemo(
-    () => new Map(conversationTurns.map((turn, index) => [turn.id, index])),
-    [conversationTurns],
-  );
+  // Turn index caches: turns are rebuilt on every event append, but during a
+  // live stream the turn layout rarely changes. Reusing the previous Map (and
+  // turn objects) when the turn signatures match keeps the render-context value
+  // — and with it every memoized message row — identity-stable.
+  const turnIndexCacheRef = useRef<{
+    turns: ConversationTurn<AgentMessage>[];
+    turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
+    turnOrdinalById: Map<string, number>;
+  }>({ turns: [], turnByEventIndex: new Map(), turnOrdinalById: new Map() });
+  const { turnByEventIndex, turnOrdinalById } = useMemo(() => {
+    const cache = turnIndexCacheRef.current;
+    if (
+      cache.turns.length === conversationTurns.length
+      && cache.turns.every((turn, index) => (
+        turn === conversationTurns[index]
+        || turnSignatureEqual(turn, conversationTurns[index])
+      ))
+    ) {
+      return cache;
+    }
+    const next = {
+      turns: conversationTurns,
+      turnByEventIndex: buildConversationTurnIndex(conversationTurns),
+      turnOrdinalById: new Map(conversationTurns.map((turn, index) => [turn.id, index])),
+    };
+    turnIndexCacheRef.current = next;
+    return next;
+  }, [conversationTurns]);
   const sessionHasSubagents = useSubagentStore((state) => (state.sessions[sessionId]?.order.length ?? 0) > 0);
   const runningSubagentCount = useSubagentStore((state) => {
     const session = state.sessions[sessionId];
@@ -267,26 +320,53 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
     [events],
   );
-  const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
+  const collapseCacheRef = useRef<{
+    events: AgentMessage[];
+    timestamps: number[];
+    flags: string;
+    map: Map<number, AssistantCollapseInfo>;
+  }>({ events: [], timestamps: [], flags: '', map: new Map() });
   const collapseInfoByEventIndex = useMemo(() => {
+    const cache = collapseCacheRef.current;
+    const flags = `${isRunning}|${stopped}|${subagentFlowPending}`;
+    if (
+      cache.events === events
+      && cache.timestamps === eventTimestamps
+      && cache.flags === flags
+    ) {
+      return cache.map;
+    }
     const map = buildAssistantCollapseInfoMap(events, eventTimestamps, {
       allowImplicitResult: !isRunning && !stopped,
     });
     // While the async subagent flow is unsettled the latest turn must keep
     // looking alive — collapsing it into "已处理 32s" reads as finished even
     // though background children are still running.
-    if (!subagentFlowPending) {
-      return map;
+    const finalMap = subagentFlowPending ? omitLatestTurnCollapse(map, events) : map;
+    // Reuse the previous map reference when entries are equivalent so the
+    // render-context value stays stable across unrelated event appends.
+    if (
+      cache.map.size === finalMap.size
+      && [...finalMap].every(([index, info]) => {
+        const prev = cache.map.get(index);
+        return prev != null
+          && prev.turnKey === info.turnKey
+          && prev.isToggleMessage === info.isToggleMessage
+          && prev.durationMs === info.durationMs
+          && prev.hideReasoningOnly === info.hideReasoningOnly;
+      })
+    ) {
+      collapseCacheRef.current = { events, timestamps: eventTimestamps, flags, map: cache.map };
+      return cache.map;
     }
-    return omitLatestTurnCollapse(map, events);
+    collapseCacheRef.current = { events, timestamps: eventTimestamps, flags, map: finalMap };
+    return finalMap;
   }, [events, eventTimestamps, isRunning, stopped, subagentFlowPending]);
 
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
     isRunning,
-    events,
-    latestRewindableUserIndex,
     collapseInfoByEventIndex,
     expandedTurnKeys,
     onToggleExpandedTurn: toggleExpandedTurn,
@@ -298,8 +378,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     sessionId,
     compactAiOutput,
     isRunning,
-    events,
-    latestRewindableUserIndex,
     collapseInfoByEventIndex,
     expandedTurnKeys,
     toggleExpandedTurn,
@@ -338,7 +416,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               <SubagentRunningRow sessionId={sessionId} />
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
-                className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
+                className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-1 pb-4"
               >
                 {scrollToBottomButton}
                 {footer}
@@ -438,9 +516,10 @@ function ScrollToBottomButton({
 
 function CodeMuxThreadMessages() {
   const messageIds = unstable_useThreadMessageIds();
+  const lastMessageId = messageIds.length > 0 ? messageIds[messageIds.length - 1] : null;
 
   return (
-    <>
+    <LastMessageIdContext.Provider value={lastMessageId}>
       {messageIds.map((messageId) => (
         <ThreadPrimitive.Unstable_MessageById
           key={messageId}
@@ -448,7 +527,7 @@ function CodeMuxThreadMessages() {
           components={MESSAGE_COMPONENTS}
         />
       ))}
-    </>
+    </LastMessageIdContext.Provider>
   );
 }
 
@@ -478,9 +557,14 @@ function showRewindResultToast(mode: RewindMode, filesChanged?: number) {
 
 function CodeMuxUserMessage() {
   const message = useAuiState((state) => state.message);
-  const { sessionId, isRunning, events } = useCodeMuxThreadRenderContext();
+  const { sessionId, isRunning } = useCodeMuxThreadRenderContext();
   const rewindToMessage = useAgentStore((state) => state.rewindToMessage);
   const requestComposerRestore = useAgentStore((state) => state.requestComposerRestore);
+  const sourceEventIndex = getSourceEventIndex(message);
+  const event = useAgentStore((state) => {
+    const list = state.events[sessionId] ?? EMPTY_EVENTS;
+    return sourceEventIndex != null ? list[sourceEventIndex] : undefined;
+  });
   const agentKind = useSessionStore((state) =>
     (state.sessions.find((session) => session.id === sessionId)
       ?? state.archivedSessions.find((session) => session.id === sessionId))?.agent_kind,
@@ -490,8 +574,6 @@ function CodeMuxUserMessage() {
       ?? state.archivedSessions.find((session) => session.id === sessionId))?.is_read_only ?? false,
   );
   const [isRewinding, setIsRewinding] = useState(false);
-  const sourceEventIndex = getSourceEventIndex(message);
-  const event = sourceEventIndex != null ? events[sourceEventIndex] : undefined;
   const rewindModes: RewindMode[] = agentKind
     ? (['conversation', 'files', 'both'] as const).filter((mode) => AGENT_REWIND_CAPABILITIES[agentKind][mode])
     : [];
@@ -621,7 +703,7 @@ function UserMessage({
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
       data-message-row
-      className="group/message-row mb-5 flex w-full justify-end"
+      className="group/message-row relative mb-3 flex w-full justify-end"
     >
       <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
         {imageAttachments.length > 0 ? (
@@ -645,8 +727,8 @@ function UserMessage({
             onToggle={() => setExpanded((value) => !value)}
           />
         ) : null}
-        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
-          <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
+        <div className="pointer-events-none absolute bottom-0 right-0 z-10 flex items-center justify-end gap-1 rounded-md bg-[hsl(var(--background))]/88 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 group-focus-within/message-row:pointer-events-auto group-focus-within/message-row:opacity-100 group-hover/message-row:pointer-events-auto group-hover/message-row:opacity-100">
+          <MessageFooter timestamp={timestamp} className="-mt-1.5 justify-end" revealOnHover />
           {canRewind ? (
             <DropdownMenu>
               <Tooltip>
@@ -658,7 +740,7 @@ function UserMessage({
                       size="icon"
                       aria-label={rewindTooltip}
                       disabled={isRewinding}
-                      className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:ring-0 disabled:pointer-events-none disabled:opacity-40"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:ring-0 disabled:pointer-events-none disabled:opacity-40"
                     >
                       {isRewinding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
                     </Button>
@@ -769,22 +851,6 @@ function UserEditComposer({ message, sourceEventIndex }: { message: MessageState
       </ComposerPrimitive.Root>
     </MessagePrimitive.Root>
   );
-}
-
-function findLatestRewindableUserIndex(events: AgentMessage[]): number | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind !== 'user') {
-      continue;
-    }
-    const hasText = event.data.content.trim().length > 0;
-    const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
-    if ((hasText || hasAttachments) && !isInterruptMarker(event.data.content)) {
-      return index;
-    }
-  }
-
-  return null;
 }
 
 function getImageAttachmentItems(message: MessageState): Array<{ id: string; name: string; src: string }> {
@@ -1156,6 +1222,7 @@ function AssistantLikeMessage({
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
+  const isLastRow = useIsLastMessage(message);
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   if (message.content.length === 0 && !collapseInfo?.isToggleMessage) {
     return null;
@@ -1209,11 +1276,11 @@ function AssistantLikeMessage({
       setIsForking(false);
     }
   };
-  const messageBottomSpacing = shouldHideCollapsedContent && collapseInfo?.isToggleMessage
-    ? 'mb-4'
-    : shouldRenderFooter
-      ? 'mb-4'
-      : 'mb-5';
+  const messageBottomSpacing = assistantMessageBottomSpacing({
+    isLastRow,
+    isToggleMessage: collapseInfo?.isToggleMessage === true,
+    shouldRenderFooter,
+  });
 
   return (
     <MessagePrimitive.Root
@@ -1661,7 +1728,8 @@ export function incrementToolDurationMap(
   events: AgentMessage[],
   fromIndex: number,
 ): Record<string, number> {
-  const durations = { ...prevDurations };
+  let changed = false;
+  let durations = prevDurations;
 
   // Only process new events for tool_progress and task_notification
   for (let index = fromIndex; index < events.length; index++) {
@@ -1671,7 +1739,11 @@ export function incrementToolDurationMap(
       const toolUseId = event.data.tool_use_id;
       const elapsed = event.data.elapsed_time_seconds;
       if (typeof toolUseId === 'string' && typeof elapsed === 'number') {
-        durations[toolUseId] = Math.round(elapsed * 1000);
+        if (durations[toolUseId] !== Math.round(elapsed * 1000)) {
+          if (durations === prevDurations) durations = { ...prevDurations };
+          durations[toolUseId] = Math.round(elapsed * 1000);
+          changed = true;
+        }
       }
     }
 
@@ -1681,12 +1753,18 @@ export function incrementToolDurationMap(
       const usage = isRecord(data.usage) ? data.usage : undefined;
       const durationMs = usage?.duration_ms;
       if (typeof toolUseId === 'string' && typeof durationMs === 'number' && durationMs > 0) {
-        durations[toolUseId] = durationMs;
+        if (durations[toolUseId] !== durationMs) {
+          if (durations === prevDurations) durations = { ...prevDurations };
+          durations[toolUseId] = durationMs;
+          changed = true;
+        }
       }
     }
   }
 
-  return durations;
+  // Keep the previous reference when nothing changed so downstream memoization
+  // (context value / memoized rows) survives unrelated event appends.
+  return changed ? durations : prevDurations;
 }
 
 export function buildToolDurationMap(events: AgentMessage[]): Record<string, number> {
