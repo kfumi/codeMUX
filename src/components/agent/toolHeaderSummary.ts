@@ -335,3 +335,53 @@ function asDisplayText(value: unknown) {
     return String(value);
   }
 }
+
+/** Action phrases for tool-group summaries: 「读取 2 次文件 · 运行 1 个命令」 style.
+ * Keyed by the normalized tool name; unlisted tools (incl. MCP servers) fall back
+ * to 「{displayName} {count} 次」. */
+const TOOL_GROUP_PHRASES: Record<string, (count: number) => string> = {
+  Read: (n) => `读取 ${n} 次文件`,
+  Write: (n) => `写入 ${n} 次文件`,
+  Edit: (n) => `编辑 ${n} 次文件`,
+  MultiEdit: (n) => `批量编辑 ${n} 次文件`,
+  NotebookRead: (n) => `读取 ${n} 次 Notebook`,
+  NotebookEdit: (n) => `编辑 ${n} 次 Notebook`,
+  LS: (n) => `列出 ${n} 次目录`,
+  Glob: (n) => `匹配 ${n} 次文件`,
+  Grep: (n) => `搜索 ${n} 次文本`,
+  Bash: (n) => `运行 ${n} 个命令`,
+  shell_command: (n) => `运行 ${n} 个命令`,
+  apply_patch: (n) => `应用 ${n} 次补丁`,
+  Agent: (n) => `派发 ${n} 个子智能体`,
+  subagent: (n) => `派发 ${n} 个子智能体`,
+  spawn_agent: (n) => `启动 ${n} 个子智能体`,
+  send_input: (n) => `发送 ${n} 次子智能体输入`,
+  wait_agent: (n) => `等待 ${n} 次子智能体`,
+  close_agent: (n) => `关闭 ${n} 个子智能体`,
+  resume_agent: (n) => `恢复 ${n} 个子智能体`,
+  TaskStop: (n) => `结束 ${n} 个子智能体`,
+  Task: (n) => `执行 ${n} 次任务`,
+  TaskGet: (n) => `查看 ${n} 次任务`,
+  TaskCreate: (n) => `创建 ${n} 项任务`,
+  TaskUpdate: (n) => `更新 ${n} 项任务`,
+  TaskList: (n) => `查看 ${n} 次任务列表`,
+  TodoWrite: (n) => `更新 ${n} 项待办`,
+  update_plan: (n) => `更新 ${n} 次计划`,
+  WebSearch: (n) => `网页搜索 ${n} 次`,
+  WebFetch: (n) => `读取 ${n} 次网页`,
+  Skill: (n) => `调用 ${n} 次技能`,
+  view_image: (n) => `查看 ${n} 张图片`,
+  js: (n) => `运行 ${n} 次 JS`,
+  js_repl: (n) => `运行 ${n} 次 JS`,
+  js_repl_reset: (n) => `重置 ${n} 次 JS`,
+  tool_search: (n) => `搜索 ${n} 次工具`,
+  WaitForMcpServers: (n) => `等待 ${n} 次 MCP 服务`,
+};
+
+export function getToolGroupPhrase(toolName: string, count: number): string {
+  if (toolName.startsWith('mcp__')) {
+    return `调用 ${count} 次 ${getToolDisplayName(toolName)}`;
+  }
+  const phrase = TOOL_GROUP_PHRASES[normalizeToolName(toolName)];
+  return phrase ? phrase(count) : `${getToolDisplayName(toolName)} ${count} 次`;
+}

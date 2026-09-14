@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolHeaderSummary, isFileMutationTool, isShellCommandTool } from './toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolGroupPhrase, getToolHeaderSummary, isFileMutationTool, isShellCommandTool } from './toolHeaderSummary';
 
 describe('toolHeaderSummary', () => {
   it('shows update_plan explanation as the header summary and omits it from displayable args', () => {
@@ -204,5 +204,24 @@ describe('toolHeaderSummary', () => {
     expect(summary.text).toBe('/reactjs/react.dev');
     expect(summary.text).not.toContain('query_docs');
     expect(summary.text).not.toContain('mcp__');
+  });
+});
+
+describe('getToolGroupPhrase', () => {
+  it('renders count phrases for known built-in tools', () => {
+    expect(getToolGroupPhrase('Read', 2)).toBe('读取 2 次文件');
+    expect(getToolGroupPhrase('Bash', 1)).toBe('运行 1 个命令');
+    expect(getToolGroupPhrase('shell_command', 3)).toBe('运行 3 个命令');
+    expect(getToolGroupPhrase('TodoWrite', 1)).toBe('更新 1 项待办');
+  });
+
+  it('respects aliases and casing when picking the phrase', () => {
+    expect(getToolGroupPhrase('edit', 2)).toBe('编辑 2 次文件');
+    expect(getToolGroupPhrase('todowrite', 1)).toBe('更新 1 项待办');
+  });
+
+  it('falls back to the display name phrase for MCP and unknown tools', () => {
+    expect(getToolGroupPhrase('mcp__context7__query_docs', 2)).toBe('调用 2 次 context7');
+    expect(getToolGroupPhrase('some_custom_tool', 3)).toBe('some_custom_tool 3 次');
   });
 });

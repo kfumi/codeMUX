@@ -391,7 +391,7 @@ describe('SubagentPreviewPanel', () => {
 
     renderPanel();
 
-    const groupTrigger = screen.getByRole('button', { name: /已执行/ });
+    const groupTrigger = screen.getByRole('button', { name: /搜索 1 次文本 · 读取 1 次文件/ });
     expect(groupTrigger).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^搜索文本/ })).toBeNull();
 

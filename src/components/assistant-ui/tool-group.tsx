@@ -6,7 +6,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { getToolDisplayName } from '@/components/agent/toolHeaderSummary';
+import { getToolDisplayName, getToolGroupPhrase } from '@/components/agent/toolHeaderSummary';
 
 const ANIMATION_DURATION = 200;
 
@@ -170,7 +170,7 @@ function ToolGroupContent({
     >
       <div
         className={cn(
-          'relative mt-1.5',
+          'relative mt-3.5',
           'group-data-[variant=outline]/tool-group-root:mt-3 group-data-[variant=outline]/tool-group-root:border-t group-data-[variant=outline]/tool-group-root:px-4 group-data-[variant=outline]/tool-group-root:pt-3',
           'group-data-[variant=muted]/tool-group-root:mt-3 group-data-[variant=muted]/tool-group-root:border-t group-data-[variant=muted]/tool-group-root:px-4 group-data-[variant=muted]/tool-group-root:pt-3',
           'ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
@@ -234,15 +234,17 @@ ToolGroup.Content = ToolGroupContent;
 function ToolGroupTriggerLabel({ summary, running = false }: { summary?: string; running?: boolean }) {
   return (
     <span className="inline-flex items-baseline">
-      <span>{running ? '运行中' : '已执行'}</span>
+      {running ? <span>运行中</span> : null}
       {summary ? (
         <>
-          <span
-            data-slot="tool-group-trigger-dot"
-            className="mx-2 select-none"
-          >
-            ·
-          </span>
+          {running ? (
+            <span
+              data-slot="tool-group-trigger-dot"
+              className="mx-2 select-none"
+            >
+              ·
+            </span>
+          ) : null}
           <span data-slot="tool-group-trigger-summary">{summary}</span>
         </>
       ) : null}
@@ -252,27 +254,31 @@ function ToolGroupTriggerLabel({ summary, running = false }: { summary?: string;
 
 export function buildToolGroupSummary(toolNames?: string[], count = toolNames?.length ?? 0): string | undefined {
   if (!toolNames || toolNames.length === 0) {
-    return count > 0 ? `工具调用×${count}` : undefined;
+    return count > 0 ? `调用 ${count} 次工具` : undefined;
   }
 
-  const counts = new Map<string, number>();
+  const groups = new Map<string, { count: number; toolName: string }>();
   for (const name of toolNames) {
     const displayName = getToolDisplayName(name);
-    counts.set(displayName, (counts.get(displayName) || 0) + 1);
+    const entry = groups.get(displayName);
+    if (entry) {
+      entry.count += 1;
+    } else {
+      groups.set(displayName, { count: 1, toolName: name });
+    }
   }
 
-  const parts: string[] = [];
-  for (const [name, toolCount] of counts) {
-    parts.push(`${name}×${toolCount}`);
-  }
-
-  return parts.join('、');
+  return [...groups.values()]
+    .map((entry) => getToolGroupPhrase(entry.toolName, entry.count))
+    .join(' · ');
 }
 
 export function buildToolGroupLabel(toolNames?: string[], count = toolNames?.length ?? 0, running = false): string {
   const summary = buildToolGroupSummary(toolNames, count);
-  const verb = running ? '运行中' : '已执行';
-  return summary ? `${verb}·${summary}` : verb;
+  if (running) {
+    return summary ? `运行中 · ${summary}` : '运行中';
+  }
+  return summary ?? '';
 }
 
 export { ToolGroup, ToolGroupRoot, ToolGroupTrigger, ToolGroupContent, toolGroupVariants };

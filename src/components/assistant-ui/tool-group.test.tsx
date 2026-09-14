@@ -18,13 +18,13 @@ describe('ToolGroupTrigger', () => {
     const { container } = renderTrigger(['Read', 'Read', 'shell_command']);
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
 
-    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×2、终端×1');
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取 2 次文件 · 运行 1 个命令');
     expect(screen.queryByText(/Read/)).toBeNull();
     expect(screen.queryByText(/shell_command/)).toBeNull();
     expect(trigger?.className).not.toContain('pl-1');
     expect(trigger?.className).toContain('font-normal');
     expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
-    expect(container.querySelector('[data-slot="tool-group-trigger-dot"]')?.className).toContain('mx-2');
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).not.toContain('已执行');
     expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.className).not.toContain('font-medium');
     expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('opacity-0');
     expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('group-hover/trigger:opacity-100');
@@ -37,7 +37,7 @@ describe('ToolGroupTrigger', () => {
       </ToolGroup>,
     );
 
-    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×1');
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取 1 次文件');
     expect(container.querySelector('[data-slot="tool-group-root"]')).toBeTruthy();
     expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
   });
@@ -73,7 +73,7 @@ describe('ToolGroupTrigger', () => {
   it('summarizes MCP grouped tools by server name only', () => {
     const { container } = renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
 
-    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('context7×2');
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('调用 2 次 context7');
     expect(screen.queryByText(/mcp__/)).toBeNull();
     expect(screen.queryByText(/query_docs/)).toBeNull();
     expect(screen.queryByText(/resolve-library-id/)).toBeNull();
@@ -83,7 +83,7 @@ describe('ToolGroupTrigger', () => {
     const { container } = renderTrigger(['Read', 'Read', 'Task', 'Glob', 'Glob', 'Glob', 'Bash']);
 
     expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe(
-      '读取×2、任务×1、匹配文件×3、终端×1',
+      '读取 2 次文件 · 执行 1 次任务 · 匹配 3 次文件 · 运行 1 个命令',
     );
   });
 
@@ -96,16 +96,18 @@ describe('ToolGroupTrigger', () => {
 
     expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).toContain('运行中');
     expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).not.toContain('已执行');
+    expect(container.querySelector('[data-slot="tool-group-trigger-dot"]')?.className).toContain('mx-2');
   });
 
-  it('keeps the 已执行 label when no subagent is running', () => {
+  it('shows the action summary without the 已执行 prefix for finished groups', () => {
     const { container } = render(
       <ToolGroup startIndex={0} endIndex={0} toolNames={['Task']}>
         <div>工具详情</div>
       </ToolGroup>,
     );
 
-    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).toContain('已执行');
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).toContain('执行 1 次任务');
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.textContent).not.toContain('已执行');
   });
 
   it('restores the native collapsible animation for grouped tools', () => {

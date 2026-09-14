@@ -1442,8 +1442,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByRole('button', { name: /已执行/ })).toBeTruthy();
-    expect(screen.getByText('终端×1')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /运行 1 个命令/ })).toBeTruthy();
+    expect(screen.getByText('运行 1 个命令')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
@@ -1658,16 +1658,17 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('先确认范围。')).toBeTruthy();
     expect(screen.getByText('架构已摸清。')).toBeTruthy();
-    expect(screen.getByText('读取×1')).toBeTruthy();
-    expect(screen.getByText('任务×1、匹配文件×1、终端×1')).toBeTruthy();
+    expect(screen.getByText('读取 1 次文件')).toBeTruthy();
+    expect(screen.getByText('执行 1 次任务 · 匹配 1 次文件 · 运行 1 个命令')).toBeTruthy();
     expect(screen.queryByText('先探索下当前桌面端架构。')).toBeNull();
     expect(screen.queryByText('再核对任务入口。')).toBeNull();
     expect(screen.queryByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeNull();
     expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: /思考/ })).toHaveLength(3);
 
-    fireEvent.click(screen.getAllByRole('button', { name: /已执行/ })[0]!);
-    fireEvent.click(screen.getAllByRole('button', { name: /已执行/ })[1]!);
+    const exploreGroupTriggers = container.querySelectorAll('[data-slot="tool-group-trigger"]');
+    fireEvent.click(exploreGroupTriggers[0]!);
+    fireEvent.click(exploreGroupTriggers[1]!);
 
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     fireEvent.click(reasoningTriggers[0]!);
@@ -1686,15 +1687,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('groups write tools with surrounding tools in one tool group', () => {
     const { container } = render(<Harness sessionId="session-file-mutation-split" />);
 
-    const toolGroupTriggers = screen.getAllByRole('button', { name: /已执行/ });
-    expect(toolGroupTriggers).toHaveLength(1);
-    expect(toolGroupTriggers[0]?.textContent).toContain('读取×1');
-    expect(toolGroupTriggers[0]?.textContent).toContain('写入×1');
-    expect(toolGroupTriggers[0]?.textContent).toContain('终端×1');
+    const toolGroupTrigger = screen.getByRole('button', { name: /读取 1 次文件/ });
+    expect(toolGroupTrigger.textContent).toContain('读取 1 次文件');
+    expect(toolGroupTrigger.textContent).toContain('写入 1 次文件');
+    expect(toolGroupTrigger.textContent).toContain('运行 1 个命令');
     expect(screen.getByText('文件已写好。')).toBeTruthy();
     expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
 
-    fireEvent.click(toolGroupTriggers[0]!);
+    fireEvent.click(toolGroupTrigger);
     expect(screen.getByText('写入')).toBeTruthy();
   });
 
@@ -2722,14 +2722,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
     expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
-    expect(screen.getByRole('button', { name: /已执行.*任务/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /执行 1 次任务/ })).toBeTruthy();
 
     const firstReasoningTrigger = screen.getAllByRole('button', { name: /思考/ })[0]!;
     expect(firstReasoningTrigger.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(firstReasoningTrigger);
     expect(screen.getByText('第一段内部思考')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /已执行.*任务/ }));
+    fireEvent.click(screen.getByRole('button', { name: /执行 1 次任务/ }));
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     expect(reasoningTriggers).toHaveLength(2);
     expect(reasoningTriggers[1]?.getAttribute('aria-expanded')).toBe('false');
@@ -2750,7 +2750,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: /已执行.*终端/ }));
+    fireEvent.click(screen.getByRole('button', { name: /运行 1 个命令/ }));
     expect(screen.getByText('终端')).toBeTruthy();
   });
 
@@ -2759,7 +2759,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
-    render(<Harness sessionId="session-opencode-history-turn" />);
+    const { container } = render(<Harness sessionId="session-opencode-history-turn" />);
 
     expect(screen.getByText('历史最终结果')).toBeTruthy();
     expect(screen.queryByText('历史过程一')).toBeNull();
@@ -2775,7 +2775,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('历史过程二')).toBeTruthy();
     expect(screen.queryByText('最终思考泄漏')).toBeNull();
 
-    const exploreTriggers = screen.getAllByRole('button', { name: /已执行/ });
+    const exploreTriggers = container.querySelectorAll('[data-slot="tool-group-trigger"]');
     fireEvent.click(exploreTriggers[exploreTriggers.length - 1]!);
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     fireEvent.click(reasoningTriggers[reasoningTriggers.length - 1]!);
@@ -2888,7 +2888,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(toggle);
 
-    const executedTrigger = screen.getByRole('button', { name: /已执行/ });
+    const executedTrigger = screen.getByRole('button', { name: /编辑 1 次文件/ });
     fireEvent.click(executedTrigger);
 
     expect(screen.getByText('编辑')).toBeTruthy();
