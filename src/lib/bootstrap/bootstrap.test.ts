@@ -7,6 +7,7 @@ import {
   describeBrowserDevice,
   hasPairingInput,
   profileToConnectionConfig,
+  resolveDaemonConnectionConfig,
   resolveRemotePairingInput,
   stripPairingInputFromUrl,
 } from './index';
@@ -148,6 +149,91 @@ describe('profileToConnectionConfig', () => {
     expect(config.baseUrl).toBe('relay://relay.example:443');
     expect(config.polling).toBe(true);
     expect(config.transport).toBeDefined();
+  });
+
+  it('falls back to relay/polling when the direct connection is unreachable (user story 7)', () => {
+    const hybridProfile: CompanionConnectionProfile = {
+      ...base,
+      connections: [
+        { id: 'direct:1', type: 'direct', host: '192.168.1.10', port: 9240, useTls: false },
+        {
+          id: 'relay:1',
+          type: 'relay',
+          endpoint: 'relay.example:443',
+          useTls: true,
+          desktopPublicKeyB64: 'abc',
+        },
+      ],
+    };
+
+    // 直连探测失败 → resolveActiveConnection 跳过它选中继 → 轮询回退。
+    const config = profileToConnectionConfig(hybridProfile, { 'direct:1': false });
+    expect(config.baseUrl).toBe('relay://relay.example:443');
+    expect(config.polling).toBe(true);
+    expect(config.transport).toBeDefined();
+
+    // 直连可达 → 维持直连,不开轮询。
+    const direct = profileToConnectionConfig(hybridProfile, { 'direct:1': true });
+    expect(direct.baseUrl).toBe('http://192.168.1.10:9240');
+    expect(direct.polling).toBeUndefined();
+  });
+
+  it('resolveDaemonConnectionConfig probes reachability for multi-connection profiles', async () => {
+    const hybridProfile: CompanionConnectionProfile = {
+      desktopId: 'cmx_desktop_abc',
+      deviceId: 'device-1',
+      token: 'cmx_tok',
+      connections: [
+        { id: 'direct:1', type: 'direct', host: '192.168.1.10', port: 9240, useTls: false },
+        {
+          id: 'relay:1',
+          type: 'relay',
+          endpoint: 'relay.example:443',
+          useTls: true,
+          desktopPublicKeyB64: 'abc',
+        },
+      ],
+    };
+    const store = new Map<string, string>();
+    vi.stubGlobal('window', {
+      location: { protocol: 'http:' },
+      setTimeout,
+      clearTimeout,
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      },
+    });
+    saveStoredProfile(hybridProfile);
+    // 探测:direct 失败(/api/health 探不通),relay 恒可达。
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('network down');
+    }));
+
+    const config = await resolveDaemonConnectionConfig();
+    expect(config.baseUrl).toBe('relay://relay.example:443');
+    expect(config.polling).toBe(true);
+  });
+
+  it('resolveDaemonConnectionConfig skips probing for single-connection profiles', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('window', {
+      location: { protocol: 'http:' },
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      },
+    });
+    saveStoredProfile(base);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const config = await resolveDaemonConnectionConfig();
+    expect(config.baseUrl).toBe('http://192.168.1.10:9240');
+    expect(config.polling).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

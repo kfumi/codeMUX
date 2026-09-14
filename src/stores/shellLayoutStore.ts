@@ -11,12 +11,10 @@ interface ShellLayoutState {
   narrowSidebarOpen: boolean;
   setNarrowSidebarOpen: (open: boolean) => void;
   toggleNarrowSidebar: () => void;
-  closeNarrowSidebar: () => void;
 }
 
 export const useShellLayoutStore = create<ShellLayoutState>((set) => ({
   narrowSidebarOpen: false,
   setNarrowSidebarOpen: (open) => set({ narrowSidebarOpen: open }),
   toggleNarrowSidebar: () => set((state) => ({ narrowSidebarOpen: !state.narrowSidebarOpen })),
-  closeNarrowSidebar: () => set({ narrowSidebarOpen: false }),
 }));

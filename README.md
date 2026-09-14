@@ -198,10 +198,13 @@ Windows 通常还需要：
 
 ```bash
 npm ci
+
 cd src-tauri/sidecar
 npm ci
 npm run build
 cd ../..
+
+npm run build:daemon
 ```
 
 ### 开发模式

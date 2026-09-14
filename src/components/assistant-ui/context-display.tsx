@@ -53,7 +53,7 @@ export function ContextDisplay({
         align="end"
         sideOffset={8}
         data-slot="context-display-popover"
-        className="w-64 rounded-xl border border-border p-0 text-popover-foreground shadow-lg !bg-popover !dark:bg-popover"
+        className="w-64 rounded-xl border border-border p-0 text-popover-foreground shadow-lg bg-popover dark:bg-popover"
       >
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-sm font-medium text-foreground">上下文</span>

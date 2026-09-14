@@ -79,7 +79,3 @@ export function readHostEnvironment(): HostEnvironmentInput {
     origin: window.location?.origin ?? null,
   };
 }
-
-export function currentHostForm(): HostForm {
-  return detectHostForm(readHostEnvironment());
-}

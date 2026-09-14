@@ -10,19 +10,23 @@
  * 桥缺失不再是错误,而是切到浏览器引导的信号;解析结果只描述「用哪个配置
  * 连哪个 daemon」,协议客户端仍然只讲 Companion REST/WS。
  */
-import { parsePairingInput, type CompanionConnectionProfile, type CompanionOfferV1, type ParsedPairingInput } from '../companion-connection';
+import { parsePairingInput, type CompanionConnectionProfile, type CompanionOfferV1, type ConnectionReachability, type ParsedPairingInput } from '../companion-connection';
 import { buildProfileFromOffer, buildProfileFromPairing } from '../companion-connection';
 import { companionHttpRequest } from '../companion-connection';
+import { buildReachabilityMap } from '../companion-connection';
 import { connectionBaseUrl, resolveActiveConnection } from '../companion-connection';
 import type { DaemonConnectionConfig } from '../daemon-client/client';
 import { DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE, desktopBridge } from '../desktop-bridge';
-import { detectHostForm, isLoopbackOrigin, readHostEnvironment, type HostForm } from '../host/host-form';
+import { detectHostForm, isLoopbackOrigin, readHostEnvironment } from '../host/host-form';
 import { createLogger } from '../logger';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { clearStoredProfile, loadStoredProfile, saveStoredProfile } from './connection-storage';
 import { awaitLocalPairingApproval, LocalPairingError, requestLocalPairing } from './local-pairing';
 
 const logger = createLogger('daemon-bootstrap');
+
+/** 可达性探测的整体上限:探不出来就按优先级选路,不让引导卡在探测上。 */
+const REACHABILITY_TIMEOUT_MS = 5000;
 
 export type BootstrapTarget = 'shell' | 'paired' | 'loopback-pairing' | 'remote-pairing';
 
@@ -95,10 +99,6 @@ export function hasPairingInput(href?: string | null): boolean {
   return value.includes('#offer=') || /[?&]code=/.test(value);
 }
 
-export function currentHostForm(): HostForm {
-  return detectHostForm(readHostEnvironment());
-}
-
 async function resolveShellBridgeConfig(): Promise<DaemonConnectionConfig> {
   const bridge = desktopBridge;
   if (!bridge) {
@@ -114,11 +114,16 @@ async function resolveShellBridgeConfig(): Promise<DaemonConnectionConfig> {
 /**
  * 档案 → 连接配置。中继连接无法直连,改为经既有中继/E2EE 通道发请求并
  * 用轮询代替 WebSocket(与移动端回退一致)。
+ *
+ * `reachability` 传入各连接的可达性探测结果(用户故事 7):直连探测失败时
+ * `resolveActiveConnection` 会跳过它选中继,轮询回退随之生效;缺省(未探测,
+ * 桌面壳或单连接档案)维持既有快速路径,不为每次连接都引入 3s 探测开销。
  */
 export function profileToConnectionConfig(
   profile: CompanionConnectionProfile,
+  reachability: ConnectionReachability = {},
 ): DaemonConnectionConfig {
-  const active = resolveActiveConnection(profile);
+  const active = resolveActiveConnection(profile, reachability);
   const baseUrl = connectionBaseUrl(active);
   if (active.type === 'relay') {
     return {
@@ -126,11 +131,48 @@ export function profileToConnectionConfig(
       token: profile.token,
       polling: true,
       transport: {
-        request: (path, init) => companionHttpRequest(profile, path, init, {}),
+        request: (path, init) =>
+          companionHttpRequest(profile, path, init, reachability),
       },
     };
   }
   return { baseUrl, token: profile.token };
+}
+
+/**
+ * 浏览器档案的可达性探测(用户故事 7 的「透明回落」):多连接档案(direct/lan
+ * + relay)才值得花一次 /api/health 探测;单连接档案没有备选,探测只是延迟。
+ */
+async function probeProfileReachability(
+  profile: CompanionConnectionProfile,
+): Promise<ConnectionReachability> {
+  if (profile.connections.length <= 1) {
+    return {};
+  }
+  try {
+    return await withTimeout(buildReachabilityMap(profile), REACHABILITY_TIMEOUT_MS, {});
+  } catch (error) {
+    logger.warn('Reachability probe failed, falling back to priority order', {
+      error: String(error),
+    });
+    return {};
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = window.setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        window.clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
 }
 
 /** 协议客户端要用的 daemon 连接配置(壳桥或浏览器档案)。 */
@@ -143,7 +185,7 @@ export async function resolveDaemonConnectionConfig(): Promise<DaemonConnectionC
   if (!profile) {
     throw new DaemonConnectionRequiredError();
   }
-  return profileToConnectionConfig(profile);
+  return profileToConnectionConfig(profile, await probeProfileReachability(profile));
 }
 
 function isAuthFailure(error: unknown): boolean {

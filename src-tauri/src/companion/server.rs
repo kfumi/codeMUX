@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -48,6 +48,9 @@ pub(crate) struct ServerContext {
     /// 网页端放行的跨源 Origin(启动时解析,修改随 server 重启生效)。
     pub(crate) web_origin_allowlist: std::sync::Arc<AllowedOrigins>,
 }
+
+/// 请求体上限:容纳多张 base64 内联图片附件的消息与图片识别请求。
+const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -453,6 +456,9 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
     }
 
     router
+        // axum 默认请求体上限 2MB,带图片附件的消息(JSON 内联 base64 dataUrl)会
+        // 超限被拒,浏览器端表现为 `TypeError: Failed to fetch`。
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             ctx.clone(),
             origin_guard_middleware,

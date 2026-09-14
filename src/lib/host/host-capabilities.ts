@@ -30,23 +30,12 @@ export interface HostPresentation {
 export interface HostCapabilitySet {
   form: HostForm;
   presentation: HostPresentation;
-  /** 协议能力:三形态完整。 */
-  protocolCapabilities: readonly string[];
-  /** 壳独占能力清单(声明用)。 */
-  shellOnlyCapabilities: readonly string[];
   /** 该形态不可用的能力(浏览器/移动 = 壳独占能力)。 */
   unavailable: readonly string[];
   /** 该形态可用的全部能力 id。 */
   available: readonly string[];
   has(id: string): boolean;
 }
-
-/**
- * 移动形态额外的能力收敛。协议能力必须保持完整(用户故事 9:终端、git、
- * workspace 文件在手机浏览器上同样可用),因此这里不放协议能力:移动与
- * 浏览器目前的差别是表现层(导航折叠、触控尺寸),而非能力面。
- */
-export const MOBILE_ADDITIONAL_HIDDEN: readonly string[] = [];
 
 const DAEMON_OWNED: CapabilityEntry[] = CAPABILITY_MANIFEST.filter(
   (entry) => entry.owner === 'daemon',
@@ -55,7 +44,6 @@ const SHELL_OWNED: CapabilityEntry[] = CAPABILITY_MANIFEST.filter(
   (entry) => entry.owner === 'shell',
 );
 
-const PROTOCOL_CAPABILITIES: readonly string[] = DAEMON_OWNED.map((entry) => entry.id);
 const SHELL_ONLY_CAPABILITIES: readonly string[] = SHELL_OWNED.map((entry) => entry.id);
 
 const PRESENTATION: Record<HostForm, HostPresentation> = {
@@ -83,19 +71,15 @@ const PRESENTATION: Record<HostForm, HostPresentation> = {
 };
 
 function buildCapabilitySet(form: HostForm): HostCapabilitySet {
-  const unavailable = form === 'desktop'
-    ? []
-    : [...SHELL_ONLY_CAPABILITIES, ...(form === 'mobile' ? MOBILE_ADDITIONAL_HIDDEN : [])];
+  const unavailable = form === 'desktop' ? [] : SHELL_ONLY_CAPABILITIES;
   const unavailableSet = new Set(unavailable);
   const available = form === 'desktop'
     ? CAPABILITY_MANIFEST.map((entry) => entry.id)
-    : PROTOCOL_CAPABILITIES.filter((id) => !unavailableSet.has(id));
+    : DAEMON_OWNED.map((entry) => entry.id).filter((id) => !unavailableSet.has(id));
 
   return {
     form,
     presentation: PRESENTATION[form],
-    protocolCapabilities: PROTOCOL_CAPABILITIES,
-    shellOnlyCapabilities: SHELL_ONLY_CAPABILITIES,
     unavailable,
     available,
     has: (id: string) => available.includes(id),
@@ -110,9 +94,4 @@ export function capabilitiesForHost(form: HostForm): HostCapabilitySet {
   const built = buildCapabilitySet(form);
   CACHE.set(form, built);
   return built;
-}
-
-/** 当前宿主的壳独占能力是否可用(组件分流入口)。 */
-export function hostSupportsCapability(form: HostForm, id: string): boolean {
-  return capabilitiesForHost(form).has(id);
 }

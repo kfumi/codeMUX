@@ -17,13 +17,13 @@ function isNarrowNow(): boolean {
  * 窄屏(手机/竖屏平板)判定(工单 03):响应式是布局问题而不是代码分叉,
  * 断点与宿主形态判定共用同一个阈值。
  */
-export function useIsNarrowViewport(query: string = NARROW_VIEWPORT_QUERY): boolean {
+export function useIsNarrowViewport(): boolean {
   const [narrow, setNarrow] = useState(isNarrowNow);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (typeof window.matchMedia === 'function') {
-      const media = window.matchMedia(query);
+      const media = window.matchMedia(NARROW_VIEWPORT_QUERY);
       const handler = (event: MediaQueryListEvent) => setNarrow(event.matches);
       setNarrow(media.matches);
       media.addEventListener('change', handler);
@@ -33,7 +33,7 @@ export function useIsNarrowViewport(query: string = NARROW_VIEWPORT_QUERY): bool
     setNarrow(window.innerWidth <= MOBILE_VIEWPORT_MAX_WIDTH);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [query]);
+  }, []);
 
   return narrow;
 }

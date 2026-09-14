@@ -17,11 +17,30 @@ export function createTerminalMethods(
 ) {
   const sockets = new Map<string, WebSocket>();
 
+  // 终端事件走 WebSocket;中继/轮询通道无法升级 WS(见 client.ts 的 polling 分支),
+  // 此时不允许半可用的终端(REST 能建、事件收不到),直接给出可读错误。
+  const wsUnavailable = (active: DaemonConnectionConfig): string | null => {
+    if (active.polling) {
+      return '终端需要 WebSocket 直连,中继/轮询通道暂不支持;请改用与桌面端同一局域网的网络。';
+    }
+    if (active.transport) {
+      return '终端需要 WebSocket 直连,当前连接通道暂不支持;请改用与桌面端同一局域网的网络。';
+    }
+    if (!/^https?:\/\//.test(active.baseUrl)) {
+      return `终端地址不可用:${active.baseUrl}`;
+    }
+    return null;
+  };
+
   const connectSocket = async (
     terminalId: string,
     onEvent: (event: TerminalEvent) => void,
   ): Promise<WebSocket> => {
     const activeConfig = await ensureConfig();
+    const blocked = wsUnavailable(activeConfig);
+    if (blocked) {
+      throw new Error(blocked);
+    }
     const wsUrl = new URL('/api/ws/terminal', activeConfig.baseUrl.replace(/^http/, 'ws'));
     wsUrl.searchParams.set('token', activeConfig.token);
     wsUrl.searchParams.set('terminalId', terminalId);
