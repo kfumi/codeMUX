@@ -461,7 +461,6 @@ function UnifiedThreadViewport({
     followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${streamingVersion}:${userMessageCount}:${runningSubagentCount}`,
     extraFrames: isHistoryHydration || hasNewUserMessage ? 2 : 1,
     forceFollow: hasNewUserMessage,
-    behavior: 'smooth',
   });
 
   useEffect(() => {
@@ -1222,7 +1221,10 @@ function AssistantLikeMessage({
 }) {
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
-  const isLastRow = useIsLastMessage(message);
+  // The tight mb-2 tail is only for a row that actually sits above the composer.
+  // While a turn is running, the last row is followed by the live streaming block
+  // (StreamingContent / SubagentRunningRow) and must keep the normal rhythm.
+  const isLastRow = useIsLastMessage(message) && !isRunning;
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   if (message.content.length === 0 && !collapseInfo?.isToggleMessage) {
     return null;

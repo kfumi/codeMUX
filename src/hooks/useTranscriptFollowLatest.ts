@@ -10,13 +10,11 @@ export function useTranscriptFollowLatest({
   followKey,
   extraFrames = 1,
   forceFollow = false,
-  behavior = 'auto',
 }: {
   viewportRef: RefObject<HTMLDivElement>;
   followKey: unknown;
   extraFrames?: number;
   forceFollow?: boolean;
-  behavior?: ScrollBehavior;
 }) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const followLatestRef = useRef(true);
@@ -154,19 +152,11 @@ export function useTranscriptFollowLatest({
 
   const scrollToBottom = useCallback(() => {
     followLatestRef.current = true;
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    if (behavior !== 'auto' && typeof viewport.scrollTo === 'function') {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-      setIsAtBottom(true);
-      return;
-    }
-
+    // 立即钉底。不要用 viewport.scrollTo({behavior:'smooth'}):实测 Chromium
+    // 会把"用户点击手势里发起的平滑滚动"立刻取消,表现为按钮点了没反应;
+    // 而钉底路径通用的 scrollTop 赋值在任何时机都可靠。
     scrollViewportToBottom();
-  }, [behavior, scrollViewportToBottom, viewportRef]);
+  }, [scrollViewportToBottom]);
 
   return { isAtBottom, scrollToBottom };
 }

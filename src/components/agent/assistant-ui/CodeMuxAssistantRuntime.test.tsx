@@ -2250,6 +2250,41 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(useAgentStore.getState().streamingThinking[sessionId]).toBe('正在确认项目入口');
   });
 
+  it('keeps the normal bottom rhythm on the last message row while the turn is streaming', () => {
+    const sessionId = 'session-running-last-row-rhythm';
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '继续改' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'running-rhythm-tool',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'running-rhythm-edit', name: 'Edit', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    useAgentStore.setState((state) => ({
+      events: { ...state.events, [sessionId]: events },
+      eventTimestamps: { ...state.eventTimestamps, [sessionId]: [1, 2] },
+      isRunning: { ...state.isRunning, [sessionId]: true },
+      queryStartTime: { ...state.queryStartTime, [sessionId]: Date.now() },
+    }));
+
+    render(<Harness sessionId={sessionId} />);
+
+    // Running turn: the row above StreamingContent keeps the normal tail (mb-5),
+    // not the composer-tightened mb-2.
+    const row = screen.getByRole('button', { name: /编辑 1 次文件/ }).closest('[data-message-row]');
+    expect(row?.className).toContain('mb-5');
+    expect(row?.className).not.toContain('mb-2');
+  });
+
   it('suppresses the stale live preview once thinking is committed across assistant messages', () => {
     const sessionId = 'session-live-explore-across-messages';
     const events: AgentMessage[] = [
@@ -2510,6 +2545,19 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     await waitFor(() => expect(button.disabled).toBe(false));
     expect(button.closest('[data-testid="thread-viewport-footer"]')).not.toBeNull();
     expect(button.className).toContain('-top-12');
+
+    // 回归:点击后必须立即钉底。Chromium 会把点击手势里发起的
+    // viewport.scrollTo({behavior:'smooth'}) 立刻取消(表现为点了没反应),
+    // 所以这里把 scrollTo 打桩成 no-op,钉底必须依然靠 scrollTop 赋值生效。
+    const scrollSpy = vi
+      .spyOn(viewport, 'scrollTo')
+      .mockImplementation(() => undefined);
+    button.click();
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+    expect(viewport.scrollTop).toBe(1000);
+    await waitFor(() => expect(button.disabled).toBe(true));
+    scrollSpy.mockRestore();
   });
 
   it('renders live streaming text with markdown parsing using Streamdown', () => {

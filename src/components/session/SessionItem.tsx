@@ -60,47 +60,40 @@ function SessionStatusIcon({
   isActive: boolean;
   agentDef: AgentDefinition | undefined;
 }) {
-  // 后台子智能体流未收尾同样算"进行中":侧栏要持续转圈,否则用户会以为
-  // 对话已经结束(父回合 result 早于子智能体返回)。
+  // 状态点跟随智能体图标右下角(参考 圆点头像徽章):进行中=黄色、出错=红色、
+  // 未读=绿色;"进行中"的转圈统一放到行右侧(时间/操作区域)。
   const flowActive = useSessionFlowActive(session.id);
   const hasError = useAgentStore((s) => !!s.error[session.id]);
   const isUnread = useSessionStore((s) => s.unreadSessions.has(session.id));
 
-  if (flowActive) {
-    return (
-      <span className="flex shrink-0 items-center justify-center h-4 w-4">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--sidebar-glow))]" />
-      </span>
-    );
-  }
-
-  if (hasError) {
-    return (
-      <span className="flex shrink-0 items-center justify-center h-4 w-4">
-        <span className="h-2 w-2 rounded-full bg-[hsl(var(--destructive))]" />
-      </span>
-    );
-  }
-
-  if (isUnread) {
-    return (
-      <span className="flex shrink-0 items-center justify-center h-4 w-4">
-        <span className="h-2 w-2 rounded-full bg-[hsl(var(--success))]" />
-      </span>
-    );
-  }
-
-  if (agentDef) {
-    return (
-      <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
-        <AgentBrandIcon agent={agentDef} size="sm" />
-      </span>
-    );
-  }
+  const dotColor = flowActive
+    ? 'bg-[hsl(var(--warning))]'
+    : hasError
+      ? 'bg-[hsl(var(--destructive))]'
+      : isUnread
+        ? 'bg-[hsl(var(--success))]'
+        : null;
 
   return (
-    <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal', isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64')}>
-      {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
+    <span className={cn('relative flex h-4 w-4 shrink-0 transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
+      {agentDef ? (
+        <AgentBrandIcon agent={agentDef} size="sm" />
+      ) : (
+        <span className={cn(
+          'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal',
+          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
+        )}>
+          {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
+        </span>
+      )}
+      {dotColor && (
+        <span
+          className={cn(
+            'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-[1.5px] border-[hsl(var(--sidebar-bg))]',
+            dotColor,
+          )}
+        />
+      )}
     </span>
   );
 }
@@ -120,6 +113,7 @@ export function SessionItem({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const agentDef = getAgentDefinition(session.agent_kind);
+  const flowActive = useSessionFlowActive(session.id);
   const awaitsConfirmation = useAgentStore((state) => sessionAwaitsUserConfirmation(
     state.events[session.id] ?? EMPTY_EVENTS,
     state.pendingPermissions[session.id] ?? EMPTY_PERMISSIONS,
@@ -182,7 +176,7 @@ export function SessionItem({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1 text-ui-title transition-colors duration-150',
+              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150',
               'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
               'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
               'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
@@ -215,12 +209,14 @@ export function SessionItem({
                     <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
                   </TooltipHint>
                 )}
-                <span className="relative flex h-5 shrink-0 items-center">
+                <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-150 group-hover:w-12">
                   <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
                     {awaitsConfirmation ? (
                       <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-[10px] font-medium leading-4 text-white">
                         等待确认
                       </span>
+                    ) : flowActive ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
                     ) : (
                       <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/40">
                         {timeLabel}

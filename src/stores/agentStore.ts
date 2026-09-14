@@ -84,7 +84,7 @@ import type {
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, RewindMessageResult, UserAttachmentPreview } from '../types/agentInput';
 import type { QueuedAgentQuery } from '../types/agentQueue';
-import { markModelVisionUnsupported, resolveVisionCapability, findProviderModelMetadata, isImageRecognitionConfigured } from '../lib/modelVisionCapabilities';
+import { markModelVisionUnsupported, resolveVisionCapability, findSessionModelMetadata, isImageRecognitionConfigured } from '../lib/modelVisionCapabilities';
 import { getPayloadAttachments, getPayloadImageAttachments, payloadHasAttachments } from '../types/agentInput';
 import { countEnrichmentFailures, filterSuccessfulEnrichmentBlocks, firstEnrichmentFailureSummary, mergeEnrichedContext } from '../lib/attachmentEnrichment';
 import {
@@ -2692,8 +2692,10 @@ function createSessionEventHandler(
     const appConfig = useSettingsStore.getState().config;
     const enrichmentConfig = appConfig?.attachment_enrichment;
     const enrichmentEnabled = isImageRecognitionConfigured(enrichmentConfig);
-    const providerModels = (appConfig?.model_providers ?? []).flatMap((provider) => provider.models);
-    const modelMetadata = findProviderModelMetadata(modelForVision, providerModels);
+    const providers = appConfig?.model_providers ?? [];
+    // 会话供应商优先：同一模型 ID 可能同时存在于多个供应商且模态配置不同，
+    // 全局摊平查找会命中排在前面的那条（如智谱与 OpenCode Go 都有 glm-5.3-flash）。
+    const modelMetadata = findSessionModelMetadata(modelForVision, providers, targetSession?.provider_id);
     const supportsVision = !payloadHasAttachments(originalPayload)
       || resolveVisionCapability(modelForVision, modelMetadata, enrichmentEnabled);
     const shouldSendImages = attachments.length > 0 && supportsVision;

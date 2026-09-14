@@ -85,7 +85,7 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-2.5 py-1 transition-colors duration-150',
+          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-1 transition-colors duration-150',
           'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
@@ -183,7 +183,7 @@ export function ProjectGroup({
         </div>
       </div>
       {expanded && (
-        <div className="ml-4 mt-1 space-y-0.5 border-l border-[hsl(var(--sidebar-border))]/45 pl-2.5">
+        <div className="ml-2.5 mt-1 space-y-0.5 border-l border-[hsl(var(--sidebar-border))]/45 pl-1.5">
           {visibleSessions.map((session) => (
             <SessionItem
               key={session.id}
