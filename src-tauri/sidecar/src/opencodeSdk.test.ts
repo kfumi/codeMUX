@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOpenCodeServerConfig, normalizeOpenCodeModelReference, officialOpenCodeSdkPort } from './opencodeSdk.js';
+import { buildOpenCodeServerConfig, DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS, normalizeOpenCodeModelReference, officialOpenCodeSdkPort } from './opencodeSdk.js';
 
 
 const sdkMocks = vi.hoisted(() => {
@@ -60,6 +60,17 @@ vi.mock('@opencode-ai/sdk/server', () => ({
 }));
 
 describe('official OpenCode SDK adapter', () => {
+  it('starts the server with the relaxed startup timeout instead of the 5s SDK default', async () => {
+    sdkMocks.createOpencodeServer.mockClear();
+
+    await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
+
+    expect(sdkMocks.createOpencodeServer).toHaveBeenCalledWith(expect.objectContaining({
+      timeout: DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS,
+    }));
+    expect(DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS).toBeGreaterThan(5000);
+  });
+
   it('forks a session at the requested provider message', async () => {
     const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
 

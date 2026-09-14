@@ -55,7 +55,6 @@ import {
   AssistantCollapseToggle,
   buildAssistantCollapseInfoMap,
   getCollapseInfoForSourceIndices,
-  isToolResultOnlyUserEvent,
   omitLatestTurnCollapse,
   type AssistantCollapseInfo,
 } from './assistantCollapse';
@@ -1454,12 +1453,10 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
+  const thinkingEpoch = useAgentStore((state) => state.streamingThinkingStartEventCount[sessionId] ?? 0);
   const lastAssistantText = useMemo(() => getLastAssistantText(events), [events]);
   const lastAssistantThinking = useMemo(() => getLastAssistantThinking(events), [events]);
-  const hasCommittedThinking = useMemo(
-    () => getCurrentTurnCommittedThinking(events) != null,
-    [events],
-  );
+  const lastCommittedThinkingIndex = useMemo(() => getLastCommittedThinkingEventIndex(events), [events]);
   const duplicateLiveText = Boolean(
     text
     && lastAssistantText
@@ -1481,8 +1478,14 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
       ))
     ),
   );
+  // OpenCode 一回合会产出多段"思考→正文"。实时思考流开始于最近一次 thinking
+  // 提交之后 → 是下一段落的新思考，必须显示；流开始后时间线里又提交了
+  // thinking → 缓冲区只是已提交内容的残留副本，让位给时间线气泡。
+  const liveThinkingIsStaleCopy = lastCommittedThinkingIndex >= thinkingEpoch;
   // Prefer reasoning panel: never show live thinking content as answer markdown.
-  const visibleThinking = hasCommittedThinking ? '' : (thinking || (textIsMisroutedThinking ? text : ''));
+  const visibleThinking = liveThinkingIsStaleCopy
+    ? ''
+    : (thinking || (textIsMisroutedThinking ? text : ''));
   const visibleText = (
     duplicateLiveText
     || textIsMisroutedThinking
@@ -1586,34 +1589,24 @@ function getLastAssistantThinking(events: AgentMessage[]): string {
   return '';
 }
 
-function getCurrentTurnCommittedThinking(
-  events: AgentMessage[],
-): { eventIndex: number; text: string } | undefined {
-  let turnStartIndex = -1;
+/** 最新一条带非空 thinking 的 assistant 事件下标（没有则 -1）。 */
+function getLastCommittedThinkingEventIndex(events: AgentMessage[]): number {
   for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === 'user' && !isToolResultOnlyUserEvent(event)) {
-      turnStartIndex = index;
-      break;
-    }
-  }
-
-  for (let index = events.length - 1; index > turnStartIndex; index -= 1) {
     const event = events[index];
     if (event?.kind !== 'assistant') {
       continue;
     }
-
-    const thinkingBlock = event.data.message?.content?.find((block) => (
+    const hasThinking = event.data.message.content.some((block) => (
       isRecord(block)
       && block.type === 'thinking'
       && typeof block.thinking === 'string'
       && block.thinking.length > 0
     ));
-    if (thinkingBlock && isRecord(thinkingBlock) && typeof thinkingBlock.thinking === 'string') {
-      return { eventIndex: index, text: thinkingBlock.thinking };
+    if (hasThinking) {
+      return index;
     }
   }
+  return -1;
 }
 
 function getMessageText(message: MessageState) {

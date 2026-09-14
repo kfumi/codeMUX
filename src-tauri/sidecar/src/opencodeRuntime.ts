@@ -551,6 +551,7 @@ export class OpenCodeRuntime {
           modelLimits: this.config.modelLimits,
         });
       } catch (error) {
+        writeLog('[opencode-task]', `SDK start FAILED error=${errorMessage(error)}`);
         this.retainStartResources(getStartFailureResources(error));
         const cleanupError = await this.closeServerAfterStartFailure();
         this.state = cleanupError ? 'cleanup_failed' : 'idle';

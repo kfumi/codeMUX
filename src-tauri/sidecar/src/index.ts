@@ -1761,6 +1761,20 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     options.emit({ type: 'sidecar_error', error: String(error) });
   };
 
+  /**
+   * Emit a turn-terminal `error` event. `sidecar_error` is only for diagnostics
+   * and is neither persisted nor treated as terminal by the daemon, so a failed
+   * turn start that only emits `sidecar_error` leaves the session stuck
+   * "running" (and later sends enqueued forever). Mirror the runtime's own
+   * failure events so the turn actually finishes.
+   */
+  const emitTurnFailure = (sessionId: string | undefined, error: unknown): void => {
+    emitError(error);
+    if (sessionId) {
+      options.emit({ type: 'error', session_id: sessionId, subtype: 'failed', error: String(error) });
+    }
+  };
+
   const isAbortError = (error: unknown): boolean => {
     const message = String(error).toLowerCase();
     return message.includes('abort') || message.includes('the operation was aborted');
@@ -1914,12 +1928,12 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       }
       case 'send_input': {
         await ensureTail;
+        const sessionId = cmd.sessionId ?? activeSessionId;
         const current = selectedRuntime();
         if (!current) {
-          emitError(`${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
+          emitTurnFailure(sessionId, `${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
           return;
         }
-        const sessionId = cmd.sessionId ?? activeSessionId;
         if (cmd.delivery === 'steer') {
           try {
             if (!current.steerActiveTurn) {
@@ -1960,7 +1974,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
               error: String(error),
             });
           } else if (!isAbortError(error)) {
-            emitError(error);
+            emitTurnFailure(sessionId, error);
           }
         });
         return;

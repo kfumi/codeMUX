@@ -85,6 +85,11 @@ export interface OpenCodeSdkStartInput {
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   serverCloseTimeoutMs?: number;
+  /**
+   * 等待 `opencode serve` 打印 "server listening" 的上限。SDK 默认仅 5000ms，
+   * 而 opencode.exe 体积很大，冷启动/磁盘繁忙时经常超过，必须放宽。
+   */
+  serverStartTimeoutMs?: number;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
   /** daemon 随会话下发的 MCP 服务器(落 server config 的 mcp 段)。 */
@@ -110,6 +115,12 @@ export interface OpenCodeSdkPort {
 }
 
 export const DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS = 10_000;
+/**
+ * `opencode serve` 启动等待上限。SDK 的默认值是 5000ms，但托管 Runtime 的
+ * `opencode.exe` 有上百 MB，进程冷启动或机器繁忙时经常超过 5s，导致
+ * ensure_session 直接判超时。放宽到 60s，足够覆盖冷启动。
+ */
+export const DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS = 60_000;
 const DEFAULT_OPENCODE_OUTPUT_TOKENS = 65_536;
 export interface OpenCodeServerConfigInput {
   provider: string;
@@ -442,7 +453,7 @@ function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits }) {
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, serverStartTimeoutMs = DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits }) {
     const runtimeLoaded = loadRuntime(runtimeRef);
     const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
     const cliPath = executable?.executablePath ?? '(托管 Runtime CLI 路径未解析)';
@@ -469,6 +480,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
       hostname: '127.0.0.1',
       port: 0,
       config: serverConfig,
+      timeout: serverStartTimeoutMs,
     });
     try {
       const client = createOpencodeClient({

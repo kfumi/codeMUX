@@ -266,6 +266,37 @@ describe('sidecar command dispatcher', () => {
     expect(opencode.respondToPermission).toHaveBeenCalledWith('permission-1', { approved: true }, 'session-1');
   });
 
+  it('fails the turn when send_input runs without an active managed runtime', async () => {
+    const failingOpenCode = {
+      ...createRuntime(),
+      ensure: vi.fn().mockRejectedValue(new Error('OpenCode SDK start failed')),
+      canReuse: vi.fn().mockReturnValue(false),
+    };
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => failingOpenCode),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1', provider: 'codemux-openai', model: 'gpt-5' });
+    await dispatcher.dispatch({ type: 'send_input', sessionId: 'session-1', prompt: 'hello' });
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error',
+      session_id: 'session-1',
+      subtype: 'failed',
+    }));
+    expect(emit).toHaveBeenCalledWith({
+      type: 'sidecar_error',
+      error: expect.stringContaining('runtime is not initialized'),
+    });
+  });
+
   it('routes Codex permission responses and pending question answers through the Codex runtime', async () => {
     const codex = {
       ...createRuntime(),

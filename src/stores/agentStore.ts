@@ -162,6 +162,12 @@ interface AgentState {
   streamingText: Record<string, string>;
   /** 单调递增的实时流版本，滚动逻辑无需订阅长字符串。 */
   streamingVersion: Record<string, number>;
+  /**
+   * 当前实时思考流开始时的 events 数量快照。之后时间线里若再出现 thinking
+   * 提交（索引 >= 快照），说明缓冲区是已提交内容的残留副本；若 thinking
+   * 提交都发生在快照之前，则是下一段落的新思考。
+   */
+  streamingThinkingStartEventCount: Record<string, number>;
   /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
   forceStopped: Record<string, boolean>;
   streamingToolInputs: Record<string, Record<string, string>>;
@@ -1960,6 +1966,14 @@ function createSessionEventHandler(
             setSessionStreamPhase(sessionId, 'thinking');
             flushPendingStreaming(sessionId, set);
             clearStreamingTextField(sessionId, 'streamingThinking', set, get);
+            // 记录本段思考流起点：时间线中若之后才出现 thinking 提交，说明
+            // 实时缓冲是已提交内容的残留；否则是下一段落的新思考。
+            set((s) => ({
+              streamingThinkingStartEventCount: {
+                ...s.streamingThinkingStartEventCount,
+                [sessionId]: (s.events[sessionId] || []).length,
+              },
+            }));
           } else if (contentBlock?.type === 'text') {
             logger.debug('Text block started', { sessionId });
             flushPendingStreaming(sessionId, set);
@@ -2580,6 +2594,7 @@ function createSessionEventHandler(
   streamingThinking: {},
   streamingText: {},
   streamingVersion: {},
+  streamingThinkingStartEventCount: {},
   forceStopped: {},
   streamingToolInputs: {},
   streamingToolMeta: {},
