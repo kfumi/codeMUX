@@ -8,6 +8,10 @@
 # 签名:配置 CSC_LINK/CSC_KEY_PASSWORD 后 electron-builder 自动签应用本体;
 # extraResources 的 daemon 二进制经下方 afterPack 钩子补签(见
 # scripts/sign-daemon.cjs 与 docs/desktop-release-guide.md)。
+# 依赖里没有原生模块(electron-updater/ws 都是纯 JS),这步本来就是空跑;
+# 而 electron-builder 26 起,它背后的 @electron/rebuild@4 要求 Node >= 22.12,
+# 关掉可让出包在 Node 20 环境(CI/同事机器)上也能跑。
+npmRebuild: false
 appId: com.codemux.desktop
 productName: CodeMUX
 # GitHub Releases(工单 06):electron-updater 的 feed 源 —— electron-builder 打包时

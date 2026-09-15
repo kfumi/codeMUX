@@ -35,6 +35,8 @@ daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查
 `desktop-electron/sidecar-dist` → `electron-builder --win nsis`。
 产物输出到 `desktop-electron/release/`。
 
+打包工具链的 `electron-builder` 在 `desktop-electron/package.json` 里固定精确版本（不写 `^`）：26 起 Windows 的 PE 资源写入由 rcedit 换成纯 JS 的 `resedit`，产物元数据与压缩工具随之变化，出包工具链需要可复现。
+
 资源根布局(daemon 按这些相对路径找资源,`--resource-dir` = 打包态的
 `process.resourcesPath`):
 
@@ -53,7 +55,7 @@ daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查
 
 ### 常见打包环境问题
 
-electron-builder 首次打包会下载 `winCodeSign`、`nsis`、`nsis-resources` 等工具包，国内网络下常遇到两类问题：
+electron-builder 首次打包会下载 `nsis`、`nsis-resources`、`7zip` 等工具包（签名出包另需 `win-codesign`），国内网络下常遇到两类问题：
 
 1. **下载超时**（`Get "https://github.com/.../nsis-*.7z": connection failed`）：切国内镜像后重跑，缓存写入 `%LOCALAPPDATA%/electron-builder/Cache/`。
 
@@ -62,7 +64,9 @@ electron-builder 首次打包会下载 `winCodeSign`、`nsis`、`nsis-resources`
    npm run build:electron-installer
    ```
 
-2. **winCodeSign 解压报符号链接权限错误**（`Cannot create symbolic link ... darwin/10.12/lib/libcrypto.dylib`）：`winCodeSign` 包内含两个 macOS 软链，Windows 解压需管理员权限或开发者模式。开启「设置 → 系统 → 开发者选项 → 开发人员模式」后重跑即可（那两个 dylib 仅用于 macOS 签名，Windows 构建用不到）。
+2. **签名时 winCodeSign 解压报符号链接权限错误**（`Cannot create symbolic link ... darwin/10.12/lib/libcrypto.dylib`）：只影响配置了 `CSC_LINK` 的签名出包。未签名出包改 PE 资源用的是纯 JS 的 `resedit`（electron-builder 26 起取代 rcedit），根本不下载 `winCodeSign`；签名路径需要 signtool，而 `toolsets.winCodeSign` 默认值 `0.0.0` 指向那个内含两个 macOS 软链的 legacy 包，Windows 解压需管理员权限或开发者模式。两种免管理员规避方式（择一）：
+   - 在 `desktop-electron/electron-builder.yml` 设 `toolsets.winCodeSign: "1.1.0"`，改下 Windows 专用的 `windows-kits-bundle-*.zip`（约 8 MB，不含软链）；
+   - 或设 `SIGNTOOL_PATH` 指向系统已装的 signtool。
 
 ## 安装包签名(应用 + daemon 同一签名链)
 
