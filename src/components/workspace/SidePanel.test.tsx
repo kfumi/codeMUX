@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -105,6 +105,7 @@ describe('SidePanel', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    sidePanelState.isResizing = false;
     setViewportWidth(1024);
   });
 
@@ -182,6 +183,31 @@ describe('SidePanel', () => {
     const close = screen.getByRole('button', { name: '关闭标签页 终端' });
     expect(close.className).toContain('opacity-0');
     expect(close.className).toContain('group-hover:opacity-100');
+  });
+
+  it('渲染拖拽遮罩,接管 webview 上方的指针事件', () => {
+    sidePanelState.isResizing = true;
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(screen.getByTestId('panel-resize-overlay')).toBeTruthy();
+  });
+
+  it('鼠标抬起或窗口失焦都会结束拖拽,避免拖拽卡住', () => {
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    fireEvent.mouseDown(screen.getByTestId('side-panel-resize-handle'), { clientX: 600 });
+    expect(sidePanelState.setResizing).toHaveBeenCalledWith(true);
+    expect(document.documentElement.classList.contains('cmx-panel-resizing')).toBe(true);
+
+    fireEvent.mouseUp(document);
+    expect(sidePanelState.setResizing).toHaveBeenLastCalledWith(false);
+    expect(document.documentElement.classList.contains('cmx-panel-resizing')).toBe(false);
+
+    sidePanelState.setResizing.mockClear();
+    fireEvent.mouseDown(screen.getByTestId('side-panel-resize-handle'), { clientX: 600 });
+    fireEvent(window, new Event('blur'));
+    expect(sidePanelState.setResizing).toHaveBeenLastCalledWith(false);
+    expect(document.documentElement.classList.contains('cmx-panel-resizing')).toBe(false);
   });
 });
 

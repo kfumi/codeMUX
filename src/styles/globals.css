@@ -243,6 +243,13 @@ input[type='password']::-ms-reveal {
   -webkit-app-region: no-drag;
 }
 
+/* 面板拖拽改宽期间(拖拽逻辑见 SidePanel):内置浏览器是独立 guest,指针移到
+   网页上时宿主 document 收不到 mouse 事件。同步禁用 webview 的指针事件,让
+   拖拽全程的事件都落在宿主文档里;ResizeOverlay 是第二重保险。 */
+html.cmx-panel-resizing webview {
+  pointer-events: none !important;
+}
+
 .composer-glow {
   position: relative;
 }

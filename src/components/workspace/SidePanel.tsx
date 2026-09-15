@@ -9,6 +9,7 @@ import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { applyBrowserVisibility, hideAllBrowserHosts } from '../../lib/browserVisibility';
 import { TooltipHint } from '../ui/tooltip';
+import { ResizeOverlay } from '../ui/resize-overlay';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
@@ -151,6 +152,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
     setResizing(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    document.documentElement.classList.add('cmx-panel-resizing');
 
     const startX = event.clientX;
     const startWidth = panelWidth;
@@ -171,12 +173,15 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       }
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      document.documentElement.classList.remove('cmx-panel-resizing');
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
     };
 
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', onUp);
   }, [panelWidth, setPanelWidth, setResizing]);
 
   return (
@@ -193,13 +198,21 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
     >
       {!isNarrow && !isExpanded && (
         <div
-          className="group absolute inset-y-0 -left-1 z-40 w-2 cursor-col-resize"
+          data-testid="side-panel-resize-handle"
+          className="group absolute inset-y-0 -left-1.5 z-40 w-3 cursor-col-resize"
           onMouseDown={handleMouseDown}
           aria-hidden="true"
         >
-          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+          <div
+            className={cn(
+              'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full transition-all duration-200',
+              isResizing ? 'bg-primary/45' : 'bg-transparent group-hover:bg-primary/22',
+            )}
+          />
         </div>
       )}
+
+      <ResizeOverlay active={isResizing} />
 
       <div className="flex h-full w-full min-w-0 flex-col">
         <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-1">
