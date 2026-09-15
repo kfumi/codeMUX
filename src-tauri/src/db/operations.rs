@@ -104,6 +104,7 @@ pub struct ImportedSessionSource {
     pub imported_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImportedSessionSnapshot {
     pub agent_kind: AgentKind,
     pub agent_session_id: String,
@@ -547,8 +548,9 @@ pub fn import_session_snapshot(
             [&existing_source.app_session_id],
         )?;
         insert_timeline_events(&tx, &existing_source.app_session_id, &snapshot.events)?;
+        // 重新导入更新标题时尊重 title_locked：用户手动改名过的会话保持命名。
         tx.execute(
-            "UPDATE sessions SET title = ?1, updated_at = ?2, project_id = COALESCE(?3, project_id), is_read_only = 0 WHERE id = ?4",
+            "UPDATE sessions SET title = CASE WHEN title_locked = 0 THEN ?1 ELSE title END, updated_at = ?2, project_id = COALESCE(?3, project_id), is_read_only = 0 WHERE id = ?4",
             params![snapshot.title, snapshot.updated_at, snapshot.project_id, existing_source.app_session_id],
         )?;
         if mapping_missing {
@@ -3218,5 +3220,61 @@ mod tests {
         let normalized = normalize_session_title(&long);
         assert_eq!(normalized.chars().count(), 81);
         assert!(normalized.ends_with('…'));
+    }
+
+    #[test]
+    fn reimport_updates_timeline_but_keeps_locked_title() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let snapshot = ImportedSessionSnapshot {
+            agent_kind: AgentKind::ClaudeCode,
+            agent_session_id: "claude-lock-1".to_string(),
+            title: "Imported Claude".to_string(),
+            created_at: "2026-01-01T10:00:00Z".to_string(),
+            updated_at: "2026-01-01T10:05:00Z".to_string(),
+            project_id: None,
+            source_locator: "C:/Users/test/.claude/session.jsonl".to_string(),
+            source_fingerprint: "claude:1".to_string(),
+            source_modified_at: Some("2026-01-01T10:05:00Z".to_string()),
+            cwd: Some("C:/workspace".to_string()),
+            events: vec![serde_json::json!({
+                "type": "user_message",
+                "session_id": "claude-lock-1",
+                "event_id": "event-1",
+                "content": [{"type": "text", "text": "hello"}]
+            })],
+        };
+
+        let (created, _) = import_session_snapshot(&mut conn, &snapshot, false).unwrap();
+        rename_session_title(&conn, &created.id, "My name").unwrap();
+
+        // 重新导入（resync）：时间线更新、只读解除，但锁定的标题不被覆盖。
+        let refreshed = ImportedSessionSnapshot {
+            title: "Native title from disk".to_string(),
+            source_fingerprint: "claude:2".to_string(),
+            updated_at: "2026-01-01T10:30:00Z".to_string(),
+            events: vec![
+                serde_json::json!({
+                    "type": "user_message",
+                    "session_id": "claude-lock-1",
+                    "event_id": "event-1",
+                    "content": [{"type": "text", "text": "hello"}]
+                }),
+                serde_json::json!({
+                    "type": "assistant_message",
+                    "session_id": "claude-lock-1",
+                    "event_id": "event-2",
+                    "content": [{"type": "text", "text": "reply"}]
+                }),
+            ],
+            ..snapshot.clone()
+        };
+        let (updated, changed) = import_session_snapshot(&mut conn, &refreshed, true).unwrap();
+        assert!(changed);
+        assert_eq!(updated.id, created.id);
+        assert_eq!(updated.title, "My name");
+        assert!(!updated.is_read_only);
+        let events = get_session_timeline(&conn, &created.id).unwrap().unwrap();
+        assert_eq!(events.len(), 2);
     }
 }

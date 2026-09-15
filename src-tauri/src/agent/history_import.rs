@@ -784,8 +784,9 @@ fn discover_claude(home: &Path) -> Vec<DiscoveredSnapshot> {
         .into_iter()
         .filter_map(|path| {
             let session_id = path.file_stem()?.to_string_lossy().to_string();
-            let (raw, malformed) = read_jsonl_values(&path).ok()?;
-            let raw: Vec<Value> = raw
+            let (values, malformed) = read_jsonl_values(&path).ok()?;
+            let native_title = claude_native_title(&values);
+            let raw: Vec<Value> = values
                 .into_iter()
                 .filter(should_include_claude_history_event)
                 .collect();
@@ -799,6 +800,7 @@ fn discover_claude(home: &Path) -> Vec<DiscoveredSnapshot> {
                 path,
                 events,
                 malformed.then(|| "部分 JSONL 记录无法解析".to_string()),
+                native_title,
             ))
         })
         .collect()
@@ -808,6 +810,7 @@ fn discover_codex(home: &Path) -> Vec<DiscoveredSnapshot> {
     let root = home.join(".codex").join("sessions");
     let mut files = Vec::new();
     collect_jsonl_files(&root, &mut files);
+    let index_names = codex_session_index_thread_names(home);
     files
         .into_iter()
         .filter_map(|path| {
@@ -825,6 +828,10 @@ fn discover_codex(home: &Path) -> Vec<DiscoveredSnapshot> {
                 .and_then(|payload| payload.get("cwd"))
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
+            let native_title = index_names
+                .get(&session_id)
+                .cloned()
+                .or_else(|| codex_rollout_thread_name(&raw));
             let mut events = convert_codex_history_values_to_events(&raw, &session_id);
             if let Some(cwd) = cwd {
                 for event in &mut events {
@@ -842,6 +849,7 @@ fn discover_codex(home: &Path) -> Vec<DiscoveredSnapshot> {
                 path,
                 events,
                 malformed.then(|| "部分 JSONL 记录无法解析".to_string()),
+                native_title,
             ))
         })
         .collect()
@@ -867,6 +875,7 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
 
     // 项目目录来自 session 表（旧版 schema 无此表时跳过注入，不影响发现）。
     let directories = opencode_session_directories(&connection);
+    let titles = opencode_session_titles(&connection);
 
     session_ids
         .filter_map(Result::ok)
@@ -883,14 +892,38 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
             if events.is_empty() {
                 return None;
             }
+            let native_title = titles
+                .get(&session_id)
+                .map(String::as_str)
+                .filter(|title| !is_opencode_placeholder_title(title))
+                .map(ToOwned::to_owned);
             Some(build_snapshot(
                 AgentKind::Opencode,
                 session_id,
                 path.clone(),
                 events,
                 None,
+                native_title,
             ))
         })
+        .collect()
+}
+
+/// opencode 会话标题映射：session.id -> session.title。查询失败（旧版 schema
+/// 无 title 列等）返回空映射，调用方按“无原生标题”继续发现。
+fn opencode_session_titles(connection: &Connection) -> HashMap<String, String> {
+    let Ok(mut statement) =
+        connection.prepare("SELECT id, title FROM session WHERE title IS NOT NULL")
+    else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) else {
+        return HashMap::new();
+    };
+    rows.filter_map(Result::ok)
+        .filter(|(_, title)| !title.trim().is_empty())
         .collect()
 }
 
@@ -972,6 +1005,7 @@ fn discover_pi_in_root(root: &Path) -> Vec<DiscoveredSnapshot> {
                 path,
                 events,
                 malformed.then(|| "部分 JSONL 记录无法解析".to_string()),
+                pi_session_name(&raw),
             ))
         })
         .collect()
@@ -983,6 +1017,7 @@ fn build_snapshot(
     path: PathBuf,
     events: Vec<Value>,
     warning: Option<String>,
+    native_title: Option<String>,
 ) -> DiscoveredSnapshot {
     let metadata = fs::metadata(&path).ok();
     let modified = metadata
@@ -1006,15 +1041,12 @@ fn build_snapshot(
         .iter()
         .find_map(|event| event.get("cwd").and_then(Value::as_str))
         .map(ToOwned::to_owned);
-    let title = first_user_text(&events)
-        .map(|text| truncate_title(&text))
-        .unwrap_or_else(|| {
-            format!(
-                "{} 会话 {}",
-                agent_label(agent_kind),
-                &agent_session_id[..agent_session_id.len().min(8)]
-            )
-        });
+    let title = resolve_snapshot_title(
+        agent_kind,
+        native_title.as_deref(),
+        &events,
+        &agent_session_id,
+    );
     let warnings = warning.into_iter().collect();
 
     DiscoveredSnapshot {
@@ -1118,6 +1150,122 @@ fn first_user_text(events: &[Value]) -> Option<String> {
 
 fn truncate_title(value: &str) -> String {
     crate::db::operations::normalize_session_title(value)
+}
+
+/// 导入标题兜底链：原生标题（各智能体自己的命名，已由调用方过滤占位）>
+/// 首条用户消息截断 > "{agent} 会话 {id8}"。原生标题同样做 80 字符归一化。
+fn resolve_snapshot_title(
+    agent_kind: AgentKind,
+    native_title: Option<&str>,
+    events: &[Value],
+    agent_session_id: &str,
+) -> String {
+    native_title
+        .map(crate::db::operations::normalize_session_title)
+        .filter(|title| !title.is_empty())
+        .or_else(|| first_user_text(events).map(|text| truncate_title(&text)))
+        .unwrap_or_else(|| {
+            format!(
+                "{} 会话 {}",
+                agent_label(agent_kind),
+                &agent_session_id[..agent_session_id.len().min(8)]
+            )
+        })
+}
+
+fn non_empty_str(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// Claude 会话 JSONL 中的原生标题记录：`custom-title`（用户 /rename）优先于
+/// `ai-title`（后台 LLM 生成的摘要标题）；同名记录重复出现时最新非空值生效。
+fn claude_native_title(values: &[Value]) -> Option<String> {
+    let mut custom: Option<String> = None;
+    let mut ai: Option<String> = None;
+    for value in values {
+        match value.get("type").and_then(Value::as_str) {
+            Some("custom-title") => {
+                if let Some(title) = non_empty_str(value.get("customTitle")) {
+                    custom = Some(title);
+                }
+            }
+            Some("ai-title") => {
+                if let Some(title) = non_empty_str(value.get("aiTitle")) {
+                    ai = Some(title);
+                }
+            }
+            _ => {}
+        }
+    }
+    custom.or(ai)
+}
+
+/// Codex rollout 中的线程命名记录（`payload.type = thread_name_updated`，
+/// 兼容 `threadName`/`thread_name` 两种字段拼写）；最新非空值生效。
+fn codex_rollout_thread_name(values: &[Value]) -> Option<String> {
+    let mut name: Option<String> = None;
+    for value in values {
+        let payload = value.get("payload");
+        let payload_type = payload
+            .and_then(|payload| payload.get("type"))
+            .and_then(Value::as_str);
+        if payload_type != Some("thread_name_updated") && payload_type != Some("thread_name") {
+            continue;
+        }
+        let thread_name = payload
+            .and_then(|payload| payload.get("threadName"))
+            .or_else(|| payload.and_then(|payload| payload.get("thread_name")));
+        if let Some(name_value) = non_empty_str(thread_name) {
+            name = Some(name_value);
+        }
+    }
+    name
+}
+
+/// `~/.codex/session_index.jsonl`（`{id, thread_name}`）：同一 id 最新非空
+/// 命名生效。索引里的命名优先于 rollout 记录（与原生 resume 选择器一致）。
+fn codex_session_index_thread_names(home: &Path) -> HashMap<String, String> {
+    let Ok((values, _)) = read_jsonl_values(&home.join(".codex").join("session_index.jsonl"))
+    else {
+        return HashMap::new();
+    };
+    let mut names: HashMap<String, String> = HashMap::new();
+    for value in values {
+        let Some(id) = non_empty_str(value.get("id")) else {
+            continue;
+        };
+        if let Some(name) = non_empty_str(value.get("thread_name")) {
+            names.insert(id, name);
+        }
+    }
+    names
+}
+
+/// OpenCode 新建/子会话的占位标题（LLM title agent 生成前的临时值），不能
+/// 当原生标题导入。
+fn is_opencode_placeholder_title(title: &str) -> bool {
+    title.starts_with("New session - ") || title.starts_with("Child session - ")
+}
+
+/// pi 会话文件中的 `session_info` 条目（用户 /name、扩展 pi.setSessionName
+/// 写入）。逆序取最新一条；最新条目 name 为空表示清除命名（返回空串而非
+/// 回退到旧命名），与 pi 自身 getSessionName 行为一致。
+fn pi_session_name(values: &[Value]) -> Option<String> {
+    values
+        .iter()
+        .rev()
+        .find(|value| value.get("type").and_then(Value::as_str) == Some("session_info"))
+        .map(|value| {
+            value
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        })
 }
 
 fn format_system_time(value: std::time::SystemTime) -> String {
@@ -1274,6 +1422,158 @@ mod tests {
             .any(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished")));
 
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn discovers_claude_native_title_preferring_custom_over_ai() {
+        let home = test_home("claude-native-title");
+        let project_dir = home.join(".claude/projects/demo");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            project_dir.join("claude-session.jsonl"),
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"content\":\"使用两个异步子智能体简单探索下当前项目技术栈\"}}\n",
+                "{\"type\":\"ai-title\",\"aiTitle\":\"异步子智能体探索项目技术栈\"}\n",
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"好的\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let snapshots = discover_claude(&home);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].candidate.title, "异步子智能体探索项目技术栈",
+            "原生 ai-title 优先于首条消息截断"
+        );
+
+        // 追加 custom-title（用户 /rename）后以 custom 为准
+        let mut appended = fs::read_to_string(project_dir.join("claude-session.jsonl")).unwrap();
+        appended.push_str("{\"type\":\"custom-title\",\"customTitle\":\"我的命名\"}\n");
+        fs::write(project_dir.join("claude-session.jsonl"), appended).unwrap();
+
+        let snapshots = discover_claude(&home);
+        assert_eq!(snapshots[0].candidate.title, "我的命名");
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn codex_index_name_wins_over_rollout_thread_name() {
+        let home = test_home("codex-index-name");
+        let session_dir = home.join(".codex/sessions/2026/07");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("history.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session\",\"cwd\":\"C:/workspace\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"列出文件\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_name_updated\",\"threadName\":\"Rollout 命名\"}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            home.join(".codex/session_index.jsonl"),
+            "{\"id\":\"other\",\"thread_name\":\"Other\"}\n{\"id\":\"codex-session\",\"thread_name\":\"Index 命名\"}\n",
+        )
+        .unwrap();
+
+        let snapshots = discover_codex(&home);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].candidate.title, "Index 命名");
+
+        // 无索引条目时回落到 rollout 记录
+        fs::remove_file(home.join(".codex/session_index.jsonl")).unwrap();
+        let snapshots = discover_codex(&home);
+        assert_eq!(snapshots[0].candidate.title, "Rollout 命名");
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn discovers_pi_session_info_name_over_first_message() {
+        let home = test_home("pi-session-name");
+        let pi_dir = home.join(".pi/agent/sessions/--C--demo--");
+        fs::create_dir_all(&pi_dir).unwrap();
+        fs::write(
+            pi_dir.join("20260903_ab12cd34.jsonl"),
+            concat!(
+                "{\"type\":\"session\",\"version\":3,\"id\":\"pi-uuid-1\",\"timestamp\":\"2026-09-03T08:00:00.000Z\",\"cwd\":\"C:/demo\"}\n",
+                "{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-09-03T08:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"帮我导入会话\"}]}}\n",
+                "{\"type\":\"session_info\",\"id\":\"k1\",\"parentId\":\"u1\",\"timestamp\":\"2026-09-03T08:35:00.000Z\",\"name\":\"重构 auth 模块\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let snapshots = discover_pi_in_root(&home.join(".pi/agent/sessions"));
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].candidate.title, "重构 auth 模块");
+
+        // 最新 session_info 条目 name 为空 = 清除命名，回退首条消息截断
+        let path = pi_dir.join("20260903_ab12cd34.jsonl");
+        let mut content = fs::read_to_string(&path).unwrap();
+        content.push_str(
+            "{\"type\":\"session_info\",\"id\":\"k2\",\"parentId\":\"u1\",\"name\":\"\"}\n",
+        );
+        fs::write(&path, content).unwrap();
+        let snapshots = discover_pi_in_root(&home.join(".pi/agent/sessions"));
+        assert!(snapshots[0].candidate.title.contains("帮我导入会话"));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn opencode_session_titles_skip_placeholders() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT);
+             INSERT INTO session VALUES ('s1', 'Refactor auth module');
+             INSERT INTO session VALUES ('s2', 'New session - 2026-09-15T00:00:00.000Z');
+             INSERT INTO session VALUES ('s3', NULL);
+             INSERT INTO session VALUES ('s4', '   ');",
+        )
+        .unwrap();
+
+        let titles = opencode_session_titles(&conn);
+        assert_eq!(
+            titles.get("s1").map(String::as_str),
+            Some("Refactor auth module")
+        );
+        assert!(!titles.contains_key("s3"));
+        // 占位标题存在于映射中，但由 discover 阶段过滤
+        assert_eq!(
+            titles.get("s2").map(String::as_str),
+            Some("New session - 2026-09-15T00:00:00.000Z")
+        );
+        assert!(is_opencode_placeholder_title(titles["s2"].as_str()));
+        assert!(!is_opencode_placeholder_title(titles["s1"].as_str()));
+    }
+
+    #[test]
+    fn resolve_snapshot_title_prefers_native_then_first_message_then_fallback() {
+        let events = vec![serde_json::json!({
+            "type": "user_message", "content": [{"type": "text", "text": "首条用户消息"}]
+        })];
+
+        // 原生标题优先
+        assert_eq!(
+            resolve_snapshot_title(AgentKind::Codex, Some("Thread 命名"), &events, "abc12345"),
+            "Thread 命名"
+        );
+        // 原生标题为空（如 pi 清除命名）→ 首条消息截断
+        assert_eq!(
+            resolve_snapshot_title(AgentKind::Codex, Some("   "), &events, "abc12345"),
+            "首条用户消息"
+        );
+        // 无原生标题 → 首条消息
+        assert_eq!(
+            resolve_snapshot_title(AgentKind::Pi, None, &events, "abc12345"),
+            "首条用户消息"
+        );
+        // 无事件 → "{agent} 会话 {id8}"
+        assert_eq!(
+            resolve_snapshot_title(AgentKind::Opencode, None, &[], "abcdef123456"),
+            "OpenCode 会话 abcdef12"
+        );
     }
 
     #[test]
