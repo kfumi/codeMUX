@@ -25,6 +25,17 @@ function textAssistant(text: string): AgentMessage {
   } as unknown as AgentMessage;
 }
 
+function thinkingAssistant(thinking: string): AgentMessage {
+  return {
+    kind: 'assistant',
+    data: {
+      message: {
+        content: [{ type: 'thinking', thinking }],
+      },
+    },
+  } as unknown as AgentMessage;
+}
+
 describe('buildAssistantCollapseInfoMap', () => {
   it('collapses trailing tool steps that appear after the final text assistant', () => {
     const events = [
@@ -75,5 +86,20 @@ describe('buildAssistantCollapseInfoMap', () => {
     expect(toggleEntries).toHaveLength(1);
     expect(toggleEntries[0]?.[0]).toBe(2);
     expect(collapseInfo.get(3)?.isToggleMessage).toBe(false);
+  });
+
+  it('does not collapse a turn that does not end with summary text', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      textAssistant('intermediate narration'),
+      toolAssistant('tool-1', 'bash'),
+      thinkingAssistant('trailing reasoning only'),
+      { kind: 'result', data: { type: 'result', duration_ms: 100 } },
+    ] as unknown as AgentMessage[];
+    const timestamps = events.map((_, index) => index * 1000);
+
+    const collapseInfo = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true });
+
+    expect(collapseInfo.size).toBe(0);
   });
 });

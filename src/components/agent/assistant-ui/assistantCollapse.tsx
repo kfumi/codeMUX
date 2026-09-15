@@ -23,6 +23,11 @@ export function buildAssistantCollapseInfoMap(
   const collapseInfoByEventIndex = new Map<number, AssistantCollapseInfo>();
 
   for (const [finalAssistantIndex, resultIndex] of resultTargets) {
+    // 没有以总结性文本收尾的回合通常意味着异常中断/未正常完成:不折叠,直接展示过程。
+    if (!hasAssistantSummaryText(events[finalAssistantIndex])) {
+      continue;
+    }
+
     const userIndex = findTurnUserIndex(events, finalAssistantIndex, resultIndex);
     if (userIndex == null) {
       continue;
@@ -41,12 +46,6 @@ export function buildAssistantCollapseInfoMap(
       if (isCollapsibleProcessEvent(events[index])) {
         collapsibleEventIndices.push(index);
       }
-    }
-
-    // OpenCode can finish a turn with only a tool call and no narration.
-    // Treat that final tool message as the collapsed process in that case.
-    if (collapsibleEventIndices.length === 0 && isOpenCodeToolOnlyAssistantEvent(events[finalAssistantIndex])) {
-      collapsibleEventIndices.push(finalAssistantIndex);
     }
 
     const finalAssistantHasReasoningAndText = hasAssistantReasoningAndText(events[finalAssistantIndex]);
@@ -265,20 +264,15 @@ function hasRenderableAssistantContent(
   });
 }
 
-function isOpenCodeToolOnlyAssistantEvent(event: AgentMessage | undefined): boolean {
+function hasAssistantSummaryText(event: AgentMessage | undefined): boolean {
   if (event?.kind !== 'assistant') {
     return false;
   }
 
-  const data = event.data as unknown as Record<string, unknown>;
-  if (typeof data.opencode_session_id !== 'string' && typeof data.opencodeSessionId !== 'string') {
-    return false;
-  }
-
   const content = event.data.message?.content;
-  return Array.isArray(content)
-    && content.length > 0
-    && content.every((block) => block?.type === 'tool_use');
+  return Array.isArray(content) && content.some((block) => (
+    block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0
+  ));
 }
 
 function hasAssistantReasoningAndText(event: AgentMessage | undefined): boolean {

@@ -2786,17 +2786,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('第二段内部思考')).toBeTruthy();
   });
 
-  it('collapses completed OpenCode tool-only turns when compact output is enabled', () => {
+  it('shows completed OpenCode tool-only turns directly instead of collapsing them', () => {
     useSettingsStore.setState((state) => ({
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
     render(<Harness sessionId="session-opencode-tool-turn" />);
 
-    expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
-    expect(screen.queryByText('终端')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
+    expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /运行 1 个命令/ }));
     expect(screen.getByText('终端')).toBeTruthy();
