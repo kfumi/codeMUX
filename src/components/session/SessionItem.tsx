@@ -10,6 +10,8 @@ import { useSessionFlowActive } from '../../hooks/useSessionFlowActive';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
+import { SessionInfoCard } from './SessionInfoCard';
 import { TooltipHint } from '../ui/tooltip';
 import { sessionAwaitsUserConfirmation } from '../../lib/pendingUserInput';
 import { cn } from '../../lib/utils';
@@ -178,118 +180,129 @@ export function SessionItem({
 
   return (
     <>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150 select-none [-webkit-touch-callout:none]',
-              'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
-              'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
-              'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
-              isActive && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.105)]',
-            )}
-            onClick={onClick}
-          >
-            <SessionStatusIcon session={session} isActive={isActive} agentDef={agentDef} />
-
-            {renaming ? (
-              <input
-                autoFocus
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onBlur={handleRenameCommit}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') handleRenameCommit();
-                  if (event.key === 'Escape') setRenaming(false);
-                }}
-                onClick={(event) => event.stopPropagation()}
-                className="flex-1 min-w-0 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-ui-title text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
-              />
-            ) : (
-              <>
-                <span className={cn('flex-1 truncate transition-colors duration-200', isActive && 'font-medium')}>
-                  {session.title || '未命名对话'}
-                </span>
-                {session.is_read_only && (
-                  <TooltipHint content="导入的只读快照">
-                    <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
-                  </TooltipHint>
+      <HoverCard
+        openDelay={400}
+        closeDelay={120}
+        open={isNarrow || renaming ? false : undefined}
+      >
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <HoverCardTrigger asChild>
+              <div
+                className={cn(
+                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150 select-none [-webkit-touch-callout:none]',
+                  'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
+                  'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+                  'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
+                  isActive && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.105)]',
                 )}
-                <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-150 group-hover:w-12">
-                  <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
-                    {awaitsConfirmation ? (
-                      <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-[10px] font-medium leading-4 text-white">
-                        等待确认
-                      </span>
-                    ) : flowActive ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
-                    ) : (
-                      <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/40">
-                        {timeLabel}
-                      </span>
-                    )}
-                  </span>
-                  {/* 窄屏没有 hover:按钮簇不渲染,免得 opacity-0 的幽灵触控区拦截点击。 */}
-                  {isNarrow ? null : (
-                    <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                      <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
-                        <button
-                          className={cn(
-                            'rounded-md p-1 transition-colors duration-150',
-                            session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
-                            'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                          )}
-                          aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleTogglePinned();
-                          }}
-                        >
-                          <PinIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipHint>
-                      <TooltipHint content={archiveLabel}>
-                        <button
-                          className={cn(
-                            'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
-                            'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                          )}
-                          aria-label={archiveLabel}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleArchive();
-                          }}
-                        >
-                          <ArchiveIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipHint>
+                onClick={onClick}
+              >
+                <SessionStatusIcon session={session} isActive={isActive} agentDef={agentDef} />
+
+                {renaming ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(event) => setRenameValue(event.target.value)}
+                    onBlur={handleRenameCommit}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleRenameCommit();
+                      if (event.key === 'Escape') setRenaming(false);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    className="flex-1 min-w-0 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-ui-title text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
+                  />
+                ) : (
+                  <>
+                    <span className={cn('flex-1 truncate transition-colors duration-200', isActive && 'font-medium')}>
+                      {session.title || '未命名对话'}
                     </span>
-                  )}
-                </span>
-              </>
-            )}
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
-          <ContextMenuItem icon={<PinIcon className="h-3.5 w-3.5" />} onClick={handleTogglePinned}>
-            {session.is_pinned ? '取消置顶' : '置顶'}
-          </ContextMenuItem>
-          <ContextMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameStart}>
-            重命名
-          </ContextMenuItem>
-          {workingPath && canOpenExplorer ? (
-            <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={handleOpenInExplorer}>
-              在资源管理器中打开
+                    {session.is_read_only && (
+                      <TooltipHint content="导入的只读快照">
+                        <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
+                      </TooltipHint>
+                    )}
+                    <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-150 group-hover:w-12">
+                      <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
+                        {awaitsConfirmation ? (
+                          <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-[10px] font-medium leading-4 text-white">
+                            等待确认
+                          </span>
+                        ) : flowActive ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
+                        ) : (
+                          <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/40">
+                            {timeLabel}
+                          </span>
+                        )}
+                      </span>
+                      {/* 窄屏没有 hover:按钮簇不渲染,免得 opacity-0 的幽灵触控区拦截点击。 */}
+                      {isNarrow ? null : (
+                        <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                          <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
+                            <button
+                              className={cn(
+                                'rounded-md p-1 transition-colors duration-150',
+                                session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
+                                'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                              )}
+                              aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleTogglePinned();
+                              }}
+                            >
+                              <PinIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipHint>
+                          <TooltipHint content={archiveLabel}>
+                            <button
+                              className={cn(
+                                'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
+                                'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                              )}
+                              aria-label={archiveLabel}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleArchive();
+                              }}
+                            >
+                              <ArchiveIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipHint>
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+              </div>
+            </HoverCardTrigger>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+            <ContextMenuItem icon={<PinIcon className="h-3.5 w-3.5" />} onClick={handleTogglePinned}>
+              {session.is_pinned ? '取消置顶' : '置顶'}
             </ContextMenuItem>
-          ) : null}
-          <ContextMenuItem icon={<ArchiveIcon className="h-3.5 w-3.5" />} onClick={handleArchive}>
-            {archiveLabel}
-          </ContextMenuItem>
-          <ContextMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} danger onClick={handleDelete}>
-            删除
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+            <ContextMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameStart}>
+              重命名
+            </ContextMenuItem>
+            {workingPath && canOpenExplorer ? (
+              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={handleOpenInExplorer}>
+                在资源管理器中打开
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuItem icon={<ArchiveIcon className="h-3.5 w-3.5" />} onClick={handleArchive}>
+              {archiveLabel}
+            </ContextMenuItem>
+            <ContextMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} danger onClick={handleDelete}>
+              删除
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+        <HoverCardContent>
+          <SessionInfoCard session={latestSession} workingPath={workingPath} />
+        </HoverCardContent>
+      </HoverCard>
 
       <ConfirmDialog
         open={confirmOpen}

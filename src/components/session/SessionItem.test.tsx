@@ -256,6 +256,26 @@ describe('SessionItem', () => {
     expect(screen.getByText('重命名')).toBeTruthy();
   });
 
+  it('reveals the session info card on hover', async () => {
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-hover', title: 'Hover Session', model: 'gpt-5' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Codex · gpt-5')).toBeNull();
+
+    fireEvent.pointerOver(screen.getByText('Hover Session'));
+
+    await waitFor(() => expect(screen.getByText('Codex · gpt-5')).toBeTruthy());
+  });
+
   it('hides the explorer entry outside the desktop shell', async () => {
     hostCaps.hasExplorer = false;
     useAgentStore.setState({
