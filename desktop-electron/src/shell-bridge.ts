@@ -53,6 +53,8 @@ export interface ShellBridgeDeps {
   updater: UpdaterService;
   /** 渲染层事件出口(通知点击/更新进度等)。 */
   sendToRenderer(channel: string, payload: unknown): void;
+  /** 渲染层 App 挂载完成(main 转正主窗口 + splash 退出;幂等由 main 侧保证)。 */
+  onRendererReady(): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
 }
@@ -439,6 +441,13 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   handle('getDaemonInfo', async () => {
     const status = await deps.supervisor.daemonStatus();
     return { port: status.port, running: status.running, version: status.version };
+  });
+
+  // --- 启动 splash ------------------------------------------------------------
+  // 渲染层 App 挂载后上报(main 转正主窗口 + splash 渐隐退出);fire-and-forget,
+  // 无返回值。通道归属 main 生命周期而非 shell-bridge 依赖面,经回调注入。
+  handle('notifyRendererReady', () => {
+    deps.onRendererReady();
   });
 
   return () => {

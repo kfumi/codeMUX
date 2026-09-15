@@ -11,6 +11,7 @@ import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
+import { notifyRendererReady } from "./lib/rendererReady";
 import "./stores/appearanceStore";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
@@ -41,3 +42,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </HostBootstrapGate>
   </React.StrictMode>,
 );
+
+// 启动 splash 转正(方案 A):App 已挂载,再等双 RAF 确保首帧合成上屏,
+// 然后通知壳显示主窗口并渐隐关闭 splash。非 Electron 形态为 no-op。
+notifyRendererReady();

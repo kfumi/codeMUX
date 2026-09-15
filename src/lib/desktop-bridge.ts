@@ -213,6 +213,8 @@ export interface CodemuxDesktopBridge {
   // 通知 / 主窗口
   sendAgentNotification(payload: { title: string; body: string; sessionId: string }): Promise<void>;
   showMainWindow(): Promise<void>;
+  /** 渲染层 App 挂载完成上报(壳侧转正主窗口 + 启动 splash 渐隐退出)。 */
+  notifyRendererReady(): Promise<void>;
 
   // 应用内更新器(工单 06;进度事件经 onUpdaterEvent 转发)
   checkForUpdates(): Promise<DesktopUpdaterCheckResult>;

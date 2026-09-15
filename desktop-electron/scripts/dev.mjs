@@ -30,8 +30,10 @@ if (build.status !== 0) {
 // electron 包的主入口就是其二进制路径(跨平台)。
 const electronBinary = require('electron');
 
-const mainPath = path.join(shellRoot, 'dist-electron', 'main.js');
-const child = spawn(electronBinary, [mainPath], {
+// 按应用目录(而非 main.js 文件路径)启动:传文件路径会把 app path 解析到
+// dist-electron/,那里没有 package.json,app.getVersion() 会回退成 Electron
+// 自身版本(如 33.4.11)而非应用版本。目录启动按 package.json main 字段加载。
+const child = spawn(electronBinary, [shellRoot], {
   stdio: 'inherit',
   env: {
     ...process.env,

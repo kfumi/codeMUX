@@ -20,6 +20,7 @@ import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
 import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
+import { createSplashWindow, type SplashController } from './splash';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
@@ -168,6 +169,8 @@ let browserGuests: BrowserGuestTracker | null = null;
 let automation: BrowserAutomationService | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
+/** 启动 splash(app ready 即显示,渲染层 App 挂载后经 renderer-ready 转正关闭)。 */
+let splash: SplashController | null = null;
 
 function getRendererLog(): RendererLogRecorder {
   rendererLog ??= createRendererLogRecorder(resolveLogDir());
@@ -192,6 +195,15 @@ function showMainWindow(): void {
   mainWindow.focus();
 }
 
+/** 渲染层 App 已挂载:主窗口转正显示,splash 渐隐退出(幂等)。 */
+function promoteMainWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  splash?.dismiss();
+  splash = null;
+}
+
 function createMainWindow(): BrowserWindow {
   // 恢复用户上次调整的窗口尺寸/位置(缺失或显示器变化时按工作区钳制/居中)。
   const windowState = loadWindowState({ width: MAIN_WINDOW_WIDTH, height: MAIN_WINDOW_HEIGHT });
@@ -204,7 +216,9 @@ function createMainWindow(): BrowserWindow {
     frame: false, // 与现 Tauri 窗口一致(自绘标题栏)。
     resizable: true,
     fullscreenable: true,
-    backgroundColor: '#0b0e14',
+    // 对齐主题暗色 --background(hsl(0 0% 6.7%));亮色主题切换由渲染层接管,
+    // 此色仅覆盖首帧与 splash 转场,统一可避免转场跳色。
+    backgroundColor: '#111111',
     webPreferences: {
       preload: path.join(moduleDir, 'preload.js'),
       contextIsolation: true,
@@ -279,8 +293,22 @@ function createMainWindow(): BrowserWindow {
   window.on('maximize', sendMaximizeState);
   window.on('unmaximize', sendMaximizeState);
 
+  // 主窗口转正:splash 期间不依赖 ready-to-show(首帧只是背景色,提前显示
+  // 会露馅),改由渲染层 App 挂载后上报 renderer-ready;超时兜底与加载失败
+  // 见 createSplashWindow 的 timeout 与下方 did-fail-load。
   window.once('ready-to-show', () => {
-    window.show();
+    if (splash) {
+      splash.ensureVisible();
+    }
+  });
+
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    // 主窗口加载失败(如渲染层 dist 缺失):立即收掉 splash,让错误可见。
+    if (errorCode !== -3) {
+      // -3 = ERR_ABORTED(导航被打断,如 dev 热重载),不算失败。
+      console.error('[main] renderer load failed:', errorCode, errorDescription);
+      splash?.dispose();
+    }
   });
 
   // Browser Host(工单 07):<webview> guest 附挂前校验 —— 剥 preload、禁 Node、
@@ -362,6 +390,9 @@ function startSupervisor(): void {
 
 async function quitApplication(): Promise<void> {
   quitting = true;
+  // splash 若仍在(渲染层从未就绪的退出路径),立即销毁不留残窗。
+  splash?.dispose();
+  splash = null;
   // 自动化客户端先行断开(不重连),再停自有 daemon。
   automation?.stop();
   automation = null;
@@ -406,6 +437,12 @@ if (!gotLock) {
 
   void app.whenReady().then(() => {
     registerAppProtocol();
+    // 启动 splash(方案 A):先于主窗口创建 —— 纯静态页面数毫秒内即可绘制,
+    // 盖住渲染层 bundle 解析 + supervisor 拉 daemon 的黑屏窗口期。
+    // 尺寸/位置与即将显示的主窗口同源(同一份 window-state),视觉上是
+    // 「窗口先出现、内容区中央加载」,转正时无缝衔接。
+    // 转正路径:渲染层 renderer-ready → promoteMainWindow;超时/加载失败兜底。
+    splash = createSplashWindow({ bounds: loadWindowState({ width: MAIN_WINDOW_WIDTH, height: MAIN_WINDOW_HEIGHT }) });
     // Browser Host(工单 07):guest 弹窗兜底(webContents 创建即注册,先于主窗口)。
     const guests = createBrowserGuestTracker({ sendToRenderer });
     browserGuests = guests;
@@ -444,6 +481,7 @@ if (!gotLock) {
       supervisor,
       updater,
       sendToRenderer,
+      onRendererReady: promoteMainWindow,
       browserGuests: guests,
     });
     createTray(() => {

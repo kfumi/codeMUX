@@ -99,6 +99,8 @@ const bridge = {
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }) =>
     invoke<void>('sendAgentNotification', payload),
   showMainWindow: () => invoke<void>('showMainWindow'),
+  /** 渲染层 App 挂载完成上报(main 转正主窗口 + 启动 splash 渐隐退出)。 */
+  notifyRendererReady: () => invoke<void>('notifyRendererReady'),
 
   // 应用内更新器(工单 06;electron-updater;进度事件经 onUpdaterEvent 转发)
   checkForUpdates: () => invoke('checkForUpdates'),

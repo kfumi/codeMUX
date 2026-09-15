@@ -23,6 +23,9 @@ directories:
   buildResources: build
 files:
   - dist-electron/**
+  # 启动 splash 资源(splash.html + icon.png;src/splash.ts 经 __dirname 上级
+  # assets/ 解析,asar 内 loadFile 可直接读)。
+  - assets/**
   # 渲染层随包分发(工单 06;打包前由 scripts/copy-renderer-dist.mjs 从仓库根
   # dist/ 拷入 —— 与工单 09 的资源根收口不冲突,届时只调整来源/布局)。
   - renderer-dist/**
