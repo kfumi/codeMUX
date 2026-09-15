@@ -5,9 +5,127 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CodeMUX</title>
+    <style>
+      /* 启动加载态(与 Electron 主窗口同窗):JS bundle 解析期间 #root 为空,
+         先展示 logo 扫光加载画面,React 挂载后由选择器自动隐藏并淡出。
+         不再使用独立 splash 窗口 —— 任务栏/层级/焦点与真实窗口完全一致。 */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #111111;
+        transition: opacity 0.2s ease-out;
+      }
+
+      /* React 已提交 DOM:自动开始隐藏(双保险,JS 也会切 boot-hidden)。 */
+      #root:not(:empty) ~ #boot,
+      #boot.boot-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* 纯 CSS 兜底:JS 半路失败(脚本错误)时,10s 后无论如何让出画面,
+         避免加载态永动盖住错误信息。 */
+      #boot {
+        animation: boot-failsafe 0s linear 10s forwards;
+      }
+
+      @keyframes boot-failsafe {
+        to {
+          opacity: 0;
+          visibility: hidden;
+        }
+      }
+
+      /* logo 呼吸 + 匀速循环扫光(与产品视觉约定一致;transform 位移,
+         合成器执行,首启高负载下不掉帧)。 */
+      .boot-logo-wrap {
+        position: relative;
+        width: 96px;
+        height: 96px;
+        animation: boot-breathe 3s ease-in-out infinite;
+      }
+
+      @keyframes boot-breathe {
+        0%,
+        100% {
+          opacity: 0.85;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      .boot-logo-wrap img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+
+      .boot-sweep {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        -webkit-mask-image: url('/favicon.png');
+        mask-image: url('/favicon.png');
+        -webkit-mask-size: cover;
+        mask-size: cover;
+        pointer-events: none;
+      }
+
+      .boot-sweep-bar {
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 300%;
+        height: 100%;
+        background: linear-gradient(
+          115deg,
+          transparent 40%,
+          rgba(255, 255, 255, 0.16) 47%,
+          rgba(255, 255, 255, 0.3) 50%,
+          rgba(255, 255, 255, 0.16) 53%,
+          transparent 60%
+        );
+        animation: boot-sweep 3.2s linear infinite;
+        will-change: transform;
+      }
+
+      @keyframes boot-sweep {
+        from {
+          transform: translateX(66.7%);
+        }
+        to {
+          transform: translateX(-66.7%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot-logo-wrap {
+          animation: none;
+          opacity: 0.9;
+        }
+        .boot-sweep-bar {
+          animation: none;
+          visibility: hidden;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot" aria-hidden="true">
+      <div class="boot-logo-wrap">
+        <img src="/favicon.png" alt="" draggable="false" />
+        <div class="boot-sweep"><div class="boot-sweep-bar"></div></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

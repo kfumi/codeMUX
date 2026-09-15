@@ -11,7 +11,6 @@ import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
-import { notifyRendererReady } from "./lib/rendererReady";
 import "./stores/appearanceStore";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
@@ -43,6 +42,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>,
 );
 
-// 启动 splash 转正(方案 A):App 已挂载,再等双 RAF 确保首帧合成上屏,
-// 然后通知壳显示主窗口并渐隐关闭 splash。非 Electron 形态为 no-op。
-notifyRendererReady();
+// 启动加载态退场(index.html 内嵌 #boot):React 已挂载,立即把加载态切到
+// 透明(选择器已自动处理,这里兜底显式加类),淡出后从 DOM 移除。
+// 非 Electron 形态(浏览器/移动)同样受益:bundle 解析期间不再白屏。
+const boot = document.getElementById("boot");
+if (boot) {
+  boot.classList.add("boot-hidden");
+  boot.addEventListener("transitionend", () => boot.remove(), { once: true });
+}
