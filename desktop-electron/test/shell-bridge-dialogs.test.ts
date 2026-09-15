@@ -16,12 +16,31 @@ const ipcMainMock = vi.hoisted(() => ({
   removeHandler: vi.fn(),
 }));
 
-vi.mock('electron', () => ({
-  BrowserWindow: class {},
-  Notification: { isSupported: () => false },
-  dialog: dialogMock,
-  ipcMain: ipcMainMock,
+const notificationState = vi.hoisted(() => ({
+  instances: [] as Array<{ options: Record<string, unknown>; handlers: Record<string, () => void> }>,
 }));
+
+vi.mock('electron', () => {
+  class NotificationMock {
+    static isSupported = () => true;
+    constructor(options: Record<string, unknown>) {
+      const record = { options, handlers: {} as Record<string, () => void> };
+      notificationState.instances.push(record);
+      Object.assign(this, {
+        once: (event: string, callback: () => void) => {
+          record.handlers[event] = callback;
+        },
+        show: () => undefined,
+      });
+    }
+  }
+  return {
+    BrowserWindow: class {},
+    Notification: NotificationMock,
+    dialog: dialogMock,
+    ipcMain: ipcMainMock,
+  };
+});
 
 import { registerShellBridge, type ShellBridgeDeps } from '../src/shell-bridge';
 import type { BrowserGuestTracker } from '../src/browser-host';
@@ -57,6 +76,7 @@ function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
     updater,
     sendToRenderer: vi.fn(),
     browserGuests,
+    getAppIconPath: () => null,
     ...overrides,
   };
 }
@@ -142,6 +162,51 @@ describe('shell-bridge 对话框/更新器通道(工单 06)', () => {
     await getHandler('quitAndInstall')(null, undefined);
     expect(deps.updater.quitAndInstall).toHaveBeenCalledTimes(1);
     await expect(getHandler('currentVersion')(null, undefined)).resolves.toBe('0.3.1');
+  });
+});
+
+describe('shell-bridge 系统通知通道', () => {
+  beforeEach(() => {
+    ipcMainMock.handle.mockClear();
+    notificationState.instances.length = 0;
+  });
+
+  it('sendAgentNotification:携带应用图标创建通知,点击恢复主窗口并转发 sessionId', async () => {
+    const deps = createDeps({
+      showMainWindow: vi.fn(),
+      getAppIconPath: () => 'D:/icons/icon.ico',
+    });
+    registerShellBridge(deps);
+
+    // handler 经 Promise.resolve().then 异步执行,需 await 后断言。
+    await getHandler('sendAgentNotification')(null, {
+      title: '任务完成',
+      body: '会话 A 已回复',
+      sessionId: 'sess-1',
+    });
+
+    expect(notificationState.instances).toHaveLength(1);
+    const record = notificationState.instances[0];
+    expect(record.options).toEqual({
+      title: '任务完成',
+      body: '会话 A 已回复',
+      icon: 'D:/icons/icon.ico',
+    });
+
+    record.handlers.click?.();
+    expect(deps.showMainWindow).toHaveBeenCalledTimes(1);
+    expect(deps.sendToRenderer).toHaveBeenCalledWith('agent-notification-clicked', { sessionId: 'sess-1' });
+  });
+
+  it('sendAgentNotification:图标缺失时省略 icon 字段回落系统默认;缺参抛错', async () => {
+    registerShellBridge(createDeps());
+
+    await getHandler('sendAgentNotification')(null, { title: 't', body: 'b', sessionId: 's' });
+    expect(notificationState.instances[0].options.icon).toBeUndefined();
+
+    await expect(getHandler('sendAgentNotification')(null, { title: 't', body: 'b' })).rejects.toThrow(
+      'sendAgentNotification 需要 { title, body, sessionId }',
+    );
   });
 });
 

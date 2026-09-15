@@ -69,8 +69,8 @@ function resolveDaemonExe(): string {
   return found ?? binaryName;
 }
 
-/** 托盘图标:打包资源 icons/icon.ico → 仓库 src-tauri/icons/icon.ico。 */
-function resolveTrayIcon(): string | null {
+/** 应用图标:打包资源 icons/icon.ico → 仓库 src-tauri/icons/icon.ico(托盘 + 系统通知共用)。 */
+function resolveAppIcon(): string | null {
   const candidates: string[] = [];
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'icons', 'icon.ico'));
@@ -312,7 +312,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 function createTray(onQuit: () => void): void {
-  const iconPath = resolveTrayIcon();
+  const iconPath = resolveAppIcon();
   if (!iconPath) {
     // 无图标也可用(托盘仅是恢复入口);开发环境找不到 ico 时不阻塞启动。
     tray = null;
@@ -450,6 +450,7 @@ if (!gotLock) {
       updater,
       sendToRenderer,
       browserGuests: guests,
+      getAppIconPath: resolveAppIcon,
     });
     createTray(() => {
       void quitApplication();
