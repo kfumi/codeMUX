@@ -164,6 +164,19 @@ describe('SessionHeader', () => {
     expect(screen.getByText('shaggy-baboon')).toBeTruthy();
   });
 
+  it('hides the working directory chip for conversations without a project', () => {
+    useSessionStore.setState({ sessions: [makeSession({ project_id: null })] });
+    useAgentStore.setState({
+      sessionWorkingPaths: {
+        'session-1': 'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
+      },
+    });
+
+    render(<SessionHeader sessionId="session-1" />);
+
+    expect(screen.queryByText('shaggy-baboon')).toBeNull();
+  });
+
   it('opens the remembered worktree path from the session menu', async () => {
     useAgentStore.setState({
       sessionWorkingPaths: {
