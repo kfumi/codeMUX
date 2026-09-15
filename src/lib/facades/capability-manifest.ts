@@ -74,6 +74,9 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   // 形态没有对应后端,设置页据此隐藏入口而不是留一个必然失败的控件。
   { id: 'host.app-paths', owner: 'shell', shellMethod: 'getAppDataDirectory' },
   { id: 'host.logs', owner: 'shell', shellMethod: 'readLogFile' },
+  // shell.explorer:资源管理器是桌面壳的概念,浏览器/移动形态没有对应后端,
+  // 会话/项目菜单据此隐藏「在资源管理器中打开」而不是留一个必然报错的入口。
+  { id: 'shell.explorer', owner: 'shell', shellMethod: 'openInExplorer' },
   { id: 'host.env-check', owner: 'shell', shellMethod: 'checkDevelopmentEnvironment' },
   { id: 'host.agent-cli', owner: 'shell', shellMethod: 'checkAgentRuntimes' },
 ];

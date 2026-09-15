@@ -4,6 +4,8 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
+import { cn } from '../../lib/utils';
 
 interface MarkdownRendererProps {
   content: string;
@@ -12,6 +14,8 @@ interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ content, onFileClick: _onFileClick }: MarkdownRendererProps) {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  // 窄屏没有 hover:代码块复制按钮常显,否则触屏上无法复制。
+  const isNarrow = useIsNarrowViewport();
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -56,7 +60,10 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
               )}
               <button
                 onClick={() => handleCopy(codeText)}
-                className="absolute top-2 right-2 px-2 py-1 text-ui-caption font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm"
+                className={cn(
+                  'absolute top-2 right-2 px-2 py-1 text-ui-caption font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md transition-all duration-200 backdrop-blur-sm',
+                  isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                )}
               >
                 复制
               </button>

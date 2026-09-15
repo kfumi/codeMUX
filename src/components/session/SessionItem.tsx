@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useSessionFlowActive } from '../../hooks/useSessionFlowActive';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -112,6 +114,10 @@ export function SessionItem({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  // 窄屏抽屉没有 hover:右侧置顶/归档按钮簇不渲染(免得 opacity-0 的幽灵触控区
+  // 拦截点击),操作统一走长按/右键菜单;桌面保持 hover 展开不变。
+  const isNarrow = useIsNarrowViewport();
+  const canOpenExplorer = useHostCapabilities().has('shell.explorer');
   const agentDef = getAgentDefinition(session.agent_kind);
   const flowActive = useSessionFlowActive(session.id);
   const awaitsConfirmation = useAgentStore((state) => sessionAwaitsUserConfirmation(
@@ -176,7 +182,7 @@ export function SessionItem({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150',
+              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150 select-none [-webkit-touch-callout:none]',
               'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
               'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
               'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
@@ -223,39 +229,42 @@ export function SessionItem({
                       </span>
                     )}
                   </span>
-                  <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                    <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
-                      <button
-                        className={cn(
-                          'rounded-md p-1 transition-colors duration-150',
-                          session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
-                          'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                        )}
-                        aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleTogglePinned();
-                        }}
-                      >
-                        <PinIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipHint>
-                    <TooltipHint content={archiveLabel}>
-                      <button
-                        className={cn(
-                          'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
-                          'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                        )}
-                        aria-label={archiveLabel}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleArchive();
-                        }}
-                      >
-                        <ArchiveIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipHint>
-                  </span>
+                  {/* 窄屏没有 hover:按钮簇不渲染,免得 opacity-0 的幽灵触控区拦截点击。 */}
+                  {isNarrow ? null : (
+                    <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                      <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
+                        <button
+                          className={cn(
+                            'rounded-md p-1 transition-colors duration-150',
+                            session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
+                            'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                          )}
+                          aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleTogglePinned();
+                          }}
+                        >
+                          <PinIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipHint>
+                      <TooltipHint content={archiveLabel}>
+                        <button
+                          className={cn(
+                            'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
+                            'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                          )}
+                          aria-label={archiveLabel}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleArchive();
+                          }}
+                        >
+                          <ArchiveIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipHint>
+                    </span>
+                  )}
                 </span>
               </>
             )}
@@ -268,7 +277,7 @@ export function SessionItem({
           <ContextMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameStart}>
             重命名
           </ContextMenuItem>
-          {workingPath ? (
+          {workingPath && canOpenExplorer ? (
             <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={handleOpenInExplorer}>
               在资源管理器中打开
             </ContextMenuItem>

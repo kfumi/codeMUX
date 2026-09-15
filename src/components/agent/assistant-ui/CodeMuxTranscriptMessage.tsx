@@ -5,6 +5,7 @@ import { Streamdown } from 'streamdown';
 import { MessageFooter, type MessageFooterStats, type MessageFooterVariant } from '@/components/assistant-ui/message-footer';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import {
   ReasoningContent,
   ReasoningRoot,
@@ -295,6 +296,8 @@ export function TranscriptUserMessage({
   className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // 窄屏没有 hover:用户消息 footer 常显。
+  const isNarrow = useIsNarrowViewport();
   const canCollapse = isLongTranscriptUserMessage(text);
 
   return (
@@ -308,7 +311,14 @@ export function TranscriptUserMessage({
           />
         ) : null}
         {footer ? (
-          <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
+          <div
+            className={cn(
+              'flex items-center justify-end gap-1 transition-opacity duration-150',
+              isNarrow
+                ? 'opacity-100'
+                : 'opacity-0 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100',
+            )}
+          >
             {footer}
           </div>
         ) : null}

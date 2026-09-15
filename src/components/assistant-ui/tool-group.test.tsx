@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const narrowState = vi.hoisted(() => ({ value: false }));
+
+vi.mock('../../hooks/useIsNarrowViewport', () => ({
+  useIsNarrowViewport: () => narrowState.value,
+}));
 
 import { ToolGroup, ToolGroupContent, ToolGroupRoot, ToolGroupTrigger } from './tool-group';
 
@@ -28,6 +34,15 @@ describe('ToolGroupTrigger', () => {
     expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.className).not.toContain('font-medium');
     expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('opacity-0');
     expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('group-hover/trigger:opacity-100');
+  });
+
+  it('always shows the chevron on narrow viewports (no hover on touch)', () => {
+    narrowState.value = true;
+    const { container } = renderTrigger(['Read', 'Read', 'shell_command']);
+
+    const chevron = container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class') ?? '';
+    expect(chevron).toContain('opacity-100');
+    expect(chevron).not.toContain('opacity-0');
   });
 
   it('uses the tool group for a single tool', () => {

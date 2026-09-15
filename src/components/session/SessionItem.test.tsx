@@ -4,11 +4,23 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openInExplorerMock = vi.hoisted(() => vi.fn(async () => undefined));
+const narrowState = vi.hoisted(() => ({ value: false }));
+const hostCaps = vi.hoisted(() => ({ hasExplorer: true }));
 
 vi.mock('../../lib/facades/shell-facade', () => ({
   shellFacade: {
     openInExplorer: openInExplorerMock,
   },
+}));
+
+vi.mock('../../hooks/useIsNarrowViewport', () => ({
+  useIsNarrowViewport: () => narrowState.value,
+}));
+
+vi.mock('../../hooks/useHostCapabilities', () => ({
+  useHostCapabilities: () => ({
+    has: (id: string) => (id === 'shell.explorer' ? hostCaps.hasExplorer : true),
+  }),
 }));
 
 import { SessionItem } from './SessionItem';
@@ -39,6 +51,8 @@ describe('SessionItem', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => {});
+    narrowState.value = false;
+    hostCaps.hasExplorer = true;
     useAgentStore.setState({
       events: {},
       pendingPermissions: {},
@@ -199,5 +213,71 @@ describe('SessionItem', () => {
     fireEvent.click(screen.getByText('在资源管理器中打开'));
 
     expect(openInExplorerMock).toHaveBeenCalledWith('D:/project/codeMUX/.worktrees/brave-otter');
+  });
+
+  it('hides the hover action cluster on narrow viewports (long-press menu is the touch path)', () => {
+    narrowState.value = true;
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-n1', title: 'Narrow Session' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Narrow Session')).toBeTruthy();
+    // opacity-0 但可点击的幽灵触控区必须消失:窄屏不渲染 hover 按钮簇。
+    expect(screen.queryByRole('button', { name: '置顶对话' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '归档' })).toBeNull();
+  });
+
+  it('still opens the context menu on narrow viewports for long-press', async () => {
+    narrowState.value = true;
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-n2', title: 'Narrow Menu Session' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText('Narrow Menu Session'));
+    await waitFor(() => expect(screen.getByText('置顶')).toBeTruthy());
+    expect(screen.getByText('重命名')).toBeTruthy();
+  });
+
+  it('hides the explorer entry outside the desktop shell', async () => {
+    hostCaps.hasExplorer = false;
+    useAgentStore.setState({
+      sessionWorkingPaths: {
+        'session-n3': 'D:/project/codeMUX',
+      },
+    });
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-n3', title: 'Browser Session', project_id: 'project-1' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText('Browser Session'));
+    await waitFor(() => expect(screen.getByText('重命名')).toBeTruthy());
+    expect(screen.queryByText('在资源管理器中打开')).toBeNull();
   });
 });

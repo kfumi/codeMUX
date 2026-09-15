@@ -5,6 +5,7 @@ import { ChevronDownIcon, WrenchIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { cn } from '@/lib/utils';
 import { getToolDisplayName, getToolGroupPhrase } from '@/components/agent/toolHeaderSummary';
 
@@ -89,6 +90,8 @@ function ToolGroupTrigger({
     () => buildToolGroupSummary(toolNames, count),
     [count, toolNames],
   );
+  // 窄屏没有 hover:展开箭头常显(触发按钮本身可点,但箭头指示不应隐形)。
+  const isNarrow = useIsNarrowViewport();
 
   return (
     <CollapsibleTrigger
@@ -135,9 +138,11 @@ function ToolGroupTrigger({
         data-slot="tool-group-trigger-chevron"
         className={cn(
           'size-4 shrink-0',
-          'opacity-0 transition-[transform,opacity]',
+          'transition-[transform,opacity]',
           'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
-          'group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
+          isNarrow
+            ? 'opacity-100'
+            : 'opacity-0 group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0 group-data-[state=open]/trigger:opacity-100',
         )}

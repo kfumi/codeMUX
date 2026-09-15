@@ -204,8 +204,9 @@ export function MainLayout({
           className={cn(
             'overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl',
             isNarrow
-              // 抽屉是触屏界面:按钮统一到 44px 最小触控高度(HIG/Material 标准)。
-              ? 'fixed inset-y-0 left-0 z-50 w-[86vw] max-w-80 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)] [&_button]:min-h-11'
+              // 抽屉宽度跟随视口但稍宽于桌面侧栏默认值;触控行高保持与桌面一致,
+              // 不再全局强制 44px 按钮高度(会把分组标题、隐藏的 hover 按钮一起撑高)。
+              ? 'fixed inset-y-0 left-0 z-50 w-[92vw] max-w-96 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]'
               : 'relative shrink-0',
             sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-300 ease-in-out',
           )}

@@ -2,6 +2,7 @@ import { ArrowUp, GripVertical, Pencil, Trash2, Play } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { queuedRunNowHint, normalizeImmediateRunMode } from '../../../lib/agentSteer';
+import { useIsNarrowViewport } from '../../../hooks/useIsNarrowViewport';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -195,6 +196,8 @@ function QueuedMessageRow({
   onRunNow: () => void;
   runNowHint: string;
 }) {
+  // 窄屏没有 hover:操作簇常显(桌面是“变淡、悬停提亮”的降噪音设计)。
+  const isNarrow = useIsNarrowViewport();
   const content = query.displayContent?.trim() || query.prompt.trim() || '空消息';
   const hasImages = (query.inputPayload?.attachments?.length ?? query.inputPayload?.images?.length ?? 0) > 0;
 
@@ -229,7 +232,12 @@ function QueuedMessageRow({
         {content}
         {hasImages ? <span className="ml-1 text-[10px] text-muted-foreground">· 图片</span> : null}
       </span>
-      <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-0.5 transition-opacity',
+          isNarrow ? 'opacity-100' : 'opacity-70 group-hover:opacity-100',
+        )}
+      >
         <TooltipHint content={runNowHint}>
           <button
             type="button"

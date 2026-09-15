@@ -17,6 +17,7 @@ import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { useSubagentStore } from '@/stores/subagentStore';
@@ -674,6 +675,8 @@ function UserMessage({
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
   const [expanded, setExpanded] = useState(false);
+  // 窄屏没有 hover:用户消息 footer(时间/复制/回退)常显。
+  const isNarrow = useIsNarrowViewport();
   const canCollapse = isLongTranscriptUserMessage(text);
   const imageAttachments = getImageAttachmentItems(message);
   const rewindTooltip = '回退到此消息';
@@ -726,7 +729,14 @@ function UserMessage({
             onToggle={() => setExpanded((value) => !value)}
           />
         ) : null}
-        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-focus-within/message-row:opacity-100 group-hover/message-row:opacity-100">
+        <div
+          className={cn(
+            'flex items-center justify-end gap-1 transition-opacity duration-150',
+            isNarrow
+              ? 'opacity-100'
+              : 'opacity-0 group-focus-within/message-row:opacity-100 group-hover/message-row:opacity-100',
+          )}
+        >
           <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
             <DropdownMenu>

@@ -4,6 +4,8 @@ import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, Fol
 
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useProjectStore } from '../../stores/projectStore';
 import { SessionItem } from './SessionItem';
 import { Button } from '../ui/button';
@@ -51,6 +53,10 @@ export function ProjectGroup({
 }: ProjectGroupProps) {
   const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
   const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
+  // 窄屏抽屉没有 hover:项目行操作按钮(更多/文件树/新建对话)常显,否则触屏上
+  // 根本点不到;桌面保持 hover 展开不变。资源管理器入口按宿主能力隐藏。
+  const isNarrow = useIsNarrowViewport();
+  const canOpenExplorer = useHostCapabilities().has('shell.explorer');
   const expanded = !collapsedProjects.has(project.id);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
@@ -118,10 +124,21 @@ export function ProjectGroup({
         ) : (
           <span className="flex-1 truncate text-ui-title font-medium">{project.name}</span>
         )}
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
+        <div
+          className={cn(
+            'flex items-center gap-0.5 transition-opacity duration-200',
+            isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}
+          onClick={(event) => event.stopPropagation()}
+        >
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`项目 ${project.name} 的更多操作`}
+                className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+              >
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
             </DropdownMenuTrigger>
@@ -132,12 +149,14 @@ export function ProjectGroup({
               >
                 导入外部会话
               </DropdownMenuItem>
-              <DropdownMenuItem
-                icon={<FolderOpen className="h-3.5 w-3.5" />}
-                onClick={() => shellFacade.openInExplorer(project.path)}
-              >
-                在资源管理器中打开
-              </DropdownMenuItem>
+              {canOpenExplorer ? (
+                <DropdownMenuItem
+                  icon={<FolderOpen className="h-3.5 w-3.5" />}
+                  onClick={() => shellFacade.openInExplorer(project.path)}
+                >
+                  在资源管理器中打开
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 icon={<Pencil className="h-3.5 w-3.5" />}
                 onClick={() => {

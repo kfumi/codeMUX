@@ -381,6 +381,8 @@ function TabButton({
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const contextMenuContentRef = useRef<HTMLDivElement | null>(null);
   const handleContextMenuOpenChange = useBrowserOverlayOpenChange(setContextMenuOpen);
+  // 窄屏没有 hover:标签页关闭按钮常显,否则触屏上无法关标签。
+  const isNarrow = useIsNarrowViewport();
 
   useBrowserDropdownHostGuard(`side-panel:tab-context:${tab.id}`, contextMenuOpen, contextMenuContentRef);
 
@@ -420,7 +422,11 @@ function TabButton({
           <span
             role="button"
             tabIndex={-1}
-            className="ml-1 rounded p-0.5 text-muted-foreground/70 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            aria-label={`关闭标签页 ${tab.title}`}
+            className={cn(
+              'ml-1 rounded p-0.5 text-muted-foreground/70 transition-opacity hover:bg-muted',
+              isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            )}
             onClick={(event) => {
               event.stopPropagation();
               onClose();

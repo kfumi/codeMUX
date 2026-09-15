@@ -3,6 +3,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const narrowState = vi.hoisted(() => ({ value: false }));
+
+vi.mock('../../hooks/useIsNarrowViewport', () => ({
+  useIsNarrowViewport: () => narrowState.value,
+}));
+
 import { MessageFooter } from './message-footer';
 
 vi.mock('@assistant-ui/react', () => ({
@@ -26,6 +32,17 @@ describe('MessageFooter', () => {
 
     expect(footer?.className).toContain('opacity-0');
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
+  });
+
+  it('stays visible on narrow viewports even with revealOnHover (no hover on touch)', () => {
+    narrowState.value = true;
+    render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} revealOnHover />);
+
+    const footer = screen.getByText(/21:40/).closest('[data-message-footer]');
+
+    expect(footer?.className).not.toContain('opacity-0');
+    expect(footer?.className).not.toContain('group-hover');
+    expect(footer?.className).not.toContain('opacity-100');
   });
 
   it('renders duration without a turn status label', () => {

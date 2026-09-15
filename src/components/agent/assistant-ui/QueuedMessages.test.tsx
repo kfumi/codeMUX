@@ -16,6 +16,12 @@ const queries: QueuedAgentQuery[] = [
   { id: 'q-2', prompt: 'second task', cwd: 'D:\\workspace', createdAt: 2 },
 ];
 
+const narrowState = vi.hoisted(() => ({ value: false }));
+
+vi.mock('../../../hooks/useIsNarrowViewport', () => ({
+  useIsNarrowViewport: () => narrowState.value,
+}));
+
 let mockState: Record<string, unknown>;
 const sessionMock = vi.hoisted(() => ({ agentKind: 'pi' }));
 const settingsMock = vi.hoisted(() => ({ mode: 'steer' as string }));
@@ -54,6 +60,7 @@ describe('QueuedMessages', () => {
   beforeEach(() => {
     sessionMock.agentKind = 'pi';
     settingsMock.mode = 'steer';
+    narrowState.value = false;
     mockState = {
       queuedQueries: { 'session-1': queries },
       queuePaused: { 'session-1': false },
@@ -77,6 +84,25 @@ describe('QueuedMessages', () => {
     expect(screen.getByTestId('queued-message-0').textContent).toContain('first task');
     expect(screen.getByLabelText('编辑第 1 条排队消息')).toBeTruthy();
     expect(screen.getByLabelText('删除第 2 条排队消息')).toBeTruthy();
+  });
+
+  it('keeps the row actions fully opaque on narrow viewports (no hover on touch)', () => {
+    narrowState.value = true;
+    render(<QueuedMessages sessionId="session-1" onEdit={vi.fn()} />);
+
+    const runNow = screen.getByLabelText('立即执行第 1 条排队消息');
+    const cluster = runNow.parentElement as HTMLElement;
+    expect(cluster.className).toContain('opacity-100');
+    expect(cluster.className).not.toContain('opacity-70');
+  });
+
+  it('dims the row actions until hover on wide viewports', () => {
+    render(<QueuedMessages sessionId="session-1" onEdit={vi.fn()} />);
+
+    const runNow = screen.getByLabelText('立即执行第 1 条排队消息');
+    const cluster = runNow.parentElement as HTMLElement;
+    expect(cluster.className).toContain('opacity-70');
+    expect(cluster.className).toContain('group-hover:opacity-100');
   });
 
   it('runs the chosen message immediately via the run-now button', () => {

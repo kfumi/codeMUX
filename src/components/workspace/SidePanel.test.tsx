@@ -105,6 +105,7 @@ describe('SidePanel', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    setViewportWidth(1024);
   });
 
   it('passes the persisted terminal id to the active terminal panel', () => {
@@ -163,6 +164,24 @@ describe('SidePanel', () => {
       sidePanelState.activeTabId = previousActiveTabId;
       useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     }
+  });
+
+  it('always shows the tab close button on narrow viewports (no hover on touch)', () => {
+    setViewportWidth(390);
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    const close = screen.getByRole('button', { name: '关闭标签页 终端' });
+    expect(close.className).toContain('opacity-100');
+    expect(close.className).not.toContain('opacity-0');
+  });
+
+  it('keeps the tab close button hover-only on wide viewports', () => {
+    setViewportWidth(1024);
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    const close = screen.getByRole('button', { name: '关闭标签页 终端' });
+    expect(close.className).toContain('opacity-0');
+    expect(close.className).toContain('group-hover:opacity-100');
   });
 });
 

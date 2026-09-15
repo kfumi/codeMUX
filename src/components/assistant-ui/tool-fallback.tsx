@@ -16,6 +16,7 @@ import {
   useScrollLock,
 } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import ReactMarkdown from 'react-markdown';
@@ -93,6 +94,8 @@ function ToolFallbackTrigger({
   const isRunning = statusType === 'running';
   const isCancelled = status?.type === 'incomplete' && status.reason === 'cancelled';
   const Icon = statusIconMap[statusType];
+  // 窄屏没有 hover:展开箭头常显(触发按钮本身可点,但箭头指示不应隐形)。
+  const isNarrow = useIsNarrowViewport();
 
   return (
     <CollapsibleTrigger
@@ -128,9 +131,11 @@ function ToolFallbackTrigger({
         data-slot="tool-fallback-trigger-chevron"
         className={cn(
           'size-3.5 shrink-0 text-muted-foreground/52',
-          'opacity-0 transition-[transform,opacity]',
+          'transition-[transform,opacity]',
           'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
-          'group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
+          isNarrow
+            ? 'opacity-100'
+            : 'opacity-0 group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0 group-data-[state=open]/trigger:opacity-100',
         )}

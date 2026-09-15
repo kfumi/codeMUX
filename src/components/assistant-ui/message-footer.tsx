@@ -4,6 +4,7 @@ import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
 import { Check, Copy, Bug, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
+import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
@@ -47,7 +48,9 @@ export function MessageFooter({
 }: MessageFooterProps) {
   const isMinimal = variant === 'minimal';
   const hasStats = !isMinimal && stats?.durationMs != null;
-  const revealClass = revealOnHover
+  // 窄屏没有 hover:footer(复制/回退/调试等入口)常显,桌面保持悬停展开。
+  const isNarrow = useIsNarrowViewport();
+  const revealClass = revealOnHover && !isNarrow
     ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
     : undefined;
   const showDebug = !isMinimal && Boolean(sessionId);
