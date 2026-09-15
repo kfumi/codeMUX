@@ -140,3 +140,20 @@ fn broadcast_event(companion_state: &CompanionState, session_id: &str, event: se
     };
     let _ = companion_state.inner.event_tx.send(payload);
 }
+
+/// 会话标题变更广播：原生标题刷新（agent_session_title 事件）与手动改名共用，
+/// per-session WS 订阅方据此原地更新标题。
+pub fn broadcast_session_title_changed(
+    companion_state: &Arc<CompanionState>,
+    session_id: &str,
+    title: &str,
+) {
+    if !companion_state.inner.is_enabled() || session_id.is_empty() {
+        return;
+    }
+    broadcast_event(
+        companion_state,
+        session_id,
+        serde_json::json!({ "type": "session_title_changed", "title": title }),
+    );
+}

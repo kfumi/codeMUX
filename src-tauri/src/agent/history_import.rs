@@ -1117,12 +1117,7 @@ fn first_user_text(events: &[Value]) -> Option<String> {
 }
 
 fn truncate_title(value: &str) -> String {
-    let first_line = value.lines().next().unwrap_or(value).trim();
-    let mut title = first_line.chars().take(80).collect::<String>();
-    if first_line.chars().count() > 80 {
-        title.push('…');
-    }
-    title
+    crate::db::operations::normalize_session_title(value)
 }
 
 fn format_system_time(value: std::time::SystemTime) -> String {

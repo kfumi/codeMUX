@@ -858,6 +858,43 @@ pub fn update_session_title(conn: &Connection, session_id: &str, title: &str) ->
     Ok(())
 }
 
+/// 手动改名：写入标题并锁定，之后所有原生标题刷新（`refresh_auto_session_title`）跳过。
+pub fn rename_session_title(conn: &Connection, session_id: &str, title: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions SET title = ?1, title_locked = 1 WHERE id = ?2",
+        params![title, session_id],
+    )?;
+    Ok(())
+}
+
+/// 原生标题归一化：取首行、截断 80 字符（与 history_import 的播种标题同一规则）。
+pub fn normalize_session_title(value: &str) -> String {
+    let first_line = value.lines().next().unwrap_or(value).trim();
+    let mut title = first_line.chars().take(80).collect::<String>();
+    if first_line.chars().count() > 80 {
+        title.push('…');
+    }
+    title
+}
+
+/// 原生标题刷新（sidecar `agent_session_title` 事件）：仅在未锁定且值有变化时
+/// 写入；不 bump `updated_at`。返回是否实际变更（供调用方决定是否广播）。
+pub fn refresh_auto_session_title(
+    conn: &Connection,
+    session_id: &str,
+    title: &str,
+) -> Result<bool> {
+    let normalized = normalize_session_title(title);
+    if normalized.is_empty() {
+        return Ok(false);
+    }
+    let changed = conn.execute(
+        "UPDATE sessions SET title = ?1 WHERE id = ?2 AND title_locked = 0 AND title <> ?1",
+        params![normalized, session_id],
+    )?;
+    Ok(changed > 0)
+}
+
 pub fn touch_session(conn: &Connection, session_id: &str) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
@@ -1780,7 +1817,8 @@ mod tests {
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
         get_all_sessions, get_model_distribution, get_session, get_session_events_after,
         get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
-        list_native_sessions_for_cleanup, resolve_app_session_id_for_timeline,
+        list_native_sessions_for_cleanup, normalize_session_title, refresh_auto_session_title,
+        rename_session_title, resolve_app_session_id_for_timeline,
         sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
         unarchive_session, update_session_provider, update_session_reasoning_effort,
         update_session_settings, upsert_agent_session_mapping, upsert_session_subagent,
@@ -3124,5 +3162,61 @@ mod tests {
         .unwrap();
         assert!(super::has_running_session_subagents(&conn, "session-1").unwrap());
         assert!(!super::has_running_session_subagents(&conn, "session-2").unwrap());
+    }
+
+    fn insert_title_session(conn: &Connection, id: &str, title: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, title, "claude_code", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn refresh_auto_session_title_respects_lock_and_change_semantics() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_title_session(&conn, "session-1", "Seed");
+
+        // 正常刷新
+        assert!(refresh_auto_session_title(&conn, "session-1", "Native title").unwrap());
+        assert_eq!(
+            get_session(&conn, "session-1").unwrap().unwrap().title,
+            "Native title"
+        );
+
+        // 未变化 → 不写
+        assert!(!refresh_auto_session_title(&conn, "session-1", "Native title").unwrap());
+
+        // 手动改名锁定后，原生标题刷新跳过
+        rename_session_title(&conn, "session-1", "My name").unwrap();
+        assert_eq!(
+            get_session(&conn, "session-1").unwrap().unwrap().title,
+            "My name"
+        );
+        assert!(!refresh_auto_session_title(&conn, "session-1", "Another native").unwrap());
+        assert_eq!(
+            get_session(&conn, "session-1").unwrap().unwrap().title,
+            "My name"
+        );
+
+        // 未知会话 → 无写入无报错
+        assert!(!refresh_auto_session_title(&conn, "missing", "x").unwrap());
+
+        // 空标题 → 拒绝
+        assert!(!refresh_auto_session_title(&conn, "session-1", "   \n  ").unwrap());
+    }
+
+    #[test]
+    fn normalize_session_title_takes_first_line_and_truncates() {
+        assert_eq!(
+            normalize_session_title("First line\nSecond line"),
+            "First line"
+        );
+        assert_eq!(normalize_session_title("  padded  "), "padded");
+        let long = "长".repeat(100);
+        let normalized = normalize_session_title(&long);
+        assert_eq!(normalized.chars().count(), 81);
+        assert!(normalized.ends_with('…'));
     }
 }

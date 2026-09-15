@@ -38,6 +38,7 @@ import {
 } from './codexTurnEventNormalizer.js';
 import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { emit } from './streamEventBatcher.js';
+import { buildSessionTitleEvent } from './sessionTitleEvent.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import {
   mapToCodexEffort,
@@ -213,6 +214,9 @@ export class CodexAppServerRuntime {
   private planApprovalPending = false;
   /** Codex collab subagent adapter: child-thread routes and timelines. */
   private readonly subagents = new CodexSubagentSource();
+  /** 原生标题探测：首个完成的 turn 后 thread/read 一次（name 仅在线程被命名时存在）。 */
+  private codexTitleSynced = false;
+  private lastEmittedNativeTitle: string | null = null;
 
   private readonly connectTransport: (options: AppServerTransportOptions) => Promise<AppServerTransport>;
   private readonly emitEvent: (event: unknown) => void;
@@ -990,6 +994,7 @@ export class CodexAppServerRuntime {
         switch (status) {
           case 'completed':
             turn.settle({ outcome: 'completed' });
+            this.maybeSyncCodexThreadTitle();
             return;
           case 'interrupted':
             turn.settle({ outcome: 'interrupted' });
@@ -1366,6 +1371,33 @@ export class CodexAppServerRuntime {
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
+
+  /**
+   * 首个完成的 turn 后经 `thread/read` 探测 Thread.name。当前 Codex 构建不会
+   * 自动命名线程（name 只能由客户端 thread/name/set 写入），因此这是前向兼容
+   * + 接住外部命名（如 TUI）的场景；name 缺失或请求失败一律静默跳过。
+   */
+  private maybeSyncCodexThreadTitle(): void {
+    if (this.codexTitleSynced) return;
+    const config = this.config;
+    const threadId = this.threadId;
+    const transport = this.transport;
+    const appSessionId = config?.sessionId;
+    if (!appSessionId || !threadId || !transport) return;
+    this.codexTitleSynced = true;
+    void transport.request<{ thread?: { name?: string } }>('thread/read', { threadId })
+      .then((result) => {
+        const name = readStringRecordField(result.thread, 'name');
+        if (!name || name === this.lastEmittedNativeTitle) return;
+        this.lastEmittedNativeTitle = name;
+        this.emitEvent(buildSessionTitleEvent({ appSessionId, agentKind: 'codex', title: name }));
+      })
+      .catch((error) => {
+        process.stderr.write(
+          `[codex-app-server] thread/read title probe failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      });
+  }
 
   private async startOrResumeThread(
     config: CodexSessionBootstrap,

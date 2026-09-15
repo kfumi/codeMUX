@@ -32,7 +32,8 @@ interface SessionState {
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setSessionReadOnly: (sessionId: string, readOnly: boolean) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
-  updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  updateSessionTitle: (sessionId: string, title: string, options?: { titleLocked?: boolean }) => Promise<void>;
+  applySessionTitle: (sessionId: string, title: string) => void;
   updateSessionModel: (sessionId: string, model: string) => void;
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
   touchSession: (sessionId: string) => void;
@@ -299,15 +300,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return { activeSessionId: sessionId, unreadSessions: next };
     });
   },
-  updateSessionTitle: async (sessionId: string, title: string) => {
+  updateSessionTitle: async (sessionId: string, title: string, options?: { titleLocked?: boolean }) => {
     try {
-      await daemonFacade.patchSessionViaDaemon(sessionId, { title });
+      await daemonFacade.patchSessionViaDaemon(
+        sessionId,
+        options?.titleLocked ? { title, titleLocked: true } : { title },
+      );
       set((state) => ({
         sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, title } : s),
+        archivedSessions: state.archivedSessions.map((s) => s.id === sessionId ? { ...s, title } : s),
       }));
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+  /** daemon 推送的原生标题变更（agent_session_title / 其他端改名）：本地原地更新，不发请求。 */
+  applySessionTitle: (sessionId: string, title: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, title } : s),
+      archivedSessions: state.archivedSessions.map((s) => s.id === sessionId ? { ...s, title } : s),
+    }));
   },
   updateSessionModel: (sessionId: string, model: string) => {
     set((state) => ({

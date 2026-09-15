@@ -1867,6 +1867,16 @@ function createSessionEventHandler(
       return;
     }
 
+    // daemon 推送的原生标题变更（OpenCode session.updated / Claude ai-title /
+    // 其他端改名）：原地更新侧栏标题，不进时间线。
+    if (event.kind === 'raw' && event.data?.type === 'session_title_changed') {
+      const title = event.data.title;
+      if (typeof title === 'string' && title.trim()) {
+        useSessionStore.getState().applySessionTitle(sessionId, title);
+      }
+      return;
+    }
+
     if (event.kind === 'permission_mode_changed') {
       const planMode = (event as Extract<AgentMessage, { kind: 'permission_mode_changed' }>).data.plan_mode;
       // 先更新本地会话投影，原生模式事件到达后下拉立即反映当前模式。

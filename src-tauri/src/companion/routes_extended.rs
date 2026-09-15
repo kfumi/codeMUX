@@ -79,6 +79,9 @@ async fn list_archived_sessions(
 #[serde(rename_all = "camelCase")]
 struct SessionMaintenanceRequest {
     title: Option<String>,
+    /// 手动改名置 true 锁定标题（此后原生标题刷新跳过）；缺省仅写标题不锁定，
+    /// 供首条消息自动播种等自动路径使用。
+    title_locked: Option<bool>,
     pinned: Option<bool>,
     read_only: Option<bool>,
     working_path: Option<String>,
@@ -105,8 +108,13 @@ async fn session_maintenance(
             .lock()
             .map_err(|error| ApiError::internal(error.to_string()))?;
         if let Some(title) = body.title.as_deref() {
-            operations::update_session_title(&db, &session_id, title)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            if body.title_locked == Some(true) {
+                operations::rename_session_title(&db, &session_id, title)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            } else {
+                operations::update_session_title(&db, &session_id, title)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            }
         }
         if let Some(pinned) = body.pinned {
             operations::set_session_pinned(&db, &session_id, pinned)
@@ -137,6 +145,26 @@ async fn session_maintenance(
             working_path,
         )
         .map_err(ApiError::bad_request)?;
+    }
+
+    // 标题变更广播给所有订阅方（其他客户端/移动端原地址同步显示）。
+    if body.title.is_some() {
+        let final_title = {
+            let db = app_state
+                .db
+                .lock()
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+            operations::get_session(&db, &session_id)
+                .map_err(|error| ApiError::internal(error.to_string()))?
+                .map(|session| session.title)
+        };
+        if let Some(final_title) = final_title {
+            crate::companion::events::broadcast_session_title_changed(
+                &ctx.daemon.companion,
+                &session_id,
+                &final_title,
+            );
+        }
     }
 
     if let Some(model) = body.model {

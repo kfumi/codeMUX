@@ -27,6 +27,7 @@ import {
 import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { emit } from './streamEventBatcher.js';
+import { buildSessionTitleEvent } from './sessionTitleEvent.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { setLogCtx, writeLog } from './writeLog.js';
@@ -170,6 +171,8 @@ export class PiRuntime {
   /** 本 turn 已见到的工具调用参数（审批卡/提问卡的 metadata 来源）。 */
   private trackedToolCalls = new Map<string, PiTrackedToolCall>();
   private activeAsk: PiActiveAsk | undefined;
+  /** 最近一次已上报的原生会话名（变化才上报）。 */
+  private lastEmittedSessionName: string | null = null;
 
   constructor(
     // 可变：forkToEntry 后会话文件变化，需同步更新以便 canReuse 识别为同一运行时。
@@ -545,6 +548,21 @@ export class PiRuntime {
         ? record.sessionFile
         : this.agentSessionFile;
     this.ctx.agentSessionId = this.agentSessionFile;
+    // 恢复的会话若已被命名（会话文件 session_info 条目），同步一次原生标题。
+    this.syncPiSessionName(readPiEventString(record, 'sessionName'));
+  }
+
+  private syncPiSessionName(name: string | undefined): void {
+    if (!name) return;
+    const value = name.trim();
+    if (!value || value === this.lastEmittedSessionName) return;
+    this.lastEmittedSessionName = value;
+    (this.options.emitEvent ?? emit)(buildSessionTitleEvent({
+      appSessionId: this.config.sessionId,
+      agentKind: 'pi',
+      title: value,
+      runtimeGeneration: this.config.runtimeGeneration,
+    }));
   }
 
   /** MCP 依赖 cwd 已加载的 pi-mcp-adapter；探测失败只记日志，不阻断会话。 */
@@ -573,6 +591,12 @@ export class PiRuntime {
   }
 
   private handlePiEvent(event: PiRuntimeEvent): void {
+    if (event.type === 'session_info_changed') {
+      // pi 的会话名由用户/扩展设置（`set_session_name`、`pi.setSessionName()`），
+      // 变化时以 session_info_changed 推送；清空（name 缺失）不投影。
+      this.syncPiSessionName(readPiEventString(event, 'name'));
+      return;
+    }
     if (event.type === 'extension_ui_request') {
       this.handleExtensionUiRequest(event);
       return;

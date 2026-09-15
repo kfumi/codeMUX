@@ -220,7 +220,7 @@ export function SessionList({
               onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
               onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
-              onRename={(title) => updateSessionTitle(session.id, title)}
+              onRename={(title) => updateSessionTitle(session.id, title, { titleLocked: true })}
             />
           ))}
         </div>
@@ -262,7 +262,7 @@ export function SessionList({
               onArchiveSession={archiveSession}
               onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
               onDeleteSession={deleteSession}
-              onRenameSession={updateSessionTitle}
+              onRenameSession={(sessionId, title) => updateSessionTitle(sessionId, title, { titleLocked: true })}
               onNewSessionInProject={onNewSessionInProject}
               onOpenProjectFiles={onOpenProjectFiles}
               onOpenImportSessions={handleOpenImportSessions}
@@ -292,7 +292,7 @@ export function SessionList({
               onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
               onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
-              onRename={(title) => updateSessionTitle(session.id, title)}
+              onRename={(title) => updateSessionTitle(session.id, title, { titleLocked: true })}
             />
           ))}
         </div>

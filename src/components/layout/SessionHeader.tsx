@@ -57,7 +57,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
   const handleRenameSave = async () => {
     const trimmed = renameValue.trim();
     if (trimmed && trimmed !== session?.title) {
-      await updateSessionTitle(sessionId, trimmed);
+      await updateSessionTitle(sessionId, trimmed, { titleLocked: true });
     }
     setRenameOpen(false);
   };

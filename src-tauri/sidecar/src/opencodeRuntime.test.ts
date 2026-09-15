@@ -1729,4 +1729,71 @@ describe('OpenCodeRuntime', () => {
 
     await runtime.shutdown();
   });
+
+  it('emits agent_session_title once when session.updated carries a generated title', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    onEvent({
+      type: 'session.updated',
+      properties: {
+        info: { sessionID: 'opencode-new', title: 'New session - 2026-09-15T00:00:00.000Z' },
+      },
+    });
+    // 占位标题不采纳
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'agent_session_title')).toEqual([]);
+
+    onEvent({
+      type: 'session.updated',
+      properties: {
+        info: { sessionID: 'opencode-new', title: 'Refactor auth module' },
+      },
+    });
+    onEvent({
+      type: 'session.updated',
+      properties: {
+        info: { sessionID: 'opencode-new', title: 'Refactor auth module' },
+      },
+    });
+    await runtime.shutdown();
+
+    const titleEvents = emitted.filter((event) => (event as { type?: string }).type === 'agent_session_title');
+    expect(titleEvents).toHaveLength(1);
+    expect(titleEvents[0]).toMatchObject({
+      type: 'agent_session_title',
+      app_session_id: 'codemux-session-1',
+      agent_kind: 'opencode',
+      title: 'Refactor auth module',
+      runtime_generation: 1,
+    });
+  });
+
+  it('ignores child-session titles emitted for subagent sessions', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    onEvent({
+      type: 'session.updated',
+      properties: {
+        info: { sessionID: 'child-session-1', title: 'Child generated title' },
+      },
+    });
+    await runtime.shutdown();
+
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'agent_session_title')).toEqual([]);
+  });
 });

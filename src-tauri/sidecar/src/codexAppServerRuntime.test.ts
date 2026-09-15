@@ -2163,3 +2163,68 @@ describe('buildAppServerConfigOverrides', () => {
     expect(overrides).toEqual(['-c', 'mcp_servers.codemux-browser.command="codemux-daemon"']);
   });
 });
+
+describe('CodexAppServerRuntime native session title', () => {
+  it(
+    'probes thread/read after the first completed turn and emits agent_session_title',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'thread/read': { result: { thread: { id: 'thread_1', name: 'Named thread' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      };
+      const { runtime, events, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+
+        await runtime.sendInput('Say hello');
+        await waitForEvent(events, 'agent_session_title');
+
+        const reads = receivedRequests(readLog(), 'thread/read');
+        expect(reads).toHaveLength(1);
+        expect(reads[0]?.params).toMatchObject({ threadId: 'thread_1' });
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'agent_session_title',
+            app_session_id: 'sess_1',
+            agent_kind: 'codex',
+            title: 'Named thread',
+          }),
+        );
+
+        // 后续 turn 不再探测（每 thread 一次）。
+        events.length = 0;
+        await runtime.sendInput('Say hello again');
+        expect(receivedRequests(readLog(), 'thread/read')).toHaveLength(1);
+        expect(events.some((event) => event.type === 'agent_session_title')).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'stays silent when the thread has no name',
+    async () => {
+      const { runtime, events, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+
+        await runtime.sendInput('Say hello');
+        // thread/read 未配置 → fake 返回 method not found，探测静默失败。
+        expect(events.some((event) => event.type === 'agent_session_title')).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    30_000,
+  );
+});

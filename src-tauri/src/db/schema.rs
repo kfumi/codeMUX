@@ -29,6 +29,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             is_read_only INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
             is_pinned INTEGER NOT NULL DEFAULT 0,
+            title_locked INTEGER NOT NULL DEFAULT 0,
             working_path TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -326,6 +327,17 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .is_ok();
     if !has_working_path {
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN working_path TEXT", []);
+    }
+
+    // Migration: title_locked — 用户手动改名后锁定，原生标题刷新跳过
+    let has_title_locked: bool = conn
+        .prepare("SELECT title_locked FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_title_locked {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
@@ -628,6 +640,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(is_pinned, 0);
+    }
+
+    #[test]
+    fn migrates_sessions_title_locked_column_with_default_false() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                agent_kind TEXT NOT NULL DEFAULT 'codex',
+                mode TEXT NOT NULL DEFAULT 'agent',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+            VALUES ('session-1', 'Legacy', 'codex', 'agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let title_locked: i64 = conn
+            .query_row(
+                "SELECT title_locked FROM sessions WHERE id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(title_locked, 0);
     }
 
     #[test]

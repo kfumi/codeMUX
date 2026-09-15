@@ -1023,3 +1023,72 @@ describe('PiRuntime session-tree rewind', () => {
     }
   });
 });
+
+describe('PiRuntime native session title', () => {
+  it('syncs sessionName from get_state for restored named sessions', async () => {
+    const { runtime, events } = startFakePiRuntime({
+      responses: {
+        get_state: {
+          data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE, sessionName: 'My pi feature' },
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      await vi_waitFor(() => {
+        if (!events.some((event) => event.type === 'agent_session_title')) {
+          throw new Error('title event not emitted yet');
+        }
+      });
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'agent_session_title',
+          app_session_id: 'app-session-1',
+          agent_kind: 'pi',
+          title: 'My pi feature',
+          runtime_generation: 0,
+        }),
+      );
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('projects session_info_changed name updates and ignores clears', async () => {
+    const { runtime, events } = startFakePiRuntime({
+      responses: {
+        get_state: { data: { sessionId: 'pi-s1', sessionFile: FAKE_SESSION_FILE } },
+        prompt: {
+          data: {},
+          thenEvents: [
+            { delayMs: 0, event: { type: 'agent_start' } },
+            { delayMs: 0, event: { type: 'session_info_changed', name: 'Renamed by extension' } },
+            { delayMs: 0, event: { type: 'session_info_changed' } },
+            { delayMs: 0, event: { type: 'agent_end' } },
+          ],
+        },
+      },
+    });
+    try {
+      await runtime.ensure();
+      events.length = 0;
+      await runtime.sendInput('hello');
+      await vi_waitFor(() => {
+        if (!events.some((event) => event.type === 'agent_session_title')) {
+          throw new Error('title event not emitted yet');
+        }
+      });
+      const titleEvents = events.filter((event) => event.type === 'agent_session_title');
+      expect(titleEvents).toHaveLength(1);
+      expect(titleEvents[0]).toMatchObject({
+        type: 'agent_session_title',
+        agent_kind: 'pi',
+        title: 'Renamed by extension',
+      });
+      // title 事件不进时间线
+      expect(events.some((event) => event.type === 'turn_finished')).toBe(true);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+});

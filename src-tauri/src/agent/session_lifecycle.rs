@@ -440,6 +440,129 @@ async fn mapping_generation_is_current(
     session_generations.lock().await.get(session_id).copied() == Some(generation)
 }
 
+struct AgentSessionTitleEvent {
+    app_session_id: String,
+    agent_kind: AgentKind,
+    title: String,
+    runtime_generation: Option<u64>,
+}
+
+fn parse_agent_session_title_event(event: &str) -> Result<Option<AgentSessionTitleEvent>, String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+        if event.contains("\"type\"") && event.contains("agent_session_title") {
+            return Err("Invalid agent session title event: malformed JSON".to_string());
+        }
+        return Ok(None);
+    };
+
+    if value.get("type").and_then(|entry| entry.as_str()) != Some("agent_session_title") {
+        return Ok(None);
+    }
+
+    let app_session_id = value
+        .get("app_session_id")
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| "Invalid agent session title event: missing app_session_id".to_string())?;
+    let agent_kind_str = value
+        .get("agent_kind")
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| "Invalid agent session title event: missing agent_kind".to_string())?;
+    let title = value
+        .get("title")
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| "Invalid agent session title event: missing title".to_string())?;
+    let agent_kind = AgentKind::from_str(agent_kind_str).map_err(|_| {
+        format!(
+            "Invalid agent session title event: unknown agent_kind={}",
+            agent_kind_str
+        )
+    })?;
+
+    Ok(Some(AgentSessionTitleEvent {
+        app_session_id: app_session_id.to_string(),
+        agent_kind,
+        title: title.to_string(),
+        runtime_generation: value
+            .get("runtime_generation")
+            .and_then(|entry| entry.as_u64()),
+    }))
+}
+
+/// 原生标题事件落库（`refresh_auto_session_title`：锁定跳过 / 未变跳过），
+/// 变化时向 companion 广播 `session_title_changed`。返回是否为标题事件。
+async fn handle_agent_session_title_event(
+    state: &crate::AppState,
+    session_generations: &SessionGenerations,
+    companion_state: &Arc<crate::companion::CompanionState>,
+    event: &str,
+) -> Result<bool, String> {
+    let Some(title_event) = parse_agent_session_title_event(event)? else {
+        return Ok(false);
+    };
+
+    // OpenCode 事件带代际：会话被 reset/重建后代际过期，旧代际的标题丢弃。
+    if title_event.agent_kind == AgentKind::Opencode {
+        if let Some(generation) = title_event.runtime_generation {
+            if !mapping_generation_is_current(
+                session_generations,
+                &title_event.app_session_id,
+                generation,
+            )
+            .await
+            {
+                debug!(
+                    target: "agent",
+                    "Dropping stale OpenCode session title after reset app_session_id={}",
+                    title_event.app_session_id
+                );
+                return Ok(true);
+            }
+        }
+    }
+
+    let changed = {
+        let db = state.db.lock().unwrap();
+        let session_exists: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+                [&title_event.app_session_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false);
+        if !session_exists {
+            debug!(
+                target: "agent",
+                "Ignoring agent session title for unknown app_session_id={}",
+                title_event.app_session_id
+            );
+            return Ok(true);
+        }
+        operations::refresh_auto_session_title(&db, &title_event.app_session_id, &title_event.title)
+            .map_err(|error| {
+                format!(
+                    "Failed to refresh session title app_session_id={}: {}",
+                    title_event.app_session_id, error
+                )
+            })?
+    };
+
+    if changed {
+        info!(
+            target: "agent",
+            "Refreshed native session title app_session_id={} agent_kind={}",
+            title_event.app_session_id,
+            title_event.agent_kind.as_str()
+        );
+        crate::companion::events::broadcast_session_title_changed(
+            companion_state,
+            &title_event.app_session_id,
+            &operations::normalize_session_title(&title_event.title),
+        );
+    }
+
+    Ok(true)
+}
+
 async fn ensure_sidecar_for_session(
     app_state: Arc<crate::AppState>,
     agent_state: Arc<AgentState>,
@@ -522,6 +645,26 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
+                    match handle_agent_session_title_event(
+                        &app_state,
+                        &session_generations,
+                        &companion_state,
+                        &event,
+                    )
+                    .await
+                    {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(error) => {
+                            let error_event = serde_json::json!({
+                                "type": "sidecar_error",
+                                "error": error,
+                            })
+                            .to_string();
+                            event_binding.send(error_event).await;
+                            continue;
+                        }
+                    }
                     let mut broadcast_events =
                         crate::agent::timeline_persist::handle_sidecar_timeline_event(
                             &app_state, &event,
@@ -1622,8 +1765,9 @@ mod tests {
     use super::{
         begin_session_generation, build_ensure_session_command,
         build_update_permissions_command_from_snapshot, handle_agent_session_mapping_event,
-        invalidate_session_generation, load_latest_token_usage_for_agent_session,
-        mapping_generation_is_current, parse_agent_session_mapping_event,
+        handle_agent_session_title_event, invalidate_session_generation,
+        load_latest_token_usage_for_agent_session, mapping_generation_is_current,
+        parse_agent_session_mapping_event, parse_agent_session_title_event,
         persist_agent_session_mapping_event, resolve_active_runtime_config,
         resolve_agent_session_info, session_lifecycle_lock, AgentState,
     };
@@ -2664,6 +2808,156 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("Failed to persist agent session mapping"));
+    }
+
+    #[test]
+    fn parses_agent_session_title_event() {
+        let parsed = parse_agent_session_title_event(
+            r#"{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"opencode","title":"Native title","runtime_generation":2}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.app_session_id, "session-1");
+        assert_eq!(parsed.agent_kind, AgentKind::Opencode);
+        assert_eq!(parsed.title, "Native title");
+        assert_eq!(parsed.runtime_generation, Some(2));
+
+        let without_generation = parse_agent_session_title_event(
+            r#"{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"claude_code","title":"T"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(without_generation.runtime_generation, None);
+
+        assert!(parse_agent_session_title_event(r#"{"type":"other"}"#)
+            .unwrap()
+            .is_none());
+        assert!(parse_agent_session_title_event(
+            r#"{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"opencode"}"#,
+        )
+        .is_err());
+        assert!(parse_agent_session_title_event(
+            r#"{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"bogus","title":"T"}"#,
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_session_title_event_refreshes_title_and_broadcasts() {
+        let state = {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            crate::db::schema::initialize_database(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["session-1", "Seed", "opencode", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+            crate::AppState {
+                db: std::sync::Mutex::new(conn),
+                config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+                app_data_dir: std::path::PathBuf::new(),
+                runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+            }
+        };
+        let agent_state = AgentState::default();
+        let generation = begin_session_generation(&agent_state, "session-1").await;
+        let companion_state = std::sync::Arc::new(crate::companion::CompanionState::new());
+        let mut rx = companion_state.inner.event_tx.subscribe();
+
+        // companion 未启用 → 写库但不广播
+        let event = format!(
+            r#"{{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"opencode","title":"Native title","runtime_generation":{generation}}}"#
+        );
+        assert!(handle_agent_session_title_event(
+            &state,
+            &agent_state.session_generations,
+            &companion_state,
+            &event,
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT title FROM sessions WHERE id = 'session-1'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "Native title"
+        );
+        assert!(rx.try_recv().is_err());
+
+        // companion 启用 → 变化才广播
+        companion_state.inner.set_loopback_running(true);
+        let event = format!(
+            r#"{{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"opencode","title":"Generated title","runtime_generation":{generation}}}"#
+        );
+        assert!(handle_agent_session_title_event(
+            &state,
+            &agent_state.session_generations,
+            &companion_state,
+            &event,
+        )
+        .await
+        .unwrap());
+        let broadcast = rx.try_recv().unwrap();
+        assert_eq!(broadcast.session_id, "session-1");
+        assert_eq!(broadcast.event["type"], "session_title_changed");
+        assert_eq!(broadcast.event["title"], "Generated title");
+
+        // 重复值 → 不广播
+        assert!(handle_agent_session_title_event(
+            &state,
+            &agent_state.session_generations,
+            &companion_state,
+            &event,
+        )
+        .await
+        .unwrap());
+        assert!(rx.try_recv().is_err());
+
+        // 过期代际 → 丢弃，标题不变
+        let stale_event = format!(
+            r#"{{"type":"agent_session_title","app_session_id":"session-1","agent_kind":"opencode","title":"Stale title","runtime_generation":{}}}"#,
+            generation.wrapping_sub(1)
+        );
+        assert!(handle_agent_session_title_event(
+            &state,
+            &agent_state.session_generations,
+            &companion_state,
+            &stale_event,
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT title FROM sessions WHERE id = 'session-1'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "Generated title"
+        );
+        assert!(rx.try_recv().is_err());
+
+        // 未知会话 → 静默忽略
+        let unknown_event = r#"{"type":"agent_session_title","app_session_id":"missing","agent_kind":"codex","title":"T"}"#;
+        assert!(handle_agent_session_title_event(
+            &state,
+            &agent_state.session_generations,
+            &companion_state,
+            unknown_event,
+        )
+        .await
+        .unwrap());
     }
 
     #[tokio::test]

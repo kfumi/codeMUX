@@ -33,6 +33,7 @@ import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.j
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import { isMutationTool, TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
+import { buildSessionTitleEvent, isOpenCodePlaceholderTitle } from './sessionTitleEvent.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -107,6 +108,8 @@ export class OpenCodeRuntime {
   private permissionConfig: SidecarPermissionConfig | undefined;
   private planMode: AgentPlanMode = 'off';
   private readonly turnArtifactAggregator: TurnArtifactAggregator;
+  /** 最近一次已上报的原生标题（变化才上报；占位标题不参与）。 */
+  private lastEmittedNativeTitle: string | null = null;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -576,6 +579,8 @@ export class OpenCodeRuntime {
         : await client.createSession({ cwd: this.config.cwd });
       this.agentSessionId = session.id;
       this.state = 'started';
+      // 恢复的会话可能已在底层生成过标题（新建会话为占位标题，被过滤）。
+      this.emitNativeSessionTitle(readString((session as { title?: unknown })?.title));
       await this.subscribeToEvents();
       return this.mapping();
     } catch (error) {
@@ -613,6 +618,27 @@ export class OpenCodeRuntime {
       agentSessionId: this.agentSessionId,
       runtimeGeneration: this.config.runtimeGeneration,
     };
+  }
+
+  private syncNativeSessionTitle(event: unknown): void {
+    // 只同步主会话的标题；子会话（subagent/child）标题不进父会话侧栏。
+    const eventSessionId = getOpenCodeEventSessionId(event);
+    if (eventSessionId && this.agentSessionId && eventSessionId !== this.agentSessionId) return;
+    const properties = asRecord(asRecord(event)?.properties);
+    this.emitNativeSessionTitle(readString(asRecord(properties?.info)?.title));
+  }
+
+  private emitNativeSessionTitle(title: unknown): void {
+    if (typeof title !== 'string') return;
+    const value = title.trim();
+    if (!value || isOpenCodePlaceholderTitle(value) || value === this.lastEmittedNativeTitle) return;
+    this.lastEmittedNativeTitle = value;
+    this.emitEvent(buildSessionTitleEvent({
+      appSessionId: this.config.sessionId,
+      agentKind: 'opencode',
+      title: value,
+      runtimeGeneration: this.config.runtimeGeneration,
+    }));
   }
 
   private retainStartResources(resources: OpenCodeSdkStartResources | undefined): void {
@@ -698,6 +724,11 @@ export class OpenCodeRuntime {
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
     if (type === 'server.heartbeat') {
       return;
+    }
+    if (type === 'session.updated') {
+      // OpenCode 首条用户消息后由后台 title agent 生成标题并通过 session.updated
+      // 推送（含占位 → 生成值的替换）。在此提前消费，不走时间线投影。
+      this.syncNativeSessionTitle(event);
     }
     const eventLower = type.toLowerCase();
     const isCompactionCompletedEvent =

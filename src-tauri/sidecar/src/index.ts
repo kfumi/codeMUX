@@ -36,6 +36,7 @@ import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './t
 import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { proxyManager } from './proxyManager.js';
 import { emit, resetStreamEventSequences, syncStreamSessionContext } from './streamEventBatcher.js';
+import { buildSessionTitleEvent, extractClaudeSessionTitle } from './sessionTitleEvent.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
@@ -332,6 +333,9 @@ export class SessionRuntime {
    */
   private continuationQuiescenceTimer: ReturnType<typeof setTimeout> | null = null;
   continuationQuiescenceMs = CONTINUATION_QUIESCENCE_MS;
+  /** 原生标题同步：首轮结束后拉取一次 getSessionInfo（ai-title 由后台生成，延迟两次尝试）。 */
+  private claudeTitleSynced = false;
+  private lastEmittedNativeTitle: string | null = null;
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
@@ -1438,6 +1442,7 @@ export class SessionRuntime {
         if (msg.type === 'result') {
           sawResult = true;
           this.clearContinuationQuiescence();
+          this.scheduleClaudeTitleSync(queryHandle, appSessionId);
           if (this.turnActive) {
             writeLog('[claude-task]', 'sendInput COMPLETE');
             this.finishTurn();
@@ -1525,6 +1530,42 @@ export class SessionRuntime {
       if (this.queryHandle === queryHandle && this.abortController?.signal.aborted) {
         this.closeQueryHandle('aborted_cleanup');
       }
+    }
+  }
+
+  /**
+   * 首轮结束后拉取 Claude 原生标题（`getSessionInfo().summary`，custom →
+   * ai-title → first prompt 的兜底链）。ai-title 由后台 Haiku 请求异步写入，
+   * result 时点大概率还没生成，因此延迟两次尝试；重复值由 lastEmitted 过滤，
+   * daemon 侧也只对变化写入。旧版 SDK 无此 API 时静默跳过。
+   */
+  private scheduleClaudeTitleSync(queryHandle: Query, appSessionId: string | undefined): void {
+    if (this.claudeTitleSynced || !appSessionId) return;
+    const sdkSessionId = this.config?.agentSessionId;
+    if (!sdkSessionId) return;
+    this.claudeTitleSynced = true;
+    for (const delayMs of [4_000, 12_000]) {
+      const timer = setTimeout(() => {
+        if (this.queryHandle !== queryHandle) return;
+        void this.fetchClaudeSessionTitle(queryHandle, appSessionId, sdkSessionId);
+      }, delayMs);
+      timer.unref?.();
+    }
+  }
+
+  private async fetchClaudeSessionTitle(queryHandle: Query, appSessionId: string, sdkSessionId: string): Promise<void> {
+    try {
+      const getSessionInfo = (queryHandle as unknown as {
+        getSessionInfo?: (sessionId?: string) => Promise<unknown>;
+      }).getSessionInfo;
+      if (typeof getSessionInfo !== 'function') return;
+      const info = await getSessionInfo.call(queryHandle, sdkSessionId);
+      const title = extractClaudeSessionTitle(info);
+      if (!title || title === this.lastEmittedNativeTitle) return;
+      this.lastEmittedNativeTitle = title;
+      emit(buildSessionTitleEvent({ appSessionId, agentKind: 'claude_code', title }));
+    } catch (error) {
+      process.stderr.write(`[sidecar] Claude session title sync failed: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
 

@@ -658,4 +658,77 @@ describe('session store createSession', () => {
     expect(patchSessionViaDaemonMock).toHaveBeenCalledWith('session-shared', { pinned: true });
     expect(patchSessionViaDaemonMock).toHaveBeenCalledWith('session-shared', { title: 'Renamed by desktop' });
   });
+
+  it('marks the title locked for manual renames but not for auto seeds', async () => {
+    patchSessionViaDaemonMock.mockResolvedValue(undefined);
+    const session: Session = {
+      id: 'session-title',
+      title: 'Seed',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [session],
+      archivedSessions: [],
+      activeSessionId: session.id,
+      isLoading: false,
+      error: null,
+    });
+
+    // 自动播种（首条用户消息）：不锁定，原生标题晚到仍可替换
+    await useSessionStore.getState().updateSessionTitle(session.id, 'First user message…');
+    expect(patchSessionViaDaemonMock).toHaveBeenLastCalledWith('session-title', {
+      title: 'First user message…',
+    });
+
+    // 手动改名：锁定
+    await useSessionStore.getState().updateSessionTitle(session.id, 'My name', { titleLocked: true });
+    expect(patchSessionViaDaemonMock).toHaveBeenLastCalledWith('session-title', {
+      title: 'My name',
+      titleLocked: true,
+    });
+    expect(useSessionStore.getState().sessions[0].title).toBe('My name');
+  });
+
+  it('applies a daemon-pushed title change to active and archived lists locally', () => {
+    const session: Session = {
+      id: 'session-native-title',
+      title: 'Seed',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+    const archived: Session = { ...session, id: 'session-archived-title', is_archived: true };
+
+    return import('./sessionStore').then(({ useSessionStore }) => {
+      useSessionStore.setState({
+        sessions: [session],
+        archivedSessions: [archived],
+        activeSessionId: null,
+        isLoading: false,
+        error: null,
+      });
+
+      useSessionStore.getState().applySessionTitle(session.id, 'Generated title');
+
+      expect(useSessionStore.getState().sessions[0].title).toBe('Generated title');
+      expect(patchSessionViaDaemonMock).not.toHaveBeenCalled();
+
+      useSessionStore.getState().applySessionTitle(archived.id, 'Generated archived title');
+      expect(useSessionStore.getState().archivedSessions[0].title).toBe('Generated archived title');
+    });
+  });
 });

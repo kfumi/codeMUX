@@ -4411,6 +4411,22 @@ describe('agent store Codex history loading', () => {
       vi.useRealTimers();
     }
   });
+
+  it('applies a daemon-pushed session_title_changed event without touching the timeline', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = await primeSession('opencode');
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:/workspace');
+
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'session_title_changed',
+      title: 'Generated native title',
+    }));
+
+    expect(useSessionStore.getState().sessions[0].title).toBe('Generated native title');
+    // 不进时间线：没有 raw 事件被追加
+    expect(useAgentStore.getState().events[session.id]?.some((entry) => entry.kind === 'raw')).toBe(false);
+  });
 });
 
 describe('agent rewind capabilities', () => {
