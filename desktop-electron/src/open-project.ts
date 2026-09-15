@@ -33,11 +33,13 @@ function spawnDetached(program: string, args: string[], options: { hideWindow?: 
   }
 }
 
-function firstSpawnResult(results: SpawnResult[]): SpawnResult {
-  for (const result of results) {
-    if (result.ok) return result;
+function trySpawnSequential(attempts: Array<() => SpawnResult>): SpawnResult {
+  let last: SpawnResult = { ok: false, error: 'no attempt' };
+  for (const attempt of attempts) {
+    last = attempt();
+    if (last.ok) return last;
   }
-  return results[results.length - 1] ?? { ok: false, error: 'no attempt' };
+  return last;
 }
 
 /** 打开目录,或 reveal 文件(对齐 Rust open_in_explorer 的行为)。 */
@@ -120,12 +122,13 @@ export async function openProjectPath(rawPath: string, target: string): Promise<
         path.join(programFiles, 'Microsoft VS Code', 'Code.exe'),
         path.join(programFilesX86, 'Microsoft VS Code', 'Code.exe'),
       ]);
-      const attempts: SpawnResult[] = [];
-      if (exe) attempts.push(spawnDetached(exe, [abs]));
-      attempts.push(cmdWrapper('code', [abs]));
-      const result = firstSpawnResult(attempts);
+      const errors: string[] = [];
+      const result = trySpawnSequential([
+        ...(exe ? [() => { const r = spawnDetached(exe, [abs]); if (!r.ok) errors.push(r.error ?? ''); return r; }] : []),
+        () => { const r = cmdWrapper('code', [abs]); if (!r.ok) errors.push(r.error ?? ''); return r; },
+      ]);
       if (!result.ok) {
-        throw new Error(`Failed to open project. Tried: ${attempts.map((a) => a.error ?? '').join('; ')}`);
+        throw new Error(`Failed to open project. Tried: ${errors.join('; ')}`);
       }
       return;
     }
@@ -144,12 +147,13 @@ export async function openProjectPath(rawPath: string, target: string): Promise<
         path.join(programFiles, 'Programs', 'Cursor', 'Cursor.exe'),
         path.join(programFilesX86, 'Programs', 'Cursor', 'Cursor.exe'),
       ]);
-      const attempts: SpawnResult[] = [];
-      if (exe) attempts.push(spawnDetached(exe, [abs]));
-      attempts.push(cmdWrapper('cursor', [abs]));
-      const result = firstSpawnResult(attempts);
+      const errors: string[] = [];
+      const result = trySpawnSequential([
+        ...(exe ? [() => { const r = spawnDetached(exe, [abs]); if (!r.ok) errors.push(r.error ?? ''); return r; }] : []),
+        () => { const r = cmdWrapper('cursor', [abs]); if (!r.ok) errors.push(r.error ?? ''); return r; },
+      ]);
       if (!result.ok) {
-        throw new Error(`Failed to open project. Tried: ${attempts.map((a) => a.error ?? '').join('; ')}`);
+        throw new Error(`Failed to open project. Tried: ${errors.join('; ')}`);
       }
       return;
     }
@@ -162,20 +166,22 @@ export async function openProjectPath(rawPath: string, target: string): Promise<
 
   if (target === 'terminal') {
     if (process.platform === 'win32') {
-      const attempts = [
-        spawnDetached('wt', ['-d', abs]),
-        cmdWrapper('wt', ['-d', abs]),
-      ];
-      // powershell 兜底(对齐 Rust 的 powershell Set-Location)。
-      const powershell = spawnDetached(
-        'powershell',
-        ['-NoExit', '-Command', `Set-Location -LiteralPath '${abs.replace(/'/g, "''")}'`],
-        { hideWindow: false },
-      );
-      attempts.push(powershell);
-      const result = firstSpawnResult(attempts);
+      const errors: string[] = [];
+      const result = trySpawnSequential([
+        () => { const r = spawnDetached('wt', ['-d', abs]); if (!r.ok) errors.push(r.error ?? ''); return r; },
+        () => { const r = cmdWrapper('wt', ['-d', abs]); if (!r.ok) errors.push(r.error ?? ''); return r; },
+        () => {
+          const r = spawnDetached(
+            'powershell',
+            ['-NoExit', '-Command', `Set-Location -LiteralPath '${abs.replace(/'/g, "''")}'`],
+            { hideWindow: false },
+          );
+          if (!r.ok) errors.push(r.error ?? '');
+          return r;
+        },
+      ]);
       if (!result.ok) {
-        throw new Error(`Failed to open project. Tried: ${attempts.map((a) => a.error ?? '').join('; ')}`);
+        throw new Error(`Failed to open project. Tried: ${errors.join('; ')}`);
       }
       return;
     }
@@ -195,12 +201,13 @@ export async function openProjectPath(rawPath: string, target: string): Promise<
         path.join(programFiles, 'Git', 'git-bash.exe'),
         path.join(programFilesX86, 'Git', 'git-bash.exe'),
       ]);
-      const attempts: SpawnResult[] = [];
-      if (exe) attempts.push(spawnDetached(exe, [`--cd=${abs}`]));
-      attempts.push(cmdWrapper('git-bash.exe', [`--cd=${abs}`]));
-      const result = firstSpawnResult(attempts);
+      const errors: string[] = [];
+      const result = trySpawnSequential([
+        ...(exe ? [() => { const r = spawnDetached(exe, [`--cd=${abs}`]); if (!r.ok) errors.push(r.error ?? ''); return r; }] : []),
+        () => { const r = cmdWrapper('git-bash.exe', [`--cd=${abs}`]); if (!r.ok) errors.push(r.error ?? ''); return r; },
+      ]);
       if (!result.ok) {
-        throw new Error(`Failed to open project. Tried: ${attempts.map((a) => a.error ?? '').join('; ')}`);
+        throw new Error(`Failed to open project. Tried: ${errors.join('; ')}`);
       }
       return;
     }
