@@ -226,7 +226,6 @@ npm run dev
 ### 生产构建
 
 ```bash
-cd src-tauri && cargo build --release --bin codemux-daemon && cd ..
 npm run build:electron-installer
 ```
 

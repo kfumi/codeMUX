@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:renderer": "vite build",
     "build:web": "vite build --outDir dist-web --emptyOutDir",
     "build:daemon": "cd src-tauri && cargo build --bin codemux-daemon",
     "build:daemon:release": "cd src-tauri && cargo build --release --bin codemux-daemon",
     "build:electron": "cd desktop-electron && npm run build",
-    "build:electron-installer": "npm run build:web && cd desktop-electron && npm run pack:win",
+    "build:electron-installer": "npm run build:sidecar && npm run build:daemon:release && npm run build:renderer && npm run build:web && cd desktop-electron && npm run pack:win",
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "dev:electron": "cd desktop-electron && npm run dev",
     "build:sidecar": "cd src-tauri/sidecar && npm run build",

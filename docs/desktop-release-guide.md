@@ -21,18 +21,48 @@ npm run release:prepare -- 0.0.7   # 同步 package.json / desktop-electron/pack
 
 ## 构建安装包(NSIS)
 
-前置：daemon release 二进制已构建,渲染层已构建(脚本会自动完成后者)。
+一条命令完成全部构建(daemon release 二进制、渲染层、Electron 壳、打包)：
 
 ```bash
-cd src-tauri && cargo build --release --bin codemux-daemon
 npm run build:electron-installer
 ```
 
-`build:electron-installer` 依次执行:仓库根 `vite build`(渲染层 dist/;类型
-检查门禁独立跑 `npx tsc --noEmit`)→ `desktop-electron` tsc(main/preload)→
+`build:electron-installer` 依次执行:`src-tauri/sidecar` tsc(sidecar dist/)→
+daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查门禁独立跑
+`npx tsc --noEmit`)→ `desktop-electron` tsc(main/preload)→
 `scripts/copy-renderer-dist.mjs` 把 `../dist` 拷入 `desktop-electron/renderer-dist`
-→ `electron-builder --win nsis`。
+→ `scripts/copy-sidecar-dist.mjs` 把 `../src-tauri/sidecar/dist` 拷入
+`desktop-electron/sidecar-dist` → `electron-builder --win nsis`。
 产物输出到 `desktop-electron/release/`。
+
+资源根布局(daemon 按这些相对路径找资源,`--resource-dir` = 打包态的
+`process.resourcesPath`):
+
+| 路径 | 来源 | 缺失后果 |
+| --- | --- | --- |
+| `daemon/codemux-daemon.exe` | `extraResources` ← `src-tauri/target/release/` | 壳拉不起 daemon |
+| `sidecar/dist/index.js` + `sidecar/package.json` | `extraResources` ← `desktop-electron/sidecar-dist/`(脚本生成) | 发消息报 `Bundled sidecar was not found at sidecar\dist/index.js` |
+| `dist-web/` | `extraResources` ← 仓库根 `dist-web/` | 浏览器/移动形态无页面 |
+| `icons/icon.ico` | `extraResources` ← `src-tauri/icons/` | 托盘无图标 |
+| `app.asar` 内 `renderer-dist/` | `files` ← 脚本从根 `dist/` 拷入 | 桌面窗口白屏 |
+
+`sidecar/package.json` 只标记 ESM(`"type": "module"`);`node_modules` 不随包
+分发,sidecar 运行时从托管 Runtime 目录(`%LOCALAPPDATA%/CodeMUX/runtimes`)动态
+加载 provider SDK。修改 sidecar 源码后务必让打包链路重跑 `npm run build:sidecar`
+(脚本会拦住「dist 比 src 旧」的情况,除非设 `CODEMUX_ALLOW_STALE_SIDECAR=1`)。
+
+### 常见打包环境问题
+
+electron-builder 首次打包会下载 `winCodeSign`、`nsis`、`nsis-resources` 等工具包，国内网络下常遇到两类问题：
+
+1. **下载超时**（`Get "https://github.com/.../nsis-*.7z": connection failed`）：切国内镜像后重跑，缓存写入 `%LOCALAPPDATA%/electron-builder/Cache/`。
+
+   ```powershell
+   $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://registry.npmmirror.com/-/binary/electron-builder-binaries/"
+   npm run build:electron-installer
+   ```
+
+2. **winCodeSign 解压报符号链接权限错误**（`Cannot create symbolic link ... darwin/10.12/lib/libcrypto.dylib`）：`winCodeSign` 包内含两个 macOS 软链，Windows 解压需管理员权限或开发者模式。开启「设置 → 系统 → 开发者选项 → 开发人员模式」后重跑即可（那两个 dylib 仅用于 macOS 签名，Windows 构建用不到）。
 
 ## 安装包签名(应用 + daemon 同一签名链)
 

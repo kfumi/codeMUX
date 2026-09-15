@@ -1,9 +1,10 @@
 # CodeMUX Electron 壳打包配置(NSIS 安装包)。
-# 出包流程(根脚本 build:electron-installer):
-#   npm run build          (仓库根,产出 dist/ 渲染层)
-#   cd src-tauri && cargo build --release --bin codemux-daemon
+# 出包流程(根脚本 build:electron-installer,一条命令完成):
+#   npm run build:daemon:release  (产出 daemon release 二进制)
+#   npm run build:web             (仓库根,产出 dist/ 渲染层)
 #   之后根脚本构建 main(tsc)→ scripts/copy-renderer-dist.mjs 把 ../dist 拷入
-#   renderer-dist/ → electron-builder --win nsis。
+#   renderer-dist/ → scripts/copy-sidecar-dist.mjs 把 ../src-tauri/sidecar/dist 拷入
+#   sidecar-dist/ → electron-builder --win nsis。
 # 签名:配置 CSC_LINK/CSC_KEY_PASSWORD 后 electron-builder 自动签应用本体;
 # extraResources 的 daemon 二进制经下方 afterPack 钩子补签(见
 # scripts/sign-daemon.cjs 与 docs/desktop-release-guide.md)。
@@ -35,10 +36,18 @@ extraResources:
   # 与壳内 renderer-dist 同源同一次构建(npm run build:web)。
   - from: ../dist-web
     to: dist-web
+  # agent sidecar:daemon 按资源根相对路径 sidecar/dist/index.js 拉起
+  # (src-tauri/src/agent/mod.rs)。sidecar-dist/ 由 scripts/copy-sidecar-dist.mjs
+  # 在打包前生成 —— 含 dist/(tsc 产物)与仅标记 ESM 的 package.json,
+  # 不含 node_modules(sidecar 运行时从托管 Runtime 目录加载 SDK)。
+  - from: sidecar-dist
+    to: sidecar
   # 托盘/应用图标
   - from: ../src-tauri/icons/icon.ico
     to: icons/icon.ico
 win:
+  # 应用/安装包/桌面快捷方式图标(≥256×256)。extraResources 里的图标只服务运行时/托盘。
+  icon: ../src-tauri/icons/icon.ico
   target:
     - target: nsis
       arch:

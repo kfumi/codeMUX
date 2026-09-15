@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "node scripts/dev.mjs",
-    "pack:win": "npm run build && node scripts/copy-renderer-dist.mjs && electron-builder --win nsis"
+    "pack:win": "npm run build && node scripts/copy-renderer-dist.mjs && node scripts/copy-sidecar-dist.mjs && electron-builder --win nsis"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
