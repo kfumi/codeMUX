@@ -20,7 +20,7 @@ fn validate_agent_kind(value: &str) -> Result<AgentKind> {
     })
 }
 
-const SESSION_LIST_SELECT: &str = "id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, working_path, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id)";
+const SESSION_LIST_SELECT: &str = "id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, working_path, git_branch, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id)";
 
 fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -41,7 +41,8 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
         working_path: row.get(16)?,
-        parent_session_id: row.get(17)?,
+        git_branch: row.get(17)?,
+        parent_session_id: row.get(18)?,
     })
 }
 
@@ -71,6 +72,8 @@ pub struct Session {
     pub is_archived: bool,
     pub is_pinned: bool,
     pub working_path: Option<String>,
+    /// 工作路径建立时所在的分支；悬停卡片直接读它，只有历史会话才回退实时查询。
+    pub git_branch: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub parent_session_id: Option<String>,
@@ -212,6 +215,7 @@ pub fn create_session_with_mode_and_permissions(
         is_archived: false,
         is_pinned: false,
         working_path: None,
+        git_branch: None,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: None,
@@ -255,6 +259,7 @@ pub fn create_session_for_project_with_permissions(
         is_archived: false,
         is_pinned: false,
         working_path: None,
+        git_branch: None,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: None,
@@ -298,6 +303,7 @@ pub fn create_scheduled_session_for_project(
         is_archived: false,
         is_pinned: false,
         working_path: None,
+        git_branch: None,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: None,
@@ -333,8 +339,8 @@ pub fn create_forked_session(
         "INSERT INTO sessions (
             id, title, agent_kind, provider_id, model, reasoning_effort, mode,
             permission_config, plan_mode, project_id, origin, is_read_only,
-            is_archived, is_pinned, working_path, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?12, ?12)",
+            is_archived, is_pinned, working_path, git_branch, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?12, ?13, ?13)",
         params![
             child_id,
             title,
@@ -347,6 +353,7 @@ pub fn create_forked_session(
             source.plan_mode.as_deref().unwrap_or("off"),
             source.project_id.as_deref(),
             source.working_path.as_deref(),
+            source.git_branch.as_deref(),
             &now,
         ],
     )?;
@@ -392,16 +399,50 @@ pub fn create_forked_session(
         is_archived: false,
         is_pinned: false,
         working_path: source.working_path,
+        git_branch: source.git_branch,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: Some(source_session_id.to_string()),
     })
 }
 
+/// 会话「启动分支」的写入意图。
+pub enum GitBranchWrite {
+    /// 工作路径没有变化：保留库里已采样的分支，不重新读 Git。
+    Keep,
+    /// 工作路径首次建立或发生变更：写入本次采样结果（`None` 表示该路径不是 Git 仓库）。
+    Capture(Option<String>),
+}
+
+/// 判断本次工作路径写入是否需要重新采样启动分支。
+///
+/// 只在路径文本真的变化时采样：每次发消息都会把同一个工作路径再写一遍，
+/// 这时必须沿用首次的采样结果——否则「启动分支」会退化成「当前分支」，
+/// 而且每条消息都要多跑一次 Git。
+pub fn session_needs_git_branch_capture(
+    conn: &Connection,
+    session_id: &str,
+    working_path: &str,
+) -> Result<bool> {
+    let trimmed = working_path.trim();
+    if trimmed.is_empty() {
+        return Ok(false);
+    }
+
+    let mut stmt = conn.prepare("SELECT working_path FROM sessions WHERE id = ?1 LIMIT 1")?;
+    let mut rows = stmt.query([session_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(false);
+    };
+    let existing: Option<String> = row.get(0)?;
+    Ok(existing.as_deref().map(str::trim) != Some(trimmed))
+}
+
 pub fn update_session_working_path(
     conn: &Connection,
     session_id: &str,
     working_path: &str,
+    git_branch: GitBranchWrite,
 ) -> Result<()> {
     let trimmed = working_path.trim();
     if trimmed.is_empty() {
@@ -409,10 +450,20 @@ pub fn update_session_working_path(
     }
 
     let now = Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE sessions SET working_path = ?1, updated_at = ?2 WHERE id = ?3",
-        params![trimmed, now, session_id],
-    )?;
+    match git_branch {
+        GitBranchWrite::Keep => {
+            conn.execute(
+                "UPDATE sessions SET working_path = ?1, updated_at = ?2 WHERE id = ?3",
+                params![trimmed, now, session_id],
+            )?;
+        }
+        GitBranchWrite::Capture(branch) => {
+            conn.execute(
+                "UPDATE sessions SET working_path = ?1, git_branch = ?2, updated_at = ?3 WHERE id = ?4",
+                params![trimmed, branch, now, session_id],
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -1821,9 +1872,10 @@ mod tests {
         get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
         list_native_sessions_for_cleanup, normalize_session_title, refresh_auto_session_title,
         rename_session_title, resolve_app_session_id_for_timeline,
-        sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
-        unarchive_session, update_session_provider, update_session_reasoning_effort,
-        update_session_settings, upsert_agent_session_mapping, upsert_session_subagent,
+        session_needs_git_branch_capture, sessions_with_legacy_timeline_artifacts,
+        set_session_pinned, set_session_read_only, unarchive_session, update_session_provider,
+        update_session_reasoning_effort, update_session_settings, update_session_working_path,
+        upsert_agent_session_mapping, upsert_session_subagent, GitBranchWrite,
         ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
@@ -3276,5 +3328,126 @@ mod tests {
         assert!(!updated.is_read_only);
         let events = get_session_timeline(&conn, &created.id).unwrap().unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    fn insert_bare_session(conn: &Connection, session_id: &str, working_path: Option<&str>) {
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, working_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params![
+                session_id,
+                "Test",
+                "opencode",
+                "agent",
+                working_path,
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn samples_git_branch_only_when_working_path_changes() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_bare_session(&conn, "session-1", None);
+
+        // 工作路径首次建立：需要采样启动分支。
+        assert!(
+            session_needs_git_branch_capture(&conn, "session-1", "D:/project/codeMUX").unwrap()
+        );
+        update_session_working_path(
+            &conn,
+            "session-1",
+            "D:/project/codeMUX",
+            GitBranchWrite::Capture(Some("feature/hover".to_string())),
+        )
+        .unwrap();
+
+        let session = get_session(&conn, "session-1").unwrap().unwrap();
+        assert_eq!(session.working_path.as_deref(), Some("D:/project/codeMUX"));
+        assert_eq!(session.git_branch.as_deref(), Some("feature/hover"));
+
+        // 每条消息都会重写同一个路径：不重新采样，启动分支保持首次结果。
+        assert!(
+            !session_needs_git_branch_capture(&conn, "session-1", "D:/project/codeMUX").unwrap()
+        );
+        update_session_working_path(
+            &conn,
+            "session-1",
+            "D:/project/codeMUX",
+            GitBranchWrite::Keep,
+        )
+        .unwrap();
+        let session = get_session(&conn, "session-1").unwrap().unwrap();
+        assert_eq!(session.git_branch.as_deref(), Some("feature/hover"));
+
+        // 工作目录换了：按新路径重新采样。
+        assert!(session_needs_git_branch_capture(&conn, "session-1", "D:/project/other").unwrap());
+    }
+
+    #[test]
+    fn keeps_git_branch_when_sampled_path_is_not_a_repository() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_bare_session(&conn, "session-1", None);
+
+        update_session_working_path(
+            &conn,
+            "session-1",
+            "D:/not-a-repo",
+            GitBranchWrite::Capture(None),
+        )
+        .unwrap();
+
+        let session = get_session(&conn, "session-1").unwrap().unwrap();
+        assert_eq!(session.working_path.as_deref(), Some("D:/not-a-repo"));
+        assert_eq!(session.git_branch, None);
+    }
+
+    #[test]
+    fn does_not_backfill_git_branch_for_legacy_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_bare_session(&conn, "session-1", Some("D:/project/codeMUX"));
+
+        // 升级前已有的会话：路径在库里、启动分支为空。这里刻意不回填——每次发消息
+        // 补一次 Git 采样等于把实时查询搬到写路径上，前端对这类会话仍回退实时查询。
+        assert!(
+            !session_needs_git_branch_capture(&conn, "session-1", "D:/project/codeMUX").unwrap()
+        );
+    }
+
+    #[test]
+    fn forked_session_inherits_git_branch() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, working_path, git_branch, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            rusqlite::params![
+                "session-1",
+                "Parent",
+                "opencode",
+                "agent",
+                "D:/project/codeMUX",
+                "feature/hover",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let child = create_forked_session(
+            &mut conn,
+            "session-1",
+            "agent-1",
+            "fork-event-1",
+            None,
+            "分支 · 排查",
+        )
+        .unwrap();
+
+        assert_eq!(child.working_path.as_deref(), Some("D:/project/codeMUX"));
+        assert_eq!(child.git_branch.as_deref(), Some("feature/hover"));
+        // fork 落在同一个工作目录上，后续写入不该把启动分支改掉。
+        assert!(!session_needs_git_branch_capture(&conn, &child.id, "D:/project/codeMUX").unwrap());
     }
 }

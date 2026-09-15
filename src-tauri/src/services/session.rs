@@ -54,9 +54,32 @@ pub fn update_session_working_path_impl(
     session_id: String,
     working_path: String,
 ) -> Result<operations::Session, String> {
+    // 工作路径首次建立（或变更）时采样一次分支，之后悬停卡片直接读库。
+    // 采样要放在释放库锁之后：`git branch` 是子进程调用，持锁会把守护进程
+    // 其他 DB 访问全堵在它后面。
+    let capture = {
+        let db = state.db.lock().unwrap();
+        operations::session_needs_git_branch_capture(&db, &session_id, &working_path)
+            .map_err(|error| error.to_string())?
+    };
+    let git_branch = if capture {
+        crate::services::git::read_git_branch_for_path(std::path::Path::new(working_path.trim()))
+    } else {
+        None
+    };
+
     let db = state.db.lock().unwrap();
-    operations::update_session_working_path(&db, &session_id, &working_path)
-        .map_err(|error| error.to_string())?;
+    operations::update_session_working_path(
+        &db,
+        &session_id,
+        &working_path,
+        if capture {
+            operations::GitBranchWrite::Capture(git_branch)
+        } else {
+            operations::GitBranchWrite::Keep
+        },
+    )
+    .map_err(|error| error.to_string())?;
     operations::get_session(&db, &session_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "会话不存在".to_string())

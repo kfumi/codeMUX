@@ -10,8 +10,14 @@ interface SessionInfoCardProps {
   workingPath: string | null;
 }
 
-export function SessionInfoCard({ session, workingPath }: SessionInfoCardProps) {  const agentDef = getAgentDefinition(session.agent_kind);
-  const { branch } = useRepoBranch(workingPath);
+export function SessionInfoCard({ session, workingPath }: SessionInfoCardProps) {
+  const agentDef = getAgentDefinition(session.agent_kind);
+  // 分支优先级：库里的 git_branch（会话建立时所在的分支）→ 回退实时查询工作目录
+  // → 两者都拿不到就不显示这一行。传 null 给 hook 表示不发起实时查询，所以正常
+  // 情况下悬停不再产生 Git 调用；只有 git_branch 为空的老会话才走兜底。
+  const storedBranch = session.git_branch?.trim() || null;
+  const { branch: liveBranch } = useRepoBranch(storedBranch ? null : workingPath);
+  const branch = storedBranch ?? liveBranch;
   const model = session.model?.trim() ?? '';
   const hasDetails = Boolean(branch || workingPath);
 

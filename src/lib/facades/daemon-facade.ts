@@ -432,8 +432,10 @@ export const daemonFacade = {
   updateTitle: async (sessionId: string, title: string) => {
     await (await ensureDaemonClient()).patchSession(sessionId, { title });
   },
-  updateWorkingPath: async (sessionId: string, workingPath: string) => {
-    await (await ensureDaemonClient()).patchSession(sessionId, { workingPath });
+  // 工作路径变化时守护进程顺带采样「启动分支」，返回整条会话供调用方回填。
+  updateWorkingPath: async (sessionId: string, workingPath: string): Promise<Session | null> => {
+    const updated = await (await ensureDaemonClient()).patchSession(sessionId, { workingPath });
+    return (updated as Session | null) ?? null;
   },
   touchSession: async (sessionId: string) => {
     await (await ensureDaemonClient()).patchSession(sessionId, { touch: true });

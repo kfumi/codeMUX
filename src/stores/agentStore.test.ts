@@ -21,6 +21,7 @@ const {
   sendMessageViaDaemonMock,
   interruptViaDaemonMock,
   getTimelineMock,
+  updateWorkingPathMock,
 } = vi.hoisted(() => {
   const sessionHandlers = new Map<string, (raw: string) => void>();
   const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
@@ -73,6 +74,9 @@ const {
     sendMessageViaDaemonMock,
     interruptViaDaemonMock,
     getTimelineMock,
+    updateWorkingPathMock: vi.fn<(sessionId: string, workingPath: string) => Promise<unknown>>(
+      () => Promise.resolve(),
+    ),
   };
 });
 
@@ -110,7 +114,7 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     respondToInteractiveViaDaemon: vi.fn(),
     rewindSession: rewindSessionMock,
     resyncSessionFromNative: resyncSessionFromNativeMock,
-    updateWorkingPath: vi.fn(() => Promise.resolve()),
+    updateWorkingPath: updateWorkingPathMock,
     touchSession: vi.fn(() => Promise.resolve()),
     updateSessionTitle: vi.fn(() => Promise.resolve()),
     listSessions: vi.fn(() => Promise.resolve([])),
@@ -4440,5 +4444,53 @@ describe('agent rewind capabilities', () => {
       files: false,
       both: false,
     });
+  });
+});
+
+describe('agent store session start branch', () => {
+  function branchSession(gitBranch: string | null): Session {
+    return {
+      id: 'session-branch-1',
+      title: 'Branch Session',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: null,
+      mode: 'agent',
+      project_id: null,
+      working_path: null,
+      git_branch: gitBranch,
+      created_at: '',
+      updated_at: '',
+    };
+  }
+
+  it('backfills git_branch from the working path response', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = branchSession(null);
+    useSessionStore.setState({ sessions: [session], archivedSessions: [] });
+    updateWorkingPathMock.mockResolvedValueOnce({ ...session, git_branch: 'feature/hover' });
+
+    useAgentStore.getState().setSessionWorkingPath(session.id, 'D:/project/codeMUX');
+
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().sessions[0].git_branch).toBe('feature/hover');
+    });
+    expect(useSessionStore.getState().sessions[0].working_path).toBe('D:/project/codeMUX');
+  });
+
+  it('keeps the stored branch when the daemon response carries none', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = branchSession('feature/keep');
+    useSessionStore.setState({ sessions: [session], archivedSessions: [] });
+    updateWorkingPathMock.mockResolvedValueOnce(undefined);
+
+    useAgentStore.getState().setSessionWorkingPath(session.id, 'D:/project/codeMUX');
+
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().sessions[0].working_path).toBe('D:/project/codeMUX');
+    });
+    expect(useSessionStore.getState().sessions[0].git_branch).toBe('feature/keep');
   });
 });

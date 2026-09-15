@@ -31,6 +31,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             is_pinned INTEGER NOT NULL DEFAULT 0,
             title_locked INTEGER NOT NULL DEFAULT 0,
             working_path TEXT,
+            git_branch TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
@@ -340,6 +341,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
     }
 
+    // Migration: git_branch — 工作路径建立时采样的 Git 分支，悬停卡片直接读库
+    let has_git_branch: bool = conn
+        .prepare("SELECT git_branch FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_git_branch {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN git_branch TEXT", []);
+    }
+
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
     let _ = conn.execute("DROP TABLE IF EXISTS messages", []);
 
@@ -573,6 +582,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_kind, "claude_code");
+    }
+
+    #[test]
+    fn migrates_sessions_git_branch_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                agent_kind TEXT NOT NULL DEFAULT 'claude_code',
+                mode TEXT NOT NULL DEFAULT 'chat',
+                working_path TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO sessions (id, title, agent_kind, mode, working_path, created_at, updated_at)
+            VALUES ('session-1', 'Legacy', 'opencode', 'agent', 'D:/project/codeMUX', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        // 升级前建的老会话没有采过分支：列存在但为空，前端据此回退实时查询。
+        let branch: Option<String> = conn
+            .query_row(
+                "SELECT git_branch FROM sessions WHERE id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(branch, None);
     }
 
     #[test]

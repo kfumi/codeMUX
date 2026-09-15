@@ -913,6 +913,26 @@ pub(crate) fn current_branch_in_project(project_path: &Path) -> Result<String, S
     Ok(branch)
 }
 
+/// 读取路径所在的 Git 仓库当前分支，用于记录会话的「启动分支」。
+///
+/// 与 `current_branch_in_project` 的区别是失败一律返回 `None`：这里只是给
+/// 悬停卡片存一个展示值，目录不存在、不是仓库或 detached HEAD 都不该让
+/// 工作路径的写入失败。
+pub(crate) fn read_git_branch_for_path(path: &Path) -> Option<String> {
+    let root = path.canonicalize().ok()?;
+    if !is_inside_git_repo(&root) {
+        return None;
+    }
+
+    let output = run_git(&root, &["branch", "--show-current"]).ok()?;
+    let branch = String::from_utf8_lossy(&output).trim().to_string();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
 pub(crate) fn ensure_pr_worktree_clean(project_path: &Path) -> Result<(), String> {
     let root = project_path
         .canonicalize()

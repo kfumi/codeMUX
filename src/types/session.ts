@@ -16,6 +16,8 @@ export interface Session {
   project_id: string | null;
   /** Effective agent cwd; set for worktree sessions. */
   working_path?: string | null;
+  /** 工作路径建立时所在的分支；悬停卡片直接读它，缺省（历史会话）才实时查询。 */
+  git_branch?: string | null;
   /** `native` sessions are managed by CodeMUX; imported sessions are snapshots. */
   origin?: 'native' | 'imported' | 'scheduled';
   is_read_only?: boolean;

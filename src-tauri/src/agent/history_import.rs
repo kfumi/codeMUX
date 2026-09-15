@@ -1740,6 +1740,7 @@ mod tests {
             is_archived: false,
             is_pinned: false,
             working_path: None,
+            git_branch: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             parent_session_id: None,

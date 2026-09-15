@@ -2638,9 +2638,31 @@ function createSessionEventHandler(
         session.id === sessionId ? { ...session, working_path: trimmed } : session
       )),
     }));
-    void daemonFacade.updateWorkingPath(sessionId, trimmed).catch((error) => {
-      logger.warn('Failed to persist session working path', { sessionId }, serializeError(error));
-    });
+    void daemonFacade
+      .updateWorkingPath(sessionId, trimmed)
+      .then((updated) => {
+        // 守护进程在工作路径变化时会顺带采样「启动分支」；把结果回填进 store，
+        // 悬停卡片就不用再实时查一次 Git。
+        const branch = updated?.git_branch;
+        if (branch === undefined) {
+          return;
+        }
+        useSessionStore.setState((state) => ({
+          sessions: state.sessions.map((session) => (
+            session.id === sessionId && session.git_branch !== branch
+              ? { ...session, git_branch: branch }
+              : session
+          )),
+          archivedSessions: state.archivedSessions.map((session) => (
+            session.id === sessionId && session.git_branch !== branch
+              ? { ...session, git_branch: branch }
+              : session
+          )),
+        }));
+      })
+      .catch((error) => {
+        logger.warn('Failed to persist session working path', { sessionId }, serializeError(error));
+      });
   },
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string, fromQueue = false) => {
