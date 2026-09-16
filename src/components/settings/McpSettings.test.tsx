@@ -47,8 +47,10 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('@uiw/react-codemirror', () => ({
-  default: ({ value }: { value: string }) => <textarea data-testid="codemirror" defaultValue={value} />,
+// JSON 配置框走 CodeEditorSurface(Monaco 懒加载)。这里把真实的编辑器模块替掉,
+// 避免单测去拉 AMD 运行时;宿主形态门控本身的覆盖见 components/code/CodeEditorSurface.test.tsx。
+vi.mock('../code/MonacoCodeView', () => ({
+  default: ({ value }: { value: string }) => <textarea data-testid="monaco-code-view" defaultValue={value} />,
 }));
 
 describe('McpSettingsPanel', () => {

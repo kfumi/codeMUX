@@ -208,7 +208,11 @@ export function PreviewPanel() {
                   </div>
                 ) : activeFile.currentContent ? (
                   viewMode === 'diff' && activeFile.originalContent != null ? (
-                    <DiffView oldContent={activeFile.originalContent} newContent={activeFile.currentContent} />
+                    <DiffView
+                      oldContent={activeFile.originalContent}
+                      newContent={activeFile.currentContent}
+                      filePath={activeFile.path}
+                    />
                   ) : (
                     <FileView content={activeFile.currentContent} filePath={activeFile.path} />
                   )

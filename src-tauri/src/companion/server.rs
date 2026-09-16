@@ -449,6 +449,12 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
     let mut router = Router::new().nest("/api", api);
     if let Some(static_dir) = static_dir {
         let index_file = static_dir.join("index.html");
+        // Monaco 的 AMD 运行时(构建产物根部的 vs/**,来源见 scripts/vendor-monaco.mjs)
+        // 单独挂载,吃 ServeDir 自己的 not_found:缺文件时给出真实 404,而不是被下面的
+        // SPA 回退变成 200 + index.html —— 后者会让 AMD loader 拿入口页当脚本执行,
+        // 报出的语法错误与「少了一个文件」这个真因完全脱节。
+        // 同一判定在桌面壳侧:desktop-electron/src/main.ts 的 isVendorAssetPath。
+        router = router.nest_service("/vs", ServeDir::new(static_dir.join("vs")));
         // SPA 回退用 fallback 而非 not_found_service:后者会把回退响应状态强制
         // 改写为 404,深链刷新时前端拿到的入口页会带 404 状态。
         let static_service = ServeDir::new(static_dir).fallback(ServeFile::new(index_file));
@@ -1653,6 +1659,7 @@ pub(crate) mod server_tests {
 
     const INDEX_MARKER: &str = "<html>unified-frontend-index</html>";
     const ASSET_BODY: &str = "export const app = 'asset';";
+    const VENDOR_BODY: &str = "define('vs/loader', [], function () {});";
 
     pub(crate) async fn assemble_test_app(allowed_origins: &[&str]) -> TestApp {
         assemble_test_app_with_static(allowed_origins, true).await
@@ -1671,6 +1678,11 @@ pub(crate) mod server_tests {
             std::fs::create_dir_all(static_temp.path().join("assets")).expect("mkdir assets");
             std::fs::write(static_temp.path().join("assets/app.js"), ASSET_BODY)
                 .expect("write asset");
+            // Monaco 的 vendor 资源只准备一个文件,用来验证「存在的能取到、缺失的
+            // 得到真 404」两种分支。
+            std::fs::create_dir_all(static_temp.path().join("vs")).expect("mkdir vs");
+            std::fs::write(static_temp.path().join("vs/loader.js"), VENDOR_BODY)
+                .expect("write vendor asset");
         }
 
         let daemon = Arc::new(
@@ -1771,6 +1783,35 @@ pub(crate) mod server_tests {
         let asset = respond(&app, "/assets/app.js", loopback_peer(), &[]).await;
         assert_eq!(asset.status(), StatusCode::OK);
         assert_eq!(body_text(asset).await, ASSET_BODY);
+    }
+
+    /// Monaco 的 vendor 资源必须有真实 404。被 SPA 回退吞成 200 + index.html 时,
+    /// AMD loader 会拿入口页当脚本执行,报出的语法错误与「少了一个文件」这个真因
+    /// 完全脱节 —— 这是排查成本最高的一类失败,所以单独锁住。
+    #[tokio::test]
+    async fn vendor_assets_bypass_spa_fallback() {
+        let app = assemble_test_app(&[]).await;
+
+        let present = respond(&app, "/vs/loader.js", loopback_peer(), &[]).await;
+        assert_eq!(
+            present.status(),
+            StatusCode::OK,
+            "存在的 vendor 资源应正常返回"
+        );
+        assert_eq!(body_text(present).await, VENDOR_BODY);
+
+        let absent = respond(
+            &app,
+            "/vs/assets/ts.worker-missing.js",
+            loopback_peer(),
+            &[],
+        )
+        .await;
+        assert_eq!(
+            absent.status(),
+            StatusCode::NOT_FOUND,
+            "缺失的 vendor 资源不得回退成入口页"
+        );
     }
 
     #[tokio::test]

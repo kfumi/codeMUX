@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useMemo, useRef } from 'react';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import c from 'highlight.js/lib/languages/c';
@@ -16,6 +16,8 @@ import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
+
+import { useSupportsRichCodeEditor } from '../../lib/monacoHost';
 
 interface FileViewProps {
   content: string;
@@ -39,6 +41,10 @@ hljs.registerLanguage('sql', sql);
 hljs.registerLanguage('typescript', typescript);
 hljs.registerLanguage('xml', xml);
 hljs.registerLanguage('yaml', yaml);
+
+// Monaco 是重资产,按需加载:模块 chunk 与 AMD 运行时的加载期都由 Suspense /
+// loadingFallback 兜住,占位直接用 highlight.js 视图,所以不会出现空屏闪烁。
+const MonacoCodeView = lazy(() => import('../code/MonacoCodeView'));
 
 function escapeHtml(content: string): string {
   return content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -74,30 +80,6 @@ function getLangFromPath(filePath?: string): string | undefined {
   return ext ? extMap[ext] : undefined;
 }
 
-function useHighlightTheme() {
-  useEffect(() => {
-    const id = 'hljs-theme';
-    let link = document.getElementById(id) as HTMLLinkElement | null;
-    if (!link) {
-      link = document.createElement('link');
-      link.id = id;
-      link.rel = 'stylesheet';
-      document.head.appendChild(link);
-    }
-
-    const updateTheme = () => {
-      link!.href = document.documentElement.classList.contains('dark')
-        ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
-        : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
-    };
-
-    updateTheme();
-    const observer = new MutationObserver(updateTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-}
-
 function highlightFileContent(content: string, filePath?: string): string {
   const language = getLangFromPath(filePath);
 
@@ -129,8 +111,15 @@ function HighlightedLines({ highlighted }: { highlighted: string }) {
   );
 }
 
-export function FileView({ content, filePath }: FileViewProps) {
-  useHighlightTheme();
+/**
+ * highlight.js 只读视图,两个用途:
+ * 1. 移动形态的代码展示(Monaco 官方不支持移动浏览器);
+ * 2. Monaco 加载期与懒加载边界上的占位。
+ *
+ * 主题不再从 cdnjs 运行时注入 —— src/styles/hljs-theme.css 已同时提供亮色与
+ * `.dark` 两套规则,注入外链只会引入外网依赖,并与本地规则争抢 `.hljs-*` 命名空间。
+ */
+export function HighlightedFileView({ content, filePath }: FileViewProps) {
   const highlighted = useMemo(() => highlightFileContent(content, filePath), [content, filePath]);
 
   return (
@@ -140,12 +129,29 @@ export function FileView({ content, filePath }: FileViewProps) {
   );
 }
 
-export function EditableFileView({
+export function FileView({ content, filePath }: FileViewProps) {
+  const richEditor = useSupportsRichCodeEditor();
+  const fallback = <HighlightedFileView content={content} filePath={filePath} />;
+
+  if (!richEditor) {
+    return fallback;
+  }
+
+  return (
+    <div data-testid="monaco-code-surface" className="h-full">
+      <Suspense fallback={fallback}>
+        <MonacoCodeView value={content} filePath={filePath} readOnly loadingFallback={fallback} />
+      </Suspense>
+    </div>
+  );
+}
+
+/** 移动形态的可编辑视图:透明文字 textarea 叠在高亮层上,仅支持 Tab 缩进。 */
+export function HighlightedEditableFileView({
   content,
   filePath,
   onChange,
 }: FileViewProps & { onChange: (content: string) => void }) {
-  useHighlightTheme();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const highlighted = useMemo(() => highlightFileContent(content, filePath), [content, filePath]);
   const lineCount = content.split('\n').length;
@@ -191,6 +197,34 @@ export function EditableFileView({
           }}
         />
       </div>
+    </div>
+  );
+}
+
+export function EditableFileView({
+  content,
+  filePath,
+  onChange,
+}: FileViewProps & { onChange: (content: string) => void }) {
+  const richEditor = useSupportsRichCodeEditor();
+  const fallback = (
+    <HighlightedEditableFileView content={content} filePath={filePath} onChange={onChange} />
+  );
+
+  if (!richEditor) {
+    return fallback;
+  }
+
+  return (
+    <div data-testid="monaco-code-surface" className="h-full">
+      <Suspense fallback={fallback}>
+        <MonacoCodeView
+          value={content}
+          filePath={filePath}
+          onChange={onChange}
+          loadingFallback={fallback}
+        />
+      </Suspense>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
@@ -13,32 +13,11 @@ interface MarkdownRendererProps {
 }
 
 export function MarkdownRenderer({ content, onFileClick: _onFileClick }: MarkdownRendererProps) {
-  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
   // 窄屏没有 hover:代码块复制按钮常显,否则触屏上无法复制。
   const isNarrow = useIsNarrowViewport();
 
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.classList.contains('dark'));
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const id = 'hljs-theme';
-    let link = document.getElementById(id) as HTMLLinkElement;
-    if (!link) {
-      link = document.createElement('link');
-      link.id = id;
-      link.rel = 'stylesheet';
-      document.head.appendChild(link);
-    }
-    link.href = isDark
-      ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
-      : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
-  }, [isDark]);
-
+  // highlight.js 主题不再从 cdnjs 运行时注入:src/styles/hljs-theme.css 已同时提供
+  // 亮色与 `.dark` 两套规则,外链只会带来外网依赖,并与本地规则争抢 `.hljs-*`。
   const handleCopy = useCallback((code: string) => {
     navigator.clipboard.writeText(code);
   }, []);

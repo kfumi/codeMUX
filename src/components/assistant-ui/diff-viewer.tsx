@@ -4,7 +4,7 @@ import parseDiff from 'parse-diff';
 import { useMemo, type ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 
-type DiffLineType = 'add' | 'del' | 'normal';
+type DiffLineType = 'add' | 'del' | 'normal' | 'hunk' | 'nonewline';
 
 interface ParsedLine {
   type: DiffLineType;
@@ -24,6 +24,8 @@ interface ParsedFile {
 interface SplitLinePair {
   left: ParsedLine | null;
   right: ParsedLine | null;
+  /** 结构行(hunk 头 / 无结尾换行标记)不参与左右配对,整行渲染。 */
+  full?: ParsedLine;
 }
 
 const diffViewerVariants = cva('aui-diff-viewer overflow-hidden rounded-lg font-mono text-code', {
@@ -51,6 +53,8 @@ const diffLineVariants = cva('flex', {
       add: 'bg-[var(--diff-add-bg,_rgba(46,160,67,0.15))]',
       del: 'bg-[var(--diff-del-bg,_rgba(248,81,73,0.15))]',
       normal: '',
+      hunk: 'bg-muted/60',
+      nonewline: '',
       empty: '',
     },
   },
@@ -65,6 +69,8 @@ const diffLineTextVariants = cva('', {
       add: 'text-[var(--diff-add-text,_#1a7f37)] dark:text-[var(--diff-add-text-dark,_#3fb950)]',
       del: 'text-[var(--diff-del-text,_#cf222e)] dark:text-[var(--diff-del-text-dark,_#f85149)]',
       normal: '',
+      hunk: 'text-muted-foreground',
+      nonewline: 'text-muted-foreground/70 italic',
       empty: '',
     },
   },
@@ -82,7 +88,6 @@ export interface DiffViewerProps
   code?: string;
   oldFileName?: string;
   newFileName?: string;
-  language?: string;
   viewMode?: 'split' | 'unified';
   showLineNumbers?: boolean;
   showIcon?: boolean;
@@ -99,14 +104,13 @@ export function DiffViewer({
   code,
   oldFileName,
   newFileName,
-  language: _language,
   viewMode = 'unified',
   showLineNumbers = true,
   showIcon,
   showStats = true,
   showFileBadge,
-  showHunkHeaders: _showHunkHeaders,
-  showNoNewlineMarker: _showNoNewlineMarker,
+  showHunkHeaders = true,
+  showNoNewlineMarker = true,
   variant,
   size,
   className,
@@ -116,12 +120,12 @@ export function DiffViewer({
   const iconVisible = showIcon ?? showFileBadge ?? true;
 
   const parsedFiles = useMemo(() => {
-    if (diffPatch) return parsePatch(diffPatch);
+    if (diffPatch) return parsePatch(diffPatch, { showHunkHeaders, showNoNewlineMarker });
 
     if (oldFile !== undefined && newFile !== undefined) {
       const oldResolved = resolveFile(oldFile, oldFileName);
       const newResolved = resolveFile(newFile, newFileName ?? oldResolved.name);
-      const diff = computeDiff(oldResolved.content, newResolved.content);
+      const diff = computeDiff(oldResolved.content, newResolved.content, { showHunkHeaders });
 
       return [
         {
@@ -133,7 +137,7 @@ export function DiffViewer({
     }
 
     return [];
-  }, [diffPatch, newFile, newFileName, oldFile, oldFileName]);
+  }, [diffPatch, newFile, newFileName, oldFile, oldFileName, showHunkHeaders, showNoNewlineMarker]);
 
   if (parsedFiles.length === 0) {
     return (
@@ -164,9 +168,13 @@ export function DiffViewer({
           />
           <DiffViewerContent>
             {viewMode === 'split'
-              ? pairLinesForSplit(file.lines).map((pair, pairIndex) => (
-                  <DiffViewerSplitLine key={pairIndex} pair={pair} showLineNumbers={showLineNumbers} />
-                ))
+              ? pairLinesForSplit(file.lines).map((pair, pairIndex) =>
+                  pair.full ? (
+                    <DiffViewerLine key={pairIndex} line={pair.full} showLineNumbers={false} />
+                  ) : (
+                    <DiffViewerSplitLine key={pairIndex} pair={pair} showLineNumbers={showLineNumbers} />
+                  ),
+                )
               : file.lines.map((line, lineIndex) => (
                   <DiffViewerLine key={lineIndex} line={line} showLineNumbers={showLineNumbers} />
                 ))}
@@ -177,7 +185,12 @@ export function DiffViewer({
   );
 }
 
-function parsePatch(patch: string): ParsedFile[] {
+interface ParseOptions {
+  showHunkHeaders: boolean;
+  showNoNewlineMarker: boolean;
+}
+
+function parsePatch(patch: string, options: ParseOptions): ParsedFile[] {
   return parseDiff(patch).map((file) => {
     const lines: ParsedLine[] = [];
     let additions = 0;
@@ -187,8 +200,18 @@ function parsePatch(patch: string): ParsedFile[] {
       let oldLine = chunk.oldStart;
       let newLine = chunk.newStart;
 
+      // `@@ -a,b +c,d @@` 行由 parse-diff 放在 chunk.content 上。
+      if (options.showHunkHeaders && chunk.content) {
+        lines.push({ type: 'hunk', content: chunk.content });
+      }
+
       for (const change of chunk.changes) {
-        if (isNoNewlineMarker(change.content)) continue;
+        if (isNoNewlineMarker(change.content)) {
+          if (options.showNoNewlineMarker) {
+            lines.push({ type: 'nonewline', content: change.content });
+          }
+          continue;
+        }
 
         if (change.type === 'add') {
           additions++;
@@ -217,13 +240,31 @@ function parsePatch(patch: string): ParsedFile[] {
   });
 }
 
-function computeDiff(oldContent: string, newContent: string) {
+function countContentLines(content: string): number {
+  if (content === '') return 0;
+  return content.replace(/\n$/, '').split('\n').length;
+}
+
+function computeDiff(
+  oldContent: string,
+  newContent: string,
+  options: Pick<ParseOptions, 'showHunkHeaders'>,
+) {
   const changes = diffLines(oldContent, newContent);
   const lines: ParsedLine[] = [];
   let oldLine = 1;
   let newLine = 1;
   let additions = 0;
   let deletions = 0;
+
+  if (options.showHunkHeaders) {
+    // 两份全文之间没有 patch 里的 hunk 信息,按全文范围合成一个头,与 diff 工具的
+    // 单块输出一致。
+    lines.push({
+      type: 'hunk',
+      content: `@@ -1,${countContentLines(oldContent)} +1,${countContentLines(newContent)} @@`,
+    });
+  }
 
   for (const change of changes) {
     const contentLines = change.value.replace(/\n$/, '').split('\n');
@@ -258,7 +299,11 @@ function pairLinesForSplit(lines: ParsedLine[]): SplitLinePair[] {
   while (index < lines.length) {
     const line = lines[index]!;
 
-    if (line.type === 'normal') {
+    if (line.type === 'hunk' || line.type === 'nonewline') {
+      // 结构行不参与左右配对,整行铺开(否则会在并排视图里重复渲染两次)。
+      pairs.push({ left: null, right: null, full: line });
+      index++;
+    } else if (line.type === 'normal') {
       pairs.push({ left: line, right: line });
       index++;
     } else if (line.type === 'del') {
@@ -363,6 +408,8 @@ function DiffViewerLine({
   ...props
 }: ComponentProps<'div'> & { line: ParsedLine; showLineNumbers?: boolean }) {
   const indicator = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
+  // 结构行(hunk 头 / 无结尾换行标记)不对应具体行,不占行号位。
+  const showsNumber = showLineNumbers && line.type !== 'hunk' && line.type !== 'nonewline';
 
   return (
     <div
@@ -371,7 +418,7 @@ function DiffViewerLine({
       className={cn(diffLineVariants({ type: line.type }), className)}
       {...props}
     >
-      {showLineNumbers && (
+      {showsNumber && (
         <span data-slot="diff-viewer-line-number" className="w-8 shrink-0 px-2 text-end text-muted-foreground select-none">
           {line.type === 'add' ? line.newLineNumber : line.oldLineNumber}
         </span>

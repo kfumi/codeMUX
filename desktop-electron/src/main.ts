@@ -23,6 +23,7 @@ import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
 import { createUpdaterService } from './updater';
+import { isVendorAssetPath } from './vendor-assets';
 import { attachWindowStatePersistence, loadWindowState } from './window-state';
 
 const APP_ID = 'com.codemux.desktop';
@@ -126,6 +127,13 @@ function registerAppProtocol(): void {
     const isRootRequest = relative === '';
     const missing = !existsSync(filePath) || statSync(filePath).isDirectory();
     if (missing) {
+      // vendor 资源(Monaco 的 /vs/**)不参与 SPA 回退。回退会把它变成
+      // 200 + index.html,Monaco 的 AMD loader 于是拿入口页当脚本执行,报出的
+      // 语法错误与「少了一个文件」这个真因完全脱节。真实 404 才能直接定位。
+      // 同一判定在 daemon 侧:src-tauri/src/companion/server.rs。
+      if (isVendorAssetPath(relative)) {
+        return new Response(`vendor asset not found: ${relative}`, { status: 404 });
+      }
       // SPA fallback:非根路径一律回落 index.html(对齐 Vite history 路由)。
       filePath = path.join(distRoot, 'index.html');
       if (!existsSync(filePath)) {

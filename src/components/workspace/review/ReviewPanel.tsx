@@ -402,6 +402,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                       <div className="px-4 py-5 text-sm text-destructive">{detail.error}</div>
                     ) : detail?.change ? (
                       <DiffView
+                        variant="inline"
                         oldContent={detail.change.originalContent ?? ''}
                         newContent={detail.change.currentContent}
                       />

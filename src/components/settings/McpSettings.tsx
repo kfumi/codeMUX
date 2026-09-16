@@ -8,9 +8,7 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { TooltipHint } from '../ui/tooltip';
 import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download, Lock } from 'lucide-react';
 import { toast } from 'sonner';
-import CodeMirror from '@uiw/react-codemirror';
-import { json } from '@codemirror/lang-json';
-import { EditorView } from '@codemirror/view';
+import { CodeEditorSurface } from '../code/CodeEditorSurface';
 import { cn } from '../../lib/utils';
 
 // Agent brand SVGs for per-tool toggle icons
@@ -66,15 +64,6 @@ function defaultServerSpec(type: TransportType): McpServerSpec {
       return { type: 'sse', url: '', headers: {} };
   }
 }
-
-const baseTheme = EditorView.theme({
-  '&': { fontSize: 'var(--code-font-size)', borderRadius: '8px', overflow: 'hidden' },
-  '.cm-content': { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", padding: '8px 0' },
-  '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
-  '.cm-content ::selection': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
-});
 
 const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'opencode', 'pi'];
 
@@ -554,12 +543,13 @@ export function McpSettingsPanel() {
                   </div>
                 </div>
                 <div className="rounded-lg border overflow-hidden">
-                  <CodeMirror
+                  <CodeEditorSurface
                     value={jsonText}
-                    height="260px"
-                    extensions={[json(), EditorView.lineWrapping]}
-                    theme={baseTheme}
                     onChange={handleJsonChange}
+                    language="json"
+                    height={260}
+                    wordWrap="on"
+                    ariaLabel="完整的 JSON 配置"
                   />
                 </div>
                 {jsonError && (

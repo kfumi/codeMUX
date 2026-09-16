@@ -11,6 +11,9 @@ node_modules
 dist
 # 统一前端产物(工单 02):npm run build:web 产出,daemon 直接服务浏览器/移动形态
 dist-web
+# Monaco 的 AMD 运行时(vendor 产物,约 24MB):由 scripts/vendor-monaco.mjs 从
+# node_modules/monaco-editor/min/vs 拷入,带版本戳,不要进 git。
+public/vs
 dist-electron
 # Electron 打包产物(工单 06):renderer-dist 由 scripts/copy-renderer-dist.mjs
 # 在打包前从根 dist/ 拷入;release/ 为 electron-builder 输出。

@@ -344,7 +344,11 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
             ) : activeTab.kind === 'diff' ? (
               <div key={activeTab.id} className="h-full overflow-auto">
-                <DiffView oldContent={activeTab.diffOldContent ?? ''} newContent={activeTab.diffNewContent ?? ''} />
+                <DiffView
+                  oldContent={activeTab.diffOldContent ?? ''}
+                  newContent={activeTab.diffNewContent ?? ''}
+                  filePath={activeTab.diffFilePath}
+                />
               </div>
             ) : activeTab.kind === 'plan' ? (
               <PlanPreviewPanel
