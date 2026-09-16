@@ -123,12 +123,23 @@ resources 映射与公证流程为待办事项。
 - main 进程 `app.setAppUserModelId('com.codemux.desktop')`,与 electron-builder
   `appId` 一致;NSIS 快捷方式的 AUMID 由此派生 → 通知中心按 CodeMUX 归组、
   点击回跳应用。修改 appId 时必须同步修改 main.ts 的 `APP_ID`。
+- 归属区(应用名左侧)的名字与图标**不能**用 Electron 的通知参数设置:
+  `Notification.icon` 在 Windows 上渲染为内容区左侧的 `appLogoOverride` 方块。
+  它来自 AUMID 身份解析 —— 未打包应用读
+  `HKCU\Software\Classes\AppUserModelId\<AUMID>` 的 `DisplayName` / `IconUri`。
+  旧 Tauri 版本写过这个键且 `IconUri` 指向 dev 产物路径,若不刷新就是
+  "有名字、无图标"。
+- 打包态启动时 `main.ts` 调用 `ensureNotificationIdentity()`
+  (`src/notification-identity.ts`)刷新该键;`IconUri` 指向随包分发的
+  `resources/icons/Square150x150Logo.png`(见 `electron-builder.yml` 的
+  extraResources)。归属区图标用 png,托盘/任务栏仍用 `icon.ico`。
 
 ## 手动验收清单(不进 CI)
 
 - [ ] 安装 NSIS 包后触发一次真实更新安装(检查更新 → 下载 → 重启进入新版本)。
 - [ ] 从开始菜单/桌面快捷方式启动应用,触发 agent 通知:通知在通知中心归组到
       CodeMUX,点击通知回跳应用并激活对应会话。
+- [ ] 通知卡片在**应用名左侧**显示 CodeMUX 图标(而非内容区左侧的大方块)。
 - [ ] 配置签名环境变量出一次包,确认安装器属性中的数字签名覆盖安装器本体与
       `resources/daemon/codemux-daemon.exe`。
 

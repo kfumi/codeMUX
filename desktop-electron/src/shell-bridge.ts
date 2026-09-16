@@ -55,8 +55,6 @@ export interface ShellBridgeDeps {
   sendToRenderer(channel: string, payload: unknown): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
-  /** 应用图标路径(系统通知卡片;与托盘同源,找不到时为 null → 回落系统默认)。 */
-  getAppIconPath(): string | null;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -271,12 +269,7 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     // Windows 归组:通知身份 = 进程 AppUserModelID(main.ts setAppUserModelId
     // 'com.codemux.desktop',与 NSIS 快捷方式 AUMID 一致),通知中心按它归组;
     // Electron 33 无 per-notification relevance 配置,无需额外设置。
-    // 通知卡片默认不带应用图标(未打包/无快捷方式时尤甚),显式传 icon。
-    const notification = new Notification({
-      title,
-      body,
-      icon: deps.getAppIconPath() ?? undefined,
-    });
+    const notification = new Notification({ title, body });
     notification.once('click', () => {
       deps.showMainWindow();
       deps.sendToRenderer('agent-notification-clicked', { sessionId });

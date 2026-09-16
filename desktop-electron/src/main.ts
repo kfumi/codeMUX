@@ -19,6 +19,7 @@ import path from 'node:path';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
+import { ensureNotificationIdentity } from './notification-identity';
 import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
@@ -27,6 +28,8 @@ import { isVendorAssetPath } from './vendor-assets';
 import { attachWindowStatePersistence, loadWindowState } from './window-state';
 
 const APP_ID = 'com.codemux.desktop';
+/** 通知归属区(应用名左侧)显示的名字,写入 HKCU 的 AppUserModelId 键。 */
+const APP_DISPLAY_NAME = 'CodeMUX';
 const DEV_SERVER_URL = process.env.CODEMUX_DEV_SERVER_URL;
 const MAIN_WINDOW_WIDTH = 1280;
 const MAIN_WINDOW_HEIGHT = 820;
@@ -70,13 +73,23 @@ function resolveDaemonExe(): string {
   return found ?? binaryName;
 }
 
-/** 应用图标:打包资源 icons/icon.ico → 仓库 src-tauri/icons/icon.ico(托盘 + 系统通知共用)。 */
-function resolveAppIcon(): string | null {
+/** 托盘图标:打包资源 icons/icon.ico → 仓库 src-tauri/icons/icon.ico。 */
+function resolveTrayIcon(): string | null {
   const candidates: string[] = [];
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'icons', 'icon.ico'));
   }
   candidates.push(path.join(repoRoot, 'src-tauri', 'icons', 'icon.ico'));
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+/** 通知身份图标(归属区小图标读 png;托盘/任务栏仍用 ico)。 */
+function resolveNotificationIcon(): string | null {
+  const candidates: string[] = [];
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'icons', 'Square150x150Logo.png'));
+  }
+  candidates.push(path.join(repoRoot, 'src-tauri', 'icons', 'Square150x150Logo.png'));
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
@@ -320,7 +333,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 function createTray(onQuit: () => void): void {
-  const iconPath = resolveAppIcon();
+  const iconPath = resolveTrayIcon();
   if (!iconPath) {
     // 无图标也可用(托盘仅是恢复入口);开发环境找不到 ico 时不阻塞启动。
     tray = null;
@@ -401,6 +414,13 @@ app.setPath('userData', path.join(app.getPath('appData'), APP_ID));
 // 快捷方式,设置了反而导致任务栏不显示图标(dev 态用 Electron 默认 AUMID)。
 if (app.isPackaged) {
   app.setAppUserModelId(APP_ID);
+  // 通知归属区(应用名左侧)的名字/图标来自 HKCU\Software\Classes\AppUserModelId\<AUMID>:
+  // 旧 Tauri 写入的 IconUri 指向 dev 产物路径,不刷新就只显示名字、不显示图标。
+  void ensureNotificationIdentity({
+    appId: APP_ID,
+    displayName: APP_DISPLAY_NAME,
+    iconPath: resolveNotificationIcon(),
+  });
 }
 
 // app:// 需要在 ready 前声明特权(fetch/标准 scheme)。
@@ -458,7 +478,6 @@ if (!gotLock) {
       updater,
       sendToRenderer,
       browserGuests: guests,
-      getAppIconPath: resolveAppIcon,
     });
     createTray(() => {
       void quitApplication();

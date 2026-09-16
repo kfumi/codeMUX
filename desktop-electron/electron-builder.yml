@@ -49,6 +49,10 @@ extraResources:
   # 托盘/应用图标
   - from: ../src-tauri/icons/icon.ico
     to: icons/icon.ico
+  # 通知身份图标:通知归属区(应用名左侧)小图标;由 main.ts 写入
+  # HKCU\Software\Classes\AppUserModelId\com.codemux.desktop 的 IconUri。
+  - from: ../src-tauri/icons/Square150x150Logo.png
+    to: icons/Square150x150Logo.png
 win:
   # 应用/安装包/桌面快捷方式图标(≥256×256)。extraResources 里的图标只服务运行时/托盘。
   icon: ../src-tauri/icons/icon.ico
