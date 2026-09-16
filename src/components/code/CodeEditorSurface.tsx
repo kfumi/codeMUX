@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 
 import { useSupportsRichCodeEditor } from '../../lib/monacoHost';
 import { cn } from '../../lib/utils';
+import { MonacoLoading } from './MonacoLoading';
 
 const MonacoCodeView = lazy(() => import('./MonacoCodeView'));
 
@@ -35,34 +36,33 @@ export function CodeEditorSurface({
 }: CodeEditorSurfaceProps) {
   const richEditor = useSupportsRichCodeEditor();
 
-  const fallback = (
-    <textarea
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      spellCheck={false}
-      aria-label={ariaLabel}
-      style={{ height }}
-      className={cn(
-        'w-full resize-y bg-transparent p-3 font-mono text-code leading-relaxed outline-none',
-        className,
-      )}
-    />
-  );
-
+  // 移动形态的真实编辑视图( textarea);桌面加载期占位由 MonacoLoading 承担。
   if (!richEditor) {
-    return fallback;
+    return (
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        aria-label={ariaLabel}
+        style={{ height }}
+        className={cn(
+          'w-full resize-y bg-transparent p-3 font-mono text-code leading-relaxed outline-none',
+          className,
+        )}
+      />
+    );
   }
 
   return (
     <div data-testid="monaco-code-surface" style={{ height }} className="min-h-0">
-      <Suspense fallback={fallback}>
+      <Suspense fallback={<MonacoLoading />}>
         <MonacoCodeView
           value={value}
+          readOnly={false}
           onChange={onChange}
           language={language}
           height="100%"
           wordWrap={wordWrap}
-          loadingFallback={fallback}
         />
       </Suspense>
     </div>

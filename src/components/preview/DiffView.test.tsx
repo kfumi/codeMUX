@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
-import { DiffView, InlineDiffLines } from './DiffView';
+import { DiffView, InlineDiffLines, readDiffViewMode } from './DiffView';
 
-// Monaco 在 jsdom 里跑不起来,替换掉模块本身;这里验的是宿主门控与内联路径。
+// Monaco 在 jsdom 里跑不起来,替换掉模块本身;这里验的是宿主门控、视图切换与内联路径。
+type MonacoProps = Record<string, unknown>;
+const monacoProps: MonacoProps[] = [];
+
 vi.mock('../code/MonacoDiffView', () => ({
-  default: () => <div data-testid="monaco-diff-mock" />,
+  default: (props: MonacoProps) => {
+    monacoProps.push(props);
+    return <div data-testid="monaco-diff-mock" />;
+  },
 }));
 
 const OLD_CONTENT = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
@@ -31,6 +37,8 @@ describe('InlineDiffLines', () => {
 describe('DiffView 宿主门控', () => {
   afterEach(() => {
     cleanup();
+    monacoProps.length = 0;
+    localStorage.removeItem('codemux:diff-view-mode');
   });
 
   it('桌面形态交给 Monaco diff editor', async () => {
@@ -39,7 +47,7 @@ describe('DiffView 宿主门控', () => {
 
     expect(screen.getByTestId('monaco-diff-surface')).toBeTruthy();
     expect(screen.queryByTestId('highlight-diff-surface')).toBeNull();
-    expect(await screen.findByTestId('monaco-diff-mock')).toBeTruthy();
+    await screen.findByTestId('monaco-diff-mock');
   });
 
   it('移动形态退回轻量渲染', () => {
@@ -48,6 +56,7 @@ describe('DiffView 宿主门控', () => {
 
     expect(screen.getByTestId('highlight-diff-surface')).toBeTruthy();
     expect(screen.queryByTestId('monaco-diff-surface')).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Diff 视图方式' })).toBeNull();
   });
 
   it('inline 变体(手风琴)始终用轻量渲染，内容驱动高度', () => {
@@ -56,6 +65,7 @@ describe('DiffView 宿主门控', () => {
 
     expect(screen.getByTestId('inline-diff-view')).toBeTruthy();
     expect(screen.queryByTestId('monaco-diff-surface')).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Diff 视图方式' })).toBeNull();
   });
 
   it('统计头展示增删行数', () => {
@@ -64,5 +74,21 @@ describe('DiffView 宿主门控', () => {
 
     expect(screen.getByText('+1')).toBeTruthy();
     expect(screen.getByText('-1')).toBeTruthy();
+  });
+
+  it('全量变体支持并排/内联切换,传给 Monaco 并记住选择', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+    render(<DiffView oldContent={OLD_CONTENT} newContent={NEW_CONTENT} filePath="/repo/src/app.ts" />);
+
+    await screen.findByTestId('monaco-diff-mock');
+    expect(monacoProps[monacoProps.length - 1].viewMode).toBe('split');
+
+    fireEvent.click(screen.getByRole('tab', { name: '内联' }));
+    expect(monacoProps[monacoProps.length - 1].viewMode).toBe('unified');
+    expect(readDiffViewMode()).toBe('unified');
+
+    fireEvent.click(screen.getByRole('tab', { name: '并排' }));
+    expect(monacoProps[monacoProps.length - 1].viewMode).toBe('split');
+    expect(readDiffViewMode()).toBe('split');
   });
 });

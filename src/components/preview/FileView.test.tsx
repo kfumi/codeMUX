@@ -5,23 +5,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
-// Monaco 在 jsdom 里跑不起来,替换掉模块本身;这里验的是宿主门控与占位路径。
+// Monaco 在 jsdom 里跑不起来,替换掉模块本身;这里验的是宿主门控与传参路径。
+// mock 会捕获 props,用于断言只读/可编辑视图给 Monaco 的 readOnly 取值。
+type MonacoProps = Record<string, unknown>;
+const monacoProps: MonacoProps[] = [];
+
 vi.mock('../code/MonacoCodeView', () => ({
-  default: () => <div data-testid="monaco-editor-mock" />,
+  default: (props: MonacoProps) => {
+    monacoProps.push(props);
+    return <div data-testid="monaco-editor-mock" />;
+  },
 }));
+
+async function lastMonacoProps(): Promise<MonacoProps> {
+  await screen.findByTestId('monaco-editor-mock');
+  return monacoProps[monacoProps.length - 1];
+}
 
 describe('FileView 宿主门控', () => {
   afterEach(() => {
     cleanup();
+    monacoProps.length = 0;
   });
 
-  it('桌面形态走 Monaco', async () => {
+  it('桌面形态走 Monaco,且只读浏览显式只读', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     const { FileView } = await import('./FileView');
     render(<FileView content={'alpha\nbeta'} filePath="/repo/src/app.ts" />);
 
     expect(screen.getByTestId('monaco-code-surface')).toBeTruthy();
-    expect(await screen.findByTestId('monaco-editor-mock')).toBeTruthy();
+    expect(await lastMonacoProps()).toMatchObject({ readOnly: true });
   });
 
   it('移动形态用 highlight.js 只读视图(Monaco 不支持移动浏览器)', async () => {
@@ -49,7 +62,7 @@ describe('FileView 宿主门控', () => {
     expect(screen.queryByTestId('monaco-editor-mock')).toBeNull();
   });
 
-  it('可编辑视图在桌面形态走 Monaco', async () => {
+  it('可编辑视图在桌面形态走 Monaco,且不再只读', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     const { EditableFileView } = await import('./FileView');
     render(
@@ -57,6 +70,6 @@ describe('FileView 宿主门控', () => {
     );
 
     expect(screen.getByTestId('monaco-code-surface')).toBeTruthy();
-    expect(await screen.findByTestId('monaco-editor-mock')).toBeTruthy();
+    expect(await lastMonacoProps()).toMatchObject({ readOnly: false });
   });
 });

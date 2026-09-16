@@ -5,6 +5,7 @@ import type { editor } from 'monaco-editor';
 import { resolveMonacoLanguage } from '../../lib/monacoLanguage';
 import { defineMonacoTheme, useMonacoAppearance } from '../../lib/monacoTheme';
 import { configureMonacoLoader } from './monacoLoader';
+import { MonacoLoading } from './MonacoLoading';
 
 // AMD loader 的路径必须在任何实例创建前定好,所以放在模块顶层。
 configureMonacoLoader();
@@ -19,8 +20,6 @@ export interface MonacoCodeViewProps {
   /** 容器高度,默认填满父容器。 */
   height?: string | number;
   wordWrap?: 'on' | 'off';
-  /** AMD 运行时拉取期间显示的占位(调用方传 highlight.js 视图,避免空屏闪烁)。 */
-  loadingFallback?: React.ReactNode;
   className?: string;
 }
 
@@ -49,7 +48,6 @@ export default function MonacoCodeView({
   language,
   height = '100%',
   wordWrap = 'off',
-  loadingFallback,
   className,
 }: MonacoCodeViewProps) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);
@@ -84,7 +82,7 @@ export default function MonacoCodeView({
       beforeMount={defineMonacoTheme}
       onMount={handleMount}
       onChange={readOnly ? undefined : (next) => onChange?.(next ?? '')}
-      loading={loadingFallback}
+      loading={<MonacoLoading />}
       options={{
         ...options,
         readOnly,

@@ -227,18 +227,12 @@ export function buildMonacoTheme(tokens: MonacoAppearanceTokens): editor.IStanda
       'minimapSlider.background': color(tokens.mutedForeground, 0.12),
       'minimapSlider.hoverBackground': color(tokens.mutedForeground, 0.2),
       'minimapSlider.activeBackground': color(tokens.mutedForeground, 0.3),
-      // 差异视图:沿用应用既有的增删语义色(success / destructive)。
-      'diffEditor.insertedLineBackground': color(tokens.success, 0.14),
-      'diffEditor.removedLineBackground': color(tokens.destructive, 0.14),
-      'diffEditor.insertedTextBackground': color(tokens.success, 0.26),
-      'diffEditor.removedTextBackground': color(tokens.destructive, 0.26),
-      'diffEditorGutter.insertedLineBackground': color(tokens.success, 0.24),
-      'diffEditorGutter.removedLineBackground': color(tokens.destructive, 0.24),
-      'diffEditorOverview.insertedForeground': color(tokens.success, 0.8),
-      'diffEditorOverview.removedForeground': color(tokens.destructive, 0.8),
-      'editorGutter.addedBackground': color(tokens.success, 0.8),
-      'editorGutter.deletedBackground': color(tokens.destructive, 0.8),
-      'editorGutter.modifiedBackground': color(tokens.primary, 0.8),
+      // diffEditor.* 系列刻意不覆盖:这里的 colors 表是「覆盖表」,未列出的色回落到
+      // Monaco registerColor 的内置默认 —— 也就是 VS Code 原生的 diff 观感
+      // (插入行 rgba(155,185,85,.2) 黄绿 / 删除行 rgba(255,0,0,.2) 纯红 /
+      // 字符级 #9ccc2c33 / #ff000033,以及斜线填充与 gutter 的原生配色)。
+      // 此前用 app 语义色(success/destructive 低透明度)覆盖过,比原生更淡、
+      // 色相偏移,视觉上明显不像 VS Code,故撤掉交还给 Monaco 默认。
     },
   };
 }

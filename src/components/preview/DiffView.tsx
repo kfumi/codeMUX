@@ -1,7 +1,11 @@
-import { Suspense, lazy, useMemo } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
+import { Columns2, Rows2 } from 'lucide-react';
 import { diffLines, Change } from 'diff';
 import { countDiffChanges, splitDiffLines } from '../../lib/diffStats';
 import { useSupportsRichCodeEditor } from '../../lib/monacoHost';
+import { cn } from '../../lib/utils';
+import { MonacoLoading } from '../code/MonacoLoading';
+import type { DiffViewMode } from '../code/MonacoDiffView';
 
 interface DiffViewProps {
   oldContent: string;
@@ -36,11 +40,76 @@ const DIFF_CONTEXT_LINES = 3;
 
 const MonacoDiffView = lazy(() => import('../code/MonacoDiffView'));
 
-function DiffStatsHeader({ additions, deletions }: { additions: number; deletions: number }) {
+// 视图方式是全局偏好:所有 diff 标签页共用,跨会话记住。
+const DIFF_VIEW_MODE_STORAGE_KEY = 'codemux:diff-view-mode';
+
+export function readDiffViewMode(): DiffViewMode {
+  try {
+    return localStorage.getItem(DIFF_VIEW_MODE_STORAGE_KEY) === 'unified' ? 'unified' : 'split';
+  } catch {
+    return 'split';
+  }
+}
+
+function storeDiffViewMode(mode: DiffViewMode): void {
+  try {
+    localStorage.setItem(DIFF_VIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // 隐私模式等场景写不进 localStorage,只影响下次不记住,不值得报错。
+  }
+}
+
+function DiffStatsHeader({
+  additions,
+  deletions,
+  actions,
+}: {
+  additions: number;
+  deletions: number;
+  actions?: React.ReactNode;
+}) {
   return (
-    <div className="flex shrink-0 gap-3 border-b border-border/30 px-4 py-2 text-xs text-muted-foreground/60">
+    <div className="flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2 text-xs text-muted-foreground/60">
       <span className="text-[hsl(var(--success))]">+{additions}</span>
       <span className="text-[hsl(var(--destructive))]">-{deletions}</span>
+      {actions ? <div className="ml-auto flex items-center">{actions}</div> : null}
+    </div>
+  );
+}
+
+function DiffViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: DiffViewMode;
+  onChange: (mode: DiffViewMode) => void;
+}) {
+  const option = (mode: DiffViewMode, label: string, Icon: typeof Columns2) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={value === mode}
+      onClick={() => onChange(mode)}
+      className={cn(
+        'flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-micro transition-colors',
+        value === mode
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground/65 hover:text-foreground',
+      )}
+    >
+      <Icon className="h-3 w-3" aria-hidden />
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      className="flex items-center rounded-md border border-border/40 bg-muted/20 p-0.5"
+      role="tablist"
+      aria-label="Diff 视图方式"
+    >
+      {option('split', '并排', Columns2)}
+      {option('unified', '内联', Rows2)}
     </div>
   );
 }
@@ -96,6 +165,12 @@ export function DiffView({ oldContent, newContent, filePath, variant = 'full' }:
   const richEditor = useSupportsRichCodeEditor();
   const changes: Change[] = useMemo(() => diffLines(oldContent, newContent), [oldContent, newContent]);
   const stats = useMemo(() => countDiffChanges(changes), [changes]);
+  const [viewMode, setViewMode] = useState<DiffViewMode>(readDiffViewMode);
+
+  const handleViewModeChange = (mode: DiffViewMode) => {
+    setViewMode(mode);
+    storeDiffViewMode(mode);
+  };
 
   const inlineBody = <InlineDiffLines oldContent={oldContent} newContent={newContent} />;
 
@@ -111,12 +186,12 @@ export function DiffView({ oldContent, newContent, filePath, variant = 'full' }:
 
   const body = richEditor ? (
     <div data-testid="monaco-diff-surface" className="min-h-0 flex-1">
-      <Suspense fallback={inlineBody}>
+      <Suspense fallback={<MonacoLoading label="Diff 加载中" />}>
         <MonacoDiffView
           oldContent={oldContent}
           newContent={newContent}
           filePath={filePath}
-          loadingFallback={inlineBody}
+          viewMode={viewMode}
         />
       </Suspense>
     </div>
@@ -129,7 +204,13 @@ export function DiffView({ oldContent, newContent, filePath, variant = 'full' }:
 
   return (
     <div className="flex h-full min-h-0 flex-col font-mono text-code">
-      <DiffStatsHeader additions={stats.additions} deletions={stats.deletions} />
+      <DiffStatsHeader
+        additions={stats.additions}
+        deletions={stats.deletions}
+        actions={richEditor ? (
+          <DiffViewModeToggle value={viewMode} onChange={handleViewModeChange} />
+        ) : undefined}
+      />
       {body}
     </div>
   );

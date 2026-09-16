@@ -114,13 +114,17 @@ describe('buildMonacoTheme', () => {
     expect(colors['editorBracketMatch.border']).toBe(hslTripletToHex(LIGHT_TOKENS.primary, 0.5));
   });
 
-  it('diff 增删沿用应用的 success / destructive 语义色', () => {
+  it('diff 增删配色不覆盖,回落到 Monaco/VS Code 原生默认', () => {
     const colors = buildMonacoTheme(LIGHT_TOKENS).colors!;
 
-    expect(colors['diffEditor.insertedLineBackground']).toBe(hslTripletToHex(LIGHT_TOKENS.success, 0.14));
-    expect(colors['diffEditor.removedLineBackground']).toBe(hslTripletToHex(LIGHT_TOKENS.destructive, 0.14));
-    expect(colors['editorGutter.addedBackground']).toBe(hslTripletToHex(LIGHT_TOKENS.success, 0.8));
-    expect(colors['editorGutter.deletedBackground']).toBe(hslTripletToHex(LIGHT_TOKENS.destructive, 0.8));
+    // colors 是覆盖表:diffEditor.* 未列出即走 registerColor 的内置默认
+    // (insert rgba(155,185,85,.2) / remove rgba(255,0,0,.2)),保持正宗 VS Code 观感。
+    expect(colors['diffEditor.insertedLineBackground']).toBeUndefined();
+    expect(colors['diffEditor.removedLineBackground']).toBeUndefined();
+    expect(colors['diffEditor.insertedTextBackground']).toBeUndefined();
+    expect(colors['diffEditor.removedTextBackground']).toBeUndefined();
+    expect(colors['diffEditorGutter.insertedLineBackground']).toBeUndefined();
+    expect(colors['editorGutter.addedBackground']).toBeUndefined();
   });
 
   it('强调色变化会改变主题里的强调色，但不动背景', () => {

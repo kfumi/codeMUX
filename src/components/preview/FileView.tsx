@@ -18,6 +18,7 @@ import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 
 import { useSupportsRichCodeEditor } from '../../lib/monacoHost';
+import { MonacoLoading } from '../code/MonacoLoading';
 
 interface FileViewProps {
   content: string;
@@ -43,7 +44,8 @@ hljs.registerLanguage('xml', xml);
 hljs.registerLanguage('yaml', yaml);
 
 // Monaco 是重资产,按需加载:模块 chunk 与 AMD 运行时的加载期都由 Suspense /
-// loadingFallback 兜住,占位直接用 highlight.js 视图,所以不会出现空屏闪烁。
+// 内置 loading 兜住。占位用统一的加载指示而不是 highlight.js 内容 —— 两套渲染器
+// 先后出同一份内容会明显闪一下,Monaco 就绪后一次性呈现最终形态。
 const MonacoCodeView = lazy(() => import('../code/MonacoCodeView'));
 
 function escapeHtml(content: string): string {
@@ -112,9 +114,7 @@ function HighlightedLines({ highlighted }: { highlighted: string }) {
 }
 
 /**
- * highlight.js 只读视图,两个用途:
- * 1. 移动形态的代码展示(Monaco 官方不支持移动浏览器);
- * 2. Monaco 加载期与懒加载边界上的占位。
+ * highlight.js 只读视图:移动形态的代码展示(Monaco 官方不支持移动浏览器)。
  *
  * 主题不再从 cdnjs 运行时注入 —— src/styles/hljs-theme.css 已同时提供亮色与
  * `.dark` 两套规则,注入外链只会引入外网依赖,并与本地规则争抢 `.hljs-*` 命名空间。
@@ -131,16 +131,15 @@ export function HighlightedFileView({ content, filePath }: FileViewProps) {
 
 export function FileView({ content, filePath }: FileViewProps) {
   const richEditor = useSupportsRichCodeEditor();
-  const fallback = <HighlightedFileView content={content} filePath={filePath} />;
 
   if (!richEditor) {
-    return fallback;
+    return <HighlightedFileView content={content} filePath={filePath} />;
   }
 
   return (
     <div data-testid="monaco-code-surface" className="h-full">
-      <Suspense fallback={fallback}>
-        <MonacoCodeView value={content} filePath={filePath} readOnly loadingFallback={fallback} />
+      <Suspense fallback={<MonacoLoading />}>
+        <MonacoCodeView value={content} filePath={filePath} readOnly />
       </Suspense>
     </div>
   );
@@ -207,22 +206,19 @@ export function EditableFileView({
   onChange,
 }: FileViewProps & { onChange: (content: string) => void }) {
   const richEditor = useSupportsRichCodeEditor();
-  const fallback = (
-    <HighlightedEditableFileView content={content} filePath={filePath} onChange={onChange} />
-  );
 
   if (!richEditor) {
-    return fallback;
+    return <HighlightedEditableFileView content={content} filePath={filePath} onChange={onChange} />;
   }
 
   return (
     <div data-testid="monaco-code-surface" className="h-full">
-      <Suspense fallback={fallback}>
+      <Suspense fallback={<MonacoLoading />}>
         <MonacoCodeView
           value={content}
           filePath={filePath}
+          readOnly={false}
           onChange={onChange}
-          loadingFallback={fallback}
         />
       </Suspense>
     </div>
