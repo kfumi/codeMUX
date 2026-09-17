@@ -21,7 +21,7 @@ const ContextMenuContent = React.forwardRef<
       ref={ref}
       collisionPadding={collisionPadding}
       className={cn(
-        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-[0_14px_36px_-24px_hsl(var(--surface-shadow-strong)/0.45)] animate-in fade-in zoom-in-95 fill-mode-both',
+        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.6)] animate-in fade-in zoom-in-95 fill-mode-both',
         className,
       )}
       {...props}
@@ -95,7 +95,7 @@ const ContextMenuSubContent = React.forwardRef<
       ref={ref}
       collisionPadding={collisionPadding}
       className={cn(
-        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-[0_14px_36px_-24px_hsl(var(--surface-shadow-strong)/0.45)] animate-in fade-in zoom-in-95 fill-mode-both',
+        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.6)] animate-in fade-in zoom-in-95 fill-mode-both',
         className,
       )}
       {...props}

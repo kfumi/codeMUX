@@ -13,6 +13,19 @@ use tokio::io::AsyncWriteExt;
 pub struct ProbeResult {
     pub connected: bool,
     pub instructions: Option<String>,
+    /// Tool names from `tools/list`(连接成功但未拉取到时为空数组)。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+}
+
+impl ProbeResult {
+    fn not_connected() -> Self {
+        ProbeResult {
+            connected: false,
+            instructions: None,
+            tools: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -95,6 +108,24 @@ fn mcp_initialize_request() -> String {
     format!("{}\n", req)
 }
 
+fn mcp_initialized_notification() -> String {
+    let n = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    });
+    format!("{}\n", n)
+}
+
+fn mcp_tools_list_request() -> String {
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    });
+    format!("{}\n", req)
+}
+
 fn extract_instructions(json_str: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
     let instructions = parsed.get("result")?.get("instructions")?.as_str()?;
@@ -103,6 +134,20 @@ fn extract_instructions(json_str: &str) -> Option<String> {
     } else {
         Some(instructions.to_string())
     }
+}
+
+fn extract_tool_names(json_str: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(json_str)
+        .ok()
+        .and_then(|v| v.get("result").cloned())
+        .and_then(|result| result.get("tools").cloned())
+        .and_then(|tools| tools.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 async fn probe_stdio(spec: &serde_json::Value) -> Result<ProbeResult, String> {
@@ -172,49 +217,68 @@ async fn probe_stdio(spec: &serde_json::Value) -> Result<ProbeResult, String> {
     debug!(target: "mcp_probe", "stdio spawned pid={}", pid);
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut initialized: Option<ProbeResult> = None;
         if let Some(mut stdin) = child.stdin.take() {
             let req = mcp_initialize_request();
             debug!(target: "mcp_probe", "stdio sending initialize request bytes={}", req.len());
             stdin.write_all(req.as_bytes()).await.map_err(|e| format!("stdin write: {}", e))?;
             stdin.flush().await.map_err(|e| format!("stdin flush: {}", e))?;
-            drop(stdin);
-        }
-        if let Some(stdout) = child.stdout.as_mut() {
-            let mut reader = tokio::io::BufReader::new(stdout);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                let n = reader.read_line(&mut line).await.map_err(|e| format!("stdout read: {}", e))?;
-                if n == 0 {
-                    debug!(target: "mcp_probe", "stdio stdout EOF before initialize response");
-                    break;
-                }
-                let trimmed = line.trim();
-                if trimmed.is_empty() { continue; }
-                debug!(target: "mcp_probe", "stdio read line bytes={}", n);
-                if trimmed.starts_with('{') && trimmed.contains("\"result\"") {
-                    debug!(target: "mcp_probe", "stdio received initialize response");
-                    let instructions = extract_instructions(trimmed);
-                    return Ok(ProbeResult { connected: true, instructions });
-                }
-                if trimmed.starts_with("Content-Length") {
+            if let Some(stdout) = child.stdout.as_mut() {
+                let mut reader = tokio::io::BufReader::new(stdout);
+                let mut line = String::new();
+                loop {
                     line.clear();
-                    reader.read_line(&mut line).await.ok();
-                    line.clear();
-                    let n2 = reader.read_line(&mut line).await.map_err(|e| format!("body read: {}", e))?;
-                    if n2 > 0 {
-                        let body = line.trim();
-                        debug!(target: "mcp_probe", "stdio read framed body bytes={}", n2);
-                        if body.contains("\"result\"") {
-                            debug!(target: "mcp_probe", "stdio received framed initialize response");
-                            let instructions = extract_instructions(body);
-                            return Ok(ProbeResult { connected: true, instructions });
+                    let n = reader.read_line(&mut line).await.map_err(|e| format!("stdout read: {}", e))?;
+                    if n == 0 {
+                        debug!(target: "mcp_probe", "stdio stdout EOF");
+                        break;
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() { continue; }
+                    debug!(target: "mcp_probe", "stdio read line bytes={}", n);
+                    let is_json = trimmed.starts_with('{');
+                    let is_framed = trimmed.starts_with("Content-Length");
+                    let mut body: Option<String> = None;
+                    if is_json {
+                        body = Some(trimmed.to_string());
+                    } else if is_framed {
+                        line.clear();
+                        reader.read_line(&mut line).await.ok();
+                        line.clear();
+                        let n2 = reader.read_line(&mut line).await.map_err(|e| format!("body read: {}", e))?;
+                        if n2 > 0 {
+                            debug!(target: "mcp_probe", "stdio read framed body bytes={}", n2);
+                            body = Some(line.trim().to_string());
+                        }
+                    }
+                    let Some(body) = body.as_deref() else { continue };
+                    if initialized.is_none() && body.contains("\"result\"") && !body.contains("\"tools\"") {
+                        debug!(target: "mcp_probe", "stdio received initialize response");
+                        let instructions = extract_instructions(body);
+                        initialized = Some(ProbeResult { connected: true, instructions, tools: Vec::new() });
+                        // 继续握手:initialized 通知 + tools/list,把工具名一并带回。
+                        let notification = mcp_initialized_notification();
+                        let tools_req = mcp_tools_list_request();
+                        let _ = stdin.write_all(notification.as_bytes()).await;
+                        let _ = stdin.write_all(tools_req.as_bytes()).await;
+                        let _ = stdin.flush().await;
+                        continue;
+                    }
+                    if initialized.is_some() && body.contains("\"tools\"") {
+                        let tools = extract_tool_names(body);
+                        debug!(target: "mcp_probe", "stdio received tools/list count={}", tools.len());
+                        if let Some(mut res) = initialized.take() {
+                            res.tools = tools;
+                            return Ok(res);
                         }
                     }
                 }
             }
         }
-        Ok(ProbeResult { connected: false, instructions: None }) as Result<ProbeResult, String>
+        match initialized {
+            Some(res) => Ok(res),
+            None => Ok(ProbeResult::not_connected()),
+        }
     }).await;
 
     let _ = child.kill().await;
@@ -270,10 +334,7 @@ async fn probe_http(spec: &serde_json::Value) -> Result<ProbeResult, String> {
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    let not_connected = ProbeResult {
-        connected: false,
-        instructions: None,
-    };
+    let not_connected = ProbeResult::not_connected();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(10), req.send())
         .await
         .map_err(|_| {
@@ -285,6 +346,11 @@ async fn probe_http(spec: &serde_json::Value) -> Result<ProbeResult, String> {
             format!("Request failed: {}", e)
         })?;
 
+    let session_id = resp
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
     let status = resp.status();
     let content_type = resp
         .headers()
@@ -329,9 +395,72 @@ async fn probe_http(spec: &serde_json::Value) -> Result<ProbeResult, String> {
         Some(json) => {
             let instructions = extract_instructions(json);
             info!(target: "mcp_probe", "http probe connected instructions={}", instructions.is_some());
+
+            // 继续握手:initialized 通知 + tools/list(流式 HTTP 每次POST独立,带上会话头)。
+            let client2 = client.clone();
+            let url2 = url.to_string();
+            let headers2 = headers.clone();
+            let tools = async move {
+                let post_json = |body: serde_json::Value| {
+                    let mut r = client2
+                        .post(&url2)
+                        .header("Accept", "application/json, text/event-stream")
+                        .header("Content-Type", "application/json")
+                        .json(&body);
+                    for (k, v) in &headers2 {
+                        r = r.header(k.as_str(), v.as_str());
+                    }
+                    if let Some(sid) = &session_id {
+                        r = r.header("Mcp-Session-Id", sid.as_str());
+                    }
+                    r
+                };
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    post_json(serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).send(),
+                )
+                .await;
+                let resp = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    post_json(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})).send(),
+                )
+                .await
+                .ok()?
+                .ok()?;
+                let ct = resp
+                    .headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap_or("").to_string())
+                    .unwrap_or_default();
+                let text = tokio::time::timeout(std::time::Duration::from_secs(5), resp.text())
+                    .await
+                    .ok()?
+                    .ok()?;
+                let json = if ct.contains("text/event-stream") {
+                    text.lines().find_map(|line| {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("data:") && trimmed.contains("\"tools\"") {
+                            trimmed.strip_prefix("data:").map(|s| s.trim())
+                        } else {
+                            None
+                        }
+                    })
+                } else if text.contains("\"tools\"") {
+                    Some(text.as_str())
+                } else {
+                    None
+                }?;
+                Some(extract_tool_names(json))
+            };
+            let tools = tokio::time::timeout(std::time::Duration::from_secs(12), tools)
+                .await
+                .unwrap_or(None)
+                .unwrap_or_default();
+            info!(target: "mcp_probe", "http probe tools count={}", tools.len());
             Ok(ProbeResult {
                 connected: true,
                 instructions,
+                tools,
             })
         }
         None => {
@@ -400,6 +529,7 @@ async fn probe_sse(spec: &serde_json::Value) -> Result<ProbeResult, String> {
     Ok(ProbeResult {
         connected,
         instructions: None,
+        tools: Vec::new(),
     })
 }
 
@@ -424,10 +554,7 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult
                 "http" | "sse" => probe_http(&spec).await,
                 _ => probe_sse(&spec).await,
             };
-            let probe_result = result.unwrap_or(ProbeResult {
-                connected: false,
-                instructions: None,
-            });
+            let probe_result = result.unwrap_or_else(|_| ProbeResult::not_connected());
             if probe_result.connected {
                 info!(target: "mcp_probe", "Probe connected name={}", name);
             } else {
@@ -439,15 +566,9 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult
 
     let mut results = HashMap::new();
     for handle in handles {
-        let (name, probe_result) = handle.await.unwrap_or_else(|_| {
-            (
-                String::new(),
-                ProbeResult {
-                    connected: false,
-                    instructions: None,
-                },
-            )
-        });
+        let (name, probe_result) = handle
+            .await
+            .unwrap_or_else(|_| (String::new(), ProbeResult::not_connected()));
         if !name.is_empty() {
             results.insert(name, probe_result);
         }
@@ -458,13 +579,26 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult
     results
 }
 
-pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<String, bool>, String> {
+pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<String, ProbeResult>, String> {
     let servers = {
         let db = state.db.lock().unwrap();
         db::get_all_mcp_servers(&db).map_err(|e| format!("Failed to get servers: {}", e))?
     };
-    let results = probe_servers(&servers).await;
-    Ok(results.into_iter().map(|(k, v)| (k, v.connected)).collect())
+    Ok(probe_servers(&servers).await)
+}
+
+/// 探测一份未落库的 spec(编辑/新增时"测试连接"用)。
+pub async fn probe_mcp_spec_impl(_state: &AppState, spec: serde_json::Value) -> Result<ProbeResult, String> {
+    let server_type = spec
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stdio")
+        .to_string();
+    match server_type.as_str() {
+        "stdio" => probe_stdio(&spec).await,
+        "http" => probe_http(&spec).await,
+        _ => probe_sse(&spec).await,
+    }
 }
 
 pub async fn probe_mcp_server_impl(state: &AppState, id: String) -> Result<ProbeResult, String> {

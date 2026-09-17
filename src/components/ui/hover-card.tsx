@@ -17,7 +17,7 @@ const HoverCardContent = React.forwardRef<
       side={side}
       sideOffset={sideOffset}
       className={cn(
-        'z-50 w-72 max-w-[min(20rem,calc(100vw-2rem))] origin-[--radix-hover-card-content-transform-origin] rounded-lg border border-border/70 bg-popover/98 p-3.5 text-popover-foreground shadow-[0_18px_48px_-28px_hsl(var(--surface-shadow-strong)/0.45)] outline-none backdrop-blur-md',
+        'z-50 w-72 max-w-[min(20rem,calc(100vw-2rem))] origin-[--radix-hover-card-content-transform-origin] rounded-lg border border-border/70 bg-popover/98 p-3.5 text-popover-foreground shadow-[0_12px_36px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_12px_36px_-12px_rgba(0,0,0,0.6)] outline-none backdrop-blur-md',
         'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
         'data-[side=right]:slide-in-from-left-1 data-[side=left]:slide-in-from-right-1',
         className,

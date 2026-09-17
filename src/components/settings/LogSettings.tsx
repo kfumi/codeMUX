@@ -167,7 +167,7 @@ export function LogSettings() {
         </div>
       )}
 
-      <div className="rounded-xl bg-muted/40">
+      <div className="rounded-xl settings-tile">
         <div
           ref={contentRef}
           className="h-[60vh] overflow-auto p-4 font-mono text-code leading-relaxed"

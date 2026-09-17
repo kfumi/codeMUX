@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeEventContext } from './types.js';
 import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
+import { DEBUG_OPENCODE_EVENTS } from './writeLog.js';
 import {
   type AssistantContentBlock,
 } from './runtimeEvents.js';
@@ -144,8 +145,10 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
   const sessionId = eventSessionId;
   if (isTerminalSessionEvent(type) && sessionId && context.terminalSessionIds?.has(sessionId)) return [];
 
-  const allProps = Object.keys(properties).length > 0 ? (() => { try { return JSON.stringify(properties).slice(0, 1500) } catch { return String(properties) } })() : '(no properties)';
-  process.stderr.write(`[opencode-debug] toCodeMuxEvent type=${type} sessionId=${sessionId ?? 'null'} properties=${allProps}\n`);
+  if (DEBUG_OPENCODE_EVENTS) {
+    const allProps = Object.keys(properties).length > 0 ? (() => { try { return JSON.stringify(properties).slice(0, 1500) } catch { return String(properties) } })() : '(no properties)';
+    process.stderr.write(`[opencode-debug] toCodeMuxEvent type=${type} sessionId=${sessionId ?? 'null'} properties=${allProps}\n`);
+  }
 
   const events: CodeMuxEvent[] = [];
   if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
@@ -520,7 +523,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'server.retry': {
       const retryError = properties.error;
       const errorStr = errorMessage(retryError);
-      process.stderr.write(`[opencode-debug] toCodeMuxEvent server.retry error=${errorStr} attempt=${properties.attempt} maxRetries=${properties.maxRetries} retryDelayMs=${properties.retryDelayMs}\n`);
+      if (DEBUG_OPENCODE_EVENTS) {
+        process.stderr.write(`[opencode-debug] toCodeMuxEvent server.retry error=${errorStr} attempt=${properties.attempt} maxRetries=${properties.maxRetries} retryDelayMs=${properties.retryDelayMs}\n`);
+      }
       events.push(buildEnvelope({ type: 'system_event', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorStr } : {}) }, context, sessionId));
       break;
     }

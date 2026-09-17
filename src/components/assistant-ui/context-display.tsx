@@ -1,6 +1,9 @@
 "use client";
 
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useState } from 'react';
+
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type ContextDisplayProps = {
   usedTokens: number;
@@ -21,6 +24,8 @@ export function ContextDisplay({
   outputTokens,
   reasoningTokens,
 }: ContextDisplayProps) {
+  const [detailOpen, setDetailOpen] = useState(false);
+
   if (totalTokens <= 0) {
     return null;
   }
@@ -36,67 +41,83 @@ export function ContextDisplay({
   ].filter((row) => typeof row.value === 'number' && row.value > 0);
 
   return (
-    <Tooltip delayDuration={100}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          data-slot="context-display-trigger"
-          className="inline-flex h-8 shrink-0 self-center items-center justify-center rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-          aria-label="查看上下文使用情况"
-        >
-          <UsageRing percentage={percentage} />
-        </button>
-      </TooltipTrigger>
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <Popover open={detailOpen} onOpenChange={setDetailOpen}>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                data-slot="context-display-trigger"
+                className="inline-flex h-8 shrink-0 self-center items-center justify-center rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                aria-label="查看上下文使用情况"
+              >
+                <UsageRing percentage={percentage} />
+              </button>
+            </PopoverTrigger>
+          </TooltipTrigger>
 
-      <TooltipContent
-        side="bottom"
-        align="end"
-        sideOffset={8}
-        data-slot="context-display-popover"
-        className="w-64 rounded-xl border border-border p-0 text-popover-foreground shadow-lg bg-popover dark:bg-popover"
-      >
-        <div className="flex items-center justify-between px-4 py-3">
-          <span className="text-sm font-medium text-foreground">上下文</span>
-          <span className="text-sm font-medium tabular-nums text-foreground">
-            {formatCompactTokens(usedTokens)}/{formatCompactTokens(totalTokens)} ({percentageLabel})
-          </span>
-        </div>
-
-        <div className="px-4 pb-3">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${Math.max(percentage, 0.5)}%`,
-                backgroundColor: getProgressColor(percentage),
-              }}
-            />
-          </div>
-        </div>
-
-        {rows.length > 0 && (
-          <div className="border-t border-border px-4 py-3">
-            <div className="space-y-2">
-              {rows.map((row) => (
-                <StatRow key={row.label} label={row.label} value={row.value!} />
-              ))}
+          <PopoverContent
+            side="top"
+            align="end"
+            sideOffset={8}
+            data-slot="context-display-popover"
+            className="w-64 rounded-xl border border-border p-0 text-popover-foreground shadow-lg bg-popover dark:bg-popover"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+          >
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm font-medium text-foreground">上下文</span>
+              <span className="text-sm font-medium tabular-nums text-foreground">
+                {formatCompactTokens(usedTokens)}/{formatCompactTokens(totalTokens)} ({percentageLabel})
+              </span>
             </div>
-          </div>
-        )}
 
-        <div className="flex items-center justify-between border-t border-border px-4 py-3">
-          <span className="text-sm font-medium text-foreground">平均缓存命中率</span>
-          <span className="text-sm font-medium tabular-nums text-foreground">
-            {getCacheHitRate(inputTokens, cachedTokens)}
-          </span>
-        </div>
-      </TooltipContent>
-    </Tooltip>
+            <div className="px-4 pb-3">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.max(percentage, 0.5)}%`,
+                    backgroundColor: getProgressColor(percentage),
+                  }}
+                />
+              </div>
+            </div>
+
+            {rows.length > 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <div className="space-y-2">
+                  {rows.map((row) => (
+                    <StatRow key={row.label} label={row.label} value={row.value!} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between border-t border-border px-4 py-3">
+              <span className="text-sm font-medium text-foreground">平均缓存命中率</span>
+              <span className="text-sm font-medium tabular-nums text-foreground">
+                {getCacheHitRate(inputTokens, cachedTokens)}
+              </span>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <TooltipContent
+          side="bottom"
+          align="end"
+          sideOffset={8}
+          className="whitespace-nowrap text-muted-foreground"
+        >
+          上下文已用 {percentageLabel}，共 {formatCompactTokens(usedTokens)} tokens
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
 function UsageRing({ percentage }: { percentage: number }) {
-  const size = 24;
+  const size = 18;
   const strokeWidth = 2.5;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;

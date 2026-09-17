@@ -3,7 +3,6 @@ import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, 
 
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { cn } from '../../lib/utils';
-import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import type { HostCapabilitySet } from '../../lib/host/host-capabilities';
 import { AboutSettings } from './AboutSettings';
 import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
@@ -87,10 +86,10 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
       type="button"
       onClick={() => onTabChange(id)}
       className={cn(
-        'relative flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-ui-compact transition-colors duration-150',
+        'relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-ui-compact transition-colors duration-150',
         activeTab === id
-          ? 'bg-[hsl(var(--sidebar-muted))] font-medium text-foreground dark:bg-[hsl(var(--foreground)/0.11)]'
-          : 'text-foreground/66 hover:bg-[hsl(var(--sidebar-muted))]/50 hover:text-foreground dark:hover:bg-[hsl(var(--foreground)/0.06)]',
+          ? 'bg-[hsl(var(--foreground)/0.08)] font-medium text-foreground'
+          : 'text-foreground/66 hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground',
       )}
     >
       <Icon className={cn('h-4 w-4 shrink-0 transition-colors', activeTab === id ? 'text-foreground/82' : 'text-foreground/45')} />
@@ -119,7 +118,7 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
         {visiblePrimaryTabs.map(renderNavItem)}
       </nav>
 
-      <nav className="space-y-1 border-t border-border/50 px-3 py-3">
+      <nav className="space-y-1 px-3 py-3">
         {visibleSecondaryTabs.map(renderNavItem)}
       </nav>
     </div>
@@ -134,10 +133,10 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
 
   return (
     <section className="min-w-0 flex-1 overflow-auto bg-[hsl(var(--background))]">
-      <header className="sticky top-0 z-10 border-b border-border/45 bg-[hsl(var(--background)/0.82)] backdrop-blur-md">
+      <header className="sticky top-0 z-10 bg-[hsl(var(--background)/0.82)] backdrop-blur-md">
         {/* 手机/窄屏:48px 的桌面内边距会把内容压到 300px 以内,逐级收敛。 */}
-        <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 sm:py-5 lg:px-12 lg:py-6">
-          <h2 className="text-ui-heading-sm font-semibold tracking-tight text-foreground">{activeLabel}</h2>
+        <div className="mx-auto w-full max-w-5xl px-4 pb-3 pt-4 sm:px-6 sm:pb-3.5 sm:pt-5 lg:px-12 lg:pb-4 lg:pt-6">
+          <h2 className="text-ui-heading-md font-semibold tracking-tight text-foreground">{activeLabel}</h2>
           {activeDescription && (
             <p className="mt-1.5 text-ui-compact leading-relaxed text-foreground/55 sm:text-ui-body">{activeDescription}</p>
           )}
@@ -145,7 +144,7 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
       </header>
       {/* @container:让面板按「内容区实际宽度」而不是视口宽度做自适应
           (侧边栏可拖拽改宽,视口断点会算错)。 */}
-      <div className="@container mx-auto w-full max-w-5xl px-4 py-5 sm:px-6 sm:py-6 lg:px-12 lg:py-8">
+      <div className="@container mx-auto w-full max-w-5xl px-4 pb-5 pt-3 sm:px-6 sm:pb-6 sm:pt-4 lg:px-12 lg:pb-8 lg:pt-4">
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
         {activeTab === 'provider' && <ProviderConfigPanel />}
@@ -176,7 +175,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
 
   return (
     <div role="main" aria-label="设置" className="flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
-      <aside className={`flex w-[300px] shrink-0 flex-col border-r ${LAYOUT_DIVIDER_CLASS} bg-[hsl(var(--surface-2)/0.88)] shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)] backdrop-blur-xl`}>
+      <aside className="flex w-[275px] shrink-0 flex-col bg-[hsl(var(--sidebar-bg))]">
         <SettingsSidebar activeTab={activeTab} onTabChange={setActiveTab} onBack={onBack} />
       </aside>
       <SettingsContent activeTab={activeTab} onTabChange={setActiveTab} />

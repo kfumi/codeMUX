@@ -3,7 +3,7 @@
 import { memo, useCallback, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
 import { ChevronDownIcon, WrenchIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { useScrollLock } from '@assistant-ui/react';
+import { useCollapsibleScrollLock } from '@/hooks/useCollapsibleScrollLock';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { cn } from '@/lib/utils';
@@ -43,7 +43,7 @@ function ToolGroupRoot({
 }: ToolGroupRootProps) {
   const collapsibleRef = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
+  const lockScroll = useCollapsibleScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;

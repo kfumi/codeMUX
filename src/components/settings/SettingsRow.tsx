@@ -44,7 +44,7 @@ export function SettingsRow({
     <div
       className={cn(
         'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 sm:gap-x-4 sm:gap-y-1',
-        surface && 'rounded-xl bg-muted/40 p-4',
+        surface && 'rounded-xl settings-tile px-4 py-3.5',
         divided && 'border-t border-border/55 pt-3',
         className,
       )}
@@ -54,7 +54,7 @@ export function SettingsRow({
       </div>
       <div
         className={cn(
-          'min-w-0 self-center sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:row-span-2 sm:w-auto sm:justify-self-end',
+          'min-w-0 self-center sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:row-span-2 sm:w-auto sm:max-w-60 sm:justify-self-end',
           inlineControl
             ? 'col-start-2 row-start-1 justify-self-end'
             // 没有说明文字时不要多占一行,否则会白流出一条 0 高度的行间隙。
@@ -66,7 +66,7 @@ export function SettingsRow({
       {description ? (
         <p
           className={cn(
-            'col-span-2 col-start-1 row-start-2 text-xs leading-relaxed text-foreground/60',
+            'col-span-2 col-start-1 row-start-2 max-w-[62ch] text-xs leading-relaxed text-muted-foreground',
             'sm:col-span-1',
           )}
         >

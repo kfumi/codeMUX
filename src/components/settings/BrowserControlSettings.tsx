@@ -57,7 +57,7 @@ export function BrowserControlSettings() {
       </section>
 
       <section className="space-y-3">
-        <label className="text-sm text-foreground/74">安全</label>
+        <label className="text-ui-compact font-medium text-muted-foreground">安全</label>
         <SettingsRow
           surface
           inlineControl
@@ -75,8 +75,8 @@ export function BrowserControlSettings() {
 
       {canClearHostData && (
         <section className="space-y-3">
-          <label className="text-sm text-foreground/74">浏览器数据</label>
-          <div className="space-y-3 rounded-xl bg-muted/40 p-4">
+          <label className="text-ui-compact font-medium text-muted-foreground">浏览器数据</label>
+          <div className="space-y-3 rounded-xl settings-tile p-4">
             <SettingsRow
               inlineControl
               label="清除内置浏览器缓存"

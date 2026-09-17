@@ -49,7 +49,7 @@ const DialogContent = React.forwardRef<
       className={cn(
         // 窄屏(手机):留出 16px 边距并限制高度,内容超出时对话框自身滚动,
         // 避免贴边、也避免长内容顶出视口。调用方传入的 w/max-h 会覆盖这两项。
-        "fixed left-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-[0_24px_70px_-34px_black] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 dark:bg-[hsl(var(--surface-3))] dark:border-[hsl(var(--surface-edge))]",
+        "fixed left-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border border-border/70 bg-background p-6 shadow-[0_16px_48px_rgba(0,0,0,0.12)] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 dark:bg-[hsl(var(--surface-3))] dark:border-[hsl(var(--surface-edge))] dark:shadow-[0_16px_48px_rgba(0,0,0,0.55)]",
         extractZIndex(overlayClassName),
         className
       )}

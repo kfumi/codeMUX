@@ -41,7 +41,7 @@ async function loadTimelineUserEvents(sessionId: string, agentKind: AgentKind) {
   return (page.events ?? []).map((raw) => {
     const rawMsg = raw as Record<string, unknown>;
     return isCodeMuxPersistedTimelineEvent(rawMsg)
-      ? parseAgentEvent(JSON.stringify(rawMsg))
+      ? parseAgentEvent(rawMsg)
       : mapPersistedClaudeMessage(rawMsg, agentKind);
   }).filter(Boolean);
 }

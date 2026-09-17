@@ -22,6 +22,9 @@ pub(crate) fn is_subagent_event(event: &Value) -> bool {
 /// subagent event or carries no session id). Copies stay unstamped: subagent
 /// events never enter the parent timeline's sequence space, and a stray
 /// `sequence` would make clients drop them against the timeline watermark.
+/// 从原始 wire 行解析并持久化。生产路径统一走 `timeline_persist::ingest_sidecar_event`
+/// （它只解析一次再分派），这里保留给单测直接喂 JSON 字符串用。
+#[cfg(test)]
 pub(crate) fn handle_sidecar_subagent_event(
     state: &crate::AppState,
     raw_event: &str,
@@ -29,6 +32,16 @@ pub(crate) fn handle_sidecar_subagent_event(
     let Ok(value) = serde_json::from_str::<Value>(raw_event) else {
         return Vec::new();
     };
+    handle_sidecar_subagent_value(state, value)
+}
+
+/// Same as [`handle_sidecar_subagent_event`] but for a caller that has already
+/// parsed the wire line. `ingest_sidecar_event` uses this so a single line is
+/// deserialized once instead of once per persistence owner.
+pub(crate) fn handle_sidecar_subagent_value(
+    state: &crate::AppState,
+    value: Value,
+) -> Vec<Value> {
     if !is_subagent_event(&value) {
         return Vec::new();
     }

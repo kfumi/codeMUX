@@ -28,7 +28,7 @@ import {
   type OpenCodeSdkStartResources,
   type OpenCodeServerHandle,
 } from './opencodeSdk.js';
-import { setLogCtx, writeLog } from './writeLog.js';
+import { DEBUG_OPENCODE_EVENTS, setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import { isMutationTool, TurnArtifactAggregator } from './turnArtifactSummary.js';
@@ -655,7 +655,9 @@ export class OpenCodeRuntime {
     if (!client?.subscribe || this.eventSubscription) {
       return;
     }
-    process.stderr.write(`[opencode-debug] subscribeToEvents starting...\n`);
+    if (DEBUG_OPENCODE_EVENTS) {
+      process.stderr.write(`[opencode-debug] subscribeToEvents starting...\n`);
+    }
     try {
       this.eventSubscription = await client.subscribe({
         cwd: this.config.cwd,
@@ -734,8 +736,10 @@ export class OpenCodeRuntime {
     const isCompactionCompletedEvent =
       type === 'session.next.compaction.ended'
       || type === 'session.compacted';
-    const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
-    process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);
+    if (DEBUG_OPENCODE_EVENTS) {
+      const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
+      process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);
+    }
     if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
       writeLog('[opencode-task]', `handleSdkEvent type=${type} eventSessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}`);
     }
@@ -1111,8 +1115,10 @@ export class OpenCodeRuntime {
 
     eventsToEmit.push(event);
     for (const timelineEvent of eventsToEmit) {
-      const emitJson = (() => { try { return JSON.stringify(timelineEvent).slice(0, 1000) } catch { return String(timelineEvent).slice(0, 1000) } })();
-      process.stderr.write(`[opencode-debug] EMIT to frontend type=${timelineEvent.type ?? '(no type)'} preview=${emitJson}\n`);
+      if (DEBUG_OPENCODE_EVENTS) {
+        const emitJson = (() => { try { return JSON.stringify(timelineEvent).slice(0, 1000) } catch { return String(timelineEvent).slice(0, 1000) } })();
+        process.stderr.write(`[opencode-debug] EMIT to frontend type=${timelineEvent.type ?? '(no type)'} preview=${emitJson}\n`);
+      }
       this.emitEvent(timelineEvent);
     }
   }

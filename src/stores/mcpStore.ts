@@ -5,6 +5,8 @@ import { daemonFacade } from '../lib/facades/daemon-facade';
 interface McpStore {
   servers: McpServer[];
   probeStatus: Record<string, 'idle' | 'pending' | 'connected' | 'failed'>;
+  /** 探测拿到的工具名(id → tools/list 结果),连接但未拉到工具的服务器无条目。 */
+  probeTools: Record<string, string[]>;
   isLoading: boolean;
   isProbing: boolean;
   error: string | null;
@@ -20,6 +22,7 @@ interface McpStore {
 export const useMcpStore = create<McpStore>((set, get) => ({
   servers: [],
   probeStatus: {},
+  probeTools: {},
   isLoading: false,
   isProbing: false,
   error: null,
@@ -91,6 +94,9 @@ export const useMcpStore = create<McpStore>((set, get) => ({
           ...state.probeStatus,
           [id]: result.connected ? 'connected' : 'failed',
         },
+        probeTools: result.connected && result.tools?.length
+          ? { ...state.probeTools, [id]: result.tools }
+          : state.probeTools,
       }));
     } catch {
       set((state) => ({
@@ -104,16 +110,20 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     set({ isProbing: true });
     try {
       const results = await daemonFacade.mcp.probeAll();
-      // Backend returns name→connected map; match to server.id for UI
+      // Backend returns name→{connected, tools} map; match to server.id for UI
       const servers = get().servers;
       const probeStatus: Record<string, 'connected' | 'failed'> = {};
-      for (const [name, ok] of Object.entries(results)) {
+      const probeTools: Record<string, string[]> = {};
+      for (const [name, result] of Object.entries(results)) {
         const server = servers.find((s) => s.name === name);
         if (server) {
-          probeStatus[server.id] = ok ? 'connected' : 'failed';
+          probeStatus[server.id] = result.connected ? 'connected' : 'failed';
+          if (result.connected && result.tools?.length) {
+            probeTools[server.id] = result.tools;
+          }
         }
       }
-      set({ probeStatus });
+      set({ probeStatus, probeTools });
     } catch {
       // ignore probe errors
     } finally {

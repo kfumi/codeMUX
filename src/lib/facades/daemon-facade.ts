@@ -141,6 +141,7 @@ export const mcpViaDaemon = {
     await (await ensureDaemonClient()).mcpToggleApp(serverId, app, enabled);
   },
   probe: async (id: string) => (await ensureDaemonClient()).mcpProbe(id),
+  probeSpec: async (spec: unknown) => (await ensureDaemonClient()).mcpProbeSpec(spec),
   probeAll: async () => (await ensureDaemonClient()).mcpProbeAll(),
   importFromApps: async () => (await ensureDaemonClient()).mcpImport(),
 };

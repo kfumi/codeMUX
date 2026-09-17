@@ -1179,10 +1179,15 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             return;
         }
     }
+    // Track the last running flag this client was told about. Streaming emits
+    // hundreds of events per second while the flag itself rarely changes, so
+    // mirroring it on every event doubled the WS frame rate for no information
+    // gain — and every extra frame costs the renderer a synchronous JSON.parse.
+    let mut last_sent_running = companion_state.is_turn_active(&session_id);
     let state_payload = serde_json::json!({
         "type": "state",
         "sessionId": session_id,
-        "running": companion_state.is_turn_active(&session_id),
+        "running": last_sent_running,
     });
     if socket
         .send(Message::Text(state_payload.to_string().into()))
@@ -1214,17 +1219,21 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
                         if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
                             break;
                         }
-                        let state_payload = serde_json::json!({
-                            "type": "state",
-                            "sessionId": session_id,
-                            "running": companion_state.is_turn_active(&session_id),
-                        });
-                        if socket
-                            .send(Message::Text(state_payload.to_string().into()))
-                            .await
-                            .is_err()
-                        {
-                            break;
+                        let running = companion_state.is_turn_active(&session_id);
+                        if running != last_sent_running {
+                            last_sent_running = running;
+                            let state_payload = serde_json::json!({
+                                "type": "state",
+                                "sessionId": session_id,
+                                "running": running,
+                            });
+                            if socket
+                                .send(Message::Text(state_payload.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
                     }
                     Ok(_) => {}

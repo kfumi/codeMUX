@@ -58,7 +58,7 @@ export function AboutSettings() {
   return (
     <div className="space-y-6">
       {/* App identity */}
-      <div className="flex flex-col items-center gap-4 rounded-xl bg-muted/40 p-6">
+      <div className="flex flex-col items-center gap-4 rounded-xl settings-tile p-6">
         <img src="/logo.png" alt="CodeMUX" className="h-16 w-16 rounded-2xl" />
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground/90">
@@ -75,8 +75,8 @@ export function AboutSettings() {
 
       {/* Environment info */}
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">运行环境</label>
-        <div className="rounded-xl bg-muted/40 px-4 divide-y divide-border/40">
+        <label className="text-ui-compact font-medium text-muted-foreground">运行环境</label>
+        <div className="rounded-xl settings-tile px-4 divide-y divide-border/40">
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
           <InfoRow
             label="宿主形态"
@@ -93,7 +93,7 @@ export function AboutSettings() {
 
       {/* Links */}
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">链接</label>
+        <label className="text-ui-compact font-medium text-muted-foreground">链接</label>
         <div className="flex gap-2">
           {canUpdate && (
             <Button

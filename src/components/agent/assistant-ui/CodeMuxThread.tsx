@@ -11,7 +11,7 @@ import {
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
 
@@ -21,6 +21,7 @@ import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { useSubagentStore } from '@/stores/subagentStore';
+import { useStreamingTextReveal } from './useStreamingTextReveal';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
 import { DotMatrix } from '@/components/ui/dot-matrix';
@@ -303,14 +304,23 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   });
   const hasRunningSubagents = runningSubagentCount > 0;
   // Continuation turns stream without a sendInput, so isRunning alone misses
-  // them — the streaming buffers cover that window.
-  const streamingText = useAgentStore((state) => state.streamingText[sessionId] ?? '');
-  const streamingThinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
+  // them — the streaming buffers cover that window. Only the *presence* of a
+  // buffer matters here, so derive that boolean inside the selector instead of
+  // subscribing to the buffer text. The text changes on every streaming flush
+  // (tens of times per second, up to 16k chars per answer), and subscribing to
+  // it re-rendered this whole thread tree — message nav, footer and the message
+  // list wrapper — just to recompute a flag that only flips when a stream
+  // starts or stops. A derived boolean makes those flushes free here.
+  const hasStreamingBuffer = useAgentStore(
+    (state) =>
+      (state.streamingText[sessionId]?.length ?? 0) > 0
+      || (state.streamingThinking[sessionId]?.length ?? 0) > 0,
+  );
   // Children all terminal but the parent's summary turn has not settled yet:
   // the flow is still running from the user's point of view.
   const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
   const subagentFlowPending = sessionHasSubagents
-    && (hasRunningSubagents || isRunning || continuationPending || streamingText.length > 0 || streamingThinking.length > 0);
+    && (hasRunningSubagents || isRunning || continuationPending || hasStreamingBuffer);
   // Footer suppression is turn-scoped: only the turn still in flight waits
   // for the async subagent flow to settle; completed turns keep their footers.
   const pendingTurnId = subagentFlowPending && conversationTurns.length > 0
@@ -451,17 +461,21 @@ function UnifiedThreadViewport({
   viewportRef: RefObject<HTMLDivElement>;
   children: (scrollToBottomButton: ReactNode) => ReactNode;
 }) {
-  const streamingVersion = useAgentStore((state) => state.streamingVersion[sessionId] ?? 0);
   // 首次非空渲染可能来自已缓存历史，也需要等 assistant-ui 提交消息树。
   const previousEventCountRef = useRef(0);
   const previousUserMessageCountRef = useRef(0);
   const isHistoryHydration = previousEventCountRef.current === 0 && eventCount > 0;
   const hasNewUserMessage = userMessageCount > previousUserMessageCountRef.current;
+  // streamingVersion is deliberately not part of followKey: the hook subscribes
+  // to it imperatively, because re-rendering this viewport (and the whole thread
+  // subtree it wraps) on every streaming flush only to schedule a scroll was one
+  // of the largest per-flush costs.
   const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
     viewportRef,
-    followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${streamingVersion}:${userMessageCount}:${runningSubagentCount}`,
+    followKey: `${sessionId}:${eventCount}:${isRunning ? '1' : '0'}:${userMessageCount}:${runningSubagentCount}`,
     extraFrames: isHistoryHydration || hasNewUserMessage ? 2 : 1,
     forceFollow: hasNewUserMessage,
+    followSessionId: sessionId,
   });
 
   useEffect(() => {
@@ -1526,6 +1540,33 @@ function SubagentRunningRow({ sessionId }: { sessionId: string }) {
   );
 }
 
+/**
+ * 流式页脚的"正在执行"状态行。
+ *
+ * 单独抽成 `memo` 组件，是为了让它彻底脱离分帧绘制的重渲染路径：
+ * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的两处动效都是
+ * **绘制类**动画（`DotMatrix` 的 SVG `opacity` 闪烁、`RunningElapsedTimer` 的
+ * `.shimmer` 用 `background-clip: text`），无法卸载到合成线程。让它们跟着每帧
+ * 重渲染既无意义，也会把主线程预算浪费在重算这一小段 DOM 上。
+ * 它的 props 只有 `startTime`，在整个回合内稳定。
+ */
+const StreamingStatusFooter = memo(function StreamingStatusFooter({
+  startTime,
+}: {
+  startTime?: number;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
+      )}
+    >
+      <DotMatrix state="loading" className="size-4" label="正在执行" />
+      <RunningElapsedTimer startTime={startTime} label="正在执行" />
+    </div>
+  );
+});
+
 function StreamingContent({ sessionId, events }: { sessionId: string; events: AgentMessage[] }) {
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
@@ -1570,6 +1611,13 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
     || textIsMisroutedThinking
   ) ? '' : text;
 
+  // 分帧绘制：到达只决定目标，真正画多少由 backlog 推导，使批次大小在一个回合内
+  // 相差一个数量级时也不会表现为"一跳一跳"。可见性判定仍用全文，只有渲染切片被
+  // 节流 —— 所以"有没有内容"的判断不受影响，不会有延迟出现的空档。
+  const revealActive = isRunning && !stopped;
+  const revealedText = useStreamingTextReveal(visibleText, revealActive);
+  const revealedThinking = useStreamingTextReveal(visibleThinking, revealActive);
+
   if (stopped || (!isRunning && !thinking && !visibleText)) {
     return null;
   }
@@ -1586,7 +1634,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
               <ReasoningContent aria-busy={isRunning}>
                 <ReasoningText>
                   <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">
-                    {visibleThinking}
+                    {revealedThinking}
                   </pre>
                 </ReasoningText>
               </ReasoningContent>
@@ -1603,22 +1651,13 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
               mode="streaming"
               {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}
             >
-              {visibleText}
+              {revealedText}
             </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
 
-        {isRunning ? (
-          <div
-            className={cn(
-              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-            )}
-          >
-            <DotMatrix state="loading" className="size-4" label="正在执行" />
-            <RunningElapsedTimer startTime={queryStartTime} label="正在执行" />
-          </div>
-        ) : null}
+        {isRunning ? <StreamingStatusFooter startTime={queryStartTime} /> : null}
       </div>
     </div>
   );

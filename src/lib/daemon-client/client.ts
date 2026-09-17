@@ -1,5 +1,6 @@
 import { createControlPlaneMethods, type ControlPlaneMethods } from './control-plane';
 import { createTerminalMethods, type TerminalMethods } from './terminal';
+import { usePerfStore } from '../../stores/perfStore';
 
 export interface DaemonConnectionConfig {
   baseUrl: string;
@@ -337,6 +338,7 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         lastSequence = handlers.getInitialSequence?.() ?? lastSequence;
         socket = new WebSocket(wsUrl.toString());
         socket.onmessage = (message) => {
+          const startedAt = import.meta.env.DEV ? performance.now() : 0;
           try {
             const payload = JSON.parse(message.data as string) as {
               type: string;
@@ -355,6 +357,16 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
             }
           } catch {
             // ignore malformed frames
+          } finally {
+            // DEV-only: feeds the perf overlay so that "IPC/秒" reports the real
+            // inbound WS frame rate and "慢 IPC Top-5" surfaces frames whose
+            // parse + handler work crossed the threshold. Nothing called
+            // recordIpc before, so those rows always read zero — which hid the
+            // frame rate, the single most useful number for judging the event
+            // pipeline during streaming.
+            if (import.meta.env.DEV) {
+              usePerfStore.getState().recordIpc('ws:frame', performance.now() - startedAt, false);
+            }
           }
         };
         socket.onclose = () => {

@@ -900,6 +900,42 @@ function createMessage(
   };
 }
 
+/**
+ * Clones are cached per source event, keyed on the event object the store
+ * holds.
+ *
+ * `createEventPart` used to deep-clone the whole event on every call, and a
+ * call happens for every event on every conversion — and a conversion runs
+ * whenever the event array changes, i.e. once per incoming event. That made it
+ * O(entire transcript payload) per event: with file-read tool results in the
+ * history each conversion deep-cloned megabytes, and the main thread burned
+ * ~100ms blocks doing nothing but copying. It is measured jank, and it does not
+ * show up in the message-tree <Profiler> because the conversion runs one level
+ * above it.
+ *
+ * The clone itself is still wanted — the assistant-ui pipeline must not be able
+ * to mutate the events the store owns — but store events are treated as
+ * immutable and keep their object identity across conversions (the store only
+ * ever appends and filters), so the same clone can be reused. A WeakMap keeps
+ * this from retaining events that have scrolled out of the store.
+ *
+ * Trade-off: if a consumer did mutate the part's event, that mutation now
+ * survives instead of being re-cloned away. Nothing is expected to write to
+ * this data; it is a read-only projection of the store event.
+ */
+const clonedEventCache = new WeakMap<AgentMessage, AgentMessage>();
+
+function cloneEventOnce(event: AgentMessage): AgentMessage {
+  const cached = clonedEventCache.get(event);
+  if (cached) {
+    return cached;
+  }
+
+  const cloned = cloneJsonValue(event);
+  clonedEventCache.set(event, cloned);
+  return cloned;
+}
+
 function createEventPart(
   eventKind: AgentMessage['kind'],
   event: AgentMessage,
@@ -907,7 +943,7 @@ function createEventPart(
   return {
     type: 'data-codemux-event',
     eventKind,
-    event: cloneJsonValue(event),
+    event: cloneEventOnce(event),
   };
 }
 

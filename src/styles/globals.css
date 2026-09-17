@@ -80,8 +80,8 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
-  --radius-xl: calc(var(--radius) + 2px);
-  --radius-2xl: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 6px);
 }
 
 @layer base {
@@ -89,90 +89,90 @@
     --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
     --ui-font-size: 14px;
     --code-font-size: 13px;
-    --background: 0 0% 99%;
-    --foreground: 0 0% 12%;
+    --background: 0 0% 100%;
+    --foreground: 220 7% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 12%;
+    --card-foreground: 220 7% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 12%;
-    --primary: 209 99% 40%;
+    --popover-foreground: 220 7% 11%;
+    --primary: 220 7% 11%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 94%;
-    --secondary-foreground: 0 0% 15%;
-    --muted: 0 0% 95%;
-    --muted-foreground: 0 0% 40%;
-    --accent: 0 0% 92%;
-    --accent-foreground: 0 0% 12%;
-    --destructive: 358 70% 62%;
-    --destructive-foreground: 210 24% 98%;
-    --success: 142 55% 40%;
-    --warning: 38 88% 55%;
-    --border: 0 0% 88%;
-    --input: 0 0% 84%;
-    --ring: 209 99% 40%;
-    --radius: 0.5rem;
-    --glow: 209 99% 40%;
-    --content-width: 52rem;
-    --sidebar-bg: 0 0% 96%;
-    --sidebar-fg: 0 0% 16%;
-    --sidebar-border: 0 0% 86%;
-    --sidebar-muted: 0 0% 90%;
-    --sidebar-accent: 209 99% 40%;
-    --sidebar-glow: 209 99% 40%;
-    --settings-sidebar-bg: 0 0% 97%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 220 7% 11%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 220 5% 42%;
+    --accent: 0 0% 94%;
+    --accent-foreground: 220 7% 11%;
+    --destructive: 1 74% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 143 100% 32%;
+    --warning: 23 95% 46%;
+    --border: 0 0% 90%;
+    --input: 0 0% 89%;
+    --ring: 220 7% 11%;
+    --radius: 0.625rem;
+    --glow: 220 7% 11%;
+    --content-width: 47.5rem;
+    --sidebar-bg: 0 0% 95%;
+    --sidebar-fg: 220 7% 14%;
+    --sidebar-border: 0 0% 89%;
+    --sidebar-muted: 0 0% 92%;
+    --sidebar-accent: 220 7% 11%;
+    --sidebar-glow: 220 7% 11%;
+    --settings-sidebar-bg: 0 0% 96%;
     --shell-bg: none;
     --surface-1: 0 0% 100%;
-    --surface-2: 0 0% 97%;
-    --surface-3: 0 0% 92%;
+    --surface-2: 0 0% 96.5%;
+    --surface-3: 0 0% 93%;
     --surface-shadow: 0 0% 10%;
     --surface-shadow-strong: 0 0% 0%;
-    --surface-edge: 0 0% 84%;
-    --surface-glow: 209 99% 40%;
+    --surface-edge: 0 0% 88%;
+    --surface-glow: 220 7% 11%;
     --layout-divider: var(--border);
     --codemux-directive-accent: 221 83% 46%;
     --codemux-directive-bg: 214 100% 93%;
     --codemux-directive-border: 214 100% 82%;
-    --codemux-link: 209 99% 40%;
+    --codemux-link: 220 7% 11%;
   }
 
   .dark {
-    --background: 0 0% 6.7%;
-    --foreground: 0 0% 93%;
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 93%;
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 94%;
-    --primary: 209 92% 58%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 90%;
-    --muted: 0 0% 14%;
-    --muted-foreground: 0 0% 71%;
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 92%;
-    --destructive: 358 74% 70%;
-    --destructive-foreground: 210 24% 98%;
-    --success: 136 56% 47%;
-    --warning: 38 94% 58%;
-    --border: 0 0% 22%;
-    --input: 0 0% 24%;
-    --ring: 209 92% 58%;
-    --glow: 209 92% 58%;
-    --sidebar-bg: 0 0% 5%;
-    --sidebar-fg: 0 0% 90%;
-    --sidebar-border: 0 0% 17%;
-    --sidebar-muted: 0 0% 14%;
-    --sidebar-accent: 209 92% 58%;
-    --sidebar-glow: 209 92% 58%;
-    --settings-sidebar-bg: 0 0% 6%;
+    --background: 0 0% 9.4%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 12.9%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 15.7%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 220 7% 11%;
+    --secondary: 0 0% 12.9%;
+    --secondary-foreground: 0 0% 94%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 68%;
+    --accent: 0 0% 16.5%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 1 100% 70%;
+    --destructive-foreground: 0 0% 10%;
+    --success: 142 55% 52%;
+    --warning: 22 100% 64%;
+    --border: 0 0% 16%;
+    --input: 0 0% 17%;
+    --ring: 0 0% 100%;
+    --glow: 0 0% 100%;
+    --sidebar-bg: 0 0% 5.1%;
+    --sidebar-fg: 0 0% 92%;
+    --sidebar-border: 0 0% 13%;
+    --sidebar-muted: 0 0% 11%;
+    --sidebar-accent: 0 0% 100%;
+    --sidebar-glow: 0 0% 100%;
+    --settings-sidebar-bg: 0 0% 6.5%;
     --shell-bg: none;
-    --surface-1: 0 0% 8%;
-    --surface-2: 0 0% 11%;
-    --surface-3: 0 0% 15%;
+    --surface-1: 0 0% 11%;
+    --surface-2: 0 0% 12.9%;
+    --surface-3: 0 0% 15.7%;
     --surface-shadow: 0 0% 2%;
     --surface-shadow-strong: 0 0% 0%;
-    --surface-edge: 0 0% 19%;
-    --surface-glow: 209 92% 58%;
+    --surface-edge: 0 0% 20%;
+    --surface-glow: 0 0% 100%;
     --layout-divider: var(--border);
     --codemux-directive-accent: 211 100% 72%;
     --codemux-directive-bg: 211 68% 28%;
@@ -255,10 +255,16 @@ html.cmx-panel-resizing webview {
 }
 
 .composer-glow:focus-within {
-  border-color: hsl(var(--ring) / 0.42);
+  border-color: hsl(var(--ring) / 0.3);
   box-shadow:
-    0 0 0 1px hsl(var(--ring) / 0.08),
-    0 10px 28px -20px hsl(var(--surface-shadow-strong) / 0.28);
+    0 3px 7.5px hsl(var(--surface-shadow-strong) / 0.04),
+    0 0 20px hsl(var(--surface-shadow-strong) / 0.05);
+}
+
+.dark .composer-glow:focus-within {
+  box-shadow:
+    0 3px 7.5px hsl(var(--surface-shadow-strong) / 0.3),
+    0 0 20px hsl(var(--surface-shadow-strong) / 0.35);
 }
 
 .app-shell {
@@ -267,9 +273,9 @@ html.cmx-panel-resizing webview {
 }
 
 .surface-panel {
-  border-color: hsl(var(--border) / 0.78);
+  border-color: hsl(var(--border) / 0.6);
   background: hsl(var(--surface-1));
-  box-shadow: 0 10px 28px -24px hsl(var(--surface-shadow-strong) / 0.26);
+  box-shadow: 0 1px 2px hsl(var(--surface-shadow-strong) / 0.05);
   transition:
     background-color 180ms ease,
     border-color 180ms ease,
@@ -277,9 +283,9 @@ html.cmx-panel-resizing webview {
 }
 
 .dark .surface-panel {
-  border-color: hsl(var(--surface-edge) / 0.92);
+  border-color: hsl(var(--surface-edge) / 0.5);
   background: hsl(var(--surface-2));
-  box-shadow: 0 14px 34px -26px hsl(var(--surface-shadow-strong) / 0.9);
+  box-shadow: 0 1px 2px hsl(var(--surface-shadow-strong) / 0.35);
 }
 
 .surface-panel-muted {
@@ -298,6 +304,21 @@ html.cmx-panel-resizing webview {
 .dark .surface-interactive:hover {
   border-color: hsl(var(--surface-edge));
   background: hsl(var(--surface-3));
+}
+
+/* 设置页软瓦片(参考 PI-Desktop / Codex 的"无分割线"分层):
+   用前景色 4% 混合的色调层代替描边卡片,亮暗主题自动适配;
+   交互瓦片 hover 加深到 6.5%。 */
+.settings-tile {
+  background: hsl(var(--foreground) / 0.04);
+}
+
+.settings-tile-hover {
+  transition: background-color 150ms ease;
+}
+
+.settings-tile-hover:hover {
+  background: hsl(var(--foreground) / 0.065);
 }
 
 .terminal-panel,
@@ -323,8 +344,8 @@ html.cmx-panel-resizing webview {
 }
 
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 *::-webkit-scrollbar-track {
@@ -332,18 +353,24 @@ html.cmx-panel-resizing webview {
 }
 
 .dark *::-webkit-scrollbar-track {
-  background: hsl(var(--background) / 0.25);
+  background: transparent;
 }
 
+/* 滚动条平时隐去，悬停滚动容器或滑块时才显形（参考风格的 6-8px 细滚动条） */
 *::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.18);
+  background: transparent;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
+*:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.22);
+  background-clip: content-box;
+}
+
 *::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.3);
+  background: hsl(var(--muted-foreground) / 0.38);
   background-clip: content-box;
 }
 
@@ -472,11 +499,14 @@ html.cmx-panel-resizing webview {
 
 .aui-md a.aui-md-a {
   color: hsl(var(--codemux-link)) !important;
-  text-decoration: none !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+  text-decoration-color: hsl(var(--codemux-link) / 0.35) !important;
 }
 
 .aui-md a.aui-md-a:hover {
   color: hsl(var(--codemux-link) / 0.82) !important;
+  text-decoration-color: hsl(var(--codemux-link) / 0.7) !important;
 }
 
 .aui-md {
@@ -544,14 +574,87 @@ html.cmx-panel-resizing webview {
   pointer-events: none;
 }
 
+/*
+ * 减少动效：装饰性动画停掉，但**进度 / 状态指示**保留（降速到呼吸级）。
+ *
+ * 起因是一个实测到的真实故障：本机 `prefers-reduced-motion: reduce` 为真时，下面
+ * 这条通配规则会把**整个应用**的动画压成 0.01ms 且只播一次 —— DotMatrix 点阵、
+ * `.shimmer` 流光、各处 `animate-spin` 加载图标、会话列表的运行中标记**全部一起
+ * 静止**，看上去就像"动效坏了"。
+ *
+ * 但 CodeMUX 的核心场景是"agent 跑几分钟、用户切去别的窗口"，此时这些动效承载的是
+ * "还在运行"这一**信息**而非装饰；完全静止会让状态不可读。减少动效的本意是避免不适，
+ * 而不是让界面失去状态反馈。所以对状态类动画做「保留 + 降速」：既不以高频闪烁刺激，
+ * 也不丢失状态。
+ *
+ * 特异性说明：状态规则带 `html` 前缀（0,1,1），稳定压过通配规则（0,0,0），因此不必把
+ * 通配规则改写成复杂的 `:not()` 列表。DotMatrix 的圆点是**内联** `animation-duration`，
+ * 而样式表里的 `!important` 优先于内联声明，所以也能被降速。
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  }
+
+  html .animate-spin,
+  html .animate-pulse,
+  html .animate-pulse-soft,
+  html .animate-glow-pulse,
+  html .shimmer,
+  html [data-motion-status],
+  html [data-motion-status] * {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /*
+   * 这两处还各自带 Tailwind 的 `motion-reduce:` 守卫，**把动画名也清掉了**
+   * （`.motion-reduce\:animate-none{animation:none}`、
+   *  `.motion-reduce\:\[animation-name\:none\]{animation-name:none}`）。
+   * 只恢复时长是不够的 —— 名字为 none 时一秒都不会动，所以这里要把名字写回去。
+   */
+  html .shimmer {
+    animation-name: shimmer !important;
+  }
+
+  html [data-slot='dot-matrix'] * {
+    animation-name: aui-dot-matrix-blink !important;
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /*
+   * 折叠内容的高度动画**必须保留一个真实时长**。
+   *
+   * `collapsible-down/up` 是全应用**唯一会改变布局**的动画（它动的是 `height`；
+   * 其余动效都只动 opacity / transform / filter，与布局无关）。而 Radix 的
+   * `CollapsibleContent` 由 `Presence` 包裹，`Presence` 按计算后的 `animation-name`
+   * 决定"是否等动画结束再挂载/卸载内容"。
+   *
+   * 源序问题确实存在：`.animate-collapsible-up`（产物偏移 246318）**晚于**
+   * `.motion-reduce\:animate-none`（231988），特异性都是 (0,1,0) ⇒ 关闭时仍带动画名，
+   * 只是被上面的通配规则把时长压成 0.01ms，成为一个退化状态。
+   *
+   * **但上一版的处置是错的**：那时把 animation-name 置为 `none`，等于抽掉了
+   * "把高度收到 0"的那一步 —— Radix 真正卸载之前的若干帧里，内容仍停在自然高度，
+   * 布局先涨后缩，反而制造了闪动。已由实测确认：系统「动画效果」打开（即关闭
+   * reduce）时几乎不闪；关闭动效开启 reduce 时就闪，说明差异就出在这段动画上。
+   *
+   * 正确做法是**保留动画、只恢复真实时长**：高度从自然值收到 0 的 200ms 变化属于
+   * 尺寸过渡，不是会引起前庭不适的位移类动画；这样 Radix 的挂载/卸载握手回到正常
+   * 路径，也顺带让 reduce 下的观感与「动画效果打开」时一致。
+   * （`--animation-duration` 由组件内联设为 200ms，这里留兜底值。）
+   */
+  html [data-slot='tool-group-content'],
+  html [data-slot='tool-fallback-content'],
+  html [data-slot='reasoning-content'] {
+    animation-duration: var(--animation-duration, 200ms) !important;
+    animation-iteration-count: 1 !important;
   }
 }
 

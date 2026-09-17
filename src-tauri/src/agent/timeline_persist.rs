@@ -77,6 +77,9 @@ pub(crate) fn should_persist_domain_event(value: &Value) -> bool {
 /// on append, so live WS frames, catch-up replay and the stored timeline share
 /// one sequence space; non-persistable copies have their sidecar sequence
 /// stripped so clients never admit them into that watermark.
+/// 从原始 wire 行解析并持久化的入口。生产路径统一走 [`ingest_sidecar_event`]
+/// （它只解析一次），这里保留给单测直接喂 JSON 字符串用。
+#[cfg(test)]
 pub(crate) fn handle_sidecar_timeline_event(
     state: &crate::AppState,
     raw_event: &str,
@@ -85,6 +88,33 @@ pub(crate) fn handle_sidecar_timeline_event(
         return Vec::new();
     };
 
+    handle_sidecar_timeline_value(state, value)
+}
+
+/// Single ingest point for one sidecar stdout line.
+///
+/// Deserializes the line **exactly once** and dispatches to whichever
+/// persistence owner owns it. The lineage and the subagent table are disjoint
+/// event sets, so one parse is enough — previously the same line was
+/// deserialized separately by both owners (on top of the session-mapping and
+/// session-title handlers that run before them).
+///
+/// This is also the function the sidecar event loop runs on the **blocking
+/// pool**: it takes the DB mutex and writes SQLite synchronously, so it must
+/// not run on a tokio worker.
+pub(crate) fn ingest_sidecar_event(state: &crate::AppState, raw_event: &str) -> Vec<Value> {
+    let Ok(value) = serde_json::from_str::<Value>(raw_event) else {
+        return Vec::new();
+    };
+
+    if crate::agent::subagent_persist::is_subagent_event(&value) {
+        return crate::agent::subagent_persist::handle_sidecar_subagent_value(state, value);
+    }
+
+    handle_sidecar_timeline_value(state, value)
+}
+
+fn handle_sidecar_timeline_value(state: &crate::AppState, value: Value) -> Vec<Value> {
     if value.get("type").and_then(Value::as_str) == Some("codemux_event_batch") {
         let Some(session_id) = sidecar_session_id(&value) else {
             return Vec::new();

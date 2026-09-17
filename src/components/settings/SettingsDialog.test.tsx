@@ -116,9 +116,8 @@ describe('SettingsView', () => {
     const sidebar = settingsMain.querySelector('aside');
     const content = settingsMain.querySelector('section');
 
-    expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
-    expect(sidebar?.className).toContain('backdrop-blur-xl');
-    expect(sidebar?.className).toContain('shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)]');
+    expect(sidebar?.className).toContain('bg-[hsl(var(--sidebar-bg))]');
+    expect(sidebar?.className).toContain('w-[275px]');
     expect(content?.className).toContain('bg-[hsl(var(--background))]');
   });
 });

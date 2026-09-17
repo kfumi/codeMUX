@@ -58,7 +58,7 @@ describe('SettingsRow', () => {
 
     const row = container.firstElementChild as HTMLElement;
     expect(row.className).toContain('rounded-xl');
-    expect(row.className).toContain('bg-muted/40');
+    expect(row.className).toContain('settings-tile');
     expect(row.className).toContain('border-t');
   });
 });

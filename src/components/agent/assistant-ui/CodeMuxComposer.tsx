@@ -678,7 +678,7 @@ export function CodeMuxComposer({
                   </TooltipHint>
                 ) : null}
               </div>
-              <div className="flex min-w-0 items-center justify-end">
+              <div className="flex min-w-0 items-center justify-end gap-1">
                 {contextUsage ? (
                   <ContextDisplay
                     usedTokens={contextUsage.usedTokens}

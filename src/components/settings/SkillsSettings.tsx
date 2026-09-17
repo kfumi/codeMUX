@@ -2,9 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSkillStore } from '../../stores/skillStore';
 import type { ImportableSkill, Skill, SkillApps } from '../../types/skill';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { TooltipHint } from '../ui/tooltip';
-import { Trash2, Loader2, Eye, RefreshCw, Download, Check, Sparkles } from 'lucide-react';
+import { Trash2, Loader2, Eye, RefreshCw, Download, Check, Sparkles, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 import { cn } from '../../lib/utils';
@@ -75,6 +76,7 @@ export function SkillsSettingsPanel() {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [loadingImportable, setLoadingImportable] = useState(false);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     syncBuiltins().then(() => fetchInstalled());
@@ -156,16 +158,50 @@ export function SkillsSettingsPanel() {
     }));
   }, [importable]);
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredSkills = useMemo(
+    () =>
+      installedSkills.filter(
+        (skill) =>
+          !normalizedQuery ||
+          skill.name.toLowerCase().includes(normalizedQuery) ||
+          (skill.display_name ?? '').toLowerCase().includes(normalizedQuery) ||
+          (skill.description ?? '').toLowerCase().includes(normalizedQuery),
+      ),
+    [installedSkills, normalizedQuery],
+  );
+
   return (
     <div className="@container space-y-4">
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={handleOpenImport}>
-          <Download className="h-4 w-4 mr-1" />
-          从工具导入
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => { syncBuiltins().then(() => fetchInstalled()); }}>
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+      {/* 工具行:计数 + 搜索在左,操作按钮在右(参考 PI-Desktop 的 MCP/Skills 工具栏) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md settings-tile px-3 text-ui-compact text-muted-foreground">
+          全部
+          <span className="font-medium text-foreground">{installedSkills.length}</span>
+        </span>
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索技能..."
+            aria-label="搜索技能"
+            className="h-9 pl-8"
+          />
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <TooltipHint content="从 Claude / Codex / OpenCode / pi 导入已安装的 skills">
+            <Button size="sm" variant="outline" className="h-8" onClick={handleOpenImport}>
+              <Download className="h-4 w-4 mr-1" />
+              从工具导入
+            </Button>
+          </TooltipHint>
+          <TooltipHint content="同步内置 skills 并刷新列表">
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" aria-label="刷新" onClick={() => { syncBuiltins().then(() => fetchInstalled()); }}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </TooltipHint>
+        </div>
       </div>
 
       {isLoading && installedSkills.length === 0 && (
@@ -175,14 +211,21 @@ export function SkillsSettingsPanel() {
         </div>
       )}
 
-      <div className="grid gap-2.5 @min-[36rem]:grid-cols-2 @min-[54rem]:grid-cols-3">
-        {installedSkills.map((skill) => (
+      {!isLoading && installedSkills.length > 0 && filteredSkills.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <Search className="h-6 w-6 mb-2 opacity-50" />
+          <p className="text-sm">未找到匹配的 skill</p>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {filteredSkills.map((skill) => (
           <article
             key={skill.id}
-            className="flex h-full flex-col gap-2 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/65"
+            className="flex flex-col gap-2 rounded-xl settings-tile settings-tile-hover px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-3"
           >
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/45 text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--foreground)/0.06)] text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5" />
               </span>
               <div className="min-w-0 flex-1">
@@ -191,25 +234,23 @@ export function SkillsSettingsPanel() {
                     {skill.display_name || skill.name}
                   </span>
                 </TooltipHint>
-                {skill.disk_path && (
+                {skill.description ? (
+                  <TooltipHint content={skill.description} side="bottom">
+                    <p className="mt-0.5 cursor-default truncate text-xs leading-4 text-muted-foreground">
+                      {skill.description}
+                    </p>
+                  </TooltipHint>
+                ) : skill.disk_path ? (
                   <TooltipHint content={skill.disk_path}>
                     <p className="mt-0.5 truncate font-mono text-ui-micro text-muted-foreground/60">
                       {skill.disk_path}
                     </p>
                   </TooltipHint>
-                )}
+                ) : null}
               </div>
             </div>
 
-            {skill.description && (
-              <TooltipHint content={skill.description} side="bottom">
-                <p className="line-clamp-2 cursor-default text-xs leading-4 text-muted-foreground">
-                  {skill.description}
-                </p>
-              </TooltipHint>
-            )}
-
-            <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/50 pt-2">
+            <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
               <div className="flex items-center gap-1">
                 {APP_ORDER.map((app) => (
                   <TooltipHint key={app} content={APP_LABELS[app]}>
@@ -308,10 +349,10 @@ export function SkillsSettingsPanel() {
                         <label
                           key={skill.name}
                           className={cn(
-                            'flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors',
+                            'flex items-center gap-3 p-2.5 rounded-lg border border-transparent cursor-pointer transition-colors',
                             checked
                               ? 'bg-primary/5 border-primary/30'
-                              : 'bg-card border-border hover:bg-muted/50',
+                              : 'settings-tile settings-tile-hover',
                           )}
                         >
                           <button

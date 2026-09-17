@@ -32,9 +32,12 @@ describe('daemon session bridge', () => {
       return () => {};
     });
 
-    const received: string[] = [];
-    registerDaemonSessionHandler('session-1', (raw) => {
-      received.push(raw);
+    const received: Array<Record<string, unknown>> = [];
+    registerDaemonSessionHandler('session-1', (event) => {
+      // The bridge hands over the already-parsed frame so the store does not
+      // have to stringify it only to parse it back.
+      expect(typeof event).not.toBe('string');
+      received.push(event as Record<string, unknown>);
     });
 
     await Promise.resolve();
@@ -43,7 +46,7 @@ describe('daemon session bridge', () => {
     onEvent?.({ type: 'text_delta', sequence: 5, session_id: 'session-1', delta: 'hi' });
 
     expect(received).toHaveLength(1);
-    expect(received[0]).toContain('"sequence":5');
+    expect(received[0]).toMatchObject({ type: 'text_delta', sequence: 5 });
     expect(getLastEventSequence('session-1')).toBe(5);
   });
 });

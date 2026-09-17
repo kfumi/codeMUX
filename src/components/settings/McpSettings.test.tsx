@@ -27,6 +27,7 @@ const mockState = {
     },
   ],
   probeStatus: { fetch: 'idle' as const },
+  probeTools: {},
   isLoading: false,
   error: null,
   fetchServers,

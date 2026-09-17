@@ -665,15 +665,30 @@ async fn ensure_sidecar_for_session(
                             continue;
                         }
                     }
-                    let mut broadcast_events =
-                        crate::agent::timeline_persist::handle_sidecar_timeline_event(
-                            &app_state, &event,
-                        );
-                    broadcast_events.extend(
-                        crate::agent::subagent_persist::handle_sidecar_subagent_event(
-                            &app_state, &event,
-                        ),
-                    );
+                    // 持久化独占一个阻塞线程：这条路径会取 DB 互斥锁并同步写
+                    // SQLite（默认 journal 模式下每个事务两次 fsync），跑在 tokio
+                    // worker 上会把该会话后续所有 delta 广播一起堵住 —— 表现就是
+                    // "突发卡顿 + 随后脉冲式补发"。解析也只做一次。
+                    let broadcast_events = {
+                        let state_for_persist = app_state.clone();
+                        let raw_event = event.clone();
+                        tokio::task::spawn_blocking(move || {
+                            crate::agent::timeline_persist::ingest_sidecar_event(
+                                &state_for_persist,
+                                &raw_event,
+                            )
+                        })
+                        .await
+                        .unwrap_or_else(|error| {
+                            log::warn!(
+                                target: "agent",
+                                "Sidecar persistence task failed for session_id={}: {}",
+                                session_id_clone,
+                                error
+                            );
+                            Vec::new()
+                        })
+                    };
                     crate::companion::handle_sidecar_event_for_companion(
                         &app_state,
                         &agent_state_task,

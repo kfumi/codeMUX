@@ -33,7 +33,7 @@ export const ACCENTS: Record<AccentKey, AccentPreset> = {
   amber: { name: '琥珀', light: '36 80% 42%', dark: '38 90% 58%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(36 80% 42%)' },
   rose: { name: '玫红', light: '346 70% 50%', dark: '346 70% 65%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(346 70% 50%)' },
   violet: { name: '紫罗兰', light: '262 55% 55%', dark: '262 60% 68%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(262 55% 55%)' },
-  graphite: { name: '墨黑', light: '222 18% 10%', dark: '220 10% 88%', lightForeground: '210 24% 98%', darkForeground: '220 15% 9%', swatch: 'hsl(222 18% 10%)' },
+  graphite: { name: '石墨', light: '220 7% 11%', dark: '0 0% 100%', lightForeground: '0 0% 100%', darkForeground: '220 7% 11%', swatch: '#1a1c1f' },
 };
 
 export const UI_FONT_SIZE_MIN = 12;
@@ -53,7 +53,7 @@ export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {
-  accent: 'azure',
+  accent: 'graphite',
   uiFontFamily: '',
   uiFontSize: 14,
   codeFontSize: 13,

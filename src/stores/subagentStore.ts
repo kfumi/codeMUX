@@ -41,7 +41,7 @@ interface SubagentState {
   replaceSession: (sessionId: string, payload: { subagents: Array<Record<string, unknown>>; timelines: Record<string, Array<Record<string, unknown>>> }) => void;
   clearSession: (sessionId: string) => void;
   openInSidePanel: (sessionId: string, subagentId: string) => void;
-  routeSubagentSidecarEvent: (raw: string, sessionId: string) => boolean;
+  routeSubagentSidecarEvent: (raw: string | Record<string, unknown>, sessionId: string) => boolean;
 }
 
 function emptySessionState(): SessionSubagentsState {
@@ -228,11 +228,17 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
    * timeline). Unknown event shapes are ignored.
    */
   routeSubagentSidecarEvent: (raw, sessionId) => {
+    // Callers on the WebSocket path already hold the parsed event; only the
+    // legacy string producers need a parse here.
     let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return false;
+    if (typeof raw === 'string') {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        return false;
+      }
+    } else {
+      data = raw;
     }
     if (isCodeMuxSubagentUpsertEvent(data)) {
       get().applyUpsert(sessionId, data);

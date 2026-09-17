@@ -16,6 +16,7 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
         .route("/mcp", get(list_mcp).post(upsert_mcp))
         .route("/mcp/import", post(import_mcp))
         .route("/mcp/probe-all", post(probe_all_mcp))
+        .route("/mcp/probe-spec", post(probe_mcp_spec))
         .route("/mcp/{id}", delete(delete_mcp))
         .route("/mcp/{id}/probe", post(probe_mcp))
         .route("/mcp/{id}/apps", patch(toggle_mcp_app))
@@ -202,6 +203,26 @@ async fn probe_all_mcp(
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::to_value(results).unwrap_or_default()))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProbeMcpSpecRequest {
+    spec: serde_json::Value,
+}
+
+/// 探测一份未落库的 MCP spec(编辑/新增时"测试连接"用)。
+async fn probe_mcp_spec(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ProbeMcpSpecRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let result = crate::services::mcp::probe_mcp_spec_impl(&state, body.spec)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
 async fn import_mcp(

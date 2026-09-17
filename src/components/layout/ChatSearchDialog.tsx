@@ -222,7 +222,7 @@ async function loadFirstUserMessage(session: Session): Promise<string> {
     for (const raw of page.events ?? []) {
       const rawMsg = raw as Record<string, unknown>;
       const event = isCodeMuxPersistedTimelineEvent(rawMsg)
-        ? parseAgentEvent(JSON.stringify(rawMsg))
+        ? parseAgentEvent(rawMsg)
         : mapPersistedClaudeMessage(rawMsg, session.agent_kind);
       if (event?.kind === 'user') {
         return truncatePreview(event.data.content);

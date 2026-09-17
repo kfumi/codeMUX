@@ -1,7 +1,24 @@
 use rusqlite::{Connection, Result};
 
 pub fn initialize_database(conn: &Connection) -> Result<()> {
-    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    // journal_mode returns a row, so it has to be read rather than executed;
+    // in-memory databases report "memory" and keep the default, which is why
+    // tests are unaffected.
+    conn.query_row("PRAGMA journal_mode = WAL", [], |row| {
+        row.get::<_, String>(0)
+    })?;
+    // The default rollback journal takes two fsyncs per commit and blocks
+    // readers while a write is open. The sidecar event loop persists timeline
+    // events synchronously while holding the DB mutex, so those fsyncs stalled
+    // every queued stream delta behind them and the UI saw bursty updates.
+    // WAL plus NORMAL keeps readers (timeline catch-up, WS replay, background
+    // polls) moving during a write while staying crash-safe — only a power loss
+    // can drop the last commit, which is acceptable for a local timeline cache.
+    conn.execute_batch(
+        "PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;
+         PRAGMA foreign_keys = ON;",
+    )?;
 
     // 创建表（新库直接包含所有列）
     conn.execute_batch(

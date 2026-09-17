@@ -6,8 +6,9 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { TooltipHint } from '../ui/tooltip';
-import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download, Lock } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download, Lock, Search, Play } from 'lucide-react';
 import { toast } from 'sonner';
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { CodeEditorSurface } from '../code/CodeEditorSurface';
 import { cn } from '../../lib/utils';
 
@@ -70,6 +71,7 @@ const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'opencode', 'pi'];
 export function McpSettingsPanel() {
   const servers = useMcpStore((s) => s.servers);
   const probeStatus = useMcpStore((s) => s.probeStatus);
+  const probeTools = useMcpStore((s) => s.probeTools);
   const isLoading = useMcpStore((s) => s.isLoading);
   const isProbing = useMcpStore((s) => s.isProbing);
   const fetchServers = useMcpStore((s) => s.fetchServers);
@@ -87,6 +89,9 @@ export function McpSettingsPanel() {
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ connected: boolean; tools: string[]; error?: string } | null>(null);
 
   // wizard local state
   const [wizType, setWizType] = useState<TransportType>('stdio');
@@ -136,6 +141,7 @@ export function McpSettingsPanel() {
     setEditing(server);
     setIsNew(true);
     setDeleteConfirm(false);
+    setTestResult(null);
     setJsonText(JSON.stringify(server.server, null, 2));
     setJsonError('');
   };
@@ -144,8 +150,28 @@ export function McpSettingsPanel() {
     setEditing({ ...server });
     setIsNew(false);
     setDeleteConfirm(false);
+    setTestResult(null);
     setJsonText(JSON.stringify(server.server, null, 2));
     setJsonError('');
+  };
+
+  // 编辑/新增时用当前表单里的 spec 直接探测(不必先落库),顺带回传工具列表。
+  const handleTestConnection = async () => {
+    if (!editing || testing) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await daemonFacade.mcp.probeSpec(editing.server);
+      setTestResult({
+        connected: result.connected,
+        tools: result.tools ?? [],
+        error: result.connected ? undefined : '服务器未能完成 MCP 握手',
+      });
+    } catch (e) {
+      setTestResult({ connected: false, tools: [], error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const closeModal = () => {
@@ -294,10 +320,20 @@ export function McpSettingsPanel() {
   };
 
   const textareaClass =
-    "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0";
+    "flex min-h-[80px] w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-sm ring-offset-background break-all placeholder:text-muted-foreground transition-[background-color,border-color,color,box-shadow] duration-150 hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0";
 
   const renderServerRow = (server: McpServer) => {
     const serverType = (server.server.type ?? 'stdio') as string;
+    // 连接端点:http/sse 展示 url,stdio 展示 命令 + 参数。
+    const endpoint = (() => {
+      const url = server.server.url as string | undefined;
+      if (url) return url;
+      const command = server.server.command as string | undefined;
+      if (!command) return '';
+      const args = (server.server.args as string[] | undefined) ?? [];
+      return [command, ...args].join(' ');
+    })();
+    const tools = probeTools[server.id];
     const anyEnabled = server.builtin || Object.values(server.apps).some(Boolean);
     const statusClass = anyEnabled
       ? probeStatus[server.id] === 'connected'
@@ -311,10 +347,10 @@ export function McpSettingsPanel() {
     return (
       <article
         key={server.id}
-        className="flex h-full flex-col gap-2 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/65"
+        className="flex flex-col gap-2 rounded-xl settings-tile settings-tile-hover px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-3"
       >
-        <div className="flex items-start gap-2">
-          <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', statusClass)} />
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', statusClass)} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <TooltipHint content={server.name}>
@@ -329,19 +365,30 @@ export function McpSettingsPanel() {
               ) : (
                 <span className="shrink-0">{transportBadge(serverType)}</span>
               )}
+              {tools?.length ? (
+                <span className="shrink-0 text-ui-micro font-medium text-[hsl(var(--success))]">
+                  · {tools.length} 个工具
+                </span>
+              ) : null}
             </div>
+            {endpoint && (
+              <TooltipHint content={endpoint}>
+                <p className="mt-0.5 cursor-default truncate font-mono text-ui-micro text-muted-foreground/70">
+                  {endpoint}
+                </p>
+              </TooltipHint>
+            )}
+            {server.description && (
+              <TooltipHint content={server.description} side="bottom">
+                <p className="mt-0.5 cursor-default truncate text-xs leading-4 text-muted-foreground">
+                  {server.description}
+                </p>
+              </TooltipHint>
+            )}
           </div>
         </div>
 
-        {server.description && (
-          <TooltipHint content={server.description} side="bottom">
-            <p className="line-clamp-2 cursor-default text-xs leading-4 text-muted-foreground">
-              {server.description}
-            </p>
-          </TooltipHint>
-        )}
-
-        <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/50 pt-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
           <div className="flex items-center gap-1">
             {APP_ORDER.map((app) => (
               <TooltipHint
@@ -374,20 +421,33 @@ export function McpSettingsPanel() {
             </div>
           ) : (
             <div className="flex items-center gap-0.5">
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => probeServer(server.id)}>
-                <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
-              </Button>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(server)}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <TooltipHint content="重新探测连接状态与工具列表">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  aria-label={`probe-${server.id}`}
+                  onClick={() => probeServer(server.id)}
+                >
+                  <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
+                </Button>
+              </TooltipHint>
+              <TooltipHint content="编辑">
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`edit-${server.id}`} onClick={() => openEdit(server)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipHint>
+              <TooltipHint content="删除">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  aria-label={`delete-${server.id}`}
+                  onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipHint>
             </div>
           )}
         </div>
@@ -395,8 +455,15 @@ export function McpSettingsPanel() {
     );
   };
 
-  const builtinServers = servers.filter((server) => server.builtin);
-  const installedServers = servers.filter((server) => !server.builtin);
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (server: McpServer) =>
+    !normalizedQuery ||
+    server.name.toLowerCase().includes(normalizedQuery) ||
+    (server.description ?? '').toLowerCase().includes(normalizedQuery);
+
+  const builtinServers = servers.filter((server) => server.builtin && matchesQuery(server));
+  const installedServers = servers.filter((server) => !server.builtin && matchesQuery(server));
+  const filteredTotal = builtinServers.length + installedServers.length;
 
   const renderSection = (title: string, rows: McpServer[], emptyHint?: React.ReactNode) => (
     <section className="space-y-2">
@@ -405,7 +472,7 @@ export function McpSettingsPanel() {
         <span className="text-xs text-muted-foreground">{rows.length}</span>
       </div>
       {rows.length > 0 ? (
-        <div className="grid gap-2.5 @min-[36rem]:grid-cols-2 @min-[54rem]:grid-cols-3">
+        <div className="flex flex-col gap-2">
           {rows.map(renderServerRow)}
         </div>
       ) : (
@@ -416,18 +483,41 @@ export function McpSettingsPanel() {
 
   return (
     <div className="@container space-y-4">
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>
-          {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
-          从工具导入
-        </Button>
-        <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={isProbing}>
-          <RefreshCw className={`h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
-        </Button>
-        <Button size="sm" onClick={openNew}>
-          <Plus className="h-4 w-4 mr-1" />
-          添加
-        </Button>
+      {/* 工具行:计数 + 搜索在左,操作按钮在右(参考 PI-Desktop 的 MCP/Skills 工具栏) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md settings-tile px-3 text-ui-compact text-muted-foreground">
+          全部
+          <span className="font-medium text-foreground">{servers.length}</span>
+        </span>
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索服务器..."
+            aria-label="搜索 MCP 服务器"
+            className="h-9 pl-8"
+          />
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <TooltipHint content="手动添加一个 MCP 服务器">
+            <Button size="sm" className="h-8" onClick={openNew}>
+              <Plus className="h-4 w-4 mr-1" />
+              添加
+            </Button>
+          </TooltipHint>
+          <TooltipHint content="从 Claude / Codex / OpenCode / pi 导入已配置的服务器">
+            <Button size="sm" variant="outline" className="h-8" onClick={handleImport} disabled={importing}>
+              {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
+              从工具导入
+            </Button>
+          </TooltipHint>
+          <TooltipHint content="重新探测所有服务器的连接状态与工具列表">
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" aria-label="刷新" onClick={handleRefresh} disabled={isProbing}>
+              <RefreshCw className={`h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
+            </Button>
+          </TooltipHint>
+        </div>
       </div>
 
       {isLoading && servers.length === 0 && (
@@ -442,6 +532,13 @@ export function McpSettingsPanel() {
           <Server className="h-8 w-8 mb-2 opacity-50" />
           <p className="text-sm">暂无 MCP Server</p>
           <p className="text-xs">点击"从工具导入"或"添加"按钮</p>
+        </div>
+      )}
+
+      {!isLoading && servers.length > 0 && filteredTotal === 0 && (
+        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <Search className="h-6 w-6 mb-2 opacity-50" />
+          <p className="text-sm">未找到匹配的 MCP Server</p>
         </div>
       )}
 
@@ -561,8 +658,55 @@ export function McpSettingsPanel() {
             </div>
           )}
 
+          {/* 测试连接:用当前表单 spec 直接探测,展示连接结果与工具列表 */}
+          {testResult && (
+            <div
+              className={cn(
+                'rounded-xl px-4 py-3',
+                testResult.connected
+                  ? 'bg-[hsl(var(--success)/0.08)]'
+                  : 'bg-[hsl(var(--destructive)/0.08)]',
+              )}
+            >
+              <div className="flex items-center gap-2 text-ui-compact font-medium">
+                <span
+                  className={cn(
+                    'h-2 w-2 shrink-0 rounded-full',
+                    testResult.connected ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--destructive))]',
+                  )}
+                />
+                {testResult.connected
+                  ? `已连接${testResult.tools.length > 0 ? ` · ${testResult.tools.length} 个工具` : ''}`
+                  : '连接失败'}
+              </div>
+              {testResult.connected && testResult.tools.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {testResult.tools.slice(0, 12).map((tool) => (
+                    <span
+                      key={tool}
+                      className="rounded bg-[hsl(var(--foreground)/0.06)] px-1.5 py-0.5 font-mono text-ui-micro text-foreground/80"
+                    >
+                      {tool}
+                    </span>
+                  ))}
+                  {testResult.tools.length > 12 && (
+                    <span className="px-1 py-0.5 text-ui-micro text-muted-foreground">
+                      +{testResult.tools.length - 12}
+                    </span>
+                  )}
+                </div>
+              )}
+              {!testResult.connected && testResult.error && (
+                <p className="mt-1 break-all text-ui-caption text-muted-foreground">{testResult.error}</p>
+              )}
+            </div>
+          )}
+
           <DialogFooter className="flex justify-between">
-            <div />
+            <Button type="button" variant="outline" onClick={handleTestConnection} disabled={testing || !editing}>
+              {testing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Play className="h-4 w-4 mr-1" />}
+              测试连接
+            </Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeModal}>
                 取消
@@ -699,7 +843,7 @@ export function McpSettingsPanel() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">配置预览</label>
                 <div className="rounded-lg border bg-muted p-3 overflow-x-auto">
-                  <pre className="text-code font-mono text-muted-foreground whitespace-pre">
+                  <pre className="text-code font-mono text-muted-foreground whitespace-pre-wrap break-all">
                     {JSON.stringify(
                       (() => {
                         if (wizType === 'stdio') {

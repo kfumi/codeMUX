@@ -1,3 +1,4 @@
+import { boundEventVolume } from './boundEventVolume.js';
 import { toCodeMuxStreamEvent, type CodeMuxStreamEvent } from './codeMuxProtocol.js';
 
 const STREAM_EVENT_BATCH_INTERVAL_MS = 50;
@@ -58,7 +59,10 @@ function withResolvedSessionId(value: unknown): unknown {
 }
 
 function writeJsonLine(obj: unknown): void {
-  process.stdout.write(JSON.stringify(obj) + '\n');
+  // Single volume chokepoint for everything the sidecar sends to the daemon:
+  // bounding here means the persisted copy and the broadcast copy are derived
+  // from the same already-truncated JSON, so they cannot disagree.
+  process.stdout.write(JSON.stringify(boundEventVolume(obj)) + '\n');
 }
 
 function scheduleFlush(): void {

@@ -190,7 +190,7 @@ export function ArchivedSessionsPanel() {
         </Select>
       </div>
 
-      <div className="rounded-xl bg-muted/40">
+      <div className="rounded-xl settings-tile">
         <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 text-sm text-foreground/70">
           <span>{filteredSessions.length} 个对话</span>
           <span className="flex items-center gap-1.5">

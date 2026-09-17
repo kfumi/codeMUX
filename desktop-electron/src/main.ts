@@ -236,6 +236,23 @@ function createMainWindow(): BrowserWindow {
       spellcheck: false,
       // Browser Host(工单 07):内置浏览由渲染层 <webview> 标签托管。
       webviewTag: true,
+      // Electron defaults this to true, which makes Chromium treat the window
+      // as a background page whenever it is occluded or unfocused: timers get
+      // aligned to 1s and then throttled hard, and requestAnimationFrame drops
+      // to a handful of frames per second.
+      //
+      // That is exactly wrong for CodeMUX. The whole point of an agent turn is
+      // that it runs for minutes while the user works in another window, and
+      // the transcript has to keep painting plus the elapsed counter has to
+      // keep ticking so the run is legible at a glance. With throttling on, the
+      // dev perf overlay reports single-digit FPS and "正在执行 · 12s" freezes
+      // for long stretches — both are the throttle, not a slow renderer, and
+      // they made the real streaming cost much harder to measure.
+      //
+      // Trade-off: the renderer keeps compositing while occluded, so it uses
+      // somewhat more CPU/battery in the background. Accepted, because a frozen
+      // agent UI is a correctness problem for this product.
+      backgroundThrottling: false,
     },
   });
 

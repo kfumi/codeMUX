@@ -8,6 +8,7 @@ import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.
 import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadOpenCodeClientSdk, loadOpenCodeServerSdk } from './sdkLoader.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
+import { DEBUG_OPENCODE_EVENTS } from './writeLog.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -564,7 +565,9 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                   parts,
                 },
               });
-              process.stderr.write(`[opencode-debug] promptAsync response status=${'status' in sdkResponse ? sdkResponse.status : 'unknown'} hasError=${'error' in sdkResponse && sdkResponse.error !== undefined} raw=${JSON.stringify(sdkResponse).slice(0, 1000)}\n`);
+              if (DEBUG_OPENCODE_EVENTS) {
+                process.stderr.write(`[opencode-debug] promptAsync response status=${'status' in sdkResponse ? sdkResponse.status : 'unknown'} hasError=${'error' in sdkResponse && sdkResponse.error !== undefined} raw=${JSON.stringify(sdkResponse).slice(0, 1000)}\n`);
+              }
               if ('error' in sdkResponse && sdkResponse.error !== undefined) {
                 readResponse('OpenCode promptAsync', sdkResponse);
               }
@@ -618,11 +621,15 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
             let closed = false;
             let nextEventId: string | undefined;
             const reportRetry = (error: unknown) => {
-              process.stderr.write(`[opencode-debug] SSE onSseError fired error=${error instanceof Error ? error.message : String(error).slice(0, 500)}\n`);
+              if (DEBUG_OPENCODE_EVENTS) {
+                process.stderr.write(`[opencode-debug] SSE onSseError fired error=${error instanceof Error ? error.message : String(error).slice(0, 500)}\n`);
+              }
               if (!closed) onRetry?.(error);
             };
             const reportDisconnect = (error: unknown) => {
-              process.stderr.write(`[opencode-debug] SSE disconnect fired error=${error instanceof Error ? error.message : String(error).slice(0, 500)}\n`);
+              if (DEBUG_OPENCODE_EVENTS) {
+                process.stderr.write(`[opencode-debug] SSE disconnect fired error=${error instanceof Error ? error.message : String(error).slice(0, 500)}\n`);
+              }
               if (!closed) (onDisconnect ?? onError)(error);
             };
             const result = await client.event.subscribe({
@@ -630,9 +637,11 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               onSseError: reportRetry,
               onSseEvent: (event: { id?: string }) => {
                 nextEventId = event.id;
-                const eventType = (event as Record<string, unknown>)?.type;
-                if (typeof eventType === 'string') {
-                  process.stderr.write(`[opencode-debug] SSE onSseEvent id=${event.id ?? '(none)'} type=${eventType}\n`);
+                if (DEBUG_OPENCODE_EVENTS) {
+                  const eventType = (event as Record<string, unknown>)?.type;
+                  if (typeof eventType === 'string') {
+                    process.stderr.write(`[opencode-debug] SSE onSseEvent id=${event.id ?? '(none)'} type=${eventType}\n`);
+                  }
                 }
               },
             });
@@ -642,19 +651,19 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                   if (!closed) {
                     const eventId = nextEventId;
                     nextEventId = undefined;
-                    const eventStr = typeof event === 'string' ? event : (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event) } })();
                     const eventType = typeof event === 'object' && event !== null
                       ? (event as Record<string, unknown>).type
                       : undefined;
-                    if (eventType !== 'server.heartbeat') {
+                    if (DEBUG_OPENCODE_EVENTS && eventType !== 'server.heartbeat') {
+                      const eventStr = typeof event === 'string' ? event : (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event) } })();
                       process.stderr.write(`[opencode-debug] RAW SSE event type=${typeof event === 'object' && event !== null ? eventType ?? '(no type)' : typeof event} preview=${eventStr}\n`);
                     }
                     if (eventType !== 'server.heartbeat' && typeof event === 'object' && event !== null) {
                       const record = event as Record<string, unknown>;
-                      if (record.type === 'session.error' || record.type === 'server.error' || record.type === 'server.retry' || record.type === 'server.disconnected' || record.type === 'disconnect' || record.type === 'connection.error') {
+                      if (DEBUG_OPENCODE_EVENTS && (record.type === 'session.error' || record.type === 'server.error' || record.type === 'server.retry' || record.type === 'server.disconnected' || record.type === 'disconnect' || record.type === 'connection.error')) {
                         process.stderr.write(`[opencode-debug] RAW SSE ERROR EVENT full=${JSON.stringify(event)}\n`);
                       }
-                      if (typeof record.properties === 'object' && record.properties !== null) {
+                      if (DEBUG_OPENCODE_EVENTS && typeof record.properties === 'object' && record.properties !== null) {
                         const props = record.properties as Record<string, unknown>;
                         if (props.error) {
                           process.stderr.write(`[opencode-debug] SSE event has error property type=${record.type} error=${typeof props.error === 'object' ? JSON.stringify(props.error).slice(0, 1000) : String(props.error).slice(0, 1000)}\n`);
@@ -664,10 +673,14 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                     onEvent(eventId && typeof event === 'object' && event !== null ? { ...event, eventId } : event);
                   }
                 }
-                process.stderr.write(`[opencode-debug] SSE stream ended normally\n`);
+                if (DEBUG_OPENCODE_EVENTS) {
+                  process.stderr.write(`[opencode-debug] SSE stream ended normally\n`);
+                }
                 reportDisconnect(new Error('OpenCode SSE stream ended'));
               } catch (error) {
-                process.stderr.write(`[opencode-debug] SSE stream threw error=${error instanceof Error ? error.message : String(error)} stack=${error instanceof Error ? error.stack?.slice(0, 500) : 'n/a'}\n`);
+                if (DEBUG_OPENCODE_EVENTS) {
+                  process.stderr.write(`[opencode-debug] SSE stream threw error=${error instanceof Error ? error.message : String(error)} stack=${error instanceof Error ? error.stack?.slice(0, 500) : 'n/a'}\n`);
+                }
                 reportDisconnect(error);
               }
             })();

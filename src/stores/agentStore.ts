@@ -268,10 +268,24 @@ const pendingSessionMessageLoads = new Map<string, Promise<void>>();
 const sessionHistoryEpoch = new Map<string, number>();
 const backgroundPolls = new Map<string, number>();
 
+/**
+ * 后台（scheduled）回合进度重拉的最小间隔。
+ *
+ * 重拉走 `loadSessionMessages({ force: true })`，一次最多取 5000 条事件，
+ * 并在主线程对每条做完整 JSON 处理后**整体替换** `events` 数组 —— 开销是
+ * O(历史长度)。原实现让它与 1s 轮询同频，于是产生每秒一次的周期性卡顿。
+ * 现在"结束探测"（一次廉价的 /state）仍是 1s，重拉被节流到这个间隔；
+ * 回合一旦结束必定补一次，最终内容不会丢。
+ */
+const BACKGROUND_LIVE_RELOAD_INTERVAL_MS = 3000;
+
+const backgroundLiveReloadAt = new Map<string, number>();
+
 function stopBackgroundPoll(sessionId: string) {
   const timer = backgroundPolls.get(sessionId);
   if (timer) window.clearInterval(timer);
   backgroundPolls.delete(sessionId);
+  backgroundLiveReloadAt.delete(sessionId);
 }
 
 function bumpSessionHistoryEpoch(sessionId: string): number {
@@ -1072,9 +1086,12 @@ function simulateStreamingContent(
   entry.timer = window.setTimeout(tick, 30);
 }
 
-export function parseAgentEvent(raw: string): AgentMessage {
+export function parseAgentEvent(raw: string | Record<string, unknown>): AgentMessage {
   try {
-    const data = JSON.parse(raw);
+    // The daemon WebSocket path already hands over a parsed event object, so
+    // only string producers (legacy sidecar streams, persisted timeline rows,
+    // tests) pay for a parse here.
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
 
     // Filter out sub-agent (sidechain) messages from the main event stream.
     if (isClaudeSubagentEvent(data)) {
@@ -1721,11 +1738,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
   };
 
   const consumeSteerResultEvent = (
-    raw: string,
+    raw: string | Record<string, unknown>,
     onUnavailable: (sessionId: string, query: QueuedAgentQuery) => void,
   ): boolean => {
     try {
-      const data = JSON.parse(raw) as {
+      const data = (
+        typeof raw === 'string' ? JSON.parse(raw) : raw
+      ) as {
         type?: string;
         request_id?: string;
         ok?: boolean;
@@ -1785,11 +1804,11 @@ function createSessionEventHandler(
   get: () => AgentState,
   set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
   visionModel: string | null | undefined,
-): (raw: string) => void {
+): (raw: string | Record<string, unknown>) => void {
   // 活跃判定动态读 store 而非捕获时间戳:同一 handler 要同时服务“发送消息”与
   // “重新附着进行中回合”两条路径,新一轮会把 queryStartTime 换成新值。
   const isActiveQuery = () => get().queryStartTime[sessionId] != null;
-  return (raw: string) => {
+  return (raw: string | Record<string, unknown>) => {
     // Subagent tracks are routed to their own store and never enter the
     // parent timeline events.
     if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
@@ -2853,16 +2872,17 @@ function createSessionEventHandler(
       const handleEvent = createSessionEventHandler(sessionId, get, set, modelForVision);
       registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
         if (!running) return;
-        set((s) => {
-          if (s.isRunning[sessionId]) return {};
-          return {
-            isRunning: { ...s.isRunning, [sessionId]: true },
-            queryStartTime: {
-              ...s.queryStartTime,
-              [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
-            },
-          };
-        });
+        // 已处于 running 时不写 store。原实现在这里返回 `{}`，但 Zustand 仍会
+        // 生成新的 state 对象并通知**全部**订阅者做无意义的重算 —— 而 state 帧
+        // 在整个流式期间持续到达，这笔开销被同步放大。
+        if (get().isRunning[sessionId]) return;
+        set((s) => ({
+          isRunning: { ...s.isRunning, [sessionId]: true },
+          queryStartTime: {
+            ...s.queryStartTime,
+            [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+          },
+        }));
       });
       await daemonFacade.sendMessageViaDaemon(
         sessionId,
@@ -2925,8 +2945,20 @@ function createSessionEventHandler(
 
   completeBackgroundLiveIfIdle: async (sessionId: string) => {
     if (!get().backgroundLive[sessionId]) return;
-    await get().loadSessionMessages(sessionId, { force: true });
+
+    // 先做廉价探测（一次 /state，只回一个布尔值），再决定要不要付全量重拉的代价。
     const companionTurnActive = await daemonFacade.isSessionTurnActive(sessionId);
+
+    const now = Date.now();
+    const lastReloadAt = backgroundLiveReloadAt.get(sessionId) ?? 0;
+    const reloadDue = now - lastReloadAt >= BACKGROUND_LIVE_RELOAD_INTERVAL_MS;
+    if (companionTurnActive && !reloadDue) {
+      // 回合并未结束且还没到刷新间隔 —— 直接返回，不再每秒全量重拉一次。
+      return;
+    }
+    backgroundLiveReloadAt.set(sessionId, now);
+
+    await get().loadSessionMessages(sessionId, { force: true });
     if (shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
       return;
     }
@@ -2966,16 +2998,15 @@ function createSessionEventHandler(
     const handleEvent = createSessionEventHandler(sessionId, get, set, session?.model ?? null);
     registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
       if (!running) return;
-      set((s) => {
-        if (s.isRunning[sessionId]) return {};
-        return {
-          isRunning: { ...s.isRunning, [sessionId]: true },
-          queryStartTime: {
-            ...s.queryStartTime,
-            [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
-          },
-        };
-      });
+      // 同前：已 running 时不产生 store 写入，避免空 `set({})` 通知全部订阅者。
+      if (get().isRunning[sessionId]) return;
+      set((s) => ({
+        isRunning: { ...s.isRunning, [sessionId]: true },
+        queryStartTime: {
+          ...s.queryStartTime,
+          [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+        },
+      }));
     });
     return true;
   },
@@ -3349,7 +3380,7 @@ function createSessionEventHandler(
           }
 
           const event = isCodeMuxPersistedTimelineEvent(rawMsg)
-            ? parseAgentEvent(JSON.stringify(rawMsg))
+            ? parseAgentEvent(rawMsg)
             : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
           if (event) {
             loadedTimeline.push({ event: event as AgentMessage, ts });

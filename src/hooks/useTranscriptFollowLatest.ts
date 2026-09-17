@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useAgentStore } from '../stores/agentStore';
 
 export function isTranscriptViewportAtBottom(viewport: HTMLDivElement): boolean {
   return viewport.scrollHeight <= viewport.clientHeight
@@ -10,17 +11,30 @@ export function useTranscriptFollowLatest({
   followKey,
   extraFrames = 1,
   forceFollow = false,
+  followSessionId,
 }: {
   viewportRef: RefObject<HTMLDivElement>;
   followKey: unknown;
   extraFrames?: number;
   forceFollow?: boolean;
+  /**
+   * Session whose streaming flushes should keep the viewport pinned to the
+   * bottom. Those flushes fire tens of times per second, so they are consumed
+   * through an imperative store subscription instead of a React-rendered value:
+   * folding them into `followKey` re-rendered the entire viewport subtree on
+   * every flush just to schedule a scroll that needs no render at all.
+   */
+  followSessionId?: string;
 }) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const followLatestRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const lastScrollHeightRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
+  // Read by the imperative streaming subscription, which must not re-subscribe
+  // when extraFrames changes.
+  const extraFramesRef = useRef(extraFrames);
+  extraFramesRef.current = extraFrames;
 
   const updateScrollState = useCallback(() => {
     const viewport = viewportRef.current;
@@ -70,7 +84,11 @@ export function useTranscriptFollowLatest({
     // setAdapter），此时读到的是旧 scrollHeight；折叠动画、图片解码、代码块
     // 升级和工具静默期同理。改为等内容真正变化后再钉底。
     const lastObserved = { scrollHeight: -1, clientHeight: -1 };
-    const handleContentChange = () => {
+    let contentFrame: number | null = null;
+
+    const flushContentChange = () => {
+      contentFrame = null;
+
       // 用户在看历史时不抢滚动控制权，也省掉这次布局读取。
       if (!followLatestRef.current) {
         return;
@@ -91,6 +109,20 @@ export function useTranscriptFollowLatest({
       scrollViewportToBottom();
     };
 
+    // Reading scrollHeight/clientHeight forces a synchronous layout, and during
+    // streaming the characterData mutation fires once per rendered token — i.e.
+    // dozens of forced layouts per second, each one able to blow the frame
+    // budget on its own. Coalescing into one read per frame keeps the same
+    // "内容真正变化后再钉底" behaviour at a fraction of the layout cost, and
+    // also merges the ResizeObserver and MutationObserver signals into one.
+    const handleContentChange = () => {
+      if (contentFrame !== null) {
+        return;
+      }
+
+      contentFrame = window.requestAnimationFrame(flushContentChange);
+    };
+
     const resizeObserver = typeof ResizeObserver !== 'undefined'
       ? new ResizeObserver(handleContentChange)
       : null;
@@ -108,21 +140,25 @@ export function useTranscriptFollowLatest({
       viewport.removeEventListener('scroll', updateScrollState);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      if (contentFrame !== null) {
+        window.cancelAnimationFrame(contentFrame);
+        contentFrame = null;
+      }
     };
   }, [scrollViewportToBottom, updateScrollState, viewportRef]);
 
-  useEffect(() => {
-    if (forceFollow) {
-      followLatestRef.current = true;
-    }
-
-    if (!followLatestRef.current) {
-      return;
-    }
-
+  const cancelScheduledScroll = useCallback(() => {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
     }
+  }, []);
+
+  // Shared by the followKey effect and the streaming signal subscription.
+  // Entering it supersedes any pending frame so competing rAF chains cannot
+  // stack up.
+  const scheduleScrollAfterFrames = useCallback((frames: number) => {
+    cancelScheduledScroll();
 
     const scrollAfterFrames = (remainingFrames: number) => {
       scrollFrameRef.current = window.requestAnimationFrame(() => {
@@ -140,15 +176,56 @@ export function useTranscriptFollowLatest({
       });
     };
 
-    scrollAfterFrames(Math.max(1, extraFrames));
+    scrollAfterFrames(Math.max(1, frames));
+  }, [cancelScheduledScroll, scrollViewportToBottom, viewportRef]);
 
-    return () => {
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
+  useEffect(() => {
+    if (forceFollow) {
+      followLatestRef.current = true;
+    }
+
+    if (!followLatestRef.current) {
+      return;
+    }
+
+    scheduleScrollAfterFrames(extraFrames);
+  }, [extraFrames, followKey, forceFollow, scheduleScrollAfterFrames]);
+
+  // Cancel a pending scroll on unmount only. The effect above intentionally does
+  // not cancel in its cleanup: the streaming subscription below shares this
+  // scheduler, so a cleanup firing on every followKey change would cancel frames
+  // that subscription had just requested.
+  useEffect(() => cancelScheduledScroll, [cancelScheduledScroll]);
+
+  // Keep the viewport pinned while a stream streams, without rendering. Reading
+  // streamingVersion as React state folded it into followKey, which re-rendered
+  // this component — and the entire thread subtree it wraps — on every flush
+  // just to schedule a scroll. The scroll only has to happen; it does not have
+  // to be part of the rendered output.
+  useEffect(() => {
+    if (!followSessionId) {
+      return;
+    }
+
+    const readVersion = (state: ReturnType<typeof useAgentStore.getState>) =>
+      state.streamingVersion[followSessionId] ?? 0;
+
+    let previous = readVersion(useAgentStore.getState());
+
+    return useAgentStore.subscribe((state) => {
+      const next = readVersion(state);
+      if (next === previous) {
+        return;
       }
-    };
-  }, [extraFrames, followKey, forceFollow, scrollViewportToBottom, viewportRef]);
+
+      previous = next;
+      if (!followLatestRef.current) {
+        return;
+      }
+
+      scheduleScrollAfterFrames(extraFramesRef.current);
+    });
+  }, [extraFramesRef, followSessionId, scheduleScrollAfterFrames]);
 
   const scrollToBottom = useCallback(() => {
     followLatestRef.current = true;

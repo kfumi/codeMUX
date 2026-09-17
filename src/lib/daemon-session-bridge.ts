@@ -3,7 +3,15 @@ import { ensureDaemonClient } from './facades/daemon-facade';
 
 const logger = createLogger('daemon-session-bridge');
 
-type SessionEventHandler = (raw: string) => void;
+/**
+ * An event as it reaches a session handler. The WebSocket path already holds a
+ * parsed object, so handlers accept either shape instead of forcing a
+ * `JSON.stringify` that the store immediately parses back. Legacy string
+ * producers (direct sidecar streams, test doubles) keep working unchanged.
+ */
+export type SessionEventPayload = string | Record<string, unknown>;
+
+type SessionEventHandler = (event: SessionEventPayload) => void;
 type SessionStateHandler = (running: boolean) => void;
 
 const handlers = new Map<string, SessionEventHandler>();
@@ -51,7 +59,7 @@ export async function catchUpTimelineAfterSequence(sessionId: string): Promise<v
         if (sequence !== null) {
           setLastEventSequence(sessionId, Math.max(getLastEventSequence(sessionId), sequence));
         }
-        handler(JSON.stringify(record));
+        handler(record);
       }
     }
   } catch (error) {
@@ -75,7 +83,7 @@ async function ensureDaemonSubscription(sessionId: string): Promise<void> {
           if (sequence <= last) return;
           setLastEventSequence(sessionId, sequence);
         }
-        handler(JSON.stringify(record));
+        handler(record);
       },
       onState: (running) => {
         stateHandlers.get(sessionId)?.(running);

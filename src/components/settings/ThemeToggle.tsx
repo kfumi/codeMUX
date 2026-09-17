@@ -27,7 +27,7 @@ interface FormSectionProps {
 
 function FormSection({ label, hint, children }: FormSectionProps) {
   return (
-    <section className="space-y-2 border-b border-border/45 pb-6 last:border-b-0">
+    <section className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-ui-title font-medium text-foreground">{label}</h3>
         {hint && <span className="text-ui-caption text-right text-muted-foreground/75">{hint}</span>}
@@ -55,7 +55,7 @@ function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: bo
         'group relative flex flex-col gap-3 rounded-xl border p-3 text-left transition-all duration-200',
         active
           ? 'border-primary/55 bg-primary/[0.04] ring-1 ring-primary/35'
-          : 'border-border/55 bg-muted/25 hover:border-border hover:bg-muted/45',
+          : 'border-transparent settings-tile settings-tile-hover',
       )}
     >
       <div className="aspect-[4/3] w-full overflow-hidden rounded-md border border-border/45 bg-background">
@@ -193,7 +193,7 @@ function OptionCard({ label, active, onClick, preview }: OptionCardProps) {
         'flex flex-col items-center justify-center gap-2 rounded-lg border py-3 transition-all duration-200',
         active
           ? 'border-primary/55 bg-primary/[0.05] ring-1 ring-primary/30'
-          : 'border-border/55 bg-muted/25 hover:border-border hover:bg-muted/45',
+          : 'border-transparent settings-tile settings-tile-hover',
       )}
     >
       {preview}
@@ -240,7 +240,7 @@ export function ThemeToggle() {
       </FormSection>
 
       <FormSection label="强调色" hint="应用于按钮、链接与高亮元素">
-        <div className="flex flex-wrap gap-x-5 gap-y-3 rounded-lg border border-border/45 bg-muted/20 p-3">
+        <div className="flex flex-wrap gap-x-5 gap-y-3 rounded-xl settings-tile p-3">
           {ACCENT_KEYS.map((key) => (
             <AccentSwatch
               key={key}
@@ -257,7 +257,7 @@ export function ThemeToggle() {
       </FormSection>
 
       <FormSection label="界面字号" hint="12–18px，按 1px 调整">
-        <div className="flex w-fit items-center rounded-md border border-border bg-background">
+        <div className="flex w-fit items-center rounded-lg settings-tile">
           <Button
             type="button"
             variant="ghost"
@@ -287,7 +287,7 @@ export function ThemeToggle() {
       </FormSection>
 
       <FormSection label="代码字体大小" hint="10–20px，按 1px 调整">
-        <div className="flex w-fit items-center rounded-md border border-border bg-background">
+        <div className="flex w-fit items-center rounded-lg settings-tile">
           <Button
             type="button"
             variant="ghost"
@@ -362,7 +362,7 @@ export function ThemeToggle() {
         </p>
       </FormSection>
 
-      <div className="border-t border-border/40 pt-5">
+      <div className="pt-2">
         <Button variant="ghost" size="sm" onClick={reset} className="gap-1.5 text-foreground/60">
           <RotateCcw className="h-3.5 w-3.5" />
           恢复默认外观

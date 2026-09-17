@@ -69,8 +69,8 @@ export function GitSettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">生成模型</label>
-        <div className="space-y-3 rounded-xl bg-muted/40 p-4">
+        <label className="text-ui-compact font-medium text-muted-foreground">生成模型</label>
+        <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
               <Cpu className="h-4 w-4 text-foreground/58" />
@@ -85,8 +85,8 @@ export function GitSettings() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">提交说明</label>
-        <div className="space-y-2 rounded-xl bg-muted/40 p-4">
+        <label className="text-ui-compact font-medium text-muted-foreground">提交说明</label>
+        <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
               <GitCommitHorizontal className="h-4 w-4 text-foreground/58" />
@@ -107,8 +107,8 @@ export function GitSettings() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">拉取请求指令</label>
-        <div className="space-y-2 rounded-xl bg-muted/40 p-4">
+        <label className="text-ui-compact font-medium text-muted-foreground">拉取请求指令</label>
+        <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
               <GitPullRequest className="h-4 w-4 text-foreground/58" />
@@ -129,8 +129,8 @@ export function GitSettings() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">Gitee 凭据</label>
-        <div className="space-y-3 rounded-xl bg-muted/40 p-4">
+        <label className="text-ui-compact font-medium text-muted-foreground">Gitee 凭据</label>
+        <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground/90">Gitee Personal Access Token</div>
             <p className="mt-1 text-xs leading-relaxed text-foreground/60">

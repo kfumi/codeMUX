@@ -11,11 +11,11 @@ import {
 import { cva, type VariantProps } from "class-variance-authority";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import {
-  useScrollLock,
   useAuiState,
   type ReasoningMessagePartComponent,
   type ReasoningGroupComponent,
 } from "@assistant-ui/react";
+import { useCollapsibleScrollLock } from "@/hooks/useCollapsibleScrollLock";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
   Collapsible,
@@ -66,7 +66,7 @@ function ReasoningRoot({
   const collapsibleRef = useRef<HTMLDivElement>(null);
   const initialOpenRef = useRef(defaultOpen);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
+  const lockScroll = useCollapsibleScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : (userOpen ?? initialOpenRef.current);

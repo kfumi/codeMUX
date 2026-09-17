@@ -14,8 +14,13 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
         method: 'PATCH',
         body: JSON.stringify({ app, enabled }),
       }),
-    mcpProbe: (id: string) => fetch<{ connected: boolean; instructions?: string | null }>(config, `/mcp/${id}/probe`, { method: 'POST' }),
-    mcpProbeAll: () => fetch<Record<string, boolean>>(config, '/mcp/probe-all', { method: 'POST' }),
+    mcpProbe: (id: string) => fetch<{ connected: boolean; instructions?: string | null; tools?: string[] }>(config, `/mcp/${id}/probe`, { method: 'POST' }),
+    mcpProbeAll: () => fetch<Record<string, { connected: boolean; tools?: string[] }>>(config, '/mcp/probe-all', { method: 'POST' }),
+    mcpProbeSpec: (spec: unknown) =>
+      fetch<{ connected: boolean; instructions?: string | null; tools?: string[] }>(config, '/mcp/probe-spec', {
+        method: 'POST',
+        body: JSON.stringify({ spec }),
+      }),
     mcpImport: () => fetch<{ total: number }>(config, '/mcp/import', { method: 'POST' }),
 
     // Skills

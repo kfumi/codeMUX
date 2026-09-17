@@ -51,8 +51,8 @@ export function NotificationSettingsSection() {
 
   return (
     <div className="space-y-3">
-      <label className="text-sm text-foreground/74">通知</label>
-      <div className="space-y-3 rounded-xl bg-muted/40 p-4">
+      <label className="text-ui-compact font-medium text-muted-foreground">通知</label>
+      <div className="space-y-3 rounded-xl settings-tile p-4">
         {presentation.systemNotifications ? (
           <SettingsRow
             inlineControl

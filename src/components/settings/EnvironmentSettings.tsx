@@ -72,7 +72,7 @@ export function EnvironmentSettings() {
 
       <div className="space-y-3">
         {loading && !check ? (
-          <div className="rounded-xl bg-muted/40 p-5 text-sm text-foreground/60">正在检测环境...</div>
+          <div className="rounded-xl settings-tile p-5 text-sm text-foreground/60">正在检测环境...</div>
         ) : (
           check?.tools.map((tool) => <ToolCheckRow key={tool.command} tool={tool} />)
         )}
@@ -90,7 +90,7 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
   const Icon = meta.icon;
 
   return (
-    <div className="rounded-xl bg-muted/40 p-4">
+    <div className="rounded-xl settings-tile p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

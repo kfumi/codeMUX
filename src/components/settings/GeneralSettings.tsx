@@ -54,7 +54,7 @@ export function GeneralSettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">显示偏好</label>
+        <label className="text-ui-compact font-medium text-muted-foreground">显示偏好</label>
         <SettingsRow
           surface
           inlineControl
@@ -73,7 +73,7 @@ export function GeneralSettings() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">对话</label>
+        <label className="text-ui-compact font-medium text-muted-foreground">对话</label>
         <SettingsRow
           surface
           label="「立即」的行为"
@@ -100,7 +100,7 @@ export function GeneralSettings() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm text-foreground/74">项目打开</label>
+        <label className="text-ui-compact font-medium text-muted-foreground">项目打开</label>
         <SettingsRow
           surface
           label="默认文件打开目标"
@@ -149,8 +149,8 @@ export function GeneralSettings() {
       {/* Config file section:仅桌面壳(本机路径 + 资源管理器) */}
       {showConfigFile && (
         <div className="space-y-3">
-          <label className="text-sm text-foreground/74">配置文件</label>
-          <div className="rounded-xl bg-muted/40 p-4 space-y-3">
+          <label className="text-ui-compact font-medium text-muted-foreground">配置文件</label>
+          <div className="rounded-xl settings-tile p-4 space-y-3">
             <p className="text-xs text-foreground/60">
               配置文件包含提供商、智能体、主题等所有应用设置。高级用户可直接编辑此文件。
             </p>

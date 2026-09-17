@@ -61,7 +61,10 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
   }, []);
 
   const { messages, timestampsByMessage, parsedEvents, timestamps } = useMemo(() => {
-    const parsed = (rawEvents ?? []).map((event) => parseAgentEvent(JSON.stringify(event)));
+    // parseAgentEvent accepts the raw object directly; the old
+    // JSON.stringify round-trip re-serialized every subagent event only for the
+    // parser to deserialize it again.
+    const parsed = (rawEvents ?? []).map((event) => parseAgentEvent(event));
     const parsedTimestamps = parsed.map((_message, index) => {
       const raw = (rawEvents ?? [])[index] as { timestamp?: unknown } | undefined;
       const ts = typeof raw?.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN;

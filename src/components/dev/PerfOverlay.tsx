@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { saveDialog } from '../../lib/desktopDialogs';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import {
+  installLayoutFlickerProbe,
+  type LayoutProbeResult,
+} from '../../lib/dev/layoutFlickerProbe';
+import { readAndResetSmoothness, type SmoothnessSnapshot } from '../../lib/streamSmoothness';
 import { usePerfStore } from '../../stores/perfStore';
 import { TooltipHint } from '../ui/tooltip';
 import './PerfOverlay.css';
@@ -55,6 +60,50 @@ export function PerfOverlay() {
     [renderAggregates],
   );
   const slowThresholdMs = usePerfStore((s) => s.slowThresholdMs);
+  // Long-task totals for the last sampling window. This answers the question
+  // the FPS number alone cannot: a low FPS caused by the main thread actually
+  // blocking shows up here, while a low FPS caused by the browser throttling a
+  // window it considers backgrounded does not. Reading those two apart matters
+  // — otherwise a throttle artifact reads as a renderer performance problem.
+  const [longTasks, setLongTasks] = useState({ count: 0, maxMs: 0, totalMs: 0 });
+  // 流式平滑度。单独一行是因为 FPS 与长任务都看不出"手感"：一个完全停顿的流
+  // 是完美平滑的（变异系数为 0），所以必须同时显示"推进帧占比"与"更新间隔 p95"。
+  const [smoothness, setSmoothness] = useState<SmoothnessSnapshot | null>(null);
+  // 系统级"减少动效"会让 `DotMatrix`（`motion-reduce:[animation-name:none]`）与
+  // `RunningElapsedTimer` 的 `.shimmer`（`motion-reduce:animate-none`）被**显式**
+  // 关掉，表现为"所有 loading 动效一起失效"。把它显出来，这类症状就不必再靠猜。
+  const [reduceMotion, setReduceMotion] = useState(false);
+  // 布局闪动诊断：装上即**常驻**记录（只在数值变化时记账），这样"滚动条占位
+  // 10→0 的那一瞬"不会因为采样起点在点击之后而被漏掉；再点一次即导出并停止。
+  const [layoutProbeOn, setLayoutProbeOn] = useState(false);
+  const [layoutProbeResult, setLayoutProbeResult] = useState<LayoutProbeResult | null>(null);
+  const layoutProbeRef = useRef<{ uninstall: () => void; dump: () => LayoutProbeResult } | null>(null);
+
+  useEffect(() => () => layoutProbeRef.current?.uninstall(), []);
+
+  const toggleLayoutProbe = useCallback(() => {
+    if (layoutProbeRef.current) {
+      // 导出并停止。
+      const result = layoutProbeRef.current.dump();
+      layoutProbeRef.current.uninstall();
+      layoutProbeRef.current = null;
+      setLayoutProbeResult(result);
+      setLayoutProbeOn(false);
+      return;
+    }
+    setLayoutProbeResult(null);
+    layoutProbeRef.current = installLayoutFlickerProbe();
+    setLayoutProbeOn(true);
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!query) return;
+    setReduceMotion(query.matches);
+    const onChange = (event: MediaQueryListEvent) => setReduceMotion(event.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -73,6 +122,29 @@ export function PerfOverlay() {
     const setFps = usePerfStore.getState().setFps;
     const setMemoryMb = usePerfStore.getState().setMemoryMb;
 
+    // longtask is Chromium-only; where it is missing the row stays at zero and
+    // simply carries no signal.
+    let taskCount = 0;
+    let taskMaxMs = 0;
+    let taskTotalMs = 0;
+    let longTaskObserver: PerformanceObserver | null = null;
+    if (typeof PerformanceObserver !== 'undefined') {
+      try {
+        longTaskObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            taskCount += 1;
+            taskTotalMs += entry.duration;
+            if (entry.duration > taskMaxMs) {
+              taskMaxMs = entry.duration;
+            }
+          }
+        });
+        longTaskObserver.observe({ entryTypes: ['longtask'] });
+      } catch {
+        longTaskObserver = null;
+      }
+    }
+
     const tick = () => {
       frames++;
       const now = performance.now();
@@ -83,11 +155,27 @@ export function PerfOverlay() {
         const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
         setMemoryMb(mem?.usedJSHeapSize ? mem.usedJSHeapSize / 1048576 : null);
         usePerfStore.getState().pruneIpc();
+        setLongTasks({
+          count: taskCount,
+          maxMs: Math.round(taskMaxMs),
+          totalMs: Math.round(taskTotalMs),
+        });
+        taskCount = 0;
+        taskMaxMs = 0;
+        taskTotalMs = 0;
+        const smooth = readAndResetSmoothness(now);
+        // 非流式期间采样数为 0 —— 保留上一次读数，避免数字每秒闪成 0。
+        if (smooth.sampledFrames > 0) {
+          setSmoothness(smooth);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      longTaskObserver?.disconnect();
+    };
   }, []);
 
   const persist = useCallback((next: StoredPosition) => {
@@ -171,8 +259,39 @@ export function PerfOverlay() {
         </TooltipHint>
       </div>
       <PerfRow label="FPS" value={String(fps)} bad={fps > 0 && fps < FPS_BAD_THRESHOLD} />
+      <PerfRow
+        label="长任务/秒"
+        value={
+          longTasks.count === 0
+            ? '无'
+            : `${longTasks.count} · 最长 ${longTasks.maxMs}ms · 共 ${longTasks.totalMs}ms`
+        }
+        bad={longTasks.totalMs >= 200}
+      />
       <PerfRow label="内存 (MB)" value={memoryMb !== null ? memoryMb.toFixed(1) : 'N/A'} />
       <PerfRow label="IPC/秒" value={String(ipcRate)} />
+      {reduceMotion ? <PerfRow label="系统动效" value="已被系统关闭" bad /> : null}
+      {layoutProbeResult ? (
+        <PerfRow
+          label="闪动诊断"
+          value={`视口宽 ${layoutProbeResult.viewportWidths.length} 种 · 占位 ${JSON.stringify(layoutProbeResult.scrollbarSpaces)} · 元素 ${layoutProbeResult.elementSwaps} 个`}
+          bad={layoutProbeResult.scrollbarSpaces.length > 1 || layoutProbeResult.elementSwaps > 1}
+        />
+      ) : null}
+      <PerfRow
+        label="流式平滑度"
+        value={smoothness
+          ? `CV ${smoothness.charsPerUpdateCv.toFixed(2)} · ${smoothness.updatesPerSecond.toFixed(1)} 次/秒`
+          : '无'}
+        bad={Boolean(smoothness && (smoothness.charsPerUpdateCv > 2 || smoothness.updatesPerSecond < 4))}
+      />
+      <PerfRow
+        label="更新间隔 p50/p95"
+        value={smoothness
+          ? `${Math.round(smoothness.updateIntervalP50)}ms / ${Math.round(smoothness.updateIntervalP95)}ms`
+          : '无'}
+        bad={Boolean(smoothness && smoothness.updateIntervalP95 > 120)}
+      />
 
       <div style={{ marginTop: 4, opacity: 0.8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>慢 IPC Top-5 (&gt;</span>
@@ -222,6 +341,9 @@ export function PerfOverlay() {
       <div className="perf-overlay__actions">
         <button onClick={openDevtools}>DevTools</button>
         <button onClick={exportSnapshot}>快照</button>
+        <button onClick={toggleLayoutProbe}>
+          {layoutProbeOn ? '导出闪动记录' : '开始闪动记录'}
+        </button>
       </div>
     </div>
   );

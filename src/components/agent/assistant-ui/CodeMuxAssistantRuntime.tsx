@@ -17,6 +17,7 @@ import {
   type CodeMuxAssistantMessage,
   type CodeMuxAssistantPart,
 } from './convertAgentEvents';
+import { reconcileAssistantMessages } from './assistantMessageIdentity';
 
 type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
@@ -76,8 +77,15 @@ function SessionScopedAssistantRuntime({
   const eventTimestampsRef = useRef(eventTimestamps);
   eventTimestampsRef.current = eventTimestamps;
 
+  // 历史身份稳定：把本次转换结果与上一次的产出做引用协调，让未变化的消息与部件
+  // 保持对象身份。下游 assistant-ui 的转换缓存是 `WeakMap<外部消息对象, ThreadMessage>`，
+  // 只有身份稳定时它才会真正命中；否则整条线程消息每次事件都被重新转换。
+  const stableMessagesRef = useRef<CodeMuxAssistantMessage[] | undefined>(undefined);
   const messages = useMemo(() => {
-    return convertAgentEventsToAssistantMessages(events, conversationTurns);
+    const converted = convertAgentEventsToAssistantMessages(events, conversationTurns);
+    const stable = reconcileAssistantMessages(converted, stableMessagesRef.current);
+    stableMessagesRef.current = stable;
+    return stable;
   }, [events, conversationTurns]);
 
   const handleMessage = useCallback(
@@ -142,15 +150,18 @@ function SessionScopedAssistantRuntime({
     [],
   );
 
+  // adapters 必须保持引用稳定：`useExternalStoreRuntime` 内部用
+  // `if (this._store === store) return` 做守卫，且 setAdapter 的 effect 没有依赖
+  // 数组 —— 每次渲染都新建字面量会让守卫永不生效、adapter 每次渲染都被重灌。
+  const adapters = useMemo(() => ({ attachments: attachmentAdapter }), [attachmentAdapter]);
+
   const runtime = useExternalStoreRuntime<CodeMuxAssistantMessage>({
     messages,
     isRunning,
     convertMessage,
     onNew: handleNew,
     onEdit: handleEdit,
-    adapters: {
-      attachments: attachmentAdapter,
-    },
+    adapters,
   });
 
   return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
