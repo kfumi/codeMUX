@@ -3508,6 +3508,66 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().streamingText[session.id]).toBe('');
   });
 
+  it('publishes the truncated transcript and its turn projection in a single store generation', async () => {
+    const session = await primeSession('codex');
+
+    const secondTurnLocator: AgentUserMessageLocator = {
+      providerMessageId: 'codex-user-2',
+      lineIndex: 12,
+      role: 'user',
+      textFingerprint: 'second turn',
+      turnOrdinal: 2,
+    };
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-single-generation-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: 'second turn', locator: secondTurnLocator } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-single-generation-2',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3, 4] },
+    });
+
+    const generations: { events: boolean; turns: boolean }[] = [];
+    const unsubscribe = useAgentStore.subscribe((state, previous) => {
+      const eventsChanged = state.events[session.id] !== previous.events[session.id];
+      const turnsChanged = state.turns[session.id] !== previous.turns[session.id];
+      if (eventsChanged || turnsChanged) {
+        generations.push({ events: eventsChanged, turns: turnsChanged });
+      }
+    });
+
+    await useAgentStore.getState().rewindToMessage(session.id, 2);
+    unsubscribe();
+
+    // The transcript and its turn projection must land together. A separate
+    // turns-only generation re-renders every surviving message row twice, which
+    // is what made rewinding a long thread freeze the UI.
+    expect(generations).toEqual([{ events: true, turns: true }]);
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
+    expect(useAgentStore.getState().turns[session.id]).toHaveLength(1);
+  });
+
   it('rewinds an earlier user message by turn ordinal and text fingerprint', async () => {
     const session = await primeSession('claude_code');
 

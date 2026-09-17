@@ -3649,29 +3649,50 @@ function createSessionEventHandler(
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
     clearSimulatedStream(sessionId);
 
-    set((s) => ({
-      events: { ...s.events, [sessionId]: events.slice(0, userEventIndex) },
-      eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userEventIndex) },
-      isRunning: { ...s.isRunning, [sessionId]: false },
-      queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
-      error: { ...s.error, [sessionId]: null },
-      mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
-      todos: removeSessionEntry(s.todos, sessionId),
-      tokenUsageBySession: removeSessionEntry(s.tokenUsageBySession, sessionId),
-      tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
-      streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-      streamingText: { ...s.streamingText, [sessionId]: '' },
-      streamingVersion: removeSessionEntry(s.streamingVersion, sessionId),
-      forceStopped: { ...s.forceStopped, [sessionId]: false },
-      streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
-      streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
-      streamingToolIndexMap: removeSessionEntry(s.streamingToolIndexMap, sessionId),
-      streamedToolUseIds: removeSessionEntry(s.streamedToolUseIds, sessionId),
-      changedFiles: removeSessionEntry(s.changedFiles, sessionId),
-      fileOriginals: removeSessionEntry(s.fileOriginals, sessionId),
-      acknowledgedFiles: removeSessionEntry(s.acknowledgedFiles, sessionId),
-      composerDrafts: removeSessionEntry(s.composerDrafts, sessionId),
-    }));
+    set((s) => {
+      const nextEvents = events.slice(0, userEventIndex);
+      const nextTimestamps = (s.eventTimestamps[sessionId] ?? []).slice(0, userEventIndex);
+      const nextEventsBySession = { ...s.events, [sessionId]: nextEvents };
+      const nextTimestampsBySession = { ...s.eventTimestamps, [sessionId]: nextTimestamps };
+      const nextIsRunning = { ...s.isRunning, [sessionId]: false };
+      const nextForceStopped = { ...s.forceStopped, [sessionId]: false };
+      return {
+        events: nextEventsBySession,
+        eventTimestamps: nextTimestampsBySession,
+        isRunning: nextIsRunning,
+        queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
+        error: { ...s.error, [sessionId]: null },
+        mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
+        todos: removeSessionEntry(s.todos, sessionId),
+        tokenUsageBySession: removeSessionEntry(s.tokenUsageBySession, sessionId),
+        tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
+        streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+        streamingText: { ...s.streamingText, [sessionId]: '' },
+        streamingVersion: removeSessionEntry(s.streamingVersion, sessionId),
+        forceStopped: nextForceStopped,
+        streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
+        streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
+        streamingToolIndexMap: removeSessionEntry(s.streamingToolIndexMap, sessionId),
+        streamedToolUseIds: removeSessionEntry(s.streamedToolUseIds, sessionId),
+        changedFiles: removeSessionEntry(s.changedFiles, sessionId),
+        fileOriginals: removeSessionEntry(s.fileOriginals, sessionId),
+        acknowledgedFiles: removeSessionEntry(s.acknowledgedFiles, sessionId),
+        composerDrafts: removeSessionEntry(s.composerDrafts, sessionId),
+        // Rebuild the turn projection in the same commit as the truncated events.
+        // Leaving it to the store subscriber publishes a second generation, which
+        // re-renders every surviving message row twice on long threads.
+        turns: {
+          ...s.turns,
+          [sessionId]: computeSessionTurns({
+            ...s,
+            events: nextEventsBySession,
+            eventTimestamps: nextTimestampsBySession,
+            isRunning: nextIsRunning,
+            forceStopped: nextForceStopped,
+          }, sessionId),
+        },
+      };
+    });
 
     try {
       localStorage.removeItem(`acknowledged-files-${sessionId}`);
@@ -3716,6 +3737,18 @@ function createSessionEventHandler(
 // Keep the lifecycle projection in the store so renderers do not independently
 // infer terminal state from the last assistant message. The listener only reacts
 // to inputs used by the reducer; its own `turns` update does not recurse.
+// Keep the lifecycle projection in the store so renderers do not independently
+// infer terminal state from the last assistant message. The listener only reacts
+// to inputs used by the reducer; its own `turns` update does not recurse.
+function computeSessionTurns(state: AgentState, sessionId: string): ConversationTurn<AgentMessage>[] {
+  return buildConversationTurns(state.events[sessionId] ?? [], {
+    isRunning: state.isRunning[sessionId] ?? false,
+    forceStopped: state.forceStopped[sessionId] ?? false,
+    sessionId,
+    timestamps: state.eventTimestamps[sessionId],
+  });
+}
+
 useAgentStore.subscribe((state, previousState) => {
   const sessionIds = new Set([
     ...Object.keys(state.events),
@@ -3730,21 +3763,22 @@ useAgentStore.subscribe((state, previousState) => {
   const changedTurns: Record<string, ConversationTurn<AgentMessage>[]> = {};
 
   for (const sessionId of sessionIds) {
+    // A commit that already refreshed `turns` alongside its own events (see the
+    // rewind action) must not be re-derived here: rebuilding them would publish a
+    // second generation and re-render the whole transcript twice.
     if (
-      state.events[sessionId] === previousState.events[sessionId]
-      && state.isRunning[sessionId] === previousState.isRunning[sessionId]
-      && state.forceStopped[sessionId] === previousState.forceStopped[sessionId]
-      && state.eventTimestamps[sessionId] === previousState.eventTimestamps[sessionId]
+      state.turns[sessionId] !== previousState.turns[sessionId]
+      || (
+        state.events[sessionId] === previousState.events[sessionId]
+        && state.isRunning[sessionId] === previousState.isRunning[sessionId]
+        && state.forceStopped[sessionId] === previousState.forceStopped[sessionId]
+        && state.eventTimestamps[sessionId] === previousState.eventTimestamps[sessionId]
+      )
     ) {
       continue;
     }
 
-    changedTurns[sessionId] = buildConversationTurns(state.events[sessionId] ?? [], {
-      isRunning: state.isRunning[sessionId] ?? false,
-      forceStopped: state.forceStopped[sessionId] ?? false,
-      sessionId,
-      timestamps: state.eventTimestamps[sessionId],
-    });
+    changedTurns[sessionId] = computeSessionTurns(state, sessionId);
   }
 
   if (Object.keys(changedTurns).length > 0) {
