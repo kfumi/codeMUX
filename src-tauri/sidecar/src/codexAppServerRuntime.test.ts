@@ -187,6 +187,9 @@ function waitForEvent(
   }, { timeout: 5_000, interval: 20 });
 }
 
+// 本文件几乎每条用例都会真实 spawn 一个 Node 子进程(fake app-server)并等待握手,
+// 全量并行跑 60 个 sidecar 测试文件时 spawn/握手会被明显拖慢,因此统一给足超时预算(60s)。
+// (只放宽测试预算,断言与内部 vi.waitFor 的 5s 超时不变。)
 describe('CodexAppServerRuntime (fake app-server)', () => {
   it('rejects sendInput before ensure_session', async () => {
     const { runtime } = await createHarness(DEFAULT_SCENARIO);
@@ -228,7 +231,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -244,7 +247,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -283,7 +286,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -333,7 +336,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -403,7 +406,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -543,7 +546,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -590,7 +593,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -638,7 +641,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -678,7 +681,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -729,7 +732,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -765,7 +768,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -814,7 +817,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -851,7 +854,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -893,7 +896,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -942,7 +945,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it('rejects steer when no Codex turn is active', async () => {
@@ -969,7 +972,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1001,7 +1004,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 });
 
@@ -1078,7 +1081,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1120,7 +1123,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1156,7 +1159,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1193,7 +1196,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1225,7 +1228,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1285,7 +1288,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1338,7 +1341,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1370,7 +1373,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1408,7 +1411,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1422,7 +1425,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   // ─── Issue 08: manual context compaction (/compact) ────────────────────
@@ -1508,7 +1511,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1545,7 +1548,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1597,7 +1600,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1652,7 +1655,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1674,7 +1677,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   // ─── Issue 07: Plan Mode + Plan Approval closure ────────────────────────
@@ -1785,7 +1788,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1812,7 +1815,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1836,7 +1839,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1868,7 +1871,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -1906,7 +1909,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   // ─── Issue 06: mid-turn permission update deferral ──────────────────────
@@ -1961,7 +1964,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   // ─── Issue 09: third-party upstream compat-proxy rehoming ───────────────
@@ -1988,7 +1991,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await proxyManager.stop();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -2010,7 +2013,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   // ─── Issue 10: fork on the persistent app-server connection ─────────────
@@ -2048,7 +2051,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -2080,7 +2083,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 
   it(
@@ -2104,7 +2107,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         await runtime.shutdown();
       }
     },
-    20_000,
+    60_000,
   );
 });
 

@@ -307,14 +307,25 @@ describe('SessionRuntime subagent query lifecycle', () => {
       message: { role: 'assistant', content: [{ type: 'text', text: 'All subagents completed, here is the summary' }] },
     });
     await flush();
-    expect(harness.emitted.slice(emittedAfterFirstTurn).some((event) => event.type === 'turn_finished')).toBe(false);
+    // Silence past the quiescence window closes the woken turn explicitly.
+    // Wait for that synthetic boundary instead of racing it with wall-clock
+    // sleeps: under load the timer can fire inside the flush window.
+    await vi.waitFor(() => {
+      expect(
+        harness.emitted.slice(emittedAfterFirstTurn).filter((event) => event.type === 'turn_finished'),
+      ).toHaveLength(1);
+    }, { timeout: 5_000 });
 
-    // Silence past the quiescence window closes the turn explicitly.
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    const finish = harness.emitted
-      .slice(emittedAfterFirstTurn)
-      .find((event) => event.type === 'turn_finished') as { outcome?: string } | undefined;
-    expect(finish?.outcome).toBe('completed');
+    const continuationEvents = harness.emitted.slice(emittedAfterFirstTurn);
+    const assistantIndex = continuationEvents.findIndex((event) => event.type === 'assistant_message');
+    const finishes = continuationEvents
+      .filter((event) => event.type === 'turn_finished') as Array<{ outcome?: string; synthetic?: boolean }>;
+    // Exactly one boundary, and it trails the content it closes.
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    expect(finishes).toHaveLength(1);
+    expect(continuationEvents.indexOf(finishes[0] as Record<string, unknown>)).toBeGreaterThan(assistantIndex);
+    expect(finishes[0]?.outcome).toBe('completed');
+    expect(finishes[0]?.synthetic).toBe(true);
 
     runtime.shutdown();
   });
@@ -351,14 +362,24 @@ describe('SessionRuntime subagent query lifecycle', () => {
       message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain tail' }] },
     });
     await flush();
-    expect(harness.emitted.slice(emittedAfterFirstTurn).some((event) => event.type === 'turn_finished')).toBe(false);
+    // The trailing sidechain frames must not cancel the pending quiescence
+    // timer, so wait for the synthesized boundary instead of racing it with
+    // wall-clock sleeps.
+    await vi.waitFor(() => {
+      expect(
+        harness.emitted.slice(emittedAfterFirstTurn).filter((event) => event.type === 'turn_finished'),
+      ).toHaveLength(1);
+    }, { timeout: 5_000 });
 
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    const finish = harness.emitted
-      .slice(emittedAfterFirstTurn)
-      .find((event) => event.type === 'turn_finished') as { outcome?: string; synthetic?: boolean } | undefined;
-    expect(finish?.outcome).toBe('completed');
-    expect(finish?.synthetic).toBe(true);
+    const continuationEvents = harness.emitted.slice(emittedAfterFirstTurn);
+    const assistantIndex = continuationEvents.findIndex((event) => event.type === 'assistant_message');
+    const finishes = continuationEvents
+      .filter((event) => event.type === 'turn_finished') as Array<{ outcome?: string; synthetic?: boolean }>;
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    expect(finishes).toHaveLength(1);
+    expect(continuationEvents.indexOf(finishes[0] as Record<string, unknown>)).toBeGreaterThan(assistantIndex);
+    expect(finishes[0]?.outcome).toBe('completed');
+    expect(finishes[0]?.synthetic).toBe(true);
 
     runtime.shutdown();
   });

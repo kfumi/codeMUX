@@ -61,8 +61,8 @@ function startFakePiRuntime(
       PiRpcProcess.start({
         command: process.execPath,
         args: [FAKE_PI_PATH],
-        env: { PI_FAKE_SCENARIO: scenarioFile, PI_FAKE_LOG: wireLogFile },
-        requestTimeoutMs: 2_000,
+        env: { ...process.env, PI_FAKE_SCENARIO: scenarioFile, PI_FAKE_LOG: wireLogFile },
+        requestTimeoutMs: 10_000,
       }),
     eventIdFactory: (() => {
       let n = 0;
@@ -479,8 +479,8 @@ describe('PiRuntime', () => {
         return PiRpcProcess.start({
           command: process.execPath,
           args: [FAKE_PI_PATH],
-          env: { PI_FAKE_SCENARIO: scenarioFile },
-          requestTimeoutMs: 2_000,
+          env: { ...process.env, PI_FAKE_SCENARIO: scenarioFile },
+          requestTimeoutMs: 10_000,
         });
       },
     });

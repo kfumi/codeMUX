@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { SidecarCommand } from './types.js';
 import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarCommandDispatcher } from './index.js';
+// 静态导入:在 it() 内 await import 会把首次模块图加载计入该用例的超时预算。
+import { SteerUnavailableError } from './steer.js';
 
 function createRuntime() {
   return {
@@ -690,7 +692,6 @@ describe('sidecar command dispatcher', () => {
   });
 
   it('emits steer_result unavailable when steerActiveTurn rejects as unavailable', async () => {
-    const { SteerUnavailableError } = await import('./steer.js');
     const claude = createRuntime();
     claude.steerActiveTurn.mockRejectedValue(new SteerUnavailableError('no active Claude turn to steer'));
     const emit = vi.fn();

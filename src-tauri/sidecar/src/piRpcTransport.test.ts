@@ -255,8 +255,8 @@ describe('PiRpcProcess', () => {
     return PiRpcProcess.start({
       command: process.execPath,
       args: [FAKE_PI_PATH],
-      env: { PI_FAKE_SCENARIO: envValue },
-      requestTimeoutMs: 2_000,
+      env: { ...process.env, PI_FAKE_SCENARIO: envValue },
+      requestTimeoutMs: 10_000,
     });
   }
 
