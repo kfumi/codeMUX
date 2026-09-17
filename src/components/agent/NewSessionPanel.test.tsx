@@ -11,6 +11,8 @@ import type { AgentKind } from '../../types/session';
 import type { ModelProvider } from '../../types/provider';
 import type { SlashCommand } from '../../lib/slashCommands';
 import { NewSessionPanel } from './NewSessionPanel';
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useAgentStore } from '../../stores/agentStore';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
 vi.mock('../../hooks/useAgentModels', () => ({
@@ -204,7 +206,6 @@ describe('NewSessionPanel', () => {
   });
 
   it('clears the shared new-session composer draft after a successful submit', async () => {
-    const { useAgentStore } = await import('../../stores/agentStore');
     useAgentStore.getState().saveComposerDraft('new-session-draft', '旧输入还在');
 
     const onSubmit = vi.fn(async () => {});

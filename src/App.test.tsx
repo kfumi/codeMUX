@@ -3,6 +3,9 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import App from './App';
+
 vi.mock('sonner', () => ({
   Toaster: () => <div>toaster</div>,
 }));
@@ -170,7 +173,6 @@ vi.mock('./stores/skillStore', () => ({
 
 describe('App', () => {
   it('渲染时在 UpdaterProvider 内将更新入口传给主布局', async () => {
-    const { default: App } = await import('./App');
 
     render(<App />);
 

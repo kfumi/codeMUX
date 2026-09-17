@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { CodeEditorSurface } from './CodeEditorSurface';
+
 // Monaco 在 jsdom 里跑不起来(需要真实布局与 worker),所以替换掉这个模块。
 // 这里要验的是「宿主形态 → 走哪条渲染路径」的门控与 readOnly 传参,不是编辑器本身。
 type MonacoProps = Record<string, unknown>;
@@ -19,7 +22,6 @@ vi.mock('./MonacoCodeView', () => ({
 
 async function renderSurface(hostForm: 'desktop' | 'browser' | 'mobile') {
   useDaemonConnectionStore.setState({ hostForm });
-  const { CodeEditorSurface } = await import('./CodeEditorSurface');
   render(
     <CodeEditorSurface
       value='{"a":1}'

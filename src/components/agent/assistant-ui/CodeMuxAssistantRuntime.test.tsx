@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
@@ -20,6 +20,57 @@ import {
   shouldRouteChipCommandToHandler,
 } from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap, extractUserNavTitle } from './CodeMuxThread';
+
+/**
+ * 真实 markdown 渲染层在 jsdom 里的代价过高：这个文件的长会话用例（480 条事件 /
+ * 120 轮，见「does not read stale message indexes」）要挂载约 240 条消息，每条
+ * 文本都走 remark/rehype 解析并调用 Shiki 高亮，挂载与 rewind 触发的二次重渲染
+ * 会吃掉整个测试超时。这里沿用 FileEditorPanel.test.tsx 的做法把渲染层降级成静态
+ * 节点：className 与文本内容照常渲染（`.aui-md` 与 getByText 断言仍然有效），只剥离
+ * 标题/列表/引用前缀和代码围栏，让标题、列表项与正文仍是可直接命中的文本。
+ */
+function toPlainMarkdownBlocks(children: ReactNode): ReactNode {
+  if (typeof children !== 'string') {
+    return children ?? null;
+  }
+
+  return children
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('```'))
+    .map((line, index) => (
+      <div key={index}>
+        {line.replace(/^#{1,6}\s+/, '').replace(/^([-*+]|\d+\.)\s+/, '').replace(/^>\s+/, '')}
+      </div>
+    ));
+}
+
+// 消息正文由 CodeMuxThread / CodeMuxMessageParts / CodeMuxTranscriptMessage 直接渲染。
+vi.mock('streamdown', () => ({
+  defaultRehypePlugins: {},
+  Streamdown: ({ children, className }: { children?: ReactNode; className?: string }) => (
+    <div className={className}>{toPlainMarkdownBlocks(children)}</div>
+  ),
+}));
+
+// 普通文本与思考 part 走 assistant-ui 的 StreamdownTextPrimitive。这个包是外部依赖，
+// 必须按它自己的 specifier mock 掉，否则它会自行加载真实 streamdown。
+vi.mock('@assistant-ui/react-streamdown', async () => {
+  const { useMessagePartText } = await import('@assistant-ui/react');
+
+  return {
+    StreamdownTextPrimitive: ({ className }: { className?: string }) => {
+      const part = useMessagePartText();
+      return <div className={className}>{toPlainMarkdownBlocks(part.text)}</div>;
+    },
+  };
+});
+
+// @streamdown/code 在导入时就会把整个 Shiki（bundled languages + 正则引擎）拉进来，
+// 这里换成空插件；真实高亮在 jsdom 测试里没有断言价值。
+vi.mock('@streamdown/code', () => ({
+  code: { name: 'stub-code-highlighter', type: 'code-highlighter' },
+}));
 
 const sessionOneEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'session one user' } },

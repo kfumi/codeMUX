@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { AboutSettings } from './AboutSettings';
 
 // vi.mock 工厂会被提升到文件顶部执行,这里必须用 vi.hoisted 声明,
 // 否则 desktop-bridge 被更早的导入链(host-form → daemonConnectionStore)拉取时会踩到 TDZ。
@@ -47,8 +49,6 @@ describe('AboutSettings', () => {
   });
 
   it('点击检查更新时调用交互式更新检查', async () => {
-    const { AboutSettings } = await import('./AboutSettings');
-
     render(<AboutSettings />);
 
     await screen.findByText('CodeMUX');
@@ -68,7 +68,6 @@ describe('AboutSettings', () => {
       downloadAndInstall: vi.fn(async () => {}),
     });
     mockUpdaterContext.version = '1.2.3';
-    const { AboutSettings } = await import('./AboutSettings');
 
     render(<AboutSettings />);
 
@@ -85,8 +84,6 @@ describe('AboutSettings', () => {
   });
 
   it('手动检查没有更新时弹出最新版本提示', async () => {
-    const { AboutSettings } = await import('./AboutSettings');
-
     render(<AboutSettings />);
 
     await screen.findByText('CodeMUX');
@@ -99,7 +96,6 @@ describe('AboutSettings', () => {
 
   it('手动检查失败时弹出失败提示且不展示底层错误原因', async () => {
     mockUpdaterContext.checkForUpdates.mockRejectedValueOnce(new Error('network down'));
-    const { AboutSettings } = await import('./AboutSettings');
 
     render(<AboutSettings />);
 
@@ -121,8 +117,6 @@ describe('AboutSettings', () => {
   it('检查中展示加载态并禁用按钮', async () => {
     mockUpdaterContext.stage = 'checking';
 
-    const { AboutSettings } = await import('./AboutSettings');
-
     render(<AboutSettings />);
 
     const button = await screen.findByRole('button', { name: '检查中...' });
@@ -138,8 +132,6 @@ describe('AboutSettings', () => {
   ] as const)('更新处于 %s 阶段时禁用检查更新按钮且不允许再次触发', async (stage) => {
     mockUpdaterContext.stage = stage;
 
-    const { AboutSettings } = await import('./AboutSettings');
-
     render(<AboutSettings />);
 
     const button = await screen.findByRole('button', { name: '检查更新' });
@@ -152,7 +144,6 @@ describe('AboutSettings', () => {
 
   it('读取应用信息失败时仍显示规范品牌名', async () => {
     currentVersionMock.mockRejectedValueOnce(new Error('unavailable'));
-    const { AboutSettings } = await import('./AboutSettings');
 
     render(<AboutSettings />);
 
@@ -161,7 +152,6 @@ describe('AboutSettings', () => {
 
   it('浏览器形态隐藏「检查更新」并标注当前宿主形态', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'browser' });
-    const { AboutSettings } = await import('./AboutSettings');
 
     render(<AboutSettings />);
 

@@ -3,15 +3,20 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-const useUpdaterMock = vi.fn(() => ({
-  stage: 'idle' as const,
-  version: undefined,
-  progress: undefined,
-  error: undefined,
-  checkForUpdates: vi.fn(),
-  startUpdate: vi.fn(),
-  relaunch: vi.fn(),
-  resetToIdle: vi.fn(),
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { UpdaterProvider, useUpdaterContext } from './UpdaterProvider';
+
+const { useUpdaterMock } = vi.hoisted(() => ({
+  useUpdaterMock: vi.fn(() => ({
+    stage: 'idle' as const,
+    version: undefined,
+    progress: undefined,
+    error: undefined,
+    checkForUpdates: vi.fn(),
+    startUpdate: vi.fn(),
+    relaunch: vi.fn(),
+    resetToIdle: vi.fn(),
+  })),
 }));
 
 vi.mock('./hooks/useUpdater', () => ({
@@ -20,7 +25,6 @@ vi.mock('./hooks/useUpdater', () => ({
 
 describe('UpdaterProvider', () => {
   it('向子组件提供 updater 上下文', async () => {
-    const { UpdaterProvider, useUpdaterContext } = await import('./UpdaterProvider');
 
     function Probe() {
       const updater = useUpdaterContext();

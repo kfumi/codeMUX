@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../../types/session';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
+
 const unarchiveSession = vi.fn();
 const deleteSession = vi.fn();
 const fetchArchivedSessions = vi.fn();
@@ -91,7 +94,6 @@ describe('ArchivedSessionsPanel', () => {
   });
 
   it('filters archived sessions by agent and resolves legacy titles before truncating', async () => {
-    const { ArchivedSessionsPanel } = await import('./ArchivedSessionsPanel');
     render(<ArchivedSessionsPanel />);
 
     expect(fetchArchivedSessions).toHaveBeenCalled();

@@ -9,6 +9,8 @@ import { TooltipProvider } from '../ui/tooltip';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { SessionList } from './SessionList';
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { daemonFacade } from '../../lib/facades/daemon-facade';
 
 const initDaemonClientMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const getDaemonStartupErrorMock = vi.hoisted(() => vi.fn(() => null as string | null));
@@ -303,7 +305,6 @@ describe('SessionList', () => {
   });
 
   it('retries daemon connection from the sidebar alert', async () => {
-    const { daemonFacade } = await import('../../lib/facades/daemon-facade');
     getDaemonStartupErrorMock.mockReturnValue('连接失败');
     useSessionStore.setState({
       isLoading: false,

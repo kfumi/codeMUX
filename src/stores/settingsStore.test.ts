@@ -2,15 +2,59 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppConfig, ModelProvider } from '../types/provider';
 
-const setDefaultAgentKindMock = vi.fn<(agentKind: string) => Promise<void>>();
-const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>();
-const deleteModelProviderMock = vi.fn<(providerId: string) => Promise<void>>();
-const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
-const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
-const setDefaultOpenTargetMock = vi.fn<(target: string) => Promise<void>>();
-const setImmediateRunModeMock = vi.fn<(mode: string) => Promise<void>>();
-const setBrowserControlMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
-const getConfigMock = vi.fn(async () => structuredClone(baseConfig));
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useSettingsStore } from './settingsStore';
+
+const {
+  baseConfig,
+  deleteModelProviderMock,
+  getConfigMock,
+  setBrowserControlMock,
+  setCompactAiOutputMock,
+  setDefaultAgentKindMock,
+  setDefaultOpenTargetMock,
+  setImmediateRunModeMock,
+  setNotificationSettingsMock,
+  updateAgentConfigMock,
+} = vi.hoisted(() => {
+  const baseConfig: AppConfig = {
+    model_providers: [],
+    active_provider_id: null,
+    agent_defaults: {
+      default_agent_kind: 'claude_code',
+    },
+    agent_configs: {
+      claude_code: {
+        executable_mode: 'auto',
+        resume_sessions: true,
+      },
+      codex: {
+      },
+      gemini_cli: {},
+      opencode: {},
+    },
+    theme: 'System',
+    compact_ai_output: false,
+    default_open_target: 'file_explorer',
+    notifications: {
+      system_enabled: true,
+      sound_enabled: false,
+      sound: 'ding',
+    },
+  };
+  return {
+    baseConfig,
+    setDefaultAgentKindMock: vi.fn<(agentKind: string) => Promise<void>>(),
+    updateAgentConfigMock: vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>(),
+    deleteModelProviderMock: vi.fn<(providerId: string) => Promise<void>>(),
+    setCompactAiOutputMock: vi.fn<(enabled: boolean) => Promise<void>>(),
+    setNotificationSettingsMock: vi.fn<(settings: Record<string, unknown>) => Promise<void>>(),
+    setDefaultOpenTargetMock: vi.fn<(target: string) => Promise<void>>(),
+    setImmediateRunModeMock: vi.fn<(mode: string) => Promise<void>>(),
+    setBrowserControlMock: vi.fn<(settings: Record<string, unknown>) => Promise<void>>(),
+    getConfigMock: vi.fn(async () => structuredClone(baseConfig)),
+  };
+});
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
@@ -49,38 +93,12 @@ const sampleProvider = (id: string): ModelProvider => ({
   default_model: 'gpt-5',
 });
 
-const baseConfig: AppConfig = {
-  model_providers: [],
-  active_provider_id: null,
-  agent_defaults: {
-    default_agent_kind: 'claude_code',
-  },
-  agent_configs: {
-    claude_code: {
-      executable_mode: 'auto',
-      resume_sessions: true,
-    },
-    codex: {
-    },
-    gemini_cli: {},
-    opencode: {},
-  },
-  theme: 'System',
-  compact_ai_output: false,
-  default_open_target: 'file_explorer',
-  notifications: {
-    system_enabled: true,
-    sound_enabled: false,
-    sound: 'ding',
-  },
-};
 
 describe('settings store agent config actions', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     getConfigMock.mockResolvedValue(structuredClone(baseConfig));
     deleteModelProviderMock.mockImplementation(async () => undefined);
-    const { useSettingsStore } = await import('./settingsStore');
     useSettingsStore.setState({
       config: structuredClone(baseConfig),
       isLoading: false,
@@ -89,7 +107,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists default agent changes', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setDefaultAgentKind('codex');
 
@@ -98,7 +115,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists compact AI output preference', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setCompactAiOutput(true);
 
@@ -107,7 +123,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists the default project open target', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setDefaultOpenTarget('vscode');
 
@@ -116,7 +131,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists the immediate-run preference', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setImmediateRunMode('interrupt');
 
@@ -125,7 +139,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('keeps the active provider consistent when the active provider is deleted', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     const provider = sampleProvider('provider-1');
 
     useSettingsStore.setState((state) => ({
@@ -150,7 +163,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('uses provider Codex proxy override when deciding if proxy is needed', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     const provider = sampleProvider('provider-1');
 
     useSettingsStore.setState((state) => ({
@@ -167,7 +179,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('reports no proxy needed when a responses endpoint exists on the active provider', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     const provider = sampleProvider('provider-1');
     provider.endpoints.push({
       protocol: 'openai_responses',
@@ -191,7 +202,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('still reports proxy needed for chat-only providers that request it', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     const provider = sampleProvider('provider-1');
     provider.endpoints[0].codex_needs_proxy = true;
 
@@ -209,7 +219,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists notification settings updates', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setNotificationSettings({
       system_enabled: true,
@@ -230,7 +239,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('rolls notification settings back when persistence fails', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     setNotificationSettingsMock.mockRejectedValueOnce(new Error('write failed'));
 
     await useSettingsStore.getState().setNotificationSettings({
@@ -248,7 +256,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('normalizes legacy notification sound values before saving', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setNotificationSettings({
       system_enabled: true,
@@ -269,7 +276,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('persists reserved browser control settings', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
 
     await useSettingsStore.getState().setBrowserControl({
       enabled: true,
@@ -287,7 +293,6 @@ describe('settings store agent config actions', () => {
   });
 
   it('fills browser control defaults when the saved config omitted the field', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     getConfigMock.mockResolvedValueOnce({
       ...structuredClone(baseConfig),
       browser: undefined,

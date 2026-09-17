@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useSessionStore } from './sessionStore';
+import { useSettingsStore } from './settingsStore';
+
 const {
   createMock,
   touchMock,
@@ -71,8 +75,6 @@ describe('session store createSession', () => {
     resetAgentSessionMock.mockResolvedValue(undefined);
     deleteSessionMock.mockResolvedValue(undefined);
     touchMock.mockResolvedValue(undefined);
-    const { useSessionStore } = await import('./sessionStore');
-    const { useSettingsStore } = await import('./settingsStore');
     useSessionStore.setState({
       sessions: [],
       archivedSessions: [],
@@ -127,7 +129,6 @@ describe('session store createSession', () => {
     };
     forkClaudeMock.mockResolvedValue(child);
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     const result = await useSessionStore.getState().forkSession('parent', 'assistant-1', 'provider-1');
@@ -158,7 +159,6 @@ describe('session store createSession', () => {
     };
     forkCodexMock.mockResolvedValue(child);
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
@@ -186,7 +186,6 @@ describe('session store createSession', () => {
     };
     forkOpenCodeMock.mockResolvedValue(child);
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-3', 'message-3');
@@ -208,7 +207,6 @@ describe('session store createSession', () => {
     };
     createMock.mockResolvedValue(session);
 
-    const { useSessionStore } = await import('./sessionStore');
     const created = await useSessionStore.getState().createSession('Legacy', 'agent', 'project-1');
 
     expect(created).toEqual(session);
@@ -237,8 +235,6 @@ describe('session store createSession', () => {
     };
     createMock.mockResolvedValue(session);
 
-    const { useSessionStore } = await import('./sessionStore');
-    const { useSettingsStore } = await import('./settingsStore');
     useSettingsStore.setState((state) => ({
       config: state.config
         ? {
@@ -278,7 +274,6 @@ describe('session store createSession', () => {
     };
     createMock.mockResolvedValue(session);
 
-    const { useSessionStore } = await import('./sessionStore');
     const created = await useSessionStore.getState().createSession('New', 'codex', 'agent', 'project-2');
 
     expect(created).toEqual(session);
@@ -312,7 +307,6 @@ describe('session store createSession', () => {
     };
     createMock.mockResolvedValue(session);
 
-    const { useSessionStore } = await import('./sessionStore');
     await useSessionStore.getState().createSession(
       'OpenCode',
       'opencode',
@@ -364,7 +358,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-19T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [recentSession, oldSession],
       activeSessionId: oldSession.id,
@@ -397,7 +390,6 @@ describe('session store createSession', () => {
       created_at: '2026-06-20T00:00:00.000Z',
       updated_at: '2026-06-20T00:00:00.000Z',
     };
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [session],
       archivedSessions: [],
@@ -441,7 +433,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-19T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [activeSession, nextSession],
       archivedSessions: [],
@@ -478,7 +469,6 @@ describe('session store createSession', () => {
       is_archived: true,
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [],
       archivedSessions: [archivedSession],
@@ -516,7 +506,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-20T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [session],
       activeSessionId: session.id,
@@ -545,7 +534,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-20T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [activeSession],
       archivedSessions: [],
@@ -587,7 +575,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-19T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [activeSession, inactiveSession],
       archivedSessions: [],
@@ -633,7 +620,6 @@ describe('session store createSession', () => {
     });
     listSessionsMock.mockImplementation(async () => [sharedSession]);
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [sharedSession],
       archivedSessions: [],
@@ -674,7 +660,6 @@ describe('session store createSession', () => {
       updated_at: '2026-06-20T00:00:00.000Z',
     };
 
-    const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [session],
       archivedSessions: [],

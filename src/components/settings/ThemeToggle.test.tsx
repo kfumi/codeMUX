@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { ThemeToggle } from './ThemeToggle';
 
 const setUiFontFamily = vi.fn();
 
@@ -38,8 +41,11 @@ describe('ThemeToggle', () => {
     });
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it('loads system fonts and applies the selected family', async () => {
-    const { ThemeToggle } = await import('./ThemeToggle');
     render(<ThemeToggle />);
 
     expect(screen.getByText('界面字体')).toBeTruthy();

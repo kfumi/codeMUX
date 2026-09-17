@@ -3,12 +3,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportableSkill, Skill, SkillApps } from '../types/skill';
 
-const listInstalledMock = vi.fn<() => Promise<Skill[]>>();
-const listImportableMock = vi.fn<() => Promise<ImportableSkill[]>>();
-const toggleAppMock = vi.fn<
-  (id: string, app: string, enabled: boolean) => Promise<void>
->();
-const importFromAppsMock = vi.fn<(selected?: string[] | null) => Promise<{ total: number }>>();
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useSkillStore } from './skillStore';
+
+const { importFromAppsMock, listImportableMock, listInstalledMock, toggleAppMock } = vi.hoisted(() => ({
+  listInstalledMock: vi.fn<() => Promise<Skill[]>>(),
+  listImportableMock: vi.fn<() => Promise<ImportableSkill[]>>(),
+  toggleAppMock: vi.fn<(id: string, app: string, enabled: boolean) => Promise<void>>(),
+  importFromAppsMock: vi.fn<(selected?: string[] | null) => Promise<{ total: number }>>(),
+}));
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
@@ -49,7 +52,6 @@ describe('skill store toggleApp', () => {
   });
 
   it('updates only the targeted app field in local state', async () => {
-    const { useSkillStore } = await import('./skillStore');
     const skill = makeSkill('s1', 'alpha', { claude: true });
     listInstalledMock.mockResolvedValue([skill]);
     await useSkillStore.getState().fetchInstalled();
@@ -64,7 +66,6 @@ describe('skill store toggleApp', () => {
   });
 
   it('does not modify other skills when toggling one', async () => {
-    const { useSkillStore } = await import('./skillStore');
     const s1 = makeSkill('s1', 'alpha', { claude: true });
     const s2 = makeSkill('s2', 'beta', { codex: true });
     listInstalledMock.mockResolvedValue([s1, s2]);
@@ -79,7 +80,6 @@ describe('skill store toggleApp', () => {
   });
 
   it('refetches installed list after import finds new skills', async () => {
-    const { useSkillStore } = await import('./skillStore');
     importFromAppsMock.mockResolvedValue({ total: 2 });
     listInstalledMock.mockResolvedValue([]);
 
@@ -90,7 +90,6 @@ describe('skill store toggleApp', () => {
   });
 
   it('does not refetch when import finds zero skills', async () => {
-    const { useSkillStore } = await import('./skillStore');
     importFromAppsMock.mockResolvedValue({ total: 0 });
     listInstalledMock.mockResolvedValue([]);
 

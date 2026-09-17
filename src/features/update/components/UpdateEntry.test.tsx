@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '@/stores/daemonConnectionStore';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { UpdateEntry } from './UpdateEntry';
+
 type MockUpdaterState = {
   stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
   version?: string;
@@ -52,7 +55,6 @@ describe('UpdateEntry', () => {
   });
 
   it('没有可用更新时不渲染入口按钮', async () => {
-    const { UpdateEntry } = await import('./UpdateEntry');
 
     render(<UpdateEntry />);
 
@@ -62,7 +64,6 @@ describe('UpdateEntry', () => {
   it('发现新版本时展示左上角更新按钮，确认后才开始下载安装', async () => {
     mockUpdaterState.stage = 'available';
     mockUpdaterState.version = '1.2.3';
-    const { UpdateEntry } = await import('./UpdateEntry');
 
     render(<UpdateEntry />);
 
@@ -82,7 +83,6 @@ describe('UpdateEntry', () => {
       totalBytes: 100,
       downloadedBytes: 42,
     };
-    const { UpdateEntry } = await import('./UpdateEntry');
 
     const { rerender } = render(<UpdateEntry />);
 
@@ -100,7 +100,6 @@ describe('UpdateEntry', () => {
   it('更新检查失败时不展示左上角入口按钮', async () => {
     mockUpdaterState.stage = 'error';
     mockUpdaterState.error = 'network down';
-    const { UpdateEntry } = await import('./UpdateEntry');
 
     render(<UpdateEntry />);
 
@@ -112,7 +111,6 @@ describe('UpdateEntry', () => {
     useDaemonConnectionStore.setState({ hostForm: 'browser' });
     mockUpdaterState.stage = 'available';
     mockUpdaterState.version = '1.2.3';
-    const { UpdateEntry } = await import('./UpdateEntry');
 
     render(<UpdateEntry />);
 

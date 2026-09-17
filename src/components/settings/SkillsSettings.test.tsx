@@ -2,6 +2,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { SkillsSettingsPanel } from './SkillsSettings';
+
 const toggleApp = vi.fn();
 const importFromApps = vi.fn().mockResolvedValue(0);
 const listImportable = vi.fn().mockResolvedValue([]);
@@ -69,7 +72,6 @@ describe('SkillsSettingsPanel', () => {
   });
 
   it('renders 4 agent icon toggles per skill', async () => {
-    const { SkillsSettingsPanel } = await import('./SkillsSettings');
     render(<SkillsSettingsPanel />);
 
     expect(screen.getByLabelText('toggle-s1-claude')).toBeTruthy();
@@ -82,7 +84,6 @@ describe('SkillsSettingsPanel', () => {
   });
 
   it('clicking an agent icon triggers toggleApp', async () => {
-    const { SkillsSettingsPanel } = await import('./SkillsSettings');
     render(<SkillsSettingsPanel />);
 
     fireEvent.click(screen.getByLabelText('toggle-s1-codex'));
@@ -93,7 +94,6 @@ describe('SkillsSettingsPanel', () => {
   });
 
   it('shows uninstall button for all skills', async () => {
-    const { SkillsSettingsPanel } = await import('./SkillsSettings');
     render(<SkillsSettingsPanel />);
 
     // Both skills should have a trash button (no builtin protection)
@@ -104,7 +104,6 @@ describe('SkillsSettingsPanel', () => {
   });
 
   it('opens import dialog and scans importable skills on click', async () => {
-    const { SkillsSettingsPanel } = await import('./SkillsSettings');
     render(<SkillsSettingsPanel />);
 
     fireEvent.click(screen.getByText('从工具导入'));

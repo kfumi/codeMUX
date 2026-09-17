@@ -5,6 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../types/session';
 import type { AgentUserMessageLocator } from '../types/agent';
 
+import { daemonFacade } from '../lib/facades/daemon-facade';
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import {
+  AGENT_REWIND_CAPABILITIES,
+  extractChangedFilesFromEvents,
+  supportsRewindMode,
+  useAgentStore,
+} from './agentStore';
+import { useSessionStore } from './sessionStore';
+import { useSettingsStore } from './settingsStore';
+import { useSubagentStore } from './subagentStore';
+
 const {
   startSessionMock,
   enrichAttachmentsMock,
@@ -134,8 +146,6 @@ vi.mock('../lib/facades/daemon-facade', () => ({
 
 describe('agent store Codex history loading', () => {
   async function primeSession(agentKind: Session['agent_kind']) {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
 
     const session: Session = {
       id: `session-${agentKind}-1`,
@@ -204,7 +214,6 @@ describe('agent store Codex history loading', () => {
       blocks: [{ attachment_name: 'screen.png', markdown: 'Visible terminal error.', ok: true }],
     });
 
-    const { useSettingsStore } = await import('./settingsStore');
     useSettingsStore.setState({
       config: {
         model_providers: [],
@@ -283,7 +292,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('queues messages submitted during a running turn and dispatches them in order', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     let finishFirstTurn: ((event: string) => void) | undefined;
 
@@ -318,8 +326,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('queues messages while background subagents run and dispatches when the flow settles', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSubagentStore } = await import('./subagentStore');
     const session = await primeSession('claude_code');
 
     // 回合 1 正常跑完(注册会话 handler),子智能体仍在后台运行。
@@ -358,8 +364,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('background real-result terminal clears isRunning and drains the queue', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSubagentStore } = await import('./subagentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
@@ -394,7 +398,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not let a background synthetic boundary steal an active user turn', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
       void onEvent;
@@ -425,7 +428,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('queues pi follow-ups during a running turn instead of sending them immediately', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('pi');
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -447,7 +449,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow steers a running pi turn and keeps the remaining queue', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('pi');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -491,8 +492,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not stop a live desktop query when attaching to a background turn', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { daemonFacade } = await import('../lib/facades/daemon-facade');
     const session = await primeSession('codex');
     vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
 
@@ -510,8 +509,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('attachLiveSession subscribes the daemon stream and ends with the turn after a refresh', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { daemonFacade } = await import('../lib/facades/daemon-facade');
     const session = await primeSession('codex');
     sessionHandlers.clear();
     vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
@@ -537,9 +534,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('proxy_status updates the settings indicator without entering the timeline', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSettingsStore } = await import('./settingsStore');
-    const { daemonFacade } = await import('../lib/facades/daemon-facade');
     const session = await primeSession('codex');
     sessionHandlers.clear();
     vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
@@ -576,8 +570,7 @@ describe('agent store Codex history loading', () => {
     expect(useSettingsStore.getState().proxyUrl).toBeNull();
   });
 
-  it('attachLiveSession is a no-op when the daemon turn is not active', async () => {    const { useAgentStore } = await import('./agentStore');
-    const { daemonFacade } = await import('../lib/facades/daemon-facade');
+  it('attachLiveSession is a no-op when the daemon turn is not active', async () => {
     const session = await primeSession('codex');
     sessionHandlers.clear();
     vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
@@ -590,7 +583,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow steers the active Codex turn without interrupting', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
@@ -622,7 +614,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('keeps isRunning true after runQueuedQueryNow steers the queued message', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
@@ -647,7 +638,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow interrupts a slash command instead of steering', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -683,7 +673,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow interrupts agents that cannot steer', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('gemini_cli');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -718,8 +707,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow interrupts when the user prefers interrupt over steer', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSettingsStore } = await import('./settingsStore');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -760,7 +747,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('falls back to interrupt when steer_result reports unavailable', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     let firstOnEvent: ((event: string) => void) | undefined;
 
@@ -809,7 +795,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('dispatches composer input immediately after a failed turn even when queuePaused', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     let finishFirstTurn: ((event: string) => void) | undefined;
 
@@ -847,7 +832,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('dispatches composer input after failure before retaining and running prior queued messages', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     let finishFirstTurn: ((event: string) => void) | undefined;
 
@@ -912,7 +896,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('runQueuedQueryNow promotes the chosen message without interrupting when nothing is running', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -935,7 +918,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('deduplicates concurrent loads but refreshes history on later loads', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     let resolveHistory: ((events: Record<string, unknown>[]) => void) | undefined;
     loadClaudeSessionEventsMock.mockImplementationOnce(() => new Promise((resolve) => {
@@ -958,7 +940,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('replaces a partial in-memory history snapshot with the latest persisted history', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     const persistedUser = {
       type: 'user',
@@ -992,7 +973,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('loads CodeMUX timeline events through loadSessionEvents when reopening a session', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('opencode');
     loadSessionEventsMock.mockResolvedValueOnce([
       {
@@ -1033,7 +1013,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('dedupes persisted timeline rows that share an event_id when reloading history', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('opencode');
     loadSessionEventsMock.mockResolvedValueOnce([
       {
@@ -1071,7 +1050,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('resyncSessionFromNative replaces cached history from CLI and reloads UI state', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     resyncSessionFromNativeMock.mockResolvedValueOnce({ eventCount: 2 });
     loadSessionEventsMock.mockResolvedValueOnce([
@@ -1111,7 +1089,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('resyncSessionFromNative preserves ask_user_question rows from persisted timeline', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('pi');
     resyncSessionFromNativeMock.mockResolvedValueOnce({ eventCount: 4 });
     loadSessionEventsMock.mockResolvedValueOnce([
@@ -1184,7 +1161,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('resyncSessionFromNative rejects while a turn is running', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     useAgentStore.setState({ isRunning: { [session.id]: true } });
 
@@ -1198,7 +1174,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it.each(['codex', 'claude_code'] as const)('does not persist %s history snapshots into SQLite', async (agentKind) => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession(agentKind);
 
     await useAgentStore
@@ -1211,7 +1186,6 @@ describe('agent store Codex history loading', () => {
   it('重新抛出 Runtime 启动失败，让新建会话流程可以回滚并提示用户', async () => {
     startSessionMock.mockRejectedValueOnce('Claude Code Runtime 未安装或不可用，请先在设置中安装');
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await expect(
@@ -1250,7 +1224,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1280,8 +1253,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore.getState().startQuery(session.id, 'Enter plan mode', 'D:\\project\\ai-code\\codeMUX');
@@ -1329,7 +1300,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -1367,7 +1337,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -1391,7 +1360,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -1412,7 +1380,6 @@ describe('agent store Codex history loading', () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     useAgentStore.getState().setSessionTokenUsage(session.id, {
       total: { totalTokens: 100, inputTokens: 80, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 0 },
@@ -1487,7 +1454,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1514,7 +1480,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1592,7 +1557,6 @@ describe('agent store Codex history loading', () => {
       onEvent(JSON.stringify({ type: 'sidecar_query_done' }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -1607,7 +1571,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('extracts OpenCode lowercase tools and camelCase file arguments', async () => {
-    const { extractChangedFilesFromEvents } = await import('./agentStore');
     const filePath = 'D:\\project\\ai-code\\codeMUX\\index.html';
     const changedFiles = extractChangedFilesFromEvents([
       {
@@ -1653,13 +1616,11 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not expose unused git baseline state', async () => {
-    const { useAgentStore } = await import('./agentStore');
 
     expect(useAgentStore.getState()).not.toHaveProperty('gitBaselines');
   });
 
   it('commits pending simulated assistant text before the result event', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1671,7 +1632,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('can send a runtime prompt while showing separate user-facing content', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1699,7 +1659,6 @@ describe('agent store Codex history loading', () => {
         sequence: 0,
       }));
     });
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore.getState().startQuery(session.id, 'hello', 'D:\\project\\ai-code\\codeMUX');
@@ -1724,7 +1683,6 @@ describe('agent store Codex history loading', () => {
         sequence: 1,
       }));
     });
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore.getState().startQuery(session.id, 'hello', 'D:\\project\\ai-code\\codeMUX');
@@ -1759,7 +1717,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -1773,7 +1730,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('restores Codex task progress from persisted update_plan calls', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     loadCodexSessionEventsMock.mockResolvedValueOnce([
@@ -1870,7 +1826,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1911,7 +1866,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -1955,7 +1909,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('codex');
 
       await useAgentStore
@@ -2003,7 +1956,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2043,7 +1995,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('claude_code');
 
       await useAgentStore
@@ -2080,7 +2031,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('opencode');
 
     await useAgentStore.getState().startQuery(session.id, '检查目录', 'D:\\project\\ai-code\\codeMUX');
@@ -2107,7 +2057,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('opencode');
       await useAgentStore
         .getState()
@@ -2185,7 +2134,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('opencode');
       await useAgentStore
         .getState()
@@ -2245,7 +2193,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('opencode');
       await useAgentStore
         .getState()
@@ -2305,7 +2252,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('claude_code');
       await useAgentStore
         .getState()
@@ -2365,7 +2311,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('claude_code');
       await useAgentStore
         .getState()
@@ -2445,7 +2390,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('codex');
 
       await useAgentStore
@@ -2499,7 +2443,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('codex');
       let toolInputNotifications = 0;
       const unsubscribe = useAgentStore.subscribe((state, previousState) => {
@@ -2572,7 +2515,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2599,7 +2541,6 @@ describe('agent store Codex history loading', () => {
 
   it('keeps a complete assistant tool call when a streamed id exists without a replaceable tool block', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
-      const { useAgentStore } = await import('./agentStore');
       useAgentStore.setState((state) => ({
         streamedToolUseIds: {
           ...state.streamedToolUseIds,
@@ -2627,7 +2568,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2676,7 +2616,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2729,7 +2668,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     await useAgentStore
@@ -2771,7 +2709,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2828,7 +2765,6 @@ describe('agent store Codex history loading', () => {
       }));
     });
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     await useAgentStore
@@ -2869,7 +2805,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('codex');
 
       await useAgentStore
@@ -2906,7 +2841,6 @@ describe('agent store Codex history loading', () => {
     });
 
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('codex');
 
       await useAgentStore
@@ -2940,7 +2874,6 @@ describe('agent store Codex history loading', () => {
     ['codex', loadCodexSessionEventsMock],
     ['claude_code', loadClaudeSessionEventsMock],
   ] as const)('does not fall back to SQLite when %s JSONL history is unavailable', async (agentKind, loaderMock) => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession(agentKind);
 
     await useAgentStore.getState().loadSessionMessages(session.id);
@@ -2951,7 +2884,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('loads Codex history CodeMUX tool and outcome events through the live adapter', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     loadCodexSessionEventsMock.mockResolvedValueOnce([
@@ -3005,7 +2937,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('refreshes Claude Code token usage from history after loading historical messages', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     loadLatestTokenUsageMock.mockResolvedValueOnce({
       total: {
@@ -3077,7 +3008,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('restores a completed Turn from normalized assistant usage without a synthetic result', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
  
     loadClaudeSessionEventsMock.mockResolvedValueOnce([
@@ -3121,7 +3051,6 @@ describe('agent store Codex history loading', () => {
   });
  
   it('loads historical Claude Agent tool calls without subagent linkage and filters sidechain history', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     loadClaudeSessionEventsMock.mockResolvedValueOnce([
@@ -3172,7 +3101,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('filters live Claude subagent stream events from the main event list', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
@@ -3241,7 +3169,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('sends image payloads for unknown models by default', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     const inputPayload = {
       text: 'inspect this',
@@ -3264,7 +3191,6 @@ describe('agent store Codex history loading', () => {
     'deepseek-v4-pro',
     'mimo-v2.5-pro',
   ])('drops image payloads for explicit no-vision model %s but keeps local preview', async (model) => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     const inputPayload = {
       text: 'inspect this',
@@ -3290,7 +3216,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('enriches image payloads when enrichment is enabled for a no-vision model', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
     useSettingsStore.setState((state) => ({
       config: state.config
         ? {
@@ -3305,7 +3230,6 @@ describe('agent store Codex history loading', () => {
         : state.config,
     }));
 
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     const inputPayload = {
       text: 'inspect this',
@@ -3327,7 +3251,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('restores image previews directly from agent JSONL image blocks', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
     loadCodexSessionEventsMock.mockResolvedValueOnce([
       {
@@ -3362,7 +3285,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rewinds the last turn, clears derived state, and returns text plus image payload', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -3452,7 +3374,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rewinds optimistic live user messages without sending a weak target', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     useAgentStore.setState({
@@ -3480,8 +3401,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('marks an inactive session unread after a rewound turn completes', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = await primeSession('codex');
 
     useSessionStore.setState({ activeSessionId: 'other-session', unreadSessions: new Set() });
@@ -3526,7 +3445,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rewinds an arbitrary earlier user message by index using its strong locator', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     const firstLocator: AgentUserMessageLocator = {
@@ -3591,7 +3509,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rewinds an earlier user message by turn ordinal and text fingerprint', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     const events = [
@@ -3635,7 +3552,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('allows rewinding the latest message without a strong locator via index fallback', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     useAgentStore.setState({
@@ -3666,7 +3582,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('falls back to ordinal rewind when the latest locator is missing from native history', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     const staleLocator = {
       providerMessageId: 'codemux-event-id-not-in-jsonl',
@@ -3714,7 +3629,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('returns null when the target index is not a rewindable user event', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -3742,7 +3656,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rejects rewinding an arbitrary message while the session is running', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -3769,8 +3682,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rejects rewinding an arbitrary message in a read-only session', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = await primeSession('codex');
 
     useSessionStore.setState({
@@ -3799,7 +3710,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('sends a fingerprint target for Claude file rewind without a provider locator', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     useAgentStore.setState({
@@ -3836,7 +3746,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('rejects file rewind for agents that do not support it', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -3853,7 +3762,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('keeps rewindLastTurn equivalent to rewinding the latest rewindable message', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     useAgentStore.setState({
@@ -3894,7 +3802,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not restore acknowledged changed-file state while loading history', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
     localStorage.setItem(`acknowledged-files-${session.id}`, JSON.stringify(['src/old.ts']));
@@ -3915,7 +3822,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not rewind history when sending a new message after an interrupted turn', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     const previousPrompt = '系统怎么实现定时任务功能，在我确认方案之前不要改任何代码';
     const nextPrompt = '怎么实现定时任务功能，在我确认之前不要改任何代码';
@@ -3957,7 +3863,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('allows sending the same content again after a completed turn', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
     useAgentStore.setState({
@@ -4006,7 +3911,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not restore a rewound turn from a stale history reload before resend', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     const prompt = '系统怎么实现定时任务功能，在我确认方案之前不要改任何代码';
 
@@ -4068,7 +3972,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('does not replace richer local history with a partial timeline after rewind and stop', async () => {
-    const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     const firstPrompt = '分析企宽工单 micro 竣工环节';
     const continuePrompt = '继续';
@@ -4117,7 +4020,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '你好', 'D:/project/x');
       const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
@@ -4163,7 +4065,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '熟悉架构', 'D:/project/x');
       const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
@@ -4220,7 +4121,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
 
@@ -4287,7 +4187,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
       const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
@@ -4341,7 +4240,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '排查接口', 'D:/project/x');
       const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
@@ -4395,7 +4293,6 @@ describe('agent store Codex history loading', () => {
       emitEvent = onEvent;
     });
     try {
-      const { useAgentStore } = await import('./agentStore');
       const session = await primeSession('pi');
       await useAgentStore.getState().startQuery(session.id, '分析函数', 'D:/project/x');
       const send = (event: Record<string, unknown>) => emitEvent?.(JSON.stringify({ session_id: session.id, ...event }));
@@ -4417,8 +4314,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('applies a daemon-pushed session_title_changed event without touching the timeline', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = await primeSession('opencode');
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:/workspace');
 
@@ -4435,7 +4330,6 @@ describe('agent store Codex history loading', () => {
 
 describe('agent rewind capabilities', () => {
   it('enables conversation-only rewind for pi (sidecar native fork)', async () => {
-    const { AGENT_REWIND_CAPABILITIES, supportsRewindMode } = await import('./agentStore');
     expect(supportsRewindMode('pi', 'conversation')).toBe(true);
     expect(supportsRewindMode('pi', 'files')).toBe(false);
     expect(supportsRewindMode('pi', 'both')).toBe(false);
@@ -4465,8 +4359,6 @@ describe('agent store session start branch', () => {
   }
 
   it('backfills git_branch from the working path response', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = branchSession(null);
     useSessionStore.setState({ sessions: [session], archivedSessions: [] });
     updateWorkingPathMock.mockResolvedValueOnce({ ...session, git_branch: 'feature/hover' });
@@ -4480,8 +4372,6 @@ describe('agent store session start branch', () => {
   });
 
   it('keeps the stored branch when the daemon response carries none', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
     const session = branchSession('feature/keep');
     useSessionStore.setState({ sessions: [session], archivedSessions: [] });
     updateWorkingPathMock.mockResolvedValueOnce(undefined);

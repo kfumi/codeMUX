@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { SettingsView } from './SettingsDialog';
 
 vi.mock('../../lib/facades/shell-facade', () => ({
   shellFacade: {
@@ -76,8 +78,6 @@ describe('SettingsView', () => {
   });
 
   it('renders settings as an embedded page rather than a dialog', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
 
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -86,8 +86,6 @@ describe('SettingsView', () => {
   });
 
   it('renders the system tools tab and reports missing Node.js/npm', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /系统工具/ }));
 
@@ -98,8 +96,6 @@ describe('SettingsView', () => {
   });
 
   it('uses one combined entry for agent preferences and managed Runtime', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: '智能体运行时' })).toBeTruthy();
@@ -108,8 +104,6 @@ describe('SettingsView', () => {
   });
 
   it('uses the same layered panel treatment as the main workspace', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
 
     const settingsMain = screen.getByRole('main', { name: '设置' });
@@ -128,8 +122,6 @@ describe('SettingsView 浏览器形态', () => {
   });
 
   it('隐藏壳独占的设置入口,而不是让用户点进去看到「桥不可用」', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: /系统工具/ })).toBeNull();
@@ -140,8 +132,6 @@ describe('SettingsView 浏览器形态', () => {
   });
 
   it('常规页渲染成功且不出现壳独占的配置文件区块', async () => {
-    const { SettingsView } = await import('./SettingsDialog');
-
     render(<SettingsView onBack={vi.fn()} />);
 
     // 回归:该区块曾以壳门面同步抛错把整页打成「渲染错误」。

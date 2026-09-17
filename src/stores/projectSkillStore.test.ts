@@ -3,7 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSkill } from '../types/skill';
 
-const listProjectMock = vi.fn<(root: string, agentKind: string, force?: boolean) => Promise<ProjectSkill[]>>();
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useProjectSkillStore } from './projectSkillStore';
+
+const { listProjectMock } = vi.hoisted(() => ({
+  listProjectMock: vi.fn<(root: string, agentKind: string, force?: boolean) => Promise<ProjectSkill[]>>(),
+}));
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
@@ -27,12 +32,10 @@ describe('project skill store', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     listProjectMock.mockResolvedValue([projectSkill]);
-    const { useProjectSkillStore } = await import('./projectSkillStore');
     useProjectSkillStore.getState().invalidate();
   });
 
   it('loads project skills for the selected agent and caches the result', async () => {
-    const { useProjectSkillStore } = await import('./projectSkillStore');
 
     await useProjectSkillStore.getState().load('C:\\project', 'claude_code');
     await useProjectSkillStore.getState().load('C:\\project', 'claude_code');
@@ -50,7 +53,6 @@ describe('project skill store', () => {
     listProjectMock.mockReturnValueOnce(new Promise((resolve) => {
       resolveRequest = resolve;
     }));
-    const { useProjectSkillStore } = await import('./projectSkillStore');
 
     const first = useProjectSkillStore.getState().load('C:\\project', 'codex');
     const second = useProjectSkillStore.getState().load('C:\\project', 'codex');

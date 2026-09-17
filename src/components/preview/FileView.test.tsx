@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { EditableFileView, FileView } from './FileView';
+
 // Monaco 在 jsdom 里跑不起来,替换掉模块本身;这里验的是宿主门控与传参路径。
 // mock 会捕获 props,用于断言只读/可编辑视图给 Monaco 的 readOnly 取值。
 type MonacoProps = Record<string, unknown>;
@@ -30,7 +33,6 @@ describe('FileView 宿主门控', () => {
 
   it('桌面形态走 Monaco,且只读浏览显式只读', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
-    const { FileView } = await import('./FileView');
     render(<FileView content={'alpha\nbeta'} filePath="/repo/src/app.ts" />);
 
     expect(screen.getByTestId('monaco-code-surface')).toBeTruthy();
@@ -39,7 +41,6 @@ describe('FileView 宿主门控', () => {
 
   it('移动形态用 highlight.js 只读视图(Monaco 不支持移动浏览器)', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'mobile' });
-    const { FileView } = await import('./FileView');
     render(<FileView content={'alpha\nbeta'} filePath="/repo/notes.unknown" />);
 
     expect(screen.queryByTestId('monaco-code-surface')).toBeNull();
@@ -52,7 +53,6 @@ describe('FileView 宿主门控', () => {
 
   it('可编辑视图在移动形态保留 textarea 编辑能力', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'mobile' });
-    const { EditableFileView } = await import('./FileView');
     render(
       <EditableFileView content="alpha" filePath="/repo/notes.unknown" onChange={() => {}} />,
     );
@@ -64,7 +64,6 @@ describe('FileView 宿主门控', () => {
 
   it('可编辑视图在桌面形态走 Monaco,且不再只读', async () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
-    const { EditableFileView } = await import('./FileView');
     render(
       <EditableFileView content="alpha" filePath="/repo/src/app.ts" onChange={() => {}} />,
     );

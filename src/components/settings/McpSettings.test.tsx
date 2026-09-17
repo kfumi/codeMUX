@@ -2,6 +2,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s),
+// 超时后遗留的 import 续体还会在 cleanup 之后二次 render,污染后续用例。
+import { McpSettingsPanel } from './McpSettings';
+
 const toggleApp = vi.fn();
 const importFromApps = vi.fn();
 const fetchServers = vi.fn().mockResolvedValue(undefined);
@@ -60,7 +64,6 @@ describe('McpSettingsPanel', () => {
   });
 
   it('renders per-tool toggles and import button', async () => {
-    const { McpSettingsPanel } = await import('./McpSettings');
     render(<McpSettingsPanel />);
 
     // Import button exists
@@ -81,7 +84,6 @@ describe('McpSettingsPanel', () => {
   });
 
   it('内置 server:显示内置徽标,app 全亮且禁点,不出现编辑/删除/探测', async () => {
-    const { McpSettingsPanel } = await import('./McpSettings');
     render(<McpSettingsPanel />);
 
     // 分组展示:内置组在上,已安装组在下。

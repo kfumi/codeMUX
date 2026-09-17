@@ -189,14 +189,16 @@ describe('AgentSettingsPanel', () => {
 
     render(<AgentSettingsPanel />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Claude Code')).toBeTruthy();
-      expect(screen.getByText('Codex')).toBeTruthy();
-      expect(screen.getByText('OpenCode')).toBeTruthy();
-    });
+    // 骨架卡片同样会渲染智能体名称,因此名称不能作为"加载完成"的信号:
+    // 必须等待只有加载完成后才出现的状态徽标,否则后续同步断言会跑在骨架态上。
+    expect(await screen.findByText('已就绪', undefined, { timeout: 5000 })).toBeTruthy();
 
-    // 状态徽标
-    expect(screen.getByText('已就绪')).toBeTruthy();
+    // 加载完成后三个智能体卡片都在
+    expect(screen.getByText('Claude Code')).toBeTruthy();
+    expect(screen.getByText('Codex')).toBeTruthy();
+    expect(screen.getByText('OpenCode')).toBeTruthy();
+
+    // 其余状态徽标
     expect(screen.getByText('可升级')).toBeTruthy();
     expect(screen.getByText('未安装')).toBeTruthy();
 

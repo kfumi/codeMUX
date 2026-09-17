@@ -4,10 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
 
-const sendMessageViaDaemonMock = vi.fn<
-  (sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }) => Promise<void>
->();
-let sessionHandler: ((raw: string) => void) | undefined;
+// 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
+import { useAgentStore } from './agentStore';
+import { useSessionStore } from './sessionStore';
+import { useSubagentStore } from './subagentStore';
+
+const { sendMessageViaDaemonMock, sessionHandlerRef } = vi.hoisted(() => ({
+  sendMessageViaDaemonMock: vi.fn<(sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }) => Promise<void>>(),
+  sessionHandlerRef: { current: undefined as ((raw: string) => void) | undefined },
+}));
 
 vi.mock('sonner', () => ({
   toast: {
@@ -18,7 +23,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('../lib/daemon-session-bridge', () => ({
   registerDaemonSessionHandler: vi.fn((_sessionId: string, handler: (raw: string) => void) => {
-    sessionHandler = handler;
+    sessionHandlerRef.current = handler;
   }),
   unregisterDaemonSessionHandler: vi.fn(),
   getLastEventSequence: vi.fn(() => -1),
@@ -57,14 +62,11 @@ describe('agentStore subagent event routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    sessionHandler = undefined;
+    sessionHandlerRef.current = undefined;
     sendMessageViaDaemonMock.mockResolvedValue(undefined);
   });
 
   async function prime() {
-    const { useAgentStore } = await import('./agentStore');
-    const { useSessionStore } = await import('./sessionStore');
-    const { useSubagentStore } = await import('./subagentStore');
 
     useSubagentStore.setState({ sessions: {} });
 
@@ -93,9 +95,9 @@ describe('agentStore subagent event routing', () => {
     const { useAgentStore, useSubagentStore } = await prime();
 
     await useAgentStore.getState().startQuery(sessionId, 'launch agent', 'D:\\workspace');
-    expect(sessionHandler).toBeDefined();
+    expect(sessionHandlerRef.current).toBeDefined();
 
-    sessionHandler?.(JSON.stringify({
+    sessionHandlerRef.current?.(JSON.stringify({
       type: 'subagent_upsert',
       session_id: sessionId,
       subagent_id: 'toolu_1',
@@ -105,14 +107,14 @@ describe('agentStore subagent event routing', () => {
       tool_call_id: 'toolu_1',
       event_id: 'u1',
     }));
-    sessionHandler?.(JSON.stringify({
+    sessionHandlerRef.current?.(JSON.stringify({
       type: 'subagent_timeline',
       session_id: sessionId,
       subagent_id: 'toolu_1',
       event: { type: 'tool_started', tool_use_id: 'c1', name: 'Grep', input: {}, event_id: 'e1', sequence: 0 },
       event_id: 'env-1',
     }));
-    sessionHandler?.(JSON.stringify({
+    sessionHandlerRef.current?.(JSON.stringify({
       type: 'sidecar_query_done',
     }));
 
@@ -131,7 +133,7 @@ describe('agentStore subagent event routing', () => {
 
     await useAgentStore.getState().startQuery(sessionId, 'hello', 'D:\\workspace');
 
-    sessionHandler?.(JSON.stringify({
+    sessionHandlerRef.current?.(JSON.stringify({
       type: 'assistant',
       uuid: 'a-sidechain',
       session_id: 'claude-native',
@@ -139,7 +141,7 @@ describe('agentStore subagent event routing', () => {
       parent_tool_use_id: 'toolu_1',
       message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain chatter' }] },
     }));
-    sessionHandler?.(JSON.stringify({ type: 'sidecar_query_done' }));
+    sessionHandlerRef.current?.(JSON.stringify({ type: 'sidecar_query_done' }));
 
     const parentEvents = useAgentStore.getState().events[sessionId] ?? [];
     // The sidechain assistant message must not enter the parent timeline.
