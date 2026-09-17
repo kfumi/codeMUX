@@ -138,21 +138,12 @@ fn default_listen_address() -> String {
     "0.0.0.0".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BrowserControlConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
     #[serde(default = "default_false")]
     pub ignore_certificate_errors: bool,
-}
-
-impl Default for BrowserControlConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ignore_certificate_errors: false,
-        }
-    }
 }
 
 impl Default for CompanionConfig {

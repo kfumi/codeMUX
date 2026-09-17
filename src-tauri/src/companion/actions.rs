@@ -90,6 +90,9 @@ pub async fn send_companion_message(
 }
 
 /// Owned-handle variant so the queued-message dispatch task can stay `'static`.
+// 9 个参数是「5 个 owned 句柄 + 4 个消息参数」的扁平列表,拆成结构体只会
+// 在调用点重复组装;保持签名稳定,故此处豁免参数数量 lint。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_companion_message_owned(
     app_state: Arc<AppState>,
     agent_state: Arc<AgentState>,
@@ -219,9 +222,7 @@ pub async fn update_companion_settings(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "会话不存在".to_string())?
     };
-    if let Err(error) = validate_companion_agent_kind(current.agent_kind, update.agent_kind) {
-        return Err(error);
-    }
+    validate_companion_agent_kind(current.agent_kind, update.agent_kind)?;
 
     {
         let mut db = app_state.db.lock().map_err(|error| error.to_string())?;

@@ -1386,7 +1386,7 @@ mod tests {
 
     /// 树形会话文件：线性主干 + 一条分叉分支（fork 目标解析只认活动链）。
     fn write_tree_session(path: &std::path::Path) {
-        let lines = vec![
+        let lines = [
             json!({"type": "session", "id": "pi-session-1", "cwd": "C:/workspace"}),
             json!({
                 "type": "message", "id": "u1", "parentId": "",

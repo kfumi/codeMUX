@@ -24,7 +24,7 @@ pub async fn fire_scheduled_task(
         Utc::now().format("%Y-%m-%d %H:%M")
     );
 
-    let session = match {
+    let session = {
         let conn = app_state.db.lock();
         match conn {
             Ok(conn) => operations::create_scheduled_session_for_project(
@@ -39,7 +39,8 @@ pub async fn fire_scheduled_task(
             ),
             Err(error) => Err(rusqlite::Error::InvalidParameterName(error.to_string())),
         }
-    } {
+    };
+    let session = match session {
         Ok(session) => session,
         Err(error) => {
             return TaskRunnerResult::Failed {

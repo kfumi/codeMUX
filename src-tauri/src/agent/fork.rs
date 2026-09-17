@@ -341,10 +341,9 @@ pub async fn fork_claude_session_impl(
         .ok_or_else(|| "Claude session history has no parent directory".to_string())?
         .join(format!("{}.jsonl", staged_session_id));
     install_claude_fork_child_history(&staged_path, &staged_session_id, &child_agent_session_id)
-        .map_err(|error| {
+        .inspect_err(|_| {
             let _ = cleanup_claude_session_files_by_id(&staged_session_id);
             let _ = cleanup_claude_session_files_by_id(&child_agent_session_id);
-            error
         })?;
     let _ = cleanup_claude_session_files_by_id(&staged_session_id);
 
@@ -652,6 +651,82 @@ pub async fn fork_pi_session_impl(
     .map_err(|error| error.to_string())
 }
 
+pub async fn fork_claude_session_for_companion(
+    daemon: &crate::daemon::DaemonState,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_claude_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_codex_session_for_companion(
+    daemon: &crate::daemon::DaemonState,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    fork_provider_turn_id: Option<String>,
+    fork_provider_turn_ordinal: Option<usize>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_codex_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        fork_provider_turn_id,
+        fork_provider_turn_ordinal,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_opencode_session_for_companion(
+    daemon: &crate::daemon::DaemonState,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_opencode_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
+pub async fn fork_pi_session_for_companion(
+    daemon: &crate::daemon::DaemonState,
+    session_id: String,
+    fork_event_id: String,
+    fork_provider_message_id: Option<String>,
+    title: Option<String>,
+) -> Result<operations::Session, String> {
+    fork_pi_session_impl(
+        daemon.app.clone(),
+        daemon.agent.clone(),
+        session_id,
+        fork_event_id,
+        fork_provider_message_id,
+        title,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{install_claude_fork_child_history, stage_claude_history_fork};
@@ -743,80 +818,4 @@ mod tests {
 
         let _ = fs::remove_dir_all(&base);
     }
-}
-
-pub async fn fork_claude_session_for_companion(
-    daemon: &crate::daemon::DaemonState,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_claude_session_impl(
-        daemon.app.clone(),
-        daemon.agent.clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
-}
-
-pub async fn fork_codex_session_for_companion(
-    daemon: &crate::daemon::DaemonState,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    fork_provider_turn_id: Option<String>,
-    fork_provider_turn_ordinal: Option<usize>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_codex_session_impl(
-        daemon.app.clone(),
-        daemon.agent.clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        fork_provider_turn_id,
-        fork_provider_turn_ordinal,
-        title,
-    )
-    .await
-}
-
-pub async fn fork_opencode_session_for_companion(
-    daemon: &crate::daemon::DaemonState,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_opencode_session_impl(
-        daemon.app.clone(),
-        daemon.agent.clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
-}
-
-pub async fn fork_pi_session_for_companion(
-    daemon: &crate::daemon::DaemonState,
-    session_id: String,
-    fork_event_id: String,
-    fork_provider_message_id: Option<String>,
-    title: Option<String>,
-) -> Result<operations::Session, String> {
-    fork_pi_session_impl(
-        daemon.app.clone(),
-        daemon.agent.clone(),
-        session_id,
-        fork_event_id,
-        fork_provider_message_id,
-        title,
-    )
-    .await
 }

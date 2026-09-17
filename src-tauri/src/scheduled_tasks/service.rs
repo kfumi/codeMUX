@@ -362,7 +362,7 @@ mod tests {
         )
         .unwrap();
 
-        let updated = super::reconcile_running_runs(&conn, &[session.id.clone()]);
+        let updated = super::reconcile_running_runs(&conn, std::slice::from_ref(&session.id));
         assert_eq!(updated, vec![task.id.clone()]);
         let stored = db::get_run(&conn, &run.id).unwrap().unwrap();
         assert_eq!(stored.status, TaskRunStatus::Completed);

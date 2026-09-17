@@ -166,7 +166,7 @@ pub async fn update_session_permissions_impl(
         .map_err(|e| e.to_string())?;
     }
 
-    if let Err(error) = send_permission_update_to_session(&state, &agent_state, &session_id).await {
+    if let Err(error) = send_permission_update_to_session(state, agent_state, &session_id).await {
         warn!(
             target: "session",
             "Runtime permission update skipped after DB save session_id={} error={}",

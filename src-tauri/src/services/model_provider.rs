@@ -157,7 +157,6 @@ pub fn set_model_provider_enabled_impl(
 }
 
 /// Test connection with the currently entered API key + Base URL (OpenAI-compatible GET …/models).
-
 pub async fn test_model_provider(api_key: String, base_url: String) -> Result<String, String> {
     if api_key.trim().is_empty() {
         return Err("请先填写 API Key".to_string());

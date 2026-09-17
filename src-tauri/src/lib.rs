@@ -6,11 +6,11 @@
 //! 二进制并经 HTTP/WS 消费其能力。
 //!
 //! 入口面:
-//! - [`daemon::run_daemon_standalone`]:无壳独立运行 daemon;
-//! - [`daemon::DaemonState`] / [`daemon::UiEventSink`]:核心状态组装与
-//!   「daemon → 桌面 UI」领域事件出口(Electron main 经 WS 客户端承接);
-//! - [`paths::PathRoots`]:注入式环境根;
-//! - [`AppState`]:daemon 进程内共享状态束。
+//! - 无壳独立运行 daemon:[`daemon::run_daemon_standalone`];
+//! - 核心状态组装与「daemon → 桌面 UI」领域事件出口(Electron main 经 WS
+//!   客户端承接):[`daemon::DaemonState`] / [`daemon::UiEventSink`];
+//! - 注入式环境根:[`paths::PathRoots`];
+//! - daemon 进程内共享状态束:[`AppState`]。
 
 mod agent;
 mod agent_runtime;

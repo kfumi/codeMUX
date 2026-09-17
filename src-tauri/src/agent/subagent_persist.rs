@@ -38,10 +38,7 @@ pub(crate) fn handle_sidecar_subagent_event(
 /// Same as [`handle_sidecar_subagent_event`] but for a caller that has already
 /// parsed the wire line. `ingest_sidecar_event` uses this so a single line is
 /// deserialized once instead of once per persistence owner.
-pub(crate) fn handle_sidecar_subagent_value(
-    state: &crate::AppState,
-    value: Value,
-) -> Vec<Value> {
+pub(crate) fn handle_sidecar_subagent_value(state: &crate::AppState, value: Value) -> Vec<Value> {
     if !is_subagent_event(&value) {
         return Vec::new();
     }

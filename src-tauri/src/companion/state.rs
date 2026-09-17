@@ -121,6 +121,12 @@ impl CompanionInner {
     }
 }
 
+impl Default for CompanionInner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone)]
 pub struct CompanionState {
     pub inner: Arc<CompanionInner>,

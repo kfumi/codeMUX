@@ -579,7 +579,9 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult
     results
 }
 
-pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<String, ProbeResult>, String> {
+pub async fn probe_all_mcp_servers_impl(
+    state: &AppState,
+) -> Result<HashMap<String, ProbeResult>, String> {
     let servers = {
         let db = state.db.lock().unwrap();
         db::get_all_mcp_servers(&db).map_err(|e| format!("Failed to get servers: {}", e))?
@@ -588,7 +590,10 @@ pub async fn probe_all_mcp_servers_impl(state: &AppState) -> Result<HashMap<Stri
 }
 
 /// 探测一份未落库的 spec(编辑/新增时"测试连接"用)。
-pub async fn probe_mcp_spec_impl(_state: &AppState, spec: serde_json::Value) -> Result<ProbeResult, String> {
+pub async fn probe_mcp_spec_impl(
+    _state: &AppState,
+    spec: serde_json::Value,
+) -> Result<ProbeResult, String> {
     let server_type = spec
         .get("type")
         .and_then(|v| v.as_str())

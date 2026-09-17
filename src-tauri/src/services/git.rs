@@ -762,7 +762,7 @@ pub fn create_git_worktree_in_project(
     codemux_home: Option<&Path>,
 ) -> Result<GitWorktree, String> {
     let root = resolve_git_root(project_path)?;
-    let branch_name = validate_branch_name(&root, &branch_name)?;
+    let branch_name = validate_branch_name(&root, branch_name)?;
     let worktree_path = resolve_worktree_path(&root, &branch_name, codemux_home)?;
     if worktree_path.exists() {
         return Err(format!(
@@ -2093,7 +2093,7 @@ mod tests {
         .unwrap();
 
         assert!(!created.path.contains(".worktrees"));
-        assert!(Path::new(&created.path).starts_with(&codemux_home.join("worktrees")));
+        assert!(Path::new(&created.path).starts_with(codemux_home.join("worktrees")));
         assert!(Path::new(&created.path).exists());
 
         let _ = fs::remove_dir_all(project);

@@ -42,6 +42,12 @@ impl RelayTransportState {
     }
 }
 
+impl Default for RelayTransportState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct RelayTransportController {
     stop_tx: mpsc::Sender<()>,
     state: RelayTransportState,
