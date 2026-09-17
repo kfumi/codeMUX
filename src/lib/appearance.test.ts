@@ -12,6 +12,7 @@ import {
   buildUiFontFamily,
   clampCodeFontSize,
   clampUiFontSize,
+  formatFontFamilyForCss,
   loadPrefs,
 } from './appearance';
 
@@ -65,6 +66,11 @@ describe('appearance preferences', () => {
     expect(buildUiFontFamily('')).toContain('system-ui');
     expect(buildUiFontFamily('Microsoft YaHei UI')).toContain("'Microsoft YaHei UI'");
     expect(buildUiFontFamily('Microsoft YaHei UI')).toContain('PingFang SC');
+    // 内置字体映射到打包的 @font-face 字体族(src/styles/fonts.css)。
+    expect(buildUiFontFamily('Inter')).toContain("'Inter'");
+    expect(buildUiFontFamily('LXGW WenKai')).toContain("'LXGW WenKai'");
+    expect(buildUiFontFamily('Noto Sans SC')).toContain("'Noto Sans SC'");
+    expect(formatFontFamilyForCss('Geist')).toContain("'Geist'");
   });
 
   it('applies CSS variables without changing the root font size', () => {

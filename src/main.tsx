@@ -1,6 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono";
+// 内置界面字体(外观设置可选,随应用打包,无需本机安装):完整单文件 woff2
+// 存放于 public/fonts/(含 OFL 许可证,@font-face 见 src/styles/fonts.css),
+// 字体族名与 src/lib/appearance.ts 的 BUILT_IN_FONT_FAMILIES 映射保持一致。
+import "./styles/fonts.css";
 import App from "./App";
 import { HostBootstrapGate } from "./components/bootstrap/HostBootstrapGate";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";

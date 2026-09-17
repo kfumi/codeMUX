@@ -1,0 +1,39 @@
+/*
+  内置开源界面字体（SIL OFL 1.1 — 允许商用与再分发，许可证文本见
+  public/fonts/licenses/）。woff2 为完整单文件（非 unicode-range 切片），
+  放在 public/fonts/ 由静态服务直接吐出（不经 Vite 资产管线，CJK 大文件
+  走管线会导致构建挂死）。外观设置的字体选择器选中内置项后，字体族名与
+  src/lib/appearance.ts 的 BUILT_IN_FONT_FAMILIES 映射保持一致，
+  @font-face 常驻加载即可离线生效。
+*/
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("/fonts/noto-sans-sc.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LXGW WenKai";
+  src: url("/fonts/lxgw-wenkai.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

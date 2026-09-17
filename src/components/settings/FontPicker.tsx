@@ -19,7 +19,8 @@ const SYSTEM_DEFAULT_VALUE = '__system_default__';
 
 /**
  * 内置推荐字体(对齐 PI-Desktop 的"内置"分组,均为 OFL 开源协议):
- * 字体在本机已安装时生效;未安装时由浏览器回退到系统字体栈。
+ * 字体文件随应用打包在 public/fonts/(完整单文件 woff2,见 src/styles/fonts.css),
+ * 无需本机安装即可生效。
  */
 const BUILT_IN_FONTS = [
   { name: 'Geist', license: 'OFL' },

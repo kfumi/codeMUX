@@ -33,3 +33,9 @@
 
 ## 已否决方向
 - daemon 逐事件广播合并帧（帧率实测仅 4-12/s，纯文本流式期间重测前勿动协议层）。
+
+## 内置字体（外观设置）
+- 真实现方式照抄 PI-Desktop：**每个字体一个完整单文件 woff2**，`font-family` 用人类可读名、不带 `Variable` 后缀（该后缀猜错一次会导致选择后不生效）。
+- CodeMUX 落点：woff2 + OFL 许可证放 `public/fonts/`（**刻意不走 Vite 资产管线**），`@font-face` 写在 `src/styles/fonts.css`（`/fonts/*.woff2` 绝对路径），`main.tsx` import 该 CSS；`src/lib/appearance.ts` 的 `BUILT_IN_FONT_FAMILIES` 是选择器显示名→真实字体族的唯一映射，改名需与 fonts.css 同步。
+- **禁止**：用 `@fontsource*` 包（数百 unicode-range 分片）或把 7MB 级 CJK woff2 放 `src/assets/` 走 Vite 资产管线。
+

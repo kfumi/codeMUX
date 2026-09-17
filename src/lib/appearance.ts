@@ -26,6 +26,19 @@ export const SYSTEM_FONT_STACK =
   "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif";
 export const CHINESE_FONT_FALLBACK = "'Microsoft YaHei UI', 'PingFang SC', sans-serif";
 
+/**
+ * 内置字体(外观设置可选,随应用打包,OFL 协议):
+ * key 是选择器里的显示名,value 是 @font-face 注册的真实字体族
+ * (@font-face 定义在 src/styles/fonts.css,woff2 存放于 public/fonts/;
+ * 改名时两处需同步)。
+ */
+export const BUILT_IN_FONT_FAMILIES: Record<string, string> = {
+  Geist: 'Geist',
+  Inter: 'Inter',
+  'Noto Sans SC': 'Noto Sans SC',
+  'LXGW WenKai': 'LXGW WenKai',
+};
+
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
   azure: { name: '天蓝', light: '209 99% 40%', dark: '209 92% 58%', lightForeground: '0 0% 100%', darkForeground: '0 0% 100%', swatch: '#0169CC' },
   cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(192 75% 42%)' },
@@ -87,13 +100,16 @@ export function buildUiFontFamily(family: string): string {
   const trimmed = family.trim();
   if (!trimmed) return SYSTEM_FONT_STACK;
   const escaped = trimmed.replace(/'/g, "\\'");
-  return `'${escaped}', ${CHINESE_FONT_FALLBACK}`;
+  // 内置字体映射到打包的 @font-face 字体族;未命中按本机已安装字体名处理。
+  const resolved = BUILT_IN_FONT_FAMILIES[trimmed] ?? escaped;
+  return `'${resolved}', ${CHINESE_FONT_FALLBACK}`;
 }
 
 export function formatFontFamilyForCss(family: string): string {
   const trimmed = family.trim();
   if (!trimmed) return SYSTEM_FONT_STACK;
-  const escaped = trimmed.replace(/'/g, "\\'");
+  const resolved = BUILT_IN_FONT_FAMILIES[trimmed] ?? trimmed;
+  const escaped = resolved.replace(/'/g, "\\'");
   return `'${escaped}'`;
 }
 
