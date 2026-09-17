@@ -125,14 +125,14 @@ function UsageRing({ percentage }: { percentage: number }) {
   const stroke = getProgressColor(percentage);
 
   return (
-    <div className="relative flex h-4 w-4 items-center justify-center">
+    <div className="relative flex h-5 w-5 items-center justify-center">
       <svg className="-rotate-90" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="hsl(var(--muted))"
+          stroke="hsl(var(--foreground) / 0.14)"
           strokeWidth={strokeWidth}
         />
         <circle
@@ -165,7 +165,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
 function getProgressColor(percentage: number) {
   if (percentage >= 85) return 'hsl(var(--destructive))';
   if (percentage >= 65) return 'hsl(var(--warning))';
-  return 'hsl(var(--muted-foreground))';
+  return 'hsl(var(--primary))';
 }
 
 function formatCompactTokens(value: number) {

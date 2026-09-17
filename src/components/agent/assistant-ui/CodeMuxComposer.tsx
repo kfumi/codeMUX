@@ -199,7 +199,6 @@ export function CodeMuxComposer({
   const composerRootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<CodeMuxLexicalComposerInputHandle>(null);
-  const [isFocused, setIsFocused] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   // Local text state maintained by the Lexical editor; avoids per-keystroke
   // sync to the runtime composer which caused long-text input jank.
@@ -521,17 +520,8 @@ export function CodeMuxComposer({
       <ComposerPrimitive.Root className="relative flex w-full flex-col">
         <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
-            onFocusCapture={() => setIsFocused(true)}
-            onBlurCapture={() => {
-              requestAnimationFrame(() => {
-                setIsFocused(composerRootRef.current?.contains(document.activeElement) ?? false);
-              });
-            }}
             className={cn(
-              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border p-2.5 transition-all duration-200',
-              isFocused
-                ? 'border-[hsl(var(--primary)/0.38)] bg-[hsl(var(--surface-1))]/98 shadow-[0_18px_42px_-30px_hsl(var(--primary)/0.36),inset_0_1px_0_hsl(var(--foreground)/0.035)]'
-                : 'border-border/82 bg-[hsl(var(--surface-1))]/94 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.026)]',
+              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border border-border/82 bg-[hsl(var(--surface-1))]/94 p-2.5 transition-all duration-200',
             )}
           >
             <input
