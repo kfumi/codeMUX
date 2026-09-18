@@ -2144,6 +2144,30 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(onSend).not.toHaveBeenCalled();
   }, 30_000);
 
+  it('marks transcripts above the long-thread threshold for off-screen row skipping', () => {
+    // jsdom does not implement content-visibility, so this test can only pin the
+    // attribute contract the CSS rule keys off (`[data-long-thread] [data-message-row]`).
+    // The rendering saving itself has to be checked in a real browser.
+    const shortView = render(<Harness sessionId="session-nav" />);
+    expect(screen.getByTestId('thread-content-shell').hasAttribute('data-long-thread')).toBe(false);
+    shortView.unmount();
+
+    const longSessionId = 'session-long-rewind';
+    const longEvents = buildLargeToolHistoryEvents(45);
+    useAgentStore.setState((state) => ({
+      events: { ...state.events, [longSessionId]: longEvents },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        [longSessionId]: longEvents.map((_, index) => index + 1),
+      },
+    } as any));
+
+    render(<Harness sessionId={longSessionId} />);
+
+    expect(longEvents.length).toBeGreaterThan(120);
+    expect(screen.getByTestId('thread-content-shell').hasAttribute('data-long-thread')).toBe(true);
+  });
+
   it('offers in-place rewind on a historical user message with a strong locator', async () => {
     const onSend = vi.fn(async () => {});
     const rewindToMessage = vi.fn().mockResolvedValue({ text: 'first instruction' });

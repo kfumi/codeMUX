@@ -26,6 +26,20 @@
   border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
+/*
+ * Long transcripts only (the thread shell sets `data-long-thread` above a
+ * message-count threshold). Off-screen rows skip layout and paint entirely,
+ * which is what kept long conversations heavy to re-render.
+ * `content-visibility: auto` keeps the row in the DOM and in the accessibility
+ * tree, while `contain-intrinsic-size: auto <length>` remembers the real height
+ * of every row that has been rendered once, so scroll length stays accurate and
+ * only never-rendered rows fall back to the estimate.
+ */
+[data-long-thread] [data-message-row] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {

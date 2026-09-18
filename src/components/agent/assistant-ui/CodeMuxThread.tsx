@@ -104,6 +104,12 @@ const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
 const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
+/**
+ * Above this event count (~60 messages) the transcript is long enough that
+ * off-screen rows are worth excluding from layout/paint. See the
+ * `[data-long-thread] [data-message-row]` rule in globals.css.
+ */
+const LONG_THREAD_EVENT_THRESHOLD = 120;
 const GROUP_BY_PART_INNER = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
@@ -413,6 +419,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           {(scrollToBottomButton) => (
             <div
               data-testid="thread-content-shell"
+              data-long-thread={events.length > LONG_THREAD_EVENT_THRESHOLD ? '' : undefined}
               className={cn(
                 'mx-auto flex w-full flex-1 flex-col pt-5',
                 showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
