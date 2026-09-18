@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '../../lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '../ui/tooltip';
 import type { UsageHeatmapDay } from '../../types/usage';
+import { buildTokenThresholds, tokenLevel } from '../../lib/usageHeatmapScale';
 
 const DAY_LABEL_WIDTH = 32;
 const OUTER_GAP = 3;
@@ -15,15 +16,35 @@ const READABLE_CELL_SIZE = 9;
 /** 月份标签的最小间距(px):靠得太近就跳过,避免窄屏互相重叠。 */
 const MIN_MONTH_LABEL_GAP = 30;
 
-export function UsageHeatmapLegend() {
+/** 图例各档的区间文案；跨度由窗口内活跃日的分位数得出，随数据变化。 */
+function buildLevelRanges(thresholds: number[] | null | undefined): string[] {
+  if (!thresholds || thresholds.length < 3) {
+    return ['无 Token 消耗', '低消耗档', '中低消耗档', '中高消耗档', '高消耗档'];
+  }
+  const [b1, b2, b3] = thresholds;
+  return [
+    '无 Token 消耗',
+    `少于 ${formatTokenCount(b1)} tokens`,
+    `${formatTokenCount(b1)} ~ ${formatTokenCount(b2)} tokens`,
+    `${formatTokenCount(b2)} ~ ${formatTokenCount(b3)} tokens`,
+    `多于 ${formatTokenCount(b3)} tokens`,
+  ];
+}
+
+interface UsageHeatmapLegendProps {
+  /** 与热力图共用同一份分档阈值，保证图例跨度与格子颜色对得上。 */
+  thresholds?: number[] | null;
+}
+
+export function UsageHeatmapLegend({ thresholds }: UsageHeatmapLegendProps) {
+  const ranges = buildLevelRanges(thresholds);
   return (
     <div className="flex items-center gap-1.5 text-ui-micro text-muted-foreground">
       <span>少</span>
       {[0, 1, 2, 3, 4].map((level) => (
-        <div
-          key={level}
-          className={cn('h-[13px] w-[13px] rounded-[2px]', LEVEL_BG[level])}
-        />
+        <TooltipHint key={level} content={ranges[level]}>
+          <div className={cn('h-[13px] w-[13px] rounded-[2px]', LEVEL_BG[level])} />
+        </TooltipHint>
       ))}
       <span>多</span>
     </div>
@@ -33,6 +54,8 @@ export function UsageHeatmapLegend() {
 interface UsageHeatmapProps {
   data: UsageHeatmapDay[];
   tokenMap?: Map<string, number>;
+  /** 分档阈值；不传时按 tokenMap 自行推导。 */
+  tokenThresholds?: number[] | null;
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -45,14 +68,6 @@ const LEVEL_BG: Record<number, string> = {
   3: 'bg-primary/70',
   4: 'bg-primary/90',
 };
-
-function getLevel(tokens: number): number {
-  if (tokens <= 0) return 0;
-  if (tokens < 50_000) return 1;
-  if (tokens < 200_000) return 2;
-  if (tokens < 500_000) return 3;
-  return 4;
-}
 
 function formatDateString(date: Date): string {
   const y = date.getFullYear();
@@ -95,7 +110,7 @@ interface MonthLabel {
   label: string;
 }
 
-export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
+export function UsageHeatmap({ data, tokenMap, tokenThresholds }: UsageHeatmapProps) {
   const [containerWidth, setContainerWidth] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -149,6 +164,12 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
 
     return { weeks, monthLabels };
   }, [data, tokenMap]);
+
+  // 分档阈值默认按窗口内「有消耗的日」推导；父组件传入同一份，图例才能显示跨度。
+  const thresholds = useMemo(
+    () => tokenThresholds ?? buildTokenThresholds(weeks.flat().map((cell) => cell.tokens)),
+    [tokenThresholds, weeks],
+  );
 
   /**
    * 宽度用 callback ref + ResizeObserver 测:早先的 useLayoutEffect 在「先渲染空态、
@@ -267,7 +288,7 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
                             'rounded-[2px]',
                             cell.isFuture
                               ? 'bg-transparent'
-                              : LEVEL_BG[getLevel(cell.tokens)],
+                              : LEVEL_BG[tokenLevel(cell.tokens, thresholds)],
                           )}
                           style={cellStyle}
                         />
