@@ -22,7 +22,8 @@
     "relay:pack-vps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-for-vps.ps1",
     "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1",
     "test": "vitest run",
-    "test:sidecar": "cd src-tauri/sidecar && npm run test"
+    "test:sidecar": "cd src-tauri/sidecar && npm run test",
+    "test:e2e:transcript-probe": "node scripts/e2e/transcript-probe/runner.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",
