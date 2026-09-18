@@ -9,11 +9,14 @@ import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
+import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
 import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
+import { focusActiveComposer } from './lib/shortcuts/composerFocus';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { daemonFacade } from './lib/facades/daemon-facade';
@@ -23,6 +26,9 @@ import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSe
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useSidePanelStore } from './stores/sidePanelStore';
+import { useChatSearchStore } from './stores/chatSearchStore';
+import { useShellLayoutStore } from './stores/shellLayoutStore';
+import { runShortcutCommand, useShortcutCommandStore } from './stores/shortcutCommandStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
 import { useNavigationStore, type NavigationLocation, type SidePanelNavigationState } from './stores/navigationStore';
@@ -93,6 +99,7 @@ function App() {
   const activeView = navigationLocation.view;
   const settingsTab = navigationLocation.settingsTab;
   const automationTaskId = navigationLocation.automationTaskId;
+  const isNarrowViewport = useIsNarrowViewport();
   const [perfOverlayVisible, setPerfOverlayVisible] = useState(false);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -257,7 +264,7 @@ function App() {
     }
   }, [activeSessionId, closeDraft, isDraftOpen]);
 
-  const handleNewSession = (projectId?: string) => {
+  const handleNewSession = useCallback((projectId?: string) => {
     setActiveSession(null);
     setActiveProject(projectId ?? null);
     const newSessionState = useNewSessionStore.getState();
@@ -281,8 +288,43 @@ function App() {
       isDraftOpen: true,
       sidePanel: getSidePanelNavigation(draftScopeId),
     });
-  };
+  }, [commitNavigation, navigationLocation, openDraft, setActiveProject, setActiveSession]);
 
+
+  // 快捷键命令的执行体：命令目录只描述「有哪些命令、默认什么键位」，执行体由 App 组装，
+  // 因为其中几条要 App 级的导航回调。注册成功后全局分发器与搜索结果共用同一段代码。
+  useEffect(() => {
+    useShortcutCommandStore.getState().setHandlers({
+      navigateBack: handleBack,
+      navigateForward: handleForward,
+      newSession: () => handleNewSession(),
+      openSettings: handleOpenSettings,
+      openSearch: () => {
+        // 搜索框挂在侧边栏里，而设置页把侧边栏换成了设置导航：不拦住的话，
+        // 开合状态会留在 store 里，等用户回到会话视图时凭空弹出搜索框。
+        if (activeView === 'settings') return;
+        useChatSearchStore.getState().open();
+      },
+      toggleSidebar: () => useShellLayoutStore.getState().toggleSidebar(isNarrowViewport),
+      toggleSidePanel: () => {
+        // 侧面板只属于 app 视图：在设置/自动化页按键不该悄悄改它的开合状态
+        if (activeView !== 'app') return;
+        const panel = useSidePanelStore.getState();
+        if (panel.isOpen) panel.closePanel();
+        else panel.openPanel();
+      },
+      abort: () => {
+        const sessionId = useSessionStore.getState().activeSessionId;
+        if (sessionId) void useAgentStore.getState().interrupt(sessionId);
+      },
+      focusComposer: () => {
+        focusActiveComposer();
+      },
+    });
+  }, [activeView, handleBack, handleForward, handleNewSession, handleOpenSettings, isNarrowViewport]);
+
+  // 全应用唯一的窗口 keydown 监听（见 ADR 0013）
+  useKeyboardShortcuts(runShortcutCommand);
   const handleStartNewSession = async (input: AgentInputPayload) => {
     const {
       selectedAgentKind,

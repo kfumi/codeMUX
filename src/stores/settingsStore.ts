@@ -5,6 +5,7 @@ import type {
   AppConfig,
   GitSettings,
   ImageRecognitionConfig,
+  KeybindingsSettings,
   ModelProvider,
   NotificationSettings,
   Theme,
@@ -60,6 +61,7 @@ interface SettingsState {
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setGitSettings: (settings: GitSettings) => Promise<void>;
+  setKeybindings: (keybindings: KeybindingsSettings) => Promise<void>;
   setBrowserControl: (settings: BrowserControlSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   upsertModelProvider: (provider: ModelProvider) => Promise<void>;
@@ -225,6 +227,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           : state.config,
         error: String(error),
       }));
+    }
+  },
+
+  setKeybindings: async (keybindings: KeybindingsSettings) => {
+    const previousKeybindings = get().config?.keybindings;
+    set((state) => ({
+      config: state.config ? { ...state.config, keybindings } : state.config,
+      error: null,
+    }));
+
+    try {
+      await daemonFacade.setKeybindings(keybindings);
+    } catch (error) {
+      set((state) => ({
+        config: state.config
+          ? { ...state.config, keybindings: previousKeybindings }
+          : state.config,
+        error: String(error),
+      }));
+      throw error;
     }
   },
 

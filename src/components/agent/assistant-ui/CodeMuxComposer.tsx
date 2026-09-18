@@ -35,6 +35,8 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
+import { registerComposerFocus } from '../../../lib/shortcuts/composerFocus';
+import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../../hooks/useShortcutHint';
 import { appendComposerReference, getPathLabel } from '../../../lib/composerReferences';
 import { cn } from '../../../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
@@ -199,6 +201,14 @@ export function CodeMuxComposer({
   const composerRootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<CodeMuxLexicalComposerInputHandle>(null);
+
+  // 「聚焦输入框」命令需要一个全局入口：composer 的 ref 只活在这个组件里
+  useEffect(() => registerComposerFocus(() => editorRef.current?.focus()), []);
+
+  // 键位提示跟着用户的改键走：停止按钮的 tooltip 与输入框占位符共用同一份。
+  const abortHint = useShortcutHint('abort');
+  const abortAria = useShortcutAriaKeyshortcuts('abort');
+  const focusComposerHint = useShortcutHint('focusComposer');
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   // Local text state maintained by the Lexical editor; avoids per-keystroke
   // sync to the runtime composer which caused long-text input jank.
@@ -592,7 +602,7 @@ export function CodeMuxComposer({
               <CodeMuxLexicalComposerInput
                 ref={editorRef}
                 submitMode="enter"
-                placeholder={placeholder}
+                placeholder={focusComposerHint ? `${placeholder} · ${focusComposerHint}` : placeholder}
                 directiveChip={DIRECTIVE_CHIP}
                 formatter={formatter}
                 onPaste={handleComposerPaste}
@@ -685,11 +695,12 @@ export function CodeMuxComposer({
                   </span>
                 )}
                 {flowActive ? (
-                  <TooltipHint content="停止当前任务">
+                  <TooltipHint content={`停止当前任务${abortHint ? ` · ${abortHint}` : ''}`}>
                     <button
                       type="button"
                       onClick={() => void onStop?.()}
                       aria-label="停止当前任务"
+                      aria-keyshortcuts={abortAria ?? undefined}
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.18)]"
                     >
                       <Square className="h-3.5 w-3.5" fill="currentColor" />

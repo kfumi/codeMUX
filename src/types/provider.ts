@@ -119,6 +119,9 @@ export interface GitSettings {
   model: string;
 }
 
+/** Shortcut id → keybinding string; `null` means the shortcut is explicitly unbound. */
+export type KeybindingsSettings = Record<string, string | null>;
+
 export interface ModelProvider {
   id: string;
   name: string;
@@ -174,6 +177,7 @@ export interface AppConfig {
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
   git?: GitSettings;
+  keybindings?: KeybindingsSettings;
   browser?: BrowserControlSettings;
   theme: Theme;
   attachment_enrichment?: AttachmentEnrichmentConfig;

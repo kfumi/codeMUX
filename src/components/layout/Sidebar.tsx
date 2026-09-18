@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react';
 
 import { openDialog } from '../../lib/desktopDialogs';
 import { createLogger, serializeError } from '../../lib/logger';
+import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
+import { useChatSearchStore } from '../../stores/chatSearchStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Project } from '../../types/project';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '../ui/tooltip';
 import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
@@ -33,7 +35,19 @@ export function Sidebar({
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
-  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const chatSearchOpen = useChatSearchStore((state) => state.isOpen);
+  const setChatSearchOpen = useChatSearchStore((state) => state.setOpen);
+  // 搜索框挂在侧边栏里：切到设置页时侧边栏被替换、搜索框随之卸载，
+  // 但开合状态在 store 里；不在这里收掉，回到会话视图会凭空弹出搜索框。
+  useEffect(() => () => useChatSearchStore.getState().close(), []);
+
+  // 搜索是「搜索聊天或运行命令」的唯一入口，键位直接显示在按钮上
+  const searchShortcutHint = useShortcutHint('openSearch');
+  const newSessionHint = useShortcutHint('newSession');
+  const newSessionAria = useShortcutAriaKeyshortcuts('newSession');
+  const searchAria = useShortcutAriaKeyshortcuts('openSearch');
+  const settingsHint = useShortcutHint('openSettings');
+  const settingsAria = useShortcutAriaKeyshortcuts('openSettings');
   const [explorerProject, setExplorerProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -70,20 +84,33 @@ export function Sidebar({
     <div className="flex h-full flex-col">
       <div className="space-y-0 px-3 pb-1.5 pt-11">
         <button
+          type="button"
           onClick={onNewSession}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          aria-keyshortcuts={newSessionAria ?? undefined}
+          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
+          {newSessionHint && (
+            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+              {newSessionHint}
+            </span>
+          )}
         </button>
 
         <button
           type="button"
           onClick={() => setChatSearchOpen(true)}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          aria-keyshortcuts={searchAria ?? undefined}
+          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Search className="h-4 w-4" />
           <span className="flex-1 text-left">搜索</span>
+          {searchShortcutHint && (
+            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+              {searchShortcutHint}
+            </span>
+          )}
         </button>
 
         <button
@@ -108,7 +135,7 @@ export function Sidebar({
       <div className="flex items-center gap-1 border-t border-[hsl(var(--sidebar-border))]/45 px-3 py-2.5">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-caption text-[hsl(var(--sidebar-fg))]/50">
+            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
               <span className={proxyRunning ? 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-fg))]/30'} />
               <span>{proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy'}</span>
             </span>
@@ -121,13 +148,17 @@ export function Sidebar({
         </Tooltip>
         <div className="flex-1" />
         <CompanionSidebarButton />
-        <button
-          onClick={onOpenSettings}
-          className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-title text-[hsl(var(--sidebar-fg))]/66 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
-        >
-          <Settings className="h-3.5 w-3.5" />
-          <span>设置</span>
-        </button>
+        <TooltipHint content={`打开设置${settingsHint ? ` · ${settingsHint}` : ''}`}>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-keyshortcuts={settingsAria ?? undefined}
+            className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-title text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            <span>设置</span>
+          </button>
+        </TooltipHint>
       </div>
 
       <ChatSearchDialog

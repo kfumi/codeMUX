@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, Info, Keyboard, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { cn } from '../../lib/utils';
@@ -12,6 +12,7 @@ import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { GitSettings } from './GitSettings';
 import { ImageRecognitionSettings } from './ImageRecognitionSettings';
+import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
@@ -23,7 +24,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'provider' | 'image-recognition' | 'browser-control' | 'agent-runtime' | 'mcp' | 'skills' | 'git' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'shortcuts' | 'provider' | 'image-recognition' | 'browser-control' | 'agent-runtime' | 'mcp' | 'skills' | 'git' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -39,6 +40,7 @@ interface SettingsContentProps {
 const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
   { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
+  { id: 'shortcuts' as const, label: '快捷键', description: '自定义每条命令的键位，可禁用或恢复默认。', icon: Keyboard },
   { id: 'provider' as const, label: '模型配置', description: '管理模型供应商的 API Key、协议端点与模型列表；会话按智能体所需协议选用可用供应商。', icon: Plug },
   { id: 'image-recognition' as const, label: '图片识别', description: '为非 vision 会话模型配置图片解析用的 API 密钥、地址与解析模型。', icon: Image },
   { id: 'browser-control' as const, label: '浏览器控制', description: '管理内置浏览器的开关、证书校验与站点数据。', icon: Globe },
@@ -89,10 +91,10 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
         'relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-ui-compact transition-colors duration-150',
         activeTab === id
           ? 'bg-[hsl(var(--foreground)/0.08)] font-medium text-foreground'
-          : 'text-foreground/66 hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground',
+          : 'text-muted-foreground hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground',
       )}
     >
-      <Icon className={cn('h-4 w-4 shrink-0 transition-colors', activeTab === id ? 'text-foreground/82' : 'text-foreground/45')} />
+      <Icon className={cn('h-4 w-4 shrink-0 transition-colors', activeTab === id ? 'text-foreground' : 'text-muted-foreground')} />
       <span className="truncate">{label}</span>
     </button>
   );
@@ -103,7 +105,7 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
         <button
           type="button"
           onClick={onBack}
-          className="mb-5 flex items-center gap-2 rounded-md px-2 py-1.5 text-ui-compact font-medium text-foreground/70 transition-colors hover:bg-muted/62 hover:text-foreground"
+          className="mb-5 flex items-center gap-2 rounded-md px-2 py-1.5 text-ui-compact font-medium text-foreground transition-colors hover:bg-muted/62 hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           返回应用
@@ -138,7 +140,7 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
         <div className="mx-auto w-full max-w-5xl px-4 pb-3 pt-4 sm:px-6 sm:pb-3.5 sm:pt-5 lg:px-12 lg:pb-4 lg:pt-6">
           <h2 className="text-ui-heading-md font-semibold tracking-tight text-foreground">{activeLabel}</h2>
           {activeDescription && (
-            <p className="mt-1.5 text-ui-compact leading-relaxed text-foreground/55 sm:text-ui-body">{activeDescription}</p>
+            <p className="mt-1.5 text-ui-compact leading-relaxed text-muted-foreground sm:text-ui-body">{activeDescription}</p>
           )}
         </div>
       </header>
@@ -147,6 +149,7 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
       <div className="@container mx-auto w-full max-w-5xl px-4 pb-5 pt-3 sm:px-6 sm:pb-6 sm:pt-4 lg:px-12 lg:pb-8 lg:pt-4">
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
+        {activeTab === 'shortcuts' && <KeyboardShortcutsSettings />}
         {activeTab === 'provider' && <ProviderConfigPanel />}
         {activeTab === 'image-recognition' && <ImageRecognitionSettings />}
         {activeTab === 'browser-control' && <BrowserControlSettings />}

@@ -459,6 +459,11 @@ pub struct AppConfig {
     pub notifications: NotificationSettings,
     #[serde(default)]
     pub git: GitSettingsConfig,
+    /// User keyboard shortcut overrides (ADR 0013): shortcut id → opaque keybinding
+    /// string. Values are never validated or normalized by the daemon; `None` means the
+    /// shortcut is explicitly unbound.
+    #[serde(default)]
+    pub keybindings: std::collections::HashMap<String, Option<String>>,
     pub theme: Theme,
     #[serde(default)]
     pub attachment_enrichment: AttachmentEnrichmentConfig,
@@ -491,6 +496,7 @@ impl Default for AppConfig {
             default_open_target: default_open_target(),
             notifications: NotificationSettings::default(),
             git: GitSettingsConfig::default(),
+            keybindings: std::collections::HashMap::new(),
             theme: Theme::System,
             attachment_enrichment: AttachmentEnrichmentConfig::default(),
             companion: CompanionConfig::default(),
@@ -549,6 +555,46 @@ mod tests {
         let config: AppConfig = serde_json::from_value(raw).unwrap();
 
         assert_eq!(config.default_open_target, "file_explorer");
+    }
+
+    #[test]
+    fn keybindings_round_trip_and_keep_explicit_unbind() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System",
+            "keybindings": { "openSearch": null, "newSession": "Mod+Alt+N" }
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        // null 是「显式解绑」，必须原样存活，不能被折叠成缺键（ADR 0013 决策 4）
+        assert!(matches!(config.keybindings.get("openSearch"), Some(None)));
+        assert_eq!(
+            config.keybindings.get("newSession").cloned().flatten(),
+            Some("Mod+Alt+N".to_string())
+        );
+
+        let round_tripped: AppConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert!(matches!(
+            round_tripped.keybindings.get("openSearch"),
+            Some(None)
+        ));
+        assert_eq!(round_tripped.keybindings.len(), 2);
+    }
+
+    #[test]
+    fn old_config_json_deserializes_with_empty_keybindings() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert!(config.keybindings.is_empty());
     }
 
     #[test]

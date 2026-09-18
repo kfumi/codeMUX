@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useWindowMaximized } from '../../hooks/useWindowMaximized';
+import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useShellLayoutStore } from '../../stores/shellLayoutStore';
@@ -58,7 +59,9 @@ export function MainLayout({
   todos,
 }: MainLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 侧栏收起状态落在布局 store：它是可绑定命令（折叠/展开侧边栏），
+  // 分发器只认 store，不该去猜组件的局部状态。
+  const sidebarCollapsed = useShellLayoutStore((state) => state.sidebarCollapsed);
   // 窄屏(工单 03):侧栏改为抽屉式覆盖层。响应式是布局问题,不是代码分叉 ——
   // 内容树完全复用,只有导航形态与尺寸不同。
   const isNarrow = useIsNarrowViewport();
@@ -112,12 +115,17 @@ export function MainLayout({
   }, []);
 
   const toggleSidebar = useCallback(() => {
-    if (isNarrow) {
-      useShellLayoutStore.getState().toggleNarrowSidebar();
-      return;
-    }
-    setSidebarCollapsed((value) => !value);
+    // 同一个动作既给按钮也给「折叠/展开侧边栏」命令用，逻辑只此一处
+    useShellLayoutStore.getState().toggleSidebar(isNarrow);
   }, [isNarrow]);
+
+  // tooltip 里带出当前键位（用户改键后提示跟着变）
+  const sidebarToggleHint = useShortcutHint('toggleSidebar');
+  const backHint = useShortcutHint('navigateBack');
+  const forwardHint = useShortcutHint('navigateForward');
+  const sidebarToggleAria = useShortcutAriaKeyshortcuts('toggleSidebar');
+  const backAria = useShortcutAriaKeyshortcuts('navigateBack');
+  const forwardAria = useShortcutAriaKeyshortcuts('navigateForward');
 
   // 侧栏是否可见:桌面看收起状态,窄屏看抽屉开关。
   const sidebarVisible = isNarrow ? narrowSidebarOpen : !sidebarCollapsed;
@@ -134,11 +142,12 @@ export function MainLayout({
   const showsCornerNotch = sidebarDocked && hostForm === 'desktop' && !windowMaximized;
 
   const sidebarToggleButton = sidebar != null ? (
-    <TooltipHint content={sidebarVisible ? '收起侧栏' : '展开侧栏'}>
+    <TooltipHint content={sidebarVisible ? `收起侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}` : `展开侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}`}>
       <button
         type="button"
         onClick={toggleSidebar}
         aria-label={sidebarVisible ? '收起侧栏' : '展开侧栏'}
+        aria-keyshortcuts={sidebarToggleAria ?? undefined}
         className={cn(
           'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
         )}
@@ -153,10 +162,11 @@ export function MainLayout({
       {sidebarToggleButton}
       {titleBarNavigation ? (
         <div className="flex items-center gap-0.5">
-          <TooltipHint content="后退">
+          <TooltipHint content={`后退${backHint ? ` · ${backHint}` : ''}`}>
             <button
               type="button"
               aria-label="后退"
+              aria-keyshortcuts={backAria ?? undefined}
               disabled={!titleBarNavigation.canGoBack}
               onClick={titleBarNavigation.onBack}
               className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
@@ -164,10 +174,11 @@ export function MainLayout({
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
           </TooltipHint>
-          <TooltipHint content="前进">
+          <TooltipHint content={`前进${forwardHint ? ` · ${forwardHint}` : ''}`}>
             <button
               type="button"
               aria-label="前进"
+              aria-keyshortcuts={forwardAria ?? undefined}
               disabled={!titleBarNavigation.canGoForward}
               onClick={titleBarNavigation.onForward}
               className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"

@@ -596,6 +596,9 @@ export const daemonFacade = {
   setGitSettings: async (settings: import('../../types/provider').GitSettings) => {
     await (await ensureDaemonClient()).patchAppConfig({ git: settings });
   },
+  setKeybindings: async (keybindings: import('../../types/provider').KeybindingsSettings) => {
+    await (await ensureDaemonClient()).patchAppConfig({ keybindings });
+  },
   setDefaultOpenTarget: async (target: import('../openTargets').OpenTarget) => {
     await (await ensureDaemonClient()).patchAppConfig({ defaultOpenTarget: target });
   },

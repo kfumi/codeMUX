@@ -14,6 +14,7 @@ const {
   setDefaultAgentKindMock,
   setDefaultOpenTargetMock,
   setImmediateRunModeMock,
+  setKeybindingsMock,
   setNotificationSettingsMock,
   updateAgentConfigMock,
 } = vi.hoisted(() => {
@@ -52,6 +53,7 @@ const {
     setDefaultOpenTargetMock: vi.fn<(target: string) => Promise<void>>(),
     setImmediateRunModeMock: vi.fn<(mode: string) => Promise<void>>(),
     setBrowserControlMock: vi.fn<(settings: Record<string, unknown>) => Promise<void>>(),
+    setKeybindingsMock: vi.fn<(keybindings: Record<string, string | null>) => Promise<void>>(),
     getConfigMock: vi.fn(async () => structuredClone(baseConfig)),
   };
 });
@@ -72,6 +74,7 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     setDefaultOpenTarget: setDefaultOpenTargetMock,
     setImmediateRunMode: setImmediateRunModeMock,
     setBrowserControl: setBrowserControlMock,
+    setKeybindings: setKeybindingsMock,
   },
 }));
 
@@ -253,6 +256,32 @@ describe('settings store agent config actions', () => {
       sound: 'ding',
     });
     expect(useSettingsStore.getState().error).toContain('write failed');
+  });
+
+  it('rolls keybindings back and rethrows when persistence fails', async () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? { ...state.config, keybindings: { openSearch: 'Mod+Shift+K' } }
+        : null,
+    }));
+    setKeybindingsMock.mockRejectedValueOnce(new Error('keybinding write failed'));
+
+    await expect(useSettingsStore.getState().setKeybindings({ openSearch: null }))
+      .rejects.toThrow('keybinding write failed');
+
+    expect(setKeybindingsMock).toHaveBeenCalledWith({ openSearch: null });
+    expect(useSettingsStore.getState().config?.keybindings).toEqual({ openSearch: 'Mod+Shift+K' });
+    expect(useSettingsStore.getState().error).toContain('keybinding write failed');
+  });
+
+  it('rolls keybindings back even when the saved config omitted the field', async () => {
+    setKeybindingsMock.mockRejectedValueOnce(new Error('legacy daemon'));
+
+    await expect(useSettingsStore.getState().setKeybindings({ openSearch: null }))
+      .rejects.toThrow('legacy daemon');
+
+    expect(useSettingsStore.getState().config?.keybindings).toBeUndefined();
+    expect(useSettingsStore.getState().config?.theme).toBe('System');
   });
 
   it('normalizes legacy notification sound values before saving', async () => {

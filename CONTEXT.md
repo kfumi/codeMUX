@@ -209,6 +209,42 @@ _Avoid_: job execution, instance；与 Immediate Run（排队消息插队）混�
 一次 Task Run 如何落到 Session：新建一条 Session，或续写该任务上次 Run 的 Session。首版仅新建。
 _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 当成通知渠道
 
+### Command
+一个可被触发的应用内动作，拥有稳定 id、标题、分组与执行体。它是快捷键的被绑定物，而不是键位；键位是绑在它上面的 Shortcut。
+_Avoid_: 用「快捷键」代指命令本身；把 Command 做成随组件创建的匿名回调；用本地化标题当 id
+
+### Shortcut
+一条 Command 与一个 Keybinding 的绑定关系。它可以被用户重绑、显式解绑或恢复默认；出厂默认只在读取时合并，从不落盘。
+_Avoid_: 把 Shortcut 与 Keybinding 混用；把「快捷键」当成键位字符串本身
+
+### Keybinding
+一串物理按键组合（如 `Mod+Shift+P`）。它是 Shortcut 的键位部分，不含平台含义，也不含执行体。
+_Avoid_: 把 Cmd/Ctrl 写进存储值；把「快捷键一览表」当成配置
+
+### Mod
+平台主修饰键的规范写法：macOS 为 Cmd，其余平台为 Ctrl。存储与匹配一律使用 Mod，展示时才渲染成 ⌘ 或 Ctrl。
+_Avoid_: 在配置或匹配逻辑中硬编码 Cmd 或 Ctrl；把 Alt/Option 混写进 Mod
+
+### Shortcut Execution
+一次按键序列命中某条 Shortcut 并执行其 Command 的过程。命中要求规范化后的 Keybinding 与该次按键相等；一次按键最多执行一条 Shortcut，目录中先命中者胜。
+_Avoid_: 把按键透传给组件后仍执行全局命令；同一次按键触发多条 Shortcut
+
+### Shortcut Catalog
+应用内置的全部 Shortcut 定义：稳定 id、分组、标题与出厂默认键位。它是「哪些命令可被绑定」的唯一真值源；用户可以改键位，不能改目录。
+_Avoid_: 把目录当成用户设置的一部分；在目录里塞用户自定义命令
+
+### Shortcut Override
+用户对某条 Shortcut 偏离出厂默认的那一份稀疏记录。只有覆盖存在时才算自定义；取值等于出厂默认的覆盖不携带用户意图，应被丢弃。
+_Avoid_: 把整份键位表物化落盘；把「等于默认」当成一次真实修改
+
+### Unbound
+用户把某条 Shortcut 的 Keybinding 置为「无」的显式状态。它与「没有覆盖、用默认」是两件不同的事，必须能跨版本存活，且不会与任何键位冲突。
+_Avoid_: 用删除覆盖表达解绑；把解绑值当成非法值而回落到默认
+
+### Reserved Keybinding
+属于宿主平台或文本编辑语义、不允许被任何 Shortcut 占用的键位（复制、粘贴、全选、撤销、重做、刷新、回车发送、关闭窗口等）。它在录制时就被拒绝，而不是先占用再让路。
+_Avoid_: 让出厂默认绕开保留表；把保留表当成平台 API 查询
+
 ## Preferred Terms
 
 
@@ -252,6 +288,14 @@ _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 
 | Schedule / 计划 | cron（用户可见名称）, timer, heartbeat |
 | Task Run / 一次执行 | job execution；与 Immediate Run 混称 |
 | Run Delivery / 执行去向 | 现有聊天 / 新聊天（Codex 用语） |
+| Command / 命令 | 用「快捷键」代指命令；用本地化标题当 id |
+| Shortcut / 快捷键 | 与 Keybinding 混用；把键位字符串本身叫 Shortcut |
+| Keybinding / 键位 | 把 Cmd/Ctrl 写进存储值 |
+| Mod | 在配置与匹配逻辑里硬编码 Cmd 或 Ctrl |
+| Shortcut Catalog / 命令目录 | 把目录当成用户设置；在目录里塞用户自定义命令 |
+| Shortcut Override / 键位覆盖 | 整份键位表物化落盘；把等于默认的覆盖当成一次修改 |
+| Unbound / 显式解绑 | 用删除覆盖表达解绑；把解绑值当非法值回落到默认 |
+| Reserved Keybinding / 保留键位 | 出厂默认绕开保留表 |
 
 ## Notes
 
@@ -260,9 +304,11 @@ _Avoid_: 用 Codex 的「现有聊天 / 新聊天」当领域词；把 Delivery 
 - 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。Daemon 权威、回环 Companion Server 与 Local Daemon Token 见 [ADR 0011](docs/adr/0011-daemon-authority-local-token.md)；Daemon 独立进程（`codemux-daemon`）与 Electron 桌面壳见 [ADR 0012](docs/adr/0012-daemon-process-electron-shell.md)，Tauri 壳已移除，ADR 0008「服务仅随移动同步开启」的表述已被 ADR 0011 修订。
 - Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
 - 定时任务决策见 [docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md](docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md)。
+- 快捷键决策见 [ADR 0013](docs/adr/0013-user-configurable-keyboard-shortcuts.md)：可改键、键位覆盖三态、按物理键匹配、无修饰键的键位不得被占用。
 
 ## Out of Scope (for this feature's first cut)
 
 - `gemini_cli`：当前未接入，不参与 Agent Kind Switch。
 - 移动端（Mobile Companion）首版不含：公网中继、系统推送通知、图片/文件附件、多桌面配对、富渲染（终端/xterm、diff 全展开、语法高亮）。
+- 快捷键首版不含：多段 chord 键位、整包键位方案预设、系统级（应用外）全局快捷键、键位布局重映射、插件或用户自定义命令。
 

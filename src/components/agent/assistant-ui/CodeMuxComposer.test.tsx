@@ -762,7 +762,8 @@ describe('CodeMuxComposer', () => {
     render(<CodeMuxComposer sessionId="session-1" placeholder="输入消息..." />);
 
     expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
-    expect(screen.getByText('输入消息...')).toBeTruthy();
+    // 占位符尾部会带上「聚焦输入框」的当前键位（跟着用户改键走）。
+    expect(screen.getByText(/输入消息\.\.\./)).toBeTruthy();
   });
 
   it('does not restore an unanswered user question after a later user message', () => {
@@ -778,7 +779,7 @@ describe('CodeMuxComposer', () => {
     render(<CodeMuxComposer sessionId="session-1" placeholder="输入消息..." />);
 
     expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
-    expect(screen.getByText('输入消息...')).toBeTruthy();
+    expect(screen.getByText(/输入消息\.\.\. · /)).toBeTruthy();
   });
 
   it('finds the latest final proposed plan after a result event', () => {

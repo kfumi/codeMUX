@@ -329,6 +329,22 @@ pub fn set_git_settings_for_companion(
     Ok(())
 }
 
+pub fn set_keybindings_for_companion(
+    state: &AppState,
+    roots: &crate::paths::PathRoots,
+    keybindings: std::collections::HashMap<String, Option<String>>,
+) -> Result<(), String> {
+    info!(
+        target: "provider",
+        "Setting keybindings count={}",
+        keybindings.len()
+    );
+    let mut config = state.config.lock().unwrap();
+    config.keybindings = keybindings;
+    crate::config::save_config(roots, &config)?;
+    Ok(())
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchAppConfigRequest {
@@ -339,6 +355,7 @@ pub struct PatchAppConfigRequest {
     pub notifications: Option<NotificationSettings>,
     pub default_open_target: Option<String>,
     pub git: Option<GitSettingsConfig>,
+    pub keybindings: Option<std::collections::HashMap<String, Option<String>>>,
     pub browser: Option<crate::config::types::BrowserControlConfig>,
     pub default_agent_kind: Option<String>,
     pub agent_kind: Option<String>,
@@ -370,6 +387,9 @@ pub fn patch_app_config_for_companion(
     }
     if let Some(settings) = patch.git {
         set_git_settings_for_companion(state, roots, settings)?;
+    }
+    if let Some(keybindings) = patch.keybindings {
+        set_keybindings_for_companion(state, roots, keybindings)?;
     }
     if let Some(settings) = patch.browser {
         set_browser_control_for_companion(state, roots, settings)?;

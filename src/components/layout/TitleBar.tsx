@@ -12,6 +12,7 @@ import { cn } from '../../lib/utils';
 import { desktopBridge } from '../../lib/desktop-bridge';
 import { shellFacade } from '../../lib/facades/shell-facade';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
+import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
@@ -78,6 +79,9 @@ export function TitleBar({
   const closeSidePanel = useSidePanelStore((state) => state.closePanel);
   // 宿主能力清单(工单 02):窗口控件与自绘标题栏是壳独占,浏览器形态隐藏。
   const { presentation } = useHostCapabilities();
+  // tooltip 与 aria-keyshortcuts 都跟着用户的改键走（写法与 MainLayout 一致）。
+  const sidePanelHint = useShortcutHint('toggleSidePanel');
+  const sidePanelAria = useShortcutAriaKeyshortcuts('toggleSidePanel');
 
   const ThemeIcon = currentTheme === 'Dark' ? Moon : currentTheme === 'Light' ? Sun : Monitor;
 
@@ -143,6 +147,7 @@ export function TitleBar({
                   <button
                     type="button"
                     aria-label={sidePanelOpen ? '收起右侧面板' : '展开右侧面板'}
+                    aria-keyshortcuts={sidePanelAria ?? undefined}
                     onClick={sidePanelOpen ? closeSidePanel : openSidePanel}
                     className={cn(
                       'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-35',
@@ -152,7 +157,10 @@ export function TitleBar({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p>{sidePanelOpen ? '收起右侧面板' : '展开右侧面板'}</p>
+                  <p>
+                    {sidePanelOpen ? '收起右侧面板' : '展开右侧面板'}
+                    {sidePanelHint ? ` · ${sidePanelHint}` : ''}
+                  </p>
                 </TooltipContent>
               </Tooltip>
             )}

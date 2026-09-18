@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MainLayout } from './MainLayout';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
+import { useShellLayoutStore } from '../../stores/shellLayoutStore';
 
 const titleBarProps: Record<string, unknown>[] = [];
 
@@ -35,6 +36,9 @@ describe('MainLayout', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 820 });
     // 默认代表「桌面壳 + 窗口化」:圆角缺口成立的那一种形态,其余形态各自覆盖。
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+    // 侧栏收起/抽屉开合现在是布局 store 里的全局状态（可绑定命令要用），
+    // 用例之间必须复位，否则前一个用例点过「收起侧栏」会漏给后面的用例。
+    useShellLayoutStore.setState({ sidebarCollapsed: false, narrowSidebarOpen: false });
     windowState.maximized = false;
   });
 
