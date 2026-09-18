@@ -21,7 +21,26 @@
  * 容器自身的 20px 内边距（并且到顶时会被 scrollTop 的 0 边界截断）。探针因此把主目标
  * 定为「较早但不是第一条」的用户消息，同时把字面上「最早的一条」也测一遍作为对照，
  * 两个目标各自的读数都原样报出来，不做取舍。
+ *
+ * 工单 02 追加的诊断（默认开启，都不写 DOM、不改样式，也不改变结论行的形状——仍然是一行 JSON）：
+ *   - 行高 / 代码块尺寸的时间线：用 ResizeObserver 只读观测（跳转动画正在跑，反复
+ *     getBoundingClientRect 会强制同步布局、改变被测对象），每条变化带「相对点击时刻的
+ *     毫秒偏移 + 行索引 + 变化前后高度 + 是否在目标之上 + 是否发生在动画落定之后」；
+ *   - 代码块几何：Streamdown 会给每个 `[data-streamdown="code-block"]` 打上**内联**
+ *     `content-visibility: auto; contain-intrinsic-size: auto 200px`——行内嵌着第二层
+ *     跳过渲染，工单 01 的 !important 中和只覆盖 `[data-message-row]`，够不到它。
+ *     每个采样行都带上它内部代码块的高度与相关性（checkVisibility contentVisibilityAuto）；
+ *   - 字体时序：`document.fonts.status` / `fonts.ready` 解决时刻 / `loadingdone` 时刻 /
+ *     已注册字体面（用来排除「UI 字体挂载后才生效」这条候选）；
+ *   - React commit（`<Profiler>`）与 DOM 变更（MutationObserver）时间线，用来判断行高变化
+ *     是否与一次异步模块到达 / 一次提交同时发生；
+ *   - 口径自查：容器 border/padding/clientWidth/滚动条宽度前后是否一致、offsetTop 链与
+ *     rect+scrollTop 两条独立路径算出的漂移是否一致、时间线上「目标行之上」的高度变化之和
+ *     是否等于漂移。
+ * 唯一会改变页面行为的是 `anchor=none`（由主进程从 CODEMUX_PROBE_ANCHOR 透传）：它把容器的
+ * scroll anchoring 关掉，用来单独量「浏览器滚动锚定」这一条候选的贡献；默认不设置。
  */
+import { Profiler } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { CodeMuxAssistantRuntimeProvider } from '@/components/agent/assistant-ui/CodeMuxAssistantRuntime';
@@ -40,59 +59,183 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import type { Session } from '@/types/session';
 
 /** `scrollToMessage` 的目标：让目标行落在容器顶下方 22px。 */
+/** Streamdown 代码块根元素的标记：它自己带一层内联的内容可见性跳过。 */
+const CODE_BLOCK_SELECTOR = '[data-streamdown="code-block"]';
+const CODE_BLOCK_BODY_SELECTOR = '[data-streamdown="code-block-body"]';
+
 /**
- * 行高快照：跳转前后各取一次，差值能直接指出「是哪些行在跳转途中改了高度」。
- * 这条回归的机制（占位高度 → 真实高度）与「异步渲染补齐」都会以行高变化的形式出现，
- * 只看残差无法区分两者。
+ * 代码块自己的占位高度 = 内联 `contain-intrinsic-size` 的值 + 上下边框。
+ *
+ * 必须加上边框：实测占位态的代码块 rect 是 202px（200 内容 + 2px 边框），直接拿 200 比会
+ * 一个都数不出来——这正是第一版诊断犯过的错，也说明「用 rect 高度判占位态」必须按声明的
+ * intrinsic size 加边框来算。
  */
-function snapshotRowHeights(): number[] {
-  return Array.from(document.querySelectorAll<HTMLElement>('[data-message-row]'))
-    .map((row) => Math.round(row.getBoundingClientRect().height));
+function intrinsicPlaceholderHeight(style: CSSStyleDeclaration): number | null {
+  const match = /(-?[\d.]+)px/.exec(style.containIntrinsicSize ?? '');
+  if (!match) {
+    return null;
+  }
+  const borderTopPx = Number.parseFloat(style.borderTopWidth) || 0;
+  const borderBottomPx = Number.parseFloat(style.borderBottomWidth) || 0;
+  return Number.parseFloat(match[1]) + borderTopPx + borderBottomPx;
 }
 
-function diffRowHeights(before: number[], after: number[], targetRowIndex: number) {
-  const changes: Array<{ index: number; id: string | null; before: number; after: number }> = [];
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-message-row]'));
+/**
+ * 一个代码块的几何事实。
+ *
+ * 只报行高无法区分「这行的 markdown 文本变矮了」与「这行里那个代码块占位终于被替换成真实
+ * 高度了」，所以采样行必须带上内部代码块这一层：占位高度、是否正处在占位态，以及盒子内部
+ * 的几何（正文相对盒子的位置、直接子元素）。
+ */
+type CodeBlockShape = {
+  /** 代码块自身的布局高度：没有做过布局时等于「intrinsic size + 上下边框」。 */
+  height: number;
+  /** 按内联 contain-intrinsic-size 声明算出的占位高度。 */
+  placeholderPx: number | null;
+  /** 当前高度是否等于占位高度。 */
+  atIntrinsicPlaceholder: boolean;
+  /** `[data-streamdown="code-block-body"]` 的高度。 */
+  bodyHeight: number | null;
+  /**
+   * 盒子的内部结构：判定「202px 是占位还是真实内容」的决定性读数。
+   * 正文底边距盒子底边的距离若约等于 112px，说明这 112px 没有任何内容占着——那就是
+   * contain-intrinsic-size 的占位。
+   */
+  bodyTopFromBlockTop: number | null;
+  bodyBottomGap: number | null;
+  /** 直接子元素的摘要（tag + 高度），用来确认盒子里到底有没有别的东西撑着高度。 */
+  children: Array<{ tag: string; streamdownSlot: string | null; height: number }>;
+  /** `checkVisibility({ contentVisibilityAuto: true })`：仅作对照（实测不可靠，见报告）。 */
+  relevant: boolean | null;
+  contentVisibility: string | null;
+  containIntrinsicSize: string | null;
+};
+
+type RowSnapshot = {
+  index: number;
+  id: string | null;
+  height: number;
+  codeBlocks: CodeBlockShape[];
+};
+
+/** 读一个代码块的几何与内部结构（只读，用于采样）。 */
+function describeCodeBlocks(row: Element): CodeBlockShape[] {
+  return Array.from(row.querySelectorAll<HTMLElement>(CODE_BLOCK_SELECTOR)).map((block) => {
+    const style = window.getComputedStyle(block);
+    const blockRect = block.getBoundingClientRect();
+    const height = Math.round(blockRect.height);
+    const placeholderPx = intrinsicPlaceholderHeight(style);
+    const body = block.querySelector<HTMLElement>(CODE_BLOCK_BODY_SELECTOR);
+    const bodyRect = body ? body.getBoundingClientRect() : null;
+    return {
+      height,
+      placeholderPx,
+      atIntrinsicPlaceholder: placeholderPx != null && Math.abs(height - placeholderPx) <= 0.75,
+      bodyHeight: bodyRect ? Math.round(bodyRect.height) : null,
+      bodyTopFromBlockTop: bodyRect ? Math.round(bodyRect.top - blockRect.top) : null,
+      bodyBottomGap: bodyRect ? Math.round(blockRect.bottom - bodyRect.bottom) : null,
+      children: Array.from(block.children).slice(0, 6).map((child) => ({
+        tag: child.tagName,
+        streamdownSlot: child.getAttribute('data-streamdown'),
+        height: Math.round(child.getBoundingClientRect().height),
+      })),
+      relevant: checkVisibility(block),
+      contentVisibility: style.contentVisibility ?? null,
+      containIntrinsicSize: style.containIntrinsicSize ?? null,
+    };
+  });
+}
+
+/** 行快照：跳转前后各取一次，除行高外还带上行内代码块那一层的几何。 */
+function snapshotRows(): RowSnapshot[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-message-row]')).map((row, index) => ({
+    index,
+    id: row.id || null,
+    height: Math.round(row.getBoundingClientRect().height),
+    codeBlocks: describeCodeBlocks(row),
+  }));
+}
+
+type RowHeightChange = {
+  index: number;
+  id: string | null;
+  before: number;
+  after: number;
+  delta: number;
+  codeBlocksBefore: CodeBlockShape[];
+  codeBlocksAfter: CodeBlockShape[];
+};
+
+type RowHeightChanges = {
+  /** 改动过的行总数（不受 changes 数组上限影响）。 */
+  changedRowCount: number;
+  /** 目标行之上改动过的行数。 */
+  changedRowsAboveTarget: number;
+  /** 目标行之上、且这次变化确实伴随「代码块从 200px 占位变成别的尺寸」的行数。 */
+  codeBlockPlaceholderFlipCountAboveTarget: number;
+  /** 目标行之上所有行高变化之和（正 = 内容变高，把目标行往下推）。 */
+  sumAboveTargetPx: number;
+  /** 目标行及其下方所有行高变化之和。 */
+  sumBelowTargetPx: number;
+  changes: RowHeightChange[];
+};
+
+function diffRows(
+  before: RowSnapshot[],
+  after: RowSnapshot[],
+  targetRowIndex: number,
+): RowHeightChanges {
+  const changes: RowHeightChange[] = [];
   const length = Math.min(before.length, after.length);
   let sumAboveTargetPx = 0;
   let sumBelowTargetPx = 0;
+  let changedRowCount = 0;
+  let changedRowsAboveTarget = 0;
+  let codeBlockPlaceholderFlipCountAboveTarget = 0;
 
   for (let index = 0; index < length; index += 1) {
-    const delta = (after[index] ?? 0) - (before[index] ?? 0);
+    const previous = before[index];
+    const current = after[index];
+    const delta = (current?.height ?? 0) - (previous?.height ?? 0);
     if (delta === 0) {
       continue;
     }
+    changedRowCount += 1;
     if (index < targetRowIndex) {
       sumAboveTargetPx += delta;
+      changedRowsAboveTarget += 1;
+      const placeholderBefore = (previous?.codeBlocks ?? [])
+        .filter((block) => block.atIntrinsicPlaceholder).length;
+      const placeholderAfter = (current?.codeBlocks ?? [])
+        .filter((block) => block.atIntrinsicPlaceholder).length;
+      if (placeholderBefore > placeholderAfter) {
+        codeBlockPlaceholderFlipCountAboveTarget += 1;
+      }
     } else {
       sumBelowTargetPx += delta;
     }
     if (changes.length < 40) {
       changes.push({
         index,
-        id: rows[index]?.id ?? null,
-        before: before[index] ?? 0,
-        after: after[index] ?? 0,
+        id: current?.id ?? null,
+        before: previous?.height ?? 0,
+        after: current?.height ?? 0,
+        delta,
+        codeBlocksBefore: previous?.codeBlocks ?? [],
+        codeBlocksAfter: current?.codeBlocks ?? [],
       });
     }
   }
 
   return {
-    changedRowCount: changes.length,
+    changedRowCount,
+    changedRowsAboveTarget,
+    codeBlockPlaceholderFlipCountAboveTarget,
     sumAboveTargetPx,
     sumBelowTargetPx,
     changes,
   };
 }
-
-type RowHeightChanges = {
-  changedRowCount: number;
-  /** 目标行之上所有行高变化之和（正 = 内容变高，把目标行往下推）。 */
-  sumAboveTargetPx: number;
-  /** 目标行及其下方所有行高变化之和。 */
-  sumBelowTargetPx: number;
-  changes: Array<{ index: number; id: string | null; before: number; after: number }>;
-};
 
 const EXPECTED_RESIDUAL_PX = 22;
 /** 夹具里 `contain-intrinsic-size` 的占位高度：未被渲染过的行就长这样。 */
@@ -121,8 +264,450 @@ const ROWS_STABLE_MS = 600;
 const MOUNT_TIMEOUT_MS = 90_000;
 const ROWS_SETTLE_TIMEOUT_MS = 60_000;
 
+/** 容器盒模型 / 字体的快照：漂移口径里含容器 border+padding 这一常量项，必须能证明它前后一致。 */
+type ContainerBox = {
+  borderTopPx: number;
+  paddingTopPx: number;
+  clientWidthPx: number;
+  offsetWidthPx: number;
+  /** offsetWidth 减 clientWidth（再去掉左右边框）：出现 / 消失会改变内容宽度，进而改行高。 */
+  verticalScrollbarPx: number;
+  overflowAnchor: string;
+  overflowY: string;
+  fontFamily: string;
+  fontSize: string;
+};
+
+function describeContainerBox(container: HTMLElement): ContainerBox {
+  const style = window.getComputedStyle(container);
+  const borderLeftPx = Number.parseFloat(style.borderLeftWidth) || 0;
+  return {
+    borderTopPx: Number.parseFloat(style.borderTopWidth) || 0,
+    paddingTopPx: Number.parseFloat(style.paddingTop) || 0,
+    clientWidthPx: container.clientWidth,
+    offsetWidthPx: container.offsetWidth,
+    verticalScrollbarPx: container.offsetWidth - container.clientWidth - borderLeftPx * 2,
+    overflowAnchor: style.overflowAnchor ?? '',
+    overflowY: style.overflowY ?? '',
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+  };
+}
+
+/**
+ * 口径自查的第二条独立路径：沿 offsetTop / offsetParent 链累加目标行的位置。
+ *
+ * 它与 `rect.top + scrollTop` 的口径相差一个固定的 border+padding 常量，而常量在**差值**里
+ * 会抵消，所以两条路径算出的漂移必须一致；不一致说明漂移里有口径伪影（例如容器 padding
+ * 在两次测量之间变了）。offsetParent 链不落在容器上时返回 null，表示这条路径不可用。
+ */
+function measureDocTopViaOffsetChain(target: HTMLElement, container: HTMLElement): number | null {
+  let node: HTMLElement | null = target;
+  let total = 0;
+  let hops = 0;
+  while (node && node !== container && hops < 64) {
+    total += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+    hops += 1;
+  }
+  return node === container ? total : null;
+}
+
+type FrameSample = {
+  /** 相对点击时刻的毫秒偏移。 */
+  tFromClick: number;
+  scrollTop: number;
+  scrollHeight: number;
+  fontsStatus: string;
+  commitCount: number;
+  mutationCount: number;
+};
+
+type LayoutTimelineChange = {
+  kind: 'row' | 'code-block';
+  t: number;
+  /** 相对点击时刻的毫秒偏移；点击之前为 null。 */
+  tFromClick: number | null;
+  /** 行索引（code-block 时是它所属行的索引）。 */
+  index: number;
+  id: string | null;
+  from: number;
+  to: number;
+  delta: number;
+  aboveTarget: boolean | null;
+  /** 该变化发生在平滑滚动落定之后（落定后再变 = 直接改残差）。 */
+  afterAnimationSettled: boolean;
+};
+
+type FlightTimeline = {
+  clickedAtMs: number | null;
+  settledAtMs: number | null;
+  targetRowIndex: number | null;
+  changeCount: number;
+  droppedChanges: number;
+  /** 目标行之上、跳转途中的行高变化之和（ResizeObserver 口径）。 */
+  sumAboveTargetRowPx: number;
+  /** 目标行之上的代码块尺寸变化之和（200px 占位被替换的净效果）。 */
+  sumAboveTargetCodeBlockPx: number;
+  changes: LayoutTimelineChange[];
+  frames: FrameSample[];
+  fontLoadingDoneAtMs: number[];
+  fontsReadyAtMs: number | null;
+};
+
+type MutationSummary = {
+  t: number;
+  tFromClick: number | null;
+  type: string;
+  attributeName: string | null;
+  tagName: string | null;
+  rowIndex: number | null;
+  addedNodes: number;
+  removedNodes: number;
+};
+
+type FontDiagnostics = {
+  statusAtStart: string;
+  statusBeforeClick: string;
+  statusAfterSettle: string;
+  /** `document.fonts.ready` 解决的时刻（performance.now()）；没有任何网络字体时也会很快解决。 */
+  readyAtMs: number | null;
+  /** `loadingdone` 事件时刻：字体真正换上的时刻。空数组 = 这次运行里没有字体换装。 */
+  loadingDoneAtMs: number[];
+  faceCount: number;
+  faces: Array<{ family: string; weight: string; style: string; status: string }>;
+  facesTruncated: boolean;
+};
+
+const LAYOUT_TIMELINE_CAP = 240;
+const FRAME_SAMPLE_CAP = 400;
+const COMMIT_TIMELINE_CAP = 400;
+const MUTATION_TIMELINE_CAP = 160;
+
+const fontTimeline: FontDiagnostics = {
+  statusAtStart: '',
+  statusBeforeClick: '',
+  statusAfterSettle: '',
+  readyAtMs: null,
+  loadingDoneAtMs: [],
+  faceCount: 0,
+  faces: [],
+  facesTruncated: false,
+};
+
+const commitTimeline = {
+  count: 0,
+  dropped: 0,
+  entries: [] as Array<{ t: number; tFromClick: number | null; phase: string }>,
+};
+
+const mutationTimeline = {
+  count: 0,
+  dropped: 0,
+  entries: [] as MutationSummary[],
+};
+
+const layoutTimeline = {
+  clickedAtMs: null as number | null,
+  settledAtMs: null as number | null,
+  targetRowIndex: null as number | null,
+  changes: [] as LayoutTimelineChange[],
+  droppedChanges: 0,
+  frames: [] as FrameSample[],
+  rowHeights: new Map<Element, number>(),
+  rowIndexes: new Map<Element, number>(),
+  blockHeights: new Map<Element, number>(),
+  blockRowIndexes: new Map<Element, number>(),
+  rowObserver: null as ResizeObserver | null,
+  blockObserver: null as ResizeObserver | null,
+  sampling: false,
+};
+
+/** 把元素映射回它所属的消息行索引（MutationObserver / commit 归因用）。 */
+function rowIndexOf(element: Element | null): number | null {
+  let node: Element | null = element;
+  let hops = 0;
+  while (node && hops < 64) {
+    const index = layoutTimeline.rowIndexes.get(node);
+    if (index != null) {
+      return index;
+    }
+    node = node.parentElement;
+    hops += 1;
+  }
+  return null;
+}
+
+function indexRows(): void {
+  layoutTimeline.rowIndexes.clear();
+  layoutTimeline.blockRowIndexes.clear();
+  Array.from(document.querySelectorAll<HTMLElement>('[data-message-row]')).forEach((row, index) => {
+    layoutTimeline.rowIndexes.set(row, index);
+    for (const block of Array.from(row.querySelectorAll(CODE_BLOCK_SELECTOR))) {
+      layoutTimeline.blockRowIndexes.set(block, index);
+    }
+  });
+}
+
+function stopLayoutObservation(): void {
+  layoutTimeline.rowObserver?.disconnect();
+  layoutTimeline.blockObserver?.disconnect();
+  layoutTimeline.rowObserver = null;
+  layoutTimeline.blockObserver = null;
+}
+
+/**
+ * 布下只读的尺寸观测。用 ResizeObserver 而不是「每帧读一遍 180 行的 rect」：探针是在平滑
+ * 滚动动画进行中采样的，反复强制同步布局会改变被测对象本身；RO 在布局之后回调，不介入
+ * 布局，又能拿到每个元素精确的变化时刻。第一次回调只当基线，不记成变化。
+ */
+function startLayoutObservation(): void {
+  stopLayoutObservation();
+  indexRows();
+  layoutTimeline.rowObserver = new ResizeObserver((entries) => collectLayoutChanges('row', entries));
+  layoutTimeline.blockObserver = new ResizeObserver((entries) => collectLayoutChanges('code-block', entries));
+  for (const row of layoutTimeline.rowIndexes.keys()) {
+    layoutTimeline.rowObserver.observe(row);
+    for (const block of Array.from(row.querySelectorAll(CODE_BLOCK_SELECTOR))) {
+      layoutTimeline.blockObserver.observe(block);
+    }
+  }
+}
+
+function collectLayoutChanges(kind: 'row' | 'code-block', entries: ResizeObserverEntry[]): void {
+  const heights = kind === 'row' ? layoutTimeline.rowHeights : layoutTimeline.blockHeights;
+  for (const entry of entries) {
+    const box = entry.borderBoxSize?.[0];
+    const height = Math.round(box ? box.blockSize : entry.contentRect.height);
+    const previous = heights.get(entry.target);
+    heights.set(entry.target, height);
+    if (previous === undefined || previous === height) {
+      continue;
+    }
+    const clickedAtMs = layoutTimeline.clickedAtMs;
+    if (clickedAtMs == null) {
+      // 点击之前的变化不算这次跳转的账；基线由 snapshotRows() 取。
+      continue;
+    }
+    const index = kind === 'row'
+      ? layoutTimeline.rowIndexes.get(entry.target) ?? null
+      : layoutTimeline.blockRowIndexes.get(entry.target) ?? null;
+    if (index == null) {
+      continue;
+    }
+    if (layoutTimeline.changes.length >= LAYOUT_TIMELINE_CAP) {
+      layoutTimeline.droppedChanges += 1;
+      continue;
+    }
+    const now = performance.now();
+    layoutTimeline.changes.push({
+      kind,
+      t: now,
+      tFromClick: now - clickedAtMs,
+      index,
+      id: kind === 'row' ? ((entry.target as HTMLElement).id || null) : null,
+      from: previous,
+      to: height,
+      delta: height - previous,
+      aboveTarget: layoutTimeline.targetRowIndex == null ? null : index < layoutTimeline.targetRowIndex,
+      afterAnimationSettled: layoutTimeline.settledAtMs != null,
+    });
+  }
+}
+
+/** 与滚动采样同节奏记录现场（只读 scrollTop/scrollHeight/fonts.status），用于把变化对上时间。 */
+async function sampleFramesUntilStopped(container: HTMLElement): Promise<void> {
+  layoutTimeline.sampling = true;
+  while (layoutTimeline.sampling) {
+    await nextTick();
+    const clickedAtMs = layoutTimeline.clickedAtMs;
+    if (clickedAtMs == null || layoutTimeline.frames.length >= FRAME_SAMPLE_CAP) {
+      continue;
+    }
+    layoutTimeline.frames.push({
+      tFromClick: Math.round(performance.now() - clickedAtMs),
+      scrollTop: Math.round(container.scrollTop),
+      scrollHeight: container.scrollHeight,
+      fontsStatus: document.fonts.status,
+      commitCount: commitTimeline.count,
+      mutationCount: mutationTimeline.count,
+    });
+  }
+}
+
+/** 记下点击时刻：时间线上所有偏移都以它为原点；同时清掉上一次测量的账。 */
+function beginFlight(targetRowIndex: number): void {
+  layoutTimeline.clickedAtMs = performance.now();
+  layoutTimeline.settledAtMs = null;
+  layoutTimeline.targetRowIndex = targetRowIndex;
+  layoutTimeline.changes.length = 0;
+  layoutTimeline.droppedChanges = 0;
+  layoutTimeline.frames.length = 0;
+  fontTimeline.statusBeforeClick = document.fonts.status;
+}
+
+/** 落定时刻：之后发生的尺寸变化会直接改落点，单独标出来。 */
+function markFlightSettled(): void {
+  layoutTimeline.settledAtMs = performance.now();
+  fontTimeline.statusAfterSettle = document.fonts.status;
+}
+
+function snapshotFlightTimeline(): FlightTimeline {
+  const rowChanges = layoutTimeline.changes.filter((change) => change.kind === 'row');
+  return {
+    clickedAtMs: layoutTimeline.clickedAtMs,
+    settledAtMs: layoutTimeline.settledAtMs,
+    targetRowIndex: layoutTimeline.targetRowIndex,
+    changeCount: layoutTimeline.changes.length,
+    droppedChanges: layoutTimeline.droppedChanges,
+    sumAboveTargetRowPx: rowChanges
+      .filter((change) => change.aboveTarget === true)
+      .reduce((sum, change) => sum + change.delta, 0),
+    sumAboveTargetCodeBlockPx: layoutTimeline.changes
+      .filter((change) => change.kind === 'code-block' && change.aboveTarget === true)
+      .reduce((sum, change) => sum + change.delta, 0),
+    changes: [...layoutTimeline.changes],
+    frames: [...layoutTimeline.frames],
+    fontLoadingDoneAtMs: [...fontTimeline.loadingDoneAtMs],
+    fontsReadyAtMs: fontTimeline.readyAtMs,
+  };
+}
+
+/**
+ * 字体时序。本仓库有「内置默认字体 + 外观字体加载」的改动：若 UI 字体在挂载之后才换上，
+ * 文本度量会整体变化、行高成片改变。这条候选必须用 fonts 的状态与时刻排除掉。
+ */
+function startFontObservation(): void {
+  fontTimeline.statusAtStart = document.fonts.status;
+  fontTimeline.faceCount = document.fonts.size;
+  fontTimeline.facesTruncated = document.fonts.size > 24;
+  fontTimeline.faces = Array.from(document.fonts).slice(0, 24).map((face) => ({
+    family: face.family,
+    weight: face.weight,
+    style: face.style,
+    status: face.status,
+  }));
+  document.fonts.addEventListener('loadingdone', () => {
+    fontTimeline.loadingDoneAtMs.push(performance.now());
+  });
+  void document.fonts.ready.then(() => {
+    fontTimeline.readyAtMs = performance.now();
+  });
+}
+
+function recordCommit(phase: string): void {
+  commitTimeline.count += 1;
+  if (commitTimeline.entries.length >= COMMIT_TIMELINE_CAP) {
+    commitTimeline.dropped += 1;
+    return;
+  }
+  const clickedAtMs = layoutTimeline.clickedAtMs;
+  const now = performance.now();
+  commitTimeline.entries.push({
+    t: now,
+    tFromClick: clickedAtMs == null ? null : now - clickedAtMs,
+    phase,
+  });
+}
+
+/** DOM 变更时间线：判断行高变化是否与一次「异步模块到达 / 提交换树」同时发生。 */
+function startMutationObservation(container: HTMLElement): MutationObserver {
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      mutationTimeline.count += 1;
+      if (mutationTimeline.entries.length >= MUTATION_TIMELINE_CAP) {
+        mutationTimeline.dropped += 1;
+        continue;
+      }
+      const clickedAtMs = layoutTimeline.clickedAtMs;
+      const now = performance.now();
+      const mutationTarget = record.target as Element;
+      mutationTimeline.entries.push({
+        t: now,
+        tFromClick: clickedAtMs == null ? null : now - clickedAtMs,
+        type: record.type,
+        attributeName: record.attributeName ?? null,
+        tagName: mutationTarget.tagName ?? null,
+        rowIndex: rowIndexOf(mutationTarget),
+        addedNodes: record.addedNodes.length,
+        removedNodes: record.removedNodes.length,
+      });
+    }
+  });
+  observer.observe(container, {
+    subtree: true,
+    attributes: true,
+    childList: true,
+    characterData: true,
+  });
+  return observer;
+}
+
+/**
+ * 代码块会计：行内嵌着的那一层跳过渲染（Streamdown 给每个代码块打的内联
+ * `content-visibility: auto; contain-intrinsic-size: auto 200px`）里，还有多少代码块没有做过
+ * 布局、因此仍以「intrinsic size + 边框」参与文档高度。目标行之上的这些占位就是残差的直接来源：
+ * 每个这样的代码块一旦被布局，高度会从约 202px 掉到约 90px，把它下面的所有行整体上提 112.5px。
+ */
+function collectCodeBlockAccounting(rows: HTMLElement[], targetIndex: number): CodeBlockAccounting {
+  let total = 0;
+  let intrinsicPlaceholderCount = 0;
+  let placeholderBodyCollapsedCount = 0;
+  let skippedCount = 0;
+  let aboveTargetIntrinsicPlaceholderCount = 0;
+  let aboveTargetIntrinsicPlaceholderPx = 0;
+
+  rows.forEach((row, index) => {
+    for (const block of describeCodeBlocks(row)) {
+      total += 1;
+      if (block.atIntrinsicPlaceholder) {
+        intrinsicPlaceholderCount += 1;
+        // 占位态的第二个判据：子树没有参与布局，正文元素的高度塌成 0。
+        if (block.bodyHeight === 0) {
+          placeholderBodyCollapsedCount += 1;
+        }
+        if (index < targetIndex) {
+          aboveTargetIntrinsicPlaceholderCount += 1;
+          aboveTargetIntrinsicPlaceholderPx += block.height;
+        }
+      }
+      if (block.relevant === false) {
+        skippedCount += 1;
+      }
+    }
+  });
+
+  return {
+    selector: CODE_BLOCK_SELECTOR,
+    total,
+    intrinsicPlaceholderCount,
+    placeholderBodyCollapsedCount,
+    skippedCount,
+    aboveTargetIntrinsicPlaceholderCount,
+    aboveTargetIntrinsicPlaceholderPx,
+  };
+}
+
 type ProbeMode = 'with-skip' | 'without-skip';
 type NavPath = 'nav-marker-click' | 'dom-fallback';
+
+/**
+ * 行内嵌着的那一层跳过渲染的会计（Streamdown 代码块自己的内联 content-visibility）。
+ * 目标行之上的 `aboveTargetIntrinsicPlaceholderCount` 就是残差的直接来源：每个这样的代码块
+ * 用约 202px 占位代替约 90px 的真实高度，一旦被布局就把目标行整体上提 112.5px。
+ */
+type CodeBlockAccounting = {
+  selector: string;
+  total: number;
+  /** 高度等于「声明占位高度 + 边框」= 没有做过布局的代码块数。 */
+  intrinsicPlaceholderCount: number;
+  /** 其中正文元素高度为 0 的个数：占位态下子树不参与布局的硬证据。 */
+  placeholderBodyCollapsedCount: number;
+  /** 被 checkVisibility({contentVisibilityAuto}) 判为不相关的代码块数（读数不可靠，仅对照）。 */
+  skippedCount: number;
+  aboveTargetIntrinsicPlaceholderCount: number;
+  aboveTargetIntrinsicPlaceholderPx: number;
+};
 
 type RowDiagnostics = {
   totalRowCount: number;
@@ -133,7 +718,15 @@ type RowDiagnostics = {
   targetRowIndex: number;
   /** 目标行之上的占位行数——这条回归的全部杠杆都在这里。 */
   placeholderRowsAboveTarget: number;
-  samples: Array<{ index: number; id: string | null; height: number | null; checkVisibility: boolean | null }>;
+  /** 行内那一层跳过渲染（Streamdown 代码块）的会计。 */
+  codeBlocks: CodeBlockAccounting;
+  samples: Array<{
+    index: number;
+    id: string | null;
+    height: number | null;
+    checkVisibility: boolean | null;
+    codeBlocks: CodeBlockShape[];
+  }>;
 };
 
 type TargetMeasurement = {
@@ -192,6 +785,25 @@ type TargetMeasurement = {
   residualPx: number;
   expectedResidualPx: number;
   elapsedMs: number;
+  /** 口径自查：容器自身盒模型 / 字体在跳转前后是否一致（不一致则漂移口径失真）。 */
+  containerBoxBefore: ContainerBox;
+  containerBoxAfter: ContainerBox;
+  /** 口径自查：offsetTop 链算出的目标行位置（与 rect+scrollTop 口径差一个常量）。 */
+  docTopViaOffsetChainBeforePx: number | null;
+  docTopViaOffsetChainAfterPx: number | null;
+  docTopDriftViaOffsetChainPx: number | null;
+  /** 口径自查：漂移 与「目标行之上行高变化之和」的差（应约等于 0）。 */
+  driftVsSumAboveTargetPx: number;
+  /** 口径自查：漂移 与「时间线上目标行之上的行高变化之和」的差（两条独立测量路径）。 */
+  driftVsTimelineSumAbovePx: number | null;
+  /** 目标行这个 DOM 节点在两次测量之间是否同一个（换了节点则两次测量不可比）。 */
+  targetNodeStable: boolean;
+  /** 落定后目标行上下各 6 行的行高与代码块几何：跳转结束后还有哪些行停在占位上。 */
+  postSettleRows: RowSnapshot[];
+  /** 行高 / 代码块尺寸变化的时间线（相对点击时刻）。 */
+  flightTimeline: FlightTimeline;
+  fontsStatusBeforeClick: string;
+  fontsStatusAfterSettle: string;
 };
 
 type ProbeResult = {
@@ -216,6 +828,15 @@ type ProbeResult = {
   windowMode: string;
   pageErrors: string[];
   durationMs: number;
+  /** 运行器是否用 !important 覆盖中和了「行级」跳过规则；行内代码块那一层不受它影响。 */
+  anchorOverride: string | null;
+  /** 挂载后容器的盒模型与字体：口径自查的基线。 */
+  containerBoxAfterMount: ContainerBox;
+  fonts: FontDiagnostics;
+  /** React commit 时间线（`<Profiler>`）。 */
+  commits: { count: number; dropped: number; entries: Array<{ t: number; tFromClick: number | null; phase: string }> };
+  /** DOM 变更时间线（MutationObserver）。 */
+  mutations: { count: number; dropped: number; entries: MutationSummary[] };
 };
 
 declare global {
@@ -523,11 +1144,13 @@ function collectRowDiagnostics(target: HTMLElement) {
     lastPlaceholderRowIndex: placeholderIndexes[placeholderIndexes.length - 1] ?? null,
     targetRowIndex: targetIndex,
     placeholderRowsAboveTarget: placeholderIndexes.filter((index) => index < targetIndex).length,
+    codeBlocks: collectCodeBlockAccounting(rows, targetIndex),
     samples: [...new Set(sampleIndexes)].map((index) => ({
       index,
       id: rows[index]?.id ?? null,
       height: heights[index] ?? null,
       checkVisibility: rows[index] ? checkVisibility(rows[index]!) : null,
+      codeBlocks: rows[index] ? describeCodeBlocks(rows[index]!) : [],
     })),
   };
 }
@@ -563,7 +1186,9 @@ async function measureTarget(
   const layoutSettle = await waitForLayoutSettled(container);
   const target = await waitForElement<HTMLElement>(targetSelector, MOUNT_TIMEOUT_MS);
   const rowDiagnostics = collectRowDiagnostics(target);
-  const rowHeightsBefore = snapshotRowHeights();
+  const rowHeightsBefore = snapshotRows();
+  const containerBoxBefore = describeContainerBox(container);
+  const docTopViaOffsetChainBeforePx = measureDocTopViaOffsetChain(target, container);
   const targetHeightBeforeClickPx = target.getBoundingClientRect().height;
   const targetCheckVisibilityBeforeClick = checkVisibility(target);
   const targetWasSkippedBeforeClick = Math.round(targetHeightBeforeClickPx) === PLACEHOLDER_HEIGHT_PX;
@@ -581,6 +1206,8 @@ async function measureTarget(
   let navPath: NavPath = 'nav-marker-click';
   let navMarkerLabel = button?.getAttribute('aria-label') ?? null;
 
+  // 时间线的原点就是这次点击；beginFlight 之后的尺寸变化都算在这一次跳转账上。
+  beginFlight(rowDiagnostics.targetRowIndex);
   if (button) {
     button.click();
   } else {
@@ -599,13 +1226,22 @@ async function measureTarget(
   }
 
   const settle = await waitForScrollSettle(container, { expectChange: true, collectTrajectory: true });
+  // 落定时刻先记账：之后（含下面这 3 个 tick）发生的尺寸变化全部标成 afterAnimationSettled。
+  markFlightSettled();
   await tick(3);
 
   const residualPx = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
   const finalScroll = scrollState(container);
   const scrollTopAfterSettle = finalScroll.scrollTop;
   const targetDocTopAfterPx = residualPx + scrollTopAfterSettle;
-  const rowHeightChanges = diffRowHeights(rowHeightsBefore, snapshotRowHeights(), rowDiagnostics.targetRowIndex);
+  const rowsAfterSettle = snapshotRows();
+  const rowHeightChanges = diffRows(rowHeightsBefore, rowsAfterSettle, rowDiagnostics.targetRowIndex);
+  const containerBoxAfter = describeContainerBox(container);
+  const docTopViaOffsetChainAfterPx = measureDocTopViaOffsetChain(target, container);
+  const flightTimeline = snapshotFlightTimeline();
+  const targetDocTopDriftPx = targetDocTopAfterPx - targetDocTopBeforePx;
+  const postSettleRowStart = Math.max(0, rowDiagnostics.targetRowIndex - 6);
+  const postSettleRows = rowsAfterSettle.slice(postSettleRowStart, rowDiagnostics.targetRowIndex + 7);
   return {
     targetId,
     targetTurn,
@@ -626,7 +1262,23 @@ async function measureTarget(
     scrollTopErrorPx: scrollTopAfterSettle - requestedScrollTopPx,
     targetDocTopBeforePx,
     targetDocTopAfterPx,
-    targetDocTopDriftPx: targetDocTopAfterPx - targetDocTopBeforePx,
+    targetDocTopDriftPx,
+    // 口径自查：容器盒模型是否前后一致、两条独立路径的漂移是否一致。
+    containerBoxBefore,
+    containerBoxAfter,
+    docTopViaOffsetChainBeforePx,
+    docTopViaOffsetChainAfterPx,
+    docTopDriftViaOffsetChainPx:
+      docTopViaOffsetChainBeforePx == null || docTopViaOffsetChainAfterPx == null
+        ? null
+        : docTopViaOffsetChainAfterPx - docTopViaOffsetChainBeforePx,
+    driftVsSumAboveTargetPx: targetDocTopDriftPx - rowHeightChanges.sumAboveTargetPx,
+    driftVsTimelineSumAbovePx: targetDocTopDriftPx - flightTimeline.sumAboveTargetRowPx,
+    targetNodeStable: document.getElementById(targetSelector.slice(1)) === target,
+    postSettleRows,
+    flightTimeline,
+    fontsStatusBeforeClick: fontTimeline.statusBeforeClick,
+    fontsStatusAfterSettle: fontTimeline.statusAfterSettle,
     scrollHeightBeforeClickPx: beforeScroll.scrollHeight,
     scrollHeightAfterSettlePx: finalScroll.scrollHeight,
     scrollHeightDeltaPx: finalScroll.scrollHeight - beforeScroll.scrollHeight,
@@ -654,21 +1306,29 @@ async function runProbe(): Promise<ProbeResult> {
 
   primeStores();
 
+  // 诊断采集器全部是只读的（ResizeObserver / MutationObserver / fonts / Profiler），
+  // 唯一会改变页面行为的是 anchor=none：它把容器的滚动锚定关掉，用来单独量这条候选。
+  startFontObservation();
+  const anchorOverride = new URLSearchParams(window.location.search).get('anchor');
+
   const rootElement = document.getElementById('probe-root');
   if (!rootElement) {
     throw new Error('页面缺少 #probe-root 挂载点');
   }
 
   createRoot(rootElement).render(
-    <TooltipProvider>
-      <CodeMuxAssistantRuntimeProvider
-        sessionId={LONG_SESSION_ID}
-        onSend={async () => {}}
-        onCommand={async () => {}}
-      >
-        <CodeMuxThread sessionId={LONG_SESSION_ID} />
-      </CodeMuxAssistantRuntimeProvider>
-    </TooltipProvider>,
+    // Profiler 只包一层（渲染成 Fragment，不产生 DOM），用来把行高变化对上一次提交。
+    <Profiler id="codemux-thread-probe" onRender={(_id, phase) => recordCommit(phase)}>
+      <TooltipProvider>
+        <CodeMuxAssistantRuntimeProvider
+          sessionId={LONG_SESSION_ID}
+          onSend={async () => {}}
+          onCommand={async () => {}}
+        >
+          <CodeMuxThread sessionId={LONG_SESSION_ID} />
+        </CodeMuxAssistantRuntimeProvider>
+      </TooltipProvider>
+    </Profiler>,
   );
 
   const container = await waitForElement<HTMLElement>('[data-testid="thread-viewport"]', MOUNT_TIMEOUT_MS);
@@ -680,6 +1340,19 @@ async function runProbe(): Promise<ProbeResult> {
 
   // 帧率决定「平滑滚动是否真的逐帧推进」，也就是这次测量是否具备触发条件。
   const rafRateHz = await measureRafRate();
+
+  const containerBoxAfterMount = describeContainerBox(container);
+  startMutationObservation(container);
+  startLayoutObservation();
+  // 帧采样循环：与滚动采样同节奏，只读 scrollTop/scrollHeight/fonts.status。
+  void sampleFramesUntilStopped(container);
+
+  if (anchorOverride != null) {
+    // 诊断模式：关掉滚动锚定。浏览器在视口上方内容变高/变矮时会调整 scrollTop 来避免
+    // 视觉跳动，这条调整会被算进「滚动落点误差」，不单独关掉就分不开它和动画误差。
+    container.style.overflowAnchor = anchorOverride;
+    document.documentElement.style.overflowAnchor = anchorOverride;
+  }
 
   // 起点必须是底部：早期行远离视口，因而从未被渲染过。
   await settleAtBottom(container);
@@ -704,6 +1377,15 @@ async function runProbe(): Promise<ProbeResult> {
     totalRowCount,
     longThreadAttrPresent: shell.hasAttribute('data-long-thread'),
     neutralizedByCss: mode === 'without-skip',
+    anchorOverride,
+    containerBoxAfterMount,
+    fonts: { ...fontTimeline, loadingDoneAtMs: [...fontTimeline.loadingDoneAtMs], faces: [...fontTimeline.faces] },
+    commits: { count: commitTimeline.count, dropped: commitTimeline.dropped, entries: [...commitTimeline.entries] },
+    mutations: {
+      count: mutationTimeline.count,
+      dropped: mutationTimeline.dropped,
+      entries: [...mutationTimeline.entries],
+    },
     initialBottomOffsetPx,
     primary,
     literalEarliest,

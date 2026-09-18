@@ -98,7 +98,12 @@ app.whenReady().then(async () => {
     log(`[probe:${mode}] 页面加载失败：${errorCode} ${errorDescription} ${validatedUrl}`);
   });
 
-  await win.loadFile(htmlPath, { query: { mode, window: windowMode } });
+  // anchor 只在诊断模式下设置：它把容器的滚动锚定关掉，用来单独量「浏览器滚动锚定」这条候选。
+  const query = { mode, window: windowMode };
+  if (process.env.CODEMUX_PROBE_ANCHOR) {
+    query.anchor = process.env.CODEMUX_PROBE_ANCHOR;
+  }
+  await win.loadFile(htmlPath, { query });
   log(`[probe:${mode}] 页面已加载（window=${windowMode}），等待探针结论`);
 
   const result = await win.webContents.executeJavaScript(
