@@ -14,23 +14,38 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** implemented（上下半均已交付并独立复跑确认）
 
-- [ ] 同一夹具 + 同一种子重放两次，读数一致（确定性，不依赖真实时钟）
-- [ ] 读数以计数与比值表达；毫秒只作观测量，不作为门禁
-- [ ] 真实引擎探针可运行并给出可解析的结论；当构建产物落后于源码时（例如样式表已改而产物未重建）**明确失败**，而不是静默通过
-- [ ] 探针的第一条断言给出明确结论：跳过离屏渲染是否使跳转落点偏离；若是，给出偏差量级
-- [ ] 长会话夹具规模与真实长会话同量级（数百轮），且可在单次测试中超时预算内跑完
-- [ ] 短会话（低于长会话阈值）不进入任何新增度量路径，行为与现状一致
-- [ ] 上述读数的采集入口可被后续工单直接复用，无需再改夹具或探针基座
+- [x] 同一夹具 + 同一种子重放两次，读数一致（确定性，不依赖真实时钟）
+- [x] 读数以计数与比值表达；毫秒只作观测量，不作为门禁
+- [x] 真实引擎探针可运行并给出可解析的结论；当构建产物落后于源码时（例如样式表已改而产物未重建）**明确失败**，而不是静默通过
+- [x] 探针的第一条断言给出明确结论：跳过离屏渲染是否使跳转落点偏离；若是，给出偏差量级
+- [x] 长会话夹具规模与真实长会话同量级（数百轮），且可在单次测试中超时预算内跑完
+- [x] 短会话（低于长会话阈值）不进入任何新增度量路径，行为与现状一致
+- [x] 上述读数的采集入口可被后续工单直接复用，无需再改夹具或探针基座
 
 ## 已确认的环境事实（2026-09-18，实测）
 
 探针的引擎选择曾被当作未定项，现在有实测结论，避免重复试错：
 
-- **Electron 不可用**：`desktop-electron/node_modules/electron/dist/electron.exe`（33.4.11，安装完整）在本机启动后创建窗口即崩溃（crashpad `not connected`、异常退出码），`loadURL('about:blank')` 与 `loadFile()` 均报 `ERR_FAILED (-2)`。`--no-sandbox`、`disable-gpu`、分离 userData 都无效。推测与「本会话本身运行在另一个 Electron 宿主内」有关。
+- **Electron 可用，且是探针的实际引擎**：`desktop-electron/node_modules/electron/dist/electron.exe`（33.4.11）在 `scripts/e2e/transcript-probe/` 的运行器里正常工作——真实 `CodeMuxThread`、真实构建样式表、真实 store，全量四组读数 120.9s、单组 27.2s。**更正**：我此前的独立冒烟试验（最小 main.cjs + `loadURL('about:blank')` / `loadFile()`）失败并报 `ERR_FAILED (-2)` 与 crashpad 报错，那是那个冒烟脚本自身的问题，不能推断成「Electron 不可用」——该错误结论在上一版本节里存在过，现予更正，勿再采信。
 - **Edge 不可用**：`msedge.exe --headless=new ... --dump-dom` 退出码 0 但标准输出为空。
 - **Chrome 可用**：`chrome.exe --headless=new --disable-gpu --no-first-run --no-default-browser-check --user-data-dir=<独立目录> --window-size=1000,800 --dump-dom <file://…>` 正常工作（HeadlessChrome/142）。
 - **必须同步测量**：无头下 `--virtual-time-budget` 未能驱动 rAF 链（探针页在 rAF 回调里写结果时，`--dump-dom` 拿到的是未执行的脚本）。改为**完全同步**测量后一次成功，且 `document.visibilityState === 'visible'`。结论：探针不要依赖 rAF 或定时器，同步强制布局并直接读几何即可——这对 CI 反而更好（确定性）。
 - **结果回传方式**：页面测量完把整份 DOM 替换成 `<pre id="probe-result">{json}</pre>`，再从 `--dump-dom` 的输出里提取，避免把数百行真实 DOM 一起 dump 出来，也无需 WebSocket/CDP 客户端。
 - **占位高度机制已被证实**（这是工单 02 的前提）：合成 200 行、行高 66–286px 不一、`content-visibility:auto` + `contain-intrinsic-size:auto 200px`，停在底部后同步测量首行——真实高度 66px 时 `getBoundingClientRect().height` 返回 **200px**，容器 `scrollHeight` 为 200×200=**40000px**（由占位高度堆出）。即：从未渲染过的离屏行确实返回基于占位高度的位置，累计偏移误差真实存在。工单 02 要修的就是它；具体在应用里的落点偏差量级由本工单的探针给出。
+
+## 交付结论（2026-09-18）
+
+上下半各一个提交：`cce479aa`（夹具 + CI 安全基准）、`6835cd55`（真实引擎探针）。
+
+**基准读数（200 轮 / 800 事件）**：挂载 commits=4、消息行 600、DOM 节点 7811、带长会话阈值属性；rewind 共 2 代 store 发布（events+turns 同代 1、eventsOnly 0、turnsOnly 0）、commits=5；流式每追加 1 个事件 = 2 代 store 发布 + 2 次组件 commit；导航一次滚动突发（16 次滚动事件）里 `getBoundingClientRect` 被调用 **1600** 次（1 次容器 + 199 个导航项 × 8 帧），组件 commit 为 0。短会话（8 轮）0 个观察者、不出读数、不带阈值属性。
+
+**探针结论：回归被证实，`deltaPx = -41.19px`**，但结论比预期复杂，两条都要带走：
+
+1. **跳过渲染确实让落点偏离**：with-skip 起跳前 180 行里 147 行恰为 200px 占位（目标行之上的占位行 20 行），目标行自身 200px→90.75px；差值由跳转途中的布局漂移差 63.89px 与滚动落点误差差 105.08px 构成。
+2. **但还有一个更大、与跳过规则无关的偏差**：被中和后落点本身仍偏离预期 **-336.94px**（漂移 -337.50px、滚动误差 -0.56px）——动画精确落在请求位置，`scrollToMessage` 的算式没错；偏差来自跳转途中行高变化（助手 markdown 行 304px→192px）。**长会话下跳转落点本就不准，只修测量逃逸口不足以让跳转精确。** 该事实已写入工单 02 的范围说明。
+
+**顺带得到的两条环境事实**：①字面意义上「最早一条 User Message」测不出这条回归（其之上累计行数为 0，两状态都被 `scrollTop` 下界截断，残差恒为 20.00px、delta 为 0），主目标因此改为 turn 12；②`show:false` 的无头窗口把 rAF 压到约 1.4Hz，平滑滚动退化成瞬移、读数不具触发条件（差值符号相反），运行器以 65Hz 的 offscreen 组为权威并标注 `animationLive`。
+
+**未覆盖**：产物漂移失败路径只用合成目录验证过 4 种情形，未真的把 `dist` 留旧跑一次；`show:false` 组的 turn 0 在 60s 内未落定（该组已知节流伪影）；挂载时已渲染行区间（0..15、底部 163..179）是本窗口尺寸下的实测值，换视口尺寸会移动该边界。
