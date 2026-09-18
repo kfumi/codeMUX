@@ -29,8 +29,8 @@ function FormSection({ label, hint, rightContent, children }: FormSectionProps) 
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h3 className="text-ui-compact font-medium text-foreground/70">{label}</h3>
-          {hint && <span className="text-xs text-foreground/38">{hint}</span>}
+          <h3 className="text-ui-compact font-medium text-foreground">{label}</h3>
+          {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
         </div>
         {rightContent}
       </div>
@@ -88,7 +88,7 @@ interface OverviewCardProps {
 function OverviewCard({ label, loading, value }: OverviewCardProps) {
   return (
     <div className="min-w-0 rounded-lg border border-border/55 bg-muted/25 p-3 sm:p-4">
-      <div className="text-xs text-foreground/55">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       {loading ? (
         <div className="mt-2 h-7 w-20 animate-pulse rounded bg-muted/60" />
       ) : (
@@ -313,7 +313,7 @@ export function UsageStatistics() {
       {agentKind === 'all' && (
         <FormSection label="智能体分布" hint="按 Token 消耗总量排名">
           {mergedAgentDistribution.length === 0 ? (
-            <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-foreground/40">
+            <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
               暂无智能体分布数据
             </div>
           ) : (
@@ -324,7 +324,7 @@ export function UsageStatistics() {
                 const agentDef = getAgentDefinition(item.agentKind as never);
                 return (
                   <div key={item.agentKind} className="flex items-center gap-3 text-sm">
-                    <span className="flex w-24 shrink-0 items-center gap-1.5 truncate text-foreground/72 sm:w-28 sm:gap-2">
+                    <span className="flex w-24 shrink-0 items-center gap-1.5 truncate text-foreground sm:w-28 sm:gap-2">
                       {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
                       {agentLabel(item.agentKind)}
                     </span>
@@ -334,7 +334,7 @@ export function UsageStatistics() {
                         style={{ width: `${percent}%` }}
                       />
                     </div>
-                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground/60 sm:w-32 sm:text-sm">
+                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:w-32 sm:text-sm">
                       {formatTokenValue(item.totalTokens)} · {percent.toFixed(1)}%
                     </span>
                   </div>
@@ -348,14 +348,14 @@ export function UsageStatistics() {
       {/* Model distribution table */}
       <FormSection label="模型统计" hint="按 Token 消耗总量排名">
         {mergedModelDistribution.length === 0 ? (
-          <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-foreground/40">
+          <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
             暂无模型统计数据
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border/55">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border/55 bg-muted/30 text-left text-xs text-foreground/55">
+                <tr className="border-b border-border/55 bg-muted/30 text-left text-xs text-muted-foreground">
                   <th className="px-3 py-2.5 font-medium sm:px-4">模型名称</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium sm:px-4">会话数</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium sm:px-4">Token 用量</th>
@@ -367,13 +367,13 @@ export function UsageStatistics() {
                     key={`${item.model}-${item.sessionCount}`}
                     className="border-b border-border/40 last:border-b-0"
                   >
-                    <td className="break-words px-3 py-2.5 text-foreground/82 sm:px-4">
+                    <td className="break-words px-3 py-2.5 text-foreground sm:px-4">
                       {item.model || '未知模型'}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground/72 sm:px-4">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground sm:px-4">
                       {item.sessionCount}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground/72 sm:px-4">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-foreground sm:px-4">
                       {formatTokenValue(item.totalTokens)}
                     </td>
                   </tr>

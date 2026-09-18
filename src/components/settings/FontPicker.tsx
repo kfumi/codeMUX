@@ -115,7 +115,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
                 >
                   <Check className={cn('mr-2 h-4 w-4', value === font.name ? 'opacity-100' : 'opacity-0')} />
                   <span style={{ fontFamily: formatFontFamilyForCss(font.name) }}>{font.name}</span>
-                  <span className="ml-auto text-ui-micro text-muted-foreground/70">{font.license}</span>
+                  <span className="ml-auto text-ui-micro text-muted-foreground">{font.license}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

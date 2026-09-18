@@ -114,9 +114,9 @@ export function LogSettings() {
   const getLineClass = (line: string) => {
     if (line.includes('ERROR')) return 'text-destructive';
     if (line.includes('WARN')) return 'text-yellow-600 dark:text-yellow-400';
-    if (line.includes('INFO')) return 'text-foreground/80';
-    if (line.includes('DEBUG') || line.includes('TRACE')) return 'text-foreground/50';
-    return 'text-foreground/70';
+    if (line.includes('INFO')) return 'text-foreground';
+    if (line.includes('DEBUG') || line.includes('TRACE')) return 'text-muted-foreground';
+    return 'text-foreground';
   };
 
   return (
@@ -137,7 +137,7 @@ export function LogSettings() {
           </Select>
         )}
         {lastRefresh && (
-          <span className="text-xs text-foreground/40">更新于 {lastRefresh}</span>
+          <span className="text-xs text-muted-foreground">更新于 {lastRefresh}</span>
         )}
         <Button
           variant="outline"
@@ -179,8 +179,8 @@ export function LogSettings() {
               </div>
             ))
           ) : (
-            <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-foreground/55">
-              <FileText className="h-8 w-8 text-foreground/24" />
+            <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <FileText className="h-8 w-8 text-muted-foreground" />
               暂无日志
             </div>
           )}

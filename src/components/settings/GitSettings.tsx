@@ -72,11 +72,11 @@ export function GitSettings() {
         <label className="text-ui-compact font-medium text-muted-foreground">生成模型</label>
         <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
-              <Cpu className="h-4 w-4 text-foreground/58" />
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <Cpu className="h-4 w-4 text-muted-foreground" />
               AI 生成所用模型
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               提交信息与 PR 描述生成所用的模型；未选择时使用默认供应商模型。
             </p>
           </div>
@@ -88,11 +88,11 @@ export function GitSettings() {
         <label className="text-ui-compact font-medium text-muted-foreground">提交说明</label>
         <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
-              <GitCommitHorizontal className="h-4 w-4 text-foreground/58" />
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <GitCommitHorizontal className="h-4 w-4 text-muted-foreground" />
               自定义提交指引
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">已添加到提交信息生成提示中</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">已添加到提交信息生成提示中</p>
           </div>
           <textarea
             aria-label="提交说明"
@@ -110,11 +110,11 @@ export function GitSettings() {
         <label className="text-ui-compact font-medium text-muted-foreground">拉取请求指令</label>
         <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
-              <GitPullRequest className="h-4 w-4 text-foreground/58" />
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <GitPullRequest className="h-4 w-4 text-muted-foreground" />
               自定义 PR 指引
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">已添加到 PR 标题/描述生成提示中</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">已添加到 PR 标题/描述生成提示中</p>
           </div>
           <textarea
             aria-label="拉取请求指令"
@@ -132,8 +132,8 @@ export function GitSettings() {
         <label className="text-ui-compact font-medium text-muted-foreground">Gitee 凭据</label>
         <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground/90">Gitee Personal Access Token</div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+            <div className="text-sm font-medium text-foreground">Gitee Personal Access Token</div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               Token 仅保存到系统凭据存储，用于推送后创建 Pull Request。
             </p>
           </div>

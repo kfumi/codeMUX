@@ -151,12 +151,12 @@ export function GeneralSettings() {
         <div className="space-y-3">
           <label className="text-ui-compact font-medium text-muted-foreground">配置文件</label>
           <div className="rounded-xl settings-tile p-4 space-y-3">
-            <p className="text-xs text-foreground/60">
+            <p className="text-xs text-muted-foreground">
               配置文件包含提供商、智能体、主题等所有应用设置。高级用户可直接编辑此文件。
             </p>
             {configPath ? (
               <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-lg bg-muted/50 px-3 py-2 text-code text-foreground/80 font-mono">
+                <code className="flex-1 truncate rounded-lg bg-muted/50 px-3 py-2 text-code text-foreground font-mono">
                   {configPath}
                 </code>
                 <Button

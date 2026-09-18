@@ -58,7 +58,7 @@ export function NotificationSettingsSection() {
             inlineControl
             label={
               <span className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-foreground/58" />
+                <Bell className="h-4 w-4 text-muted-foreground" />
                 系统通知
               </span>
             }
@@ -80,7 +80,7 @@ export function NotificationSettingsSection() {
             inlineControl
             label={
               <span className="flex items-center gap-2">
-                <BellRing className="h-4 w-4 text-foreground/58" />
+                <BellRing className="h-4 w-4 text-muted-foreground" />
                 浏览器通知
               </span>
             }
@@ -106,7 +106,7 @@ export function NotificationSettingsSection() {
           inlineControl
           label={
             <span className="flex items-center gap-2">
-              <Volume2 className="h-4 w-4 text-foreground/58" />
+              <Volume2 className="h-4 w-4 text-muted-foreground" />
               提示音
             </span>
           }

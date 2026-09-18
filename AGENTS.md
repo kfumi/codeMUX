@@ -64,6 +64,13 @@ The app's appearance is user-configurable at runtime (theme, accent color, UI fo
 - Exception: content that is inherently colored (syntax highlighting, diff added/removed lines, accent swatches) may use fixed colors if they are intentional and work in both light and dark modes.
 - For layered surfaces use the existing classes (`surface-panel`, `surface-panel-muted`, `surface-interactive`) or `hsl(var(--surface-1|2|3))` — do not invent new grays.
 
+**Text contrast — two tiers, no ad-hoc alpha:**
+
+- 文字颜色只有两档:主文字用 `text-foreground`(标题、标签、值、表格/日志正文),次级文字用 `text-muted-foreground`(说明、提示、时间戳、元信息、空状态)。层次靠字号(`text-ui-*`)与字重表达,不靠透明度。
+- 不要在文字上写 `text-foreground/45`、`text-muted-foreground/70` 这类透明度后缀。实测(浅色主题白底):`text-foreground/45` = 2.87:1、`/38` = 2.36:1、`/24` = 1.67:1、`text-muted-foreground/70` = 2.96:1,全部低于 WCAG AA 正文所需的 4.5:1;改成两档后为 17.2:1 / 5.5:1(暗色主题 17.8:1 / 8.0:1)。
+- 透明度只用于**表面层次**:背景(`bg-foreground/4`)、描边、分隔线、滚动条。语义色(`text-destructive`、`text-success`、`text-warning`、`text-primary`)按语义直接使用,不要叠加透明度。
+- 例外(可以更浅):禁用态(`disabled:opacity-*`)、输入框占位符、纯装饰性图标(空状态大图标除外,它承载信息)。
+
 **Font family:**
 
 - New UI must inherit the global font family from `var(--font-ui)` (Tailwind `font-sans` is mapped to it); do not hard-code a font family unless the content is intentionally code.

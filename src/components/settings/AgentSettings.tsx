@@ -540,7 +540,7 @@ function AgentConfigurationCard({
 
       <div className="mt-4 flex min-w-0 flex-col gap-3 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex shrink-0 items-center gap-3 lg:w-44">
-          <span className="text-xs font-medium text-foreground/70">新建会话默认模型</span>
+          <span className="text-xs font-medium text-foreground">新建会话默认模型</span>
         </div>
         <div className="min-w-0 w-full lg:w-72 lg:flex-none">
           <AgentModelSelect agentKind={agent.kind} />
@@ -782,7 +782,7 @@ function RuntimeDetectionSection({
       </div>
 
       {checkedAt && (
-        <p className="text-xs text-foreground/45">检测时间：{formatCheckedAt(checkedAt)}</p>
+        <p className="text-xs text-muted-foreground">检测时间：{formatCheckedAt(checkedAt)}</p>
       )}
     </section>
   );
@@ -805,7 +805,7 @@ function RuntimeSkeletonCard({
             <AgentBrandIcon agent={{ kind: 'claude_code' as AgentKind, label: '', description: '', icon: iconKind, capabilities: [] }} size="md" />
           </span>
           <div className="min-w-0 space-y-1.5">
-            <div className="text-sm font-semibold text-foreground/70">{label}</div>
+            <div className="text-sm font-semibold text-foreground">{label}</div>
             <div className="h-3 w-32 rounded bg-muted/60" />
           </div>
         </div>
@@ -1027,7 +1027,7 @@ interface RuntimeInfoRowProps {
 function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRowProps) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="shrink-0 text-ui-caption text-foreground/45">{label}</span>
+      <span className="shrink-0 text-ui-caption text-muted-foreground">{label}</span>
       <div className="flex min-w-0 items-center gap-1">
         {indicator === 'installed' && !empty && (
           <span
@@ -1040,7 +1040,7 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
             className={cn(
               'truncate text-ui-meta',
               mono && 'font-mono',
-              empty ? 'text-foreground/35' : 'text-foreground/80',
+              empty ? 'text-muted-foreground' : 'text-foreground',
             )}
           >
             {value}

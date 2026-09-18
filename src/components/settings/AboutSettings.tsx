@@ -25,8 +25,8 @@ interface AppInfo {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2">
-      <span className="shrink-0 text-sm text-foreground/60">{label}</span>
-      <span className="min-w-0 truncate text-right text-sm font-medium text-foreground/90">{value}</span>
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-right text-sm font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -61,10 +61,10 @@ export function AboutSettings() {
       <div className="flex flex-col items-center gap-4 rounded-xl settings-tile p-6">
         <img src="/logo.png" alt="CodeMUX" className="h-16 w-16 rounded-2xl" />
         <div className="text-center">
-          <h2 className="text-lg font-semibold text-foreground/90">
+          <h2 className="text-lg font-semibold text-foreground">
             {info?.name ?? 'CodeMUX'}
           </h2>
-          <p className="text-sm text-foreground/60">AI 编码工具聚合平台</p>
+          <p className="text-sm text-muted-foreground">AI 编码工具聚合平台</p>
           {info?.version && (
             <span className="mt-2 inline-block rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
               v{info.version}

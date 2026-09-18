@@ -380,7 +380,7 @@ export function RuntimeSettingsPanel({
 
       <div className="space-y-3">
         {loading && !checkResult ? (
-          <div className="rounded-lg border border-border/50 p-4 text-ui-compact text-foreground/60">
+          <div className="rounded-lg border border-border/50 p-4 text-ui-compact text-muted-foreground">
             正在检测 Runtime...
           </div>
         ) : (
@@ -401,7 +401,7 @@ export function RuntimeSettingsPanel({
       </div>
 
       {checkResult?.checkedAt && (
-        <p className="text-ui-caption text-foreground/45">检测时间：{formatCheckedAt(checkResult.checkedAt)}</p>
+        <p className="text-ui-caption text-muted-foreground">检测时间：{formatCheckedAt(checkResult.checkedAt)}</p>
       )}
 
       {canCheckHostCli && <ExternalCliSection />}
@@ -446,7 +446,7 @@ function NodeStatusCard({
       )}
     >
       <div className="flex items-center gap-2">
-        <Terminal className={cn('h-4 w-4 shrink-0', ok ? 'text-foreground/50' : 'text-red-500')} />
+        <Terminal className={cn('h-4 w-4 shrink-0', ok ? 'text-muted-foreground' : 'text-red-500')} />
         <h4 className="text-ui-body font-semibold text-foreground">Node.js</h4>
         <Icon className={cn('ml-auto h-4 w-4 shrink-0', ok ? 'text-emerald-500' : 'text-red-500')} />
         {!ok && (
@@ -457,18 +457,18 @@ function NodeStatusCard({
       </div>
       <div className="mt-3 grid gap-2 text-ui-compact sm:grid-cols-2">
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-foreground/45">版本</span>
-          <span className="truncate font-mono text-foreground/80">
+          <span className="shrink-0 text-muted-foreground">版本</span>
+          <span className="truncate font-mono text-foreground">
             {node.version ?? (node.available ? '未知' : '未检测到')}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-foreground/45">路径</span>
-          <span className="truncate font-mono text-foreground/80">{node.executablePath ?? '-'}</span>
+          <span className="shrink-0 text-muted-foreground">路径</span>
+          <span className="truncate font-mono text-foreground">{node.executablePath ?? '-'}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-foreground/45">npm</span>
-          <span className={cn('truncate font-mono', node.npm.available && node.npm.matchesNode ? 'text-foreground/80' : 'text-red-600 dark:text-red-400')}>
+          <span className="shrink-0 text-muted-foreground">npm</span>
+          <span className={cn('truncate font-mono', node.npm.available && node.npm.matchesNode ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
             {node.npm.version ?? (node.npm.available ? '未知' : '未检测到')}
           </span>
         </div>
@@ -478,7 +478,7 @@ function NodeStatusCard({
           type="button"
           variant="ghost"
           size="sm"
-          className="mt-2 h-7 gap-1.5 px-0 text-ui-caption text-foreground/55 hover:text-foreground"
+          className="mt-2 h-7 gap-1.5 px-0 text-ui-caption text-muted-foreground hover:text-foreground"
           onClick={onOpenSystemTools}
         >
           <Terminal className="h-3.5 w-3.5" />
@@ -522,7 +522,7 @@ function ProviderRuntimeCard({
   onRepair,
   onRemove,
 }: ProviderRuntimeCardProps) {
-  const dotColor = PROVIDER_DOT_COLOR[runtime.provider] ?? 'text-foreground/50';
+  const dotColor = PROVIDER_DOT_COLOR[runtime.provider] ?? 'text-muted-foreground';
   const isOperating = operation !== undefined;
   const progress = operation?.progress ?? null;
   const effectiveStatus: ManagedRuntimeStatus = isOperating ? 'installing' : runtime.status;
@@ -572,14 +572,14 @@ function ProviderRuntimeCard({
 
           <div className="space-y-1 text-ui-compact">
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-foreground/45">版本</span>
-              <span className="truncate font-mono text-foreground/80">
+              <span className="shrink-0 text-muted-foreground">版本</span>
+              <span className="truncate font-mono text-foreground">
                 {runtime.currentVersion ?? '-'}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-foreground/45">路径</span>
-              <span className="truncate font-mono text-foreground/80">
+              <span className="shrink-0 text-muted-foreground">路径</span>
+              <span className="truncate font-mono text-foreground">
                 {runtime.installPath ?? '-'}
               </span>
             </div>
@@ -587,7 +587,7 @@ function ProviderRuntimeCard({
 
           {(versionLoading || runtime.availableVersions.length > 0) && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="shrink-0 text-ui-caption text-foreground/45">目标版本</span>
+              <span className="shrink-0 text-ui-caption text-muted-foreground">目标版本</span>
               <Select
                 value={selectedVersion || undefined}
                 onValueChange={setSelectedVersion}
@@ -698,12 +698,12 @@ function ProviderRuntimeCard({
 
       {runtime.installedVersions.length > 1 && (
         <div className="mt-3 border-t border-border/40 pt-3">
-          <div className="mb-1.5 text-ui-caption text-foreground/45">已安装版本</div>
+          <div className="mb-1.5 text-ui-caption text-muted-foreground">已安装版本</div>
           <div className="flex flex-wrap gap-1.5">
             {runtime.installedVersions.map((version) => (
               <span
                 key={version}
-                className="rounded-md bg-muted/50 px-2 py-0.5 font-mono text-ui-caption text-foreground/70"
+                className="rounded-md bg-muted/50 px-2 py-0.5 font-mono text-ui-caption text-foreground"
               >
                 {version}
               </span>
@@ -722,14 +722,14 @@ function ProgressBar({ progress }: { progress: RuntimeInstallProgress }) {
   const stageLabel = STAGE_LABEL[progress.stage] ?? progress.stage;
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between text-ui-caption text-foreground/60">
+      <div className="flex items-center justify-between text-ui-caption text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Loader2 className="h-3 w-3 animate-spin" />
           {stageLabel}
           {progress.message ? ` · ${progress.message}` : ''}
         </span>
         {progress.percent !== undefined && (
-          <span className="font-mono text-foreground/55">{percent}%</span>
+          <span className="font-mono text-muted-foreground">{percent}%</span>
         )}
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
@@ -739,7 +739,7 @@ function ProgressBar({ progress }: { progress: RuntimeInstallProgress }) {
         />
       </div>
       {progress.bytesTotal !== undefined && progress.bytesDone !== undefined && (
-        <div className="text-ui-caption text-foreground/45">
+        <div className="text-ui-caption text-muted-foreground">
           {formatBytes(progress.bytesDone)} / {formatBytes(progress.bytesTotal)}
         </div>
       )}
@@ -787,7 +787,7 @@ function ExternalCliSection() {
                 只读查看系统 PATH 中的 CLI，与 CodeMUX 托管 Runtime 独立。
               </span>
             </span>
-            <ChevronDown className={cn('h-4 w-4 shrink-0 text-foreground/45 transition-transform', open && 'rotate-180')} />
+            <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-4 pt-4">
@@ -816,24 +816,24 @@ function ExternalCliRow({ check }: { check: AgentRuntimeCheck }) {
     <div className="rounded-lg border border-border/50 p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Terminal className="h-3.5 w-3.5 shrink-0 text-foreground/45" />
+          <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-ui-compact font-medium text-foreground">{check.label}</span>
-          <code className="rounded bg-muted/50 px-1.5 py-0.5 text-ui-caption text-foreground/60">
+          <code className="rounded bg-muted/50 px-1.5 py-0.5 text-ui-caption text-muted-foreground">
             {check.command}
           </code>
         </div>
-        <span className="shrink-0 text-ui-caption text-foreground/55">
+        <span className="shrink-0 text-ui-caption text-muted-foreground">
           {CLI_STATUS_LABEL[check.status]}
         </span>
       </div>
       <div className="mt-2 grid gap-1.5 text-ui-caption sm:grid-cols-2">
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-foreground/45">版本</span>
-          <span className="truncate font-mono text-foreground/75">{check.currentVersion ?? '-'}</span>
+          <span className="shrink-0 text-muted-foreground">版本</span>
+          <span className="truncate font-mono text-foreground">{check.currentVersion ?? '-'}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-foreground/45">路径</span>
-          <span className="truncate font-mono text-foreground/75">{check.executablePath ?? '-'}</span>
+          <span className="shrink-0 text-muted-foreground">路径</span>
+          <span className="truncate font-mono text-foreground">{check.executablePath ?? '-'}</span>
         </div>
       </div>
     </div>

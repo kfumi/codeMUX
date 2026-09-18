@@ -30,7 +30,7 @@ function FormSection({ label, hint, children }: FormSectionProps) {
     <section className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-ui-title font-medium text-foreground">{label}</h3>
-        {hint && <span className="text-ui-caption text-right text-muted-foreground/75">{hint}</span>}
+        {hint && <span className="text-ui-caption text-right text-muted-foreground">{hint}</span>}
       </div>
       {children}
     </section>
@@ -130,8 +130,8 @@ function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: bo
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Icon className={cn('h-3.5 w-3.5', active ? 'text-primary' : 'text-foreground/55')} />
-          <span className={cn('text-ui-title font-medium', active ? 'text-foreground' : 'text-foreground/72')}>
+          <Icon className={cn('h-3.5 w-3.5', active ? 'text-primary' : 'text-muted-foreground')} />
+          <span className={cn('text-ui-title font-medium', active ? 'text-foreground' : 'text-foreground')}>
             {THEME_LABELS[theme]}
           </span>
         </div>
@@ -169,7 +169,7 @@ function AccentSwatch({ accent, active, onClick }: { accent: AccentKey; active: 
       >
         {active && <Check className="h-4 w-4 text-white drop-shadow-sm" strokeWidth={3} />}
       </span>
-      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>
+      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground' : 'text-muted-foreground')}>
         {preset.name}
       </span>
     </button>
@@ -197,7 +197,7 @@ function OptionCard({ label, active, onClick, preview }: OptionCardProps) {
       )}
     >
       {preview}
-      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>{label}</span>
+      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground' : 'text-muted-foreground')}>{label}</span>
     </button>
   );
 }
@@ -355,7 +355,7 @@ export function ThemeToggle() {
             />
           ))}
         </div>
-        <p className="text-xs text-foreground/42">
+        <p className="text-xs text-muted-foreground">
           {prefs.contentWidth === 'fixed'
             ? '定宽模式下，对话消息与发送框宽度固定居中。'
             : '流式模式下，内容宽度尽量居中撑满中间区域。'}
@@ -363,7 +363,7 @@ export function ThemeToggle() {
       </FormSection>
 
       <div className="pt-2">
-        <Button variant="ghost" size="sm" onClick={reset} className="gap-1.5 text-foreground/60">
+        <Button variant="ghost" size="sm" onClick={reset} className="gap-1.5 text-muted-foreground">
           <RotateCcw className="h-3.5 w-3.5" />
           恢复默认外观
         </Button>

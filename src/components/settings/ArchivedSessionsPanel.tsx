@@ -144,7 +144,7 @@ export function ArchivedSessionsPanel() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="relative md:col-span-2 xl:col-span-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/40" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
@@ -191,7 +191,7 @@ export function ArchivedSessionsPanel() {
       </div>
 
       <div className="rounded-xl settings-tile">
-        <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 text-sm text-foreground/70">
+        <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 text-sm text-foreground">
           <span>{filteredSessions.length} 个对话</span>
           <span className="flex items-center gap-1.5">
             <FolderOpen className="h-4 w-4" />
@@ -201,8 +201,8 @@ export function ArchivedSessionsPanel() {
 
         <div className="max-h-[52vh] overflow-auto">
           {filteredSessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-sm text-foreground/55">
-              <Archive className="h-8 w-8 text-foreground/24" />
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-sm text-muted-foreground">
+              <Archive className="h-8 w-8 text-muted-foreground" />
               没有匹配的已归档对话
             </div>
           ) : (
@@ -215,7 +215,7 @@ export function ArchivedSessionsPanel() {
                 <div key={session.id} className="border-b border-border/55 px-4 py-3 last:border-b-0">
                   <div className="flex min-w-0 items-center gap-3">
                     <div
-                      className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90"
+                      className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
                       title={displayTitle}
                     >
                       {displayTitle}
@@ -230,7 +230,7 @@ export function ArchivedSessionsPanel() {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-foreground/60">
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span className="inline-flex min-w-0 items-center gap-1">
                       {agentDef ? (
                         <>

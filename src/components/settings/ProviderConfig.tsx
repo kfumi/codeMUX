@@ -686,7 +686,7 @@ export function ProviderConfigPanel() {
       <div className="flex w-full shrink-0 flex-col border-b border-border/60 pb-2 @min-[46rem]:w-60 @min-[46rem]:border-b-0 @min-[46rem]:border-r @min-[46rem]:pb-0">
         <div className="pb-2 pt-1 @min-[46rem]:px-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}

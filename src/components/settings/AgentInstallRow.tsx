@@ -79,7 +79,7 @@ export function AgentInstallRow({ install }: AgentInstallRowProps) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-5 w-5 shrink-0 text-muted-foreground/60 hover:text-foreground"
+          className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
           onClick={handleCopy}
           aria-label="复制路径"
         >
@@ -90,7 +90,7 @@ export function AgentInstallRow({ install }: AgentInstallRowProps) {
       <div className="shrink-0 text-xs">
         {runnable ? (
           version ? (
-            <span className="font-mono text-foreground/80">{version}</span>
+            <span className="font-mono text-foreground">{version}</span>
           ) : (
             <span className="text-muted-foreground">—</span>
           )

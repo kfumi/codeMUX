@@ -242,7 +242,7 @@ export function SkillsSettingsPanel() {
                   </TooltipHint>
                 ) : skill.disk_path ? (
                   <TooltipHint content={skill.disk_path}>
-                    <p className="mt-0.5 truncate font-mono text-ui-micro text-muted-foreground/60">
+                    <p className="mt-0.5 truncate font-mono text-ui-micro text-muted-foreground">
                       {skill.disk_path}
                     </p>
                   </TooltipHint>
@@ -339,7 +339,7 @@ export function SkillsSettingsPanel() {
                       <span className="text-xs font-medium text-muted-foreground">
                         {APP_LABELS[app]}
                       </span>
-                      <span className="text-xs text-muted-foreground/60">
+                      <span className="text-xs text-muted-foreground">
                         ({skills.length})
                       </span>
                     </div>
@@ -382,7 +382,7 @@ export function SkillsSettingsPanel() {
                             {skill.disk_path && (
                               <TooltipHint content={skill.disk_path}>
                                 <p
-                                  className="text-ui-micro text-muted-foreground/60 truncate mt-0.5 font-mono"
+                                  className="text-ui-micro text-muted-foreground truncate mt-0.5 font-mono"
                                 >
                                   {skill.disk_path}
                                 </p>

@@ -232,7 +232,7 @@ export function SessionItem({
                         ) : flowActive ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
                         ) : (
-                          <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/40">
+                          <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/70">
                             {timeLabel}
                           </span>
                         )}

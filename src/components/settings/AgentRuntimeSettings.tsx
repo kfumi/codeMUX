@@ -35,7 +35,7 @@ export function AgentRuntimeSettingsPanel({
 
       <section className="space-y-5">
         <div className="flex items-start gap-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/60 text-foreground/60">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground">
             <Layers3 className="h-4 w-4" />
           </span>
           <div>

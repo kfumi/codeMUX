@@ -222,7 +222,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`展开显示项目 ${project.name} 的更多对话`}
                   onClick={handleExpandSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronDown className="h-3 w-3" />
                   展开显示
@@ -233,7 +233,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`折叠显示项目 ${project.name} 的对话`}
                   onClick={handleCollapseSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronUp className="h-3 w-3" />
                   折叠显示

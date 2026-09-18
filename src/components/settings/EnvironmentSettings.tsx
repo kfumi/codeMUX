@@ -72,14 +72,14 @@ export function EnvironmentSettings() {
 
       <div className="space-y-3">
         {loading && !check ? (
-          <div className="rounded-xl settings-tile p-5 text-sm text-foreground/60">正在检测环境...</div>
+          <div className="rounded-xl settings-tile p-5 text-sm text-muted-foreground">正在检测环境...</div>
         ) : (
           check?.tools.map((tool) => <ToolCheckRow key={tool.command} tool={tool} />)
         )}
       </div>
 
       {check?.checkedAt && (
-        <p className="text-xs text-foreground/45">检测时间：{formatCheckedAt(check.checkedAt)}</p>
+        <p className="text-xs text-muted-foreground">检测时间：{formatCheckedAt(check.checkedAt)}</p>
       )}
     </div>
   );
@@ -94,11 +94,11 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Terminal className="h-4 w-4 text-foreground/45" />
-            <h4 className="text-sm font-semibold text-foreground/90">{tool.name}</h4>
-            <code className="rounded-md bg-muted/50 px-1.5 py-0.5 text-ui-caption text-foreground/60">{tool.command}</code>
+            <Terminal className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-sm font-semibold text-foreground">{tool.name}</h4>
+            <code className="rounded-md bg-muted/50 px-1.5 py-0.5 text-ui-caption text-muted-foreground">{tool.command}</code>
           </div>
-          <p className="mt-2 text-sm text-foreground/70">{tool.message}</p>
+          <p className="mt-2 text-sm text-foreground">{tool.message}</p>
         </div>
         <span className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium', meta.className)}>
           <Icon className="h-3.5 w-3.5" />
@@ -106,7 +106,7 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
         </span>
       </div>
 
-      <div className="mt-4 grid gap-2 text-xs text-foreground/58 sm:grid-cols-2">
+      <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
         <InfoPill label="版本" value={tool.version ?? '-'} />
         <InfoPill label="路径" value={tool.path ?? '-'} />
       </div>
@@ -117,8 +117,8 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
 function InfoPill({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
-      <div className="text-ui-caption text-foreground/42">{label}</div>
-      <div className="mt-1 truncate font-mono text-ui-meta text-foreground/75">{value}</div>
+      <div className="text-ui-caption text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-mono text-ui-meta text-foreground">{value}</div>
     </div>
   );
 }

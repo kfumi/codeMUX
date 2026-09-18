@@ -7,6 +7,7 @@ import { getDaemonStartupError, initDaemonClient } from '../../lib/daemon-bootst
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
@@ -58,24 +59,29 @@ function SectionHeader({
   onToggle: () => void;
   actions?: ReactNode;
 }) {
+
+  const isNarrow = useIsNarrowViewport();
+
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5">
+    <div className="group flex items-center gap-1 px-0 py-1.5">
       <button
         type="button"
         aria-label={toggleLabel}
         aria-expanded={expanded}
         onClick={onToggle}
-        className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[hsl(var(--sidebar-muted))]/70"
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-[hsl(var(--sidebar-muted))]/70"
       >
+        <span className="min-w-0 truncate text-ui-title font-medium text-[hsl(var(--sidebar-fg))]">
+          {title}
+        </span>
+        {/* 展开/收起箭头跟在标题右侧,悬停该行才出现;窄屏(触摸)没有 hover,常显。 */}
         <ChevronRight
           className={cn(
-            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/42 transition-transform duration-200',
+            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/70 transition-all duration-200',
+            isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
             expanded && 'rotate-90',
           )}
         />
-        <span className="text-ui-caption font-semibold uppercase tracking-normal text-[hsl(var(--sidebar-fg))]/38">
-          {title}
-        </span>
       </button>
       {actions}
     </div>
@@ -238,7 +244,7 @@ export function SessionList({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/50 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                    className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
                     onClick={onAddProject}
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -303,7 +309,7 @@ export function SessionList({
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/18 text-[hsl(var(--sidebar-accent))]">
             <MessageSquarePlus className="h-4 w-4" />
           </div>
-          <p className="text-ui-compact leading-relaxed text-[hsl(var(--sidebar-fg))]/50">
+          <p className="text-ui-compact leading-relaxed text-[hsl(var(--sidebar-fg))]/70">
             暂无对话
             <br />
             <span className="text-ui-caption">点击上方新建</span>
@@ -312,7 +318,7 @@ export function SessionList({
             <button
               type="button"
               onClick={onAddProject}
-              className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+              className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
             >
               <Plus className="h-3.5 w-3.5" />
               添加项目
@@ -325,7 +331,7 @@ export function SessionList({
         <button
           type="button"
           onClick={onAddProject}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

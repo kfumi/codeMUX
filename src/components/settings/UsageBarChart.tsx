@@ -142,7 +142,7 @@ export function UsageBarChart({ data }: UsageBarChartProps) {
       <div ref={containerRef} className="w-full">
         {!hasData ? (
           <div
-            className="flex items-center justify-center rounded-lg border border-border/40 bg-muted/20 text-sm text-foreground/40"
+            className="flex items-center justify-center rounded-lg border border-border/40 bg-muted/20 text-sm text-muted-foreground"
             style={{ height: totalHeight }}
           >
             暂无 Token 使用数据

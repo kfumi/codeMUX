@@ -373,7 +373,7 @@ export function McpSettingsPanel() {
             </div>
             {endpoint && (
               <TooltipHint content={endpoint}>
-                <p className="mt-0.5 cursor-default truncate font-mono text-ui-micro text-muted-foreground/70">
+                <p className="mt-0.5 cursor-default truncate font-mono text-ui-micro text-muted-foreground">
                   {endpoint}
                 </p>
               </TooltipHint>
@@ -414,7 +414,7 @@ export function McpSettingsPanel() {
             ))}
           </div>
           {server.builtin ? (
-            <div className="flex items-center pr-1 text-muted-foreground/50">
+            <div className="flex items-center pr-1 text-muted-foreground">
               <TooltipHint content="内置 server:不可修改或删除">
                 <Lock className="h-3.5 w-3.5" aria-label={`builtin-${server.id}`} />
               </TooltipHint>
@@ -468,7 +468,7 @@ export function McpSettingsPanel() {
   const renderSection = (title: string, rows: McpServer[], emptyHint?: React.ReactNode) => (
     <section className="space-y-2">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground/90">{title}</span>
+        <span className="text-sm font-medium text-foreground">{title}</span>
         <span className="text-xs text-muted-foreground">{rows.length}</span>
       </div>
       {rows.length > 0 ? (
@@ -684,7 +684,7 @@ export function McpSettingsPanel() {
                   {testResult.tools.slice(0, 12).map((tool) => (
                     <span
                       key={tool}
-                      className="rounded bg-[hsl(var(--foreground)/0.06)] px-1.5 py-0.5 font-mono text-ui-micro text-foreground/80"
+                      className="rounded bg-[hsl(var(--foreground)/0.06)] px-1.5 py-0.5 font-mono text-ui-micro text-foreground"
                     >
                       {tool}
                     </span>

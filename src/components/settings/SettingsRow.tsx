@@ -49,7 +49,7 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="col-start-1 row-start-1 min-w-0 text-sm font-medium text-foreground/90">
+      <div className="col-start-1 row-start-1 min-w-0 text-sm font-medium text-foreground">
         {label}
       </div>
       <div
