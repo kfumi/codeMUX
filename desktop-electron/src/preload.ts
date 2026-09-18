@@ -76,6 +76,7 @@ const bridge = {
   getLogFiles: () => invoke('getLogFiles'),
   readLogFile: (fileName: string) => invoke<string>('readLogFile', { fileName }),
   readHomeFile: (relativePath: string) => invoke<string>('readHomeFile', { relativePath }),
+  ensureDirectory: (path: string) => invoke<boolean>('ensureDirectory', { path }),
 
   // 资源管理器 / 项目打开
   openInExplorer: (path: string, reveal?: boolean) => invoke<void>('openInExplorer', { path, reveal }),

@@ -54,6 +54,9 @@ export const shellFacade = {
     bridgeCall((bridge) => bridge.openProjectPath(path, target)),
   readHomeFile: (relativePath: string): Promise<string> =>
     bridgeCall((bridge) => bridge.readHomeFile(relativePath)),
+  /** 确保目录存在(缺则递归创建);返回 false = 不可用,调用方降级。 */
+  ensureDirectory: (path: string): Promise<boolean> =>
+    bridgeCall((bridge) => bridge.ensureDirectory(path)),
   openInExplorer: (path: string, reveal?: boolean): Promise<void> =>
     bridgeCall((bridge) => bridge.openInExplorer(path, reveal)),
   /**

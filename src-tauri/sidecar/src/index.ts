@@ -37,7 +37,7 @@ import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { proxyManager } from './proxyManager.js';
 import { emit, resetStreamEventSequences, syncStreamSessionContext } from './streamEventBatcher.js';
 import { buildSessionTitleEvent, extractClaudeSessionTitle } from './sessionTitleEvent.js';
-import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
+import { assertWorkingDirectory, ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import type { PiApprovalMode } from './piExtension.js';
@@ -967,6 +967,9 @@ export class SessionRuntime {
       throw new Error(`Claude Runtime 路径中未找到 Claude 可执行文件: ${runtimePath}`);
     }
     this.claudeExecutablePath = claudePath;
+    // cwd 预检:不存在的 cwd 会让 claude.exe spawn 失败(ENOENT),而 SDK 会把它
+    // 误报成 "binary failed to launch / libc 不匹配"。见 defaultWorkingDirectory.ts。
+    const sessionCwd = assertWorkingDirectory(config.cwd);
     const claudeSessionId = config.agentSessionId;
     const envKey = process.env.ANTHROPIC_API_KEY;
     const envUrl = process.env.ANTHROPIC_BASE_URL;
@@ -1012,7 +1015,7 @@ export class SessionRuntime {
     const mcpServers = mapClaudeMcpServers(config.mcpServers);
 
     const options: QueryOptions = {
-      cwd: config.cwd,
+      cwd: sessionCwd,
       abortController: this.abortController,
       permissionMode: permissionOptions.permissionMode,
       allowDangerouslySkipPermissions: permissionOptions.allowDangerouslySkipPermissions,

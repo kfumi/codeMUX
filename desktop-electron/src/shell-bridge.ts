@@ -180,6 +180,11 @@ function parseSaveDialogOptions(payload: unknown): SaveDialogOptions {
   };
 }
 
+/** 绝对路径判据(ensureDirectory 预检):盘符、UNC 或 POSIX 根。 */
+function isAbsoluteFsPath(value: string): boolean {
+  return /^[a-zA-Z]:[/\\]/.test(value) || value.startsWith('\\\\') || value.startsWith('/');
+}
+
 /** 注册全部 `codemux:*` IPC 通道;返回解除注册(测试/热重载用)。 */
 export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -216,6 +221,27 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     const { relativePath } = (payload ?? {}) as { relativePath?: unknown };
     if (typeof relativePath !== 'string') throw new Error('relativePath must be a string');
     return readHomeFile(relativePath);
+  });
+  // ensureDirectory:会话工作目录落盘(claude.exe 等 CLI 对不存在的 cwd 会
+  // spawn 失败,SDK 误报为 "binary failed to launch / libc 不匹配")。
+  handle('ensureDirectory', (payload: unknown) => {
+    const { path: targetPath } = (payload ?? {}) as { path?: unknown };
+    if (typeof targetPath !== 'string' || !isAbsoluteFsPath(targetPath)) {
+      throw new Error('path must be an absolute directory path');
+    }
+    // 快路径:目录已存在 → 一次 stat 返回;缺则递归创建。
+    try {
+      return statSync(targetPath).isDirectory();
+    } catch {
+      // not exists → 创建。
+    }
+    try {
+      mkdirSync(targetPath, { recursive: true });
+      return statSync(targetPath).isDirectory();
+    } catch (error) {
+      console.warn(`[shell-bridge] ensureDirectory failed for ${targetPath}:`, error);
+      return false;
+    }
   });
 
   // --- 资源管理器 / 项目打开 ------------------------------------------------

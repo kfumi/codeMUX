@@ -191,6 +191,8 @@ export interface CodemuxDesktopBridge {
   getLogFiles(): Promise<LogFileInfo[]>;
   readLogFile(fileName: string): Promise<string>;
   readHomeFile(relativePath: string): Promise<string>;
+  /** 确保绝对路径目录存在(缺则递归创建)。返回 false = 不可用,调用方降级。 */
+  ensureDirectory(path: string): Promise<boolean>;
 
   // 资源管理器 / 项目打开
   openInExplorer(path: string, reveal?: boolean): Promise<void>;

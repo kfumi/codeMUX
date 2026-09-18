@@ -57,20 +57,41 @@ const appApiMock = vi.hoisted(() => ({
   getUserHomeDirectory: vi.fn(),
 }));
 
+const shellApiMock = vi.hoisted(() => ({
+  ensureDirectory: vi.fn(),
+}));
+
+vi.mock('./facades/shell-facade', () => ({
+  shellFacade: shellApiMock,
+}));
+
 describe('ensureDraftSessionWorkingPath', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appApiMock.getUserHomeDirectory.mockResolvedValue('C:/Users/me');
+    shellApiMock.ensureDirectory.mockResolvedValue(true);
   });
 
-  it('resolves the default cwd to CodemuxProject under home', async () => {
+  it('resolves the default cwd to CodemuxProject under home and ensures it exists', async () => {
     await expect(ensureDraftSessionWorkingPath('.')).resolves.toBe('C:/Users/me/CodemuxProject');
     expect(appApiMock.getUserHomeDirectory).toHaveBeenCalled();
+    expect(shellApiMock.ensureDirectory).toHaveBeenCalledWith('C:/Users/me/CodemuxProject');
   });
 
-  it('keeps absolute cwd unchanged', async () => {
+  it('keeps absolute cwd unchanged and still ensures the directory exists', async () => {
     await expect(ensureDraftSessionWorkingPath('D:/workspace')).resolves.toBe('D:/workspace');
     expect(appApiMock.getUserHomeDirectory).not.toHaveBeenCalled();
+    expect(shellApiMock.ensureDirectory).toHaveBeenCalledWith('D:/workspace');
+  });
+
+  it('still resolves the path when the shell bridge is unavailable (best effort)', async () => {
+    shellApiMock.ensureDirectory.mockRejectedValue(new Error('codemuxDesktop 桥不可用'));
+    await expect(ensureDraftSessionWorkingPath('.')).resolves.toBe('C:/Users/me/CodemuxProject');
+  });
+
+  it('still resolves the path when ensureDirectory reports failure', async () => {
+    shellApiMock.ensureDirectory.mockResolvedValue(false);
+    await expect(ensureDraftSessionWorkingPath('D:/workspace')).resolves.toBe('D:/workspace');
   });
 });
 

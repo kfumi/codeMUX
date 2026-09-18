@@ -6,6 +6,7 @@ import {
 } from './draftWorkspacePicker';
 import { requireDesktopBridge } from './desktop-bridge';
 import { daemonFacade } from './facades/daemon-facade';
+import { shellFacade } from './facades/shell-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -36,11 +37,18 @@ export function normalizeSessionWorkingDirectory(cwd: string, homeDir: string): 
 }
 
 export async function ensureDraftSessionWorkingPath(cwd: string): Promise<string> {
-  if (!isDefaultWorkingDirectoryRequest(cwd)) {
-    return cwd.trim();
+  const resolved = isDefaultWorkingDirectoryRequest(cwd)
+    ? resolveDefaultWorkingDirectory(await requireDesktopBridge().getUserHomeDirectory())
+    : cwd.trim();
+  // 最佳努力确保目录存在:claude.exe 等 CLI 对不存在的 cwd 会 spawn 失败
+  // (ENOENT 会被 SDK 误报成 "binary failed to launch / libc 不匹配")。
+  // 创建失败不阻断 —— sidecar 侧 cwd 预检会给出明确错误兜底。
+  try {
+    await shellFacade.ensureDirectory(resolved);
+  } catch {
+    // 浏览器形态没有壳桥:忽略,交由 sidecar 预检兜底。
   }
-  const homeDir = await requireDesktopBridge().getUserHomeDirectory();
-  return resolveDefaultWorkingDirectory(homeDir);
+  return resolved;
 }
 
 export function isValidWorkingPath(path: string | null | undefined): path is string {

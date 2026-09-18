@@ -79,6 +79,9 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'shell.explorer', owner: 'shell', shellMethod: 'openInExplorer' },
   { id: 'host.env-check', owner: 'shell', shellMethod: 'checkDevelopmentEnvironment' },
   { id: 'host.agent-cli', owner: 'shell', shellMethod: 'checkAgentRuntimes' },
+  // fs.ensure-directory:会话默认工作目录(~/CodemuxProject)的落盘创建。
+  // 浏览器/移动形态没有壳桥,由 sidecar 侧 cwd 预检兜底报出明确错误。
+  { id: 'fs.ensure-directory', owner: 'shell', shellMethod: 'ensureDirectory' },
 ];
 
 /** Methods that must route through the daemon HTTP client (no invoke fallback). */
