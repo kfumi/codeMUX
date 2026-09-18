@@ -109,6 +109,12 @@ export class OpenCodeRuntime {
   private permissionClosing = false;
   private permissionConfig: SidecarPermissionConfig | undefined;
   private planMode: AgentPlanMode = 'off';
+  /**
+   * 原生会话当前生效的 agent。仅在**确定**时赋值：新建会话服务端默认 'build'，
+   * 或会话响应里带回 agent 字段。冷 server 上首次 switchAgent 实测 4374ms（热态 21ms），
+   * 已知相同时跳过可以省掉这一整段。
+   */
+  private nativeAgent: string | undefined;
   private readonly turnArtifactAggregator: TurnArtifactAggregator;
   /** 最近一次已上报的原生标题（变化才上报；占位标题不参与）。 */
   private lastEmittedNativeTitle: string | null = null;
@@ -216,20 +222,27 @@ export class OpenCodeRuntime {
       const turnCompletion = new Promise<void>((resolve, reject) => {
         this.pendingTurnCompletion = { resolve, reject, sessionId };
       });
-      try {
-        const agent = this.planMode === 'on' ? 'plan' : 'build';
-        if (client.switchAgent) {
-          await client.switchAgent({ sessionId, agent });
-        }
-        await client.prompt({
-          sessionId,
-          prompt: normalizedPrompt,
-          inputPayload: normalizedPayload,
-          images: mapOpenCodeImages(normalizedPayload),
-          provider: this.config.provider,
-          model: this.config.model,
-          agent,
-        });
+        try {
+          const agent = this.planMode === 'on' ? 'plan' : 'build';
+          if (client.switchAgent && agent !== this.nativeAgent) {
+            const switchStartedAt = Date.now();
+            const applied = await client.switchAgent({ sessionId, agent });
+            writeLog('[opencode-task]', `[perf] opencode send switchAgent agent=${agent} applied=${applied !== false} elapsed_ms=${Date.now() - switchStartedAt}`);
+            if (applied !== false) {
+              this.nativeAgent = agent;
+            }
+          } else if (client.switchAgent) {
+            writeLog('[opencode-task]', `[perf] switchAgent SKIPPED (native agent already ${agent})`);
+          }
+          await client.prompt({
+            sessionId,
+            prompt: normalizedPrompt,
+            inputPayload: normalizedPayload,
+            images: mapOpenCodeImages(normalizedPayload),
+            provider: this.config.provider,
+            model: this.config.model,
+            agent,
+          });
       } catch (error) {
         this.pendingTurnCompletion = undefined;
         writeLog('[opencode-task]', `sendInput promptAsync FAILED error=${errorMessage(error)}`);
@@ -579,14 +592,30 @@ export class OpenCodeRuntime {
 
     try {
       const sessionCreateStartedAt = Date.now();
+      const restoredSession = Boolean(this.agentSessionId);
       const session = this.agentSessionId
         ? await client.restoreSession({ cwd: this.config.cwd, sessionId: this.agentSessionId })
         : await client.createSession({ cwd: this.config.cwd });
-      writeLog('[opencode-task]', `[perf] opencode session ${this.agentSessionId ? 'restored' : 'created'} elapsed_ms=${Date.now() - sessionCreateStartedAt}`);
+      writeLog('[opencode-task]', `[perf] opencode session ${restoredSession ? 'restored' : 'created'} elapsed_ms=${Date.now() - sessionCreateStartedAt}`);
       this.agentSessionId = session.id;
+      // 记录原生会话的 agent：响应带 agent 字段就直接采用（恢复会话也适用），
+      // 否则新建会话按服务端默认 'build'，恢复会话留空（未知，交由 sendInput 兜底切换）。
+      const nativeAgentFromSession = readString((session as { agent?: unknown })?.agent);
+      this.nativeAgent = nativeAgentFromSession ?? (restoredSession ? undefined : 'build');
       this.state = 'started';
       // 恢复的会话可能已在底层生成过标题（新建会话为占位标题，被过滤）。
       this.emitNativeSessionTitle(readString((session as { title?: unknown })?.title));
+      // 冷 server 上首次 switchAgent 要 4s+。需要切换时在 ensure 阶段先做掉，让「打开会话即预热」
+      // 把它吸收；SDK 只在 2xx 时返回 true，据此回写 nativeAgent，不确定时留给 sendInput 兜底。
+      const desiredAgent = this.planMode === 'on' ? 'plan' : 'build';
+      if (client.switchAgent && desiredAgent !== this.nativeAgent) {
+        const preSwitchStartedAt = Date.now();
+        const applied = await client.switchAgent({ sessionId: this.agentSessionId, agent: desiredAgent });
+        writeLog('[opencode-task]', `[perf] opencode init switchAgent agent=${desiredAgent} applied=${applied !== false} elapsed_ms=${Date.now() - preSwitchStartedAt}`);
+        if (applied !== false) {
+          this.nativeAgent = desiredAgent;
+        }
+      }
       const subscribeStartedAt = Date.now();
       await this.subscribeToEvents();
       writeLog('[opencode-task]', `[perf] opencode event subscription established elapsed_ms=${Date.now() - subscribeStartedAt} startInternal_total_ms=${Date.now() - startInternalStartedAt}`);

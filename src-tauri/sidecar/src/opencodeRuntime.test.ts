@@ -84,6 +84,7 @@ function createPort() {
     compactSession: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
     respondToPermission: vi.fn().mockResolvedValue(true),
+    switchAgent: vi.fn().mockResolvedValue(true),
   };
   const port: OpenCodeSdkPort = {
     start: vi.fn().mockResolvedValue({ server, client }),
@@ -1795,5 +1796,51 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
 
     expect(emitted.filter((event) => (event as { type?: string }).type === 'agent_session_title')).toEqual([]);
+  });
+
+  it('skips switchAgent when a fresh session already runs the desired agent', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    // 新建会话服务端默认 'build'：init 与 send 都不该为「切到 build」付冷启动代价（实测 4.4s）。
+    expect(client.switchAgent).not.toHaveBeenCalled();
+
+    await runtime.sendInput('hello');
+
+    expect(client.switchAgent).not.toHaveBeenCalled();
+    expect(client.prompt).toHaveBeenCalledWith(expect.objectContaining({ agent: 'build' }));
+    await runtime.shutdown().catch(() => undefined);
+  });
+
+  it('switches to plan during start, then skips the send-path switch', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    runtime.updatePermissions({ planMode: 'on' });
+    await runtime.start();
+
+    expect(client.switchAgent).toHaveBeenCalledWith({ sessionId: 'opencode-new', agent: 'plan' });
+
+    client.switchAgent.mockClear();
+    await runtime.sendInput('hello');
+
+    expect(client.switchAgent).not.toHaveBeenCalled();
+    expect(client.prompt).toHaveBeenCalledWith(expect.objectContaining({ agent: 'plan' }));
+    await runtime.shutdown().catch(() => undefined);
+  });
+
+  it('retries the switch on send when the start-time switch failed', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    runtime.updatePermissions({ planMode: 'on' });
+    client.switchAgent.mockResolvedValueOnce(false);
+    await runtime.start();
+
+    await runtime.sendInput('hello');
+
+    // 首次（init 内）失败不记账，send 必须重试，避免会话默认 agent 停留在旧值。
+    expect(client.switchAgent).toHaveBeenCalledTimes(2);
+    expect(client.prompt).toHaveBeenCalledWith(expect.objectContaining({ agent: 'plan' }));
+    await runtime.shutdown().catch(() => undefined);
   });
 });

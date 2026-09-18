@@ -61,7 +61,8 @@ export interface OpenCodeClientPort {
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
   respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
-  switchAgent?(input: { sessionId: string; agent: string }): Promise<void>;
+  /** true = 原生会话已切到该 agent（HTTP 2xx）；false = 失败（已记日志），调用方需自行兜底。 */
+  switchAgent?(input: { sessionId: string; agent: string }): Promise<boolean>;
 }
 
 export interface OpenCodeSdkStartResources {
@@ -542,11 +543,13 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               if (!res.ok) {
                 const text = await res.text().catch(() => `HTTP ${res.status}`);
                 process.stderr.write(`[opencode-task] switchAgent FAILED sessionId=${sessionId} agent=${agent} status=${res.status} body=${text.slice(0, 500)}\n`);
-                return;
+                return false;
               }
               process.stderr.write(`[opencode-task] switchAgent OK sessionId=${sessionId} agent=${agent} elapsed_ms=${Date.now() - switchAgentStartedAt}\n`);
+              return true;
             } catch (err) {
               process.stderr.write(`[opencode-task] switchAgent ERROR sessionId=${sessionId} agent=${agent} error=${err instanceof Error ? err.message : String(err)}\n`);
+              return false;
             }
           },
           async prompt({ sessionId, prompt, inputPayload, images, provider, model, agent }) {
