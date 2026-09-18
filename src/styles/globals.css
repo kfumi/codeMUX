@@ -218,7 +218,6 @@
     color: var(--color-foreground);
     font-family: var(--font-ui);
     font-size: var(--ui-font-size);
-    font-feature-settings: "cv05", "cv08", "tnum", "ss02";
     letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -568,7 +567,6 @@ html.cmx-panel-resizing webview {
 /* Address bars and other URLs must not collapse `://` via JetBrains Mono ligatures. */
 .font-liga-none {
   font-variant-ligatures: none;
-  font-feature-settings: "liga" 0, "calt" 0;
 }
 
 .code-lang-badge {
