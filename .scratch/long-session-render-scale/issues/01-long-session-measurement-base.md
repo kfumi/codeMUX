@@ -23,3 +23,14 @@
 - [ ] 长会话夹具规模与真实长会话同量级（数百轮），且可在单次测试中超时预算内跑完
 - [ ] 短会话（低于长会话阈值）不进入任何新增度量路径，行为与现状一致
 - [ ] 上述读数的采集入口可被后续工单直接复用，无需再改夹具或探针基座
+
+## 已确认的环境事实（2026-09-18，实测）
+
+探针的引擎选择曾被当作未定项，现在有实测结论，避免重复试错：
+
+- **Electron 不可用**：`desktop-electron/node_modules/electron/dist/electron.exe`（33.4.11，安装完整）在本机启动后创建窗口即崩溃（crashpad `not connected`、异常退出码），`loadURL('about:blank')` 与 `loadFile()` 均报 `ERR_FAILED (-2)`。`--no-sandbox`、`disable-gpu`、分离 userData 都无效。推测与「本会话本身运行在另一个 Electron 宿主内」有关。
+- **Edge 不可用**：`msedge.exe --headless=new ... --dump-dom` 退出码 0 但标准输出为空。
+- **Chrome 可用**：`chrome.exe --headless=new --disable-gpu --no-first-run --no-default-browser-check --user-data-dir=<独立目录> --window-size=1000,800 --dump-dom <file://…>` 正常工作（HeadlessChrome/142）。
+- **必须同步测量**：无头下 `--virtual-time-budget` 未能驱动 rAF 链（探针页在 rAF 回调里写结果时，`--dump-dom` 拿到的是未执行的脚本）。改为**完全同步**测量后一次成功，且 `document.visibilityState === 'visible'`。结论：探针不要依赖 rAF 或定时器，同步强制布局并直接读几何即可——这对 CI 反而更好（确定性）。
+- **结果回传方式**：页面测量完把整份 DOM 替换成 `<pre id="probe-result">{json}</pre>`，再从 `--dump-dom` 的输出里提取，避免把数百行真实 DOM 一起 dump 出来，也无需 WebSocket/CDP 客户端。
+- **占位高度机制已被证实**（这是工单 02 的前提）：合成 200 行、行高 66–286px 不一、`content-visibility:auto` + `contain-intrinsic-size:auto 200px`，停在底部后同步测量首行——真实高度 66px 时 `getBoundingClientRect().height` 返回 **200px**，容器 `scrollHeight` 为 200×200=**40000px**（由占位高度堆出）。即：从未渲染过的离屏行确实返回基于占位高度的位置，累计偏移误差真实存在。工单 02 要修的就是它；具体在应用里的落点偏差量级由本工单的探针给出。
