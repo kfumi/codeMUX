@@ -134,7 +134,7 @@ pub(crate) fn convert_pi_history_values_to_events(
 /// 真正的"当前对话"是活动叶子到根的链。仅在条目实际使用 parentId 链接时按链
 /// 选取（返回链上条目）；线性文件（无 parentId，含 v1 旧格式）或链损坏/成环
 /// 时返回 None 走全量线性转换，宁可交错也不丢条目。
-fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
+pub(crate) fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
     let uses_parent_links = raw_events.iter().any(|entry| {
         entry
             .get("parentId")

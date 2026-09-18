@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { buildTokenThresholds } from '../../lib/usageHeatmapScale';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { TokenBreakdownResponse, UsageStatsResponse } from '../../types/usage';
 import { Button } from '../ui/button';
@@ -38,12 +39,13 @@ function FormSection({ label, hint, rightContent, children }: FormSectionProps) 
   );
 }
 
+// Gemini CLI 是未接入运行时的占位入口，不产出用量数据，故不在统计筛选中暴露。
 const AGENT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
-  { value: 'gemini_cli', label: 'Gemini' },
   { value: 'opencode', label: 'OpenCode' },
+  { value: 'pi', label: 'pi' },
 ];
 
 const AGENT_LABELS: Record<string, string> = Object.fromEntries(
@@ -180,6 +182,13 @@ export function UsageStatistics() {
     return map;
   }, [tokenBreakdown]);
 
+  // 热力图与图例共用同一份分档阈值，图例上的跨度才与格子颜色对得上。
+  const heatmapTokenThresholds = useMemo(
+    () =>
+      buildTokenThresholds((tokenBreakdown?.heatmapTokens ?? []).map((day) => day.totalTokens)),
+    [tokenBreakdown],
+  );
+
   const mergedModelDistribution = useMemo(() => {
     const statsList = stats?.modelDistribution ?? [];
     const tokenList = tokenBreakdown?.modelTokens ?? [];
@@ -282,9 +291,13 @@ export function UsageStatistics() {
       <FormSection
         label="活跃热力图"
         hint="过去 365 天的 Token 消耗活跃度"
-        rightContent={<UsageHeatmapLegend />}
+        rightContent={<UsageHeatmapLegend thresholds={heatmapTokenThresholds} />}
       >
-        <UsageHeatmap data={stats?.heatmap ?? []} tokenMap={heatmapTokenMap} />
+        <UsageHeatmap
+          data={stats?.heatmap ?? []}
+          tokenMap={heatmapTokenMap}
+          tokenThresholds={heatmapTokenThresholds}
+        />
       </FormSection>
 
       {/* Daily token bar chart */}

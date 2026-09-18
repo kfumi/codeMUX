@@ -127,8 +127,15 @@ fn extract_date_from_timestamp(timestamp: &str) -> String {
 
 fn read_u64(value: Option<&serde_json::Value>) -> u64 {
     match value {
-        Some(serde_json::Value::Number(number)) => number.as_u64().unwrap_or(0),
-        Some(serde_json::Value::String(text)) => text.parse::<u64>().unwrap_or(0),
+        // 浮点 token 数（如 8140.0）不应静默归零。
+        Some(serde_json::Value::Number(number)) => number
+            .as_u64()
+            .or_else(|| number.as_f64().map(|float| float.max(0.0) as u64))
+            .unwrap_or(0),
+        Some(serde_json::Value::String(text)) => text
+            .parse::<u64>()
+            .or_else(|_| text.parse::<f64>().map(|float| float.max(0.0) as u64))
+            .unwrap_or(0),
         _ => 0,
     }
 }
@@ -224,8 +231,8 @@ pub async fn get_usage_token_breakdown_impl(
                 AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
                 AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
                 AgentKind::Opencode => aggregate_opencode_tokens(&home, agent_session_id),
-                // pi 用量来自 usage 轮询事件，不走原生历史聚合。
-                AgentKind::Pi => Ok(BTreeMap::new()),
+                // pi 的 DB 映射存的是会话 JSONL 绝对路径，直接读文件聚合。
+                AgentKind::Pi => aggregate_pi_tokens(agent_session_id),
                 AgentKind::GeminiCli => Ok(BTreeMap::new()),
             };
 
@@ -557,4 +564,223 @@ fn aggregate_opencode_tokens(
     }
 
     Ok(session_daily)
+}
+
+/// 汇总 pi 会话 JSONL 中活动对话链上各条 assistant 消息的 `usage`，按日期归集 Token 消耗。
+///
+/// pi 的 `agent_session_mappings.agent_session_id` 存的是会话 JSONL 绝对路径；
+/// `pi:pending-*` / `pi:<id>` 这类无文件映射没有可读历史，直接返回空。
+/// 每条消息的 `input` / `cacheRead` / `output` 都是该次请求的增量（与 pi 自身
+/// `usage.totalTokens = input + cacheRead + output` 一致），逐条累加即可。
+/// 树形会话只统计活动链（与 `pi_history` 的时间线／上下文用量同口径），/tree 分支后
+/// 放弃的分支不再计入；fork 把父会话历史整卷拷进新文件，父子两会话都会统计这段历史
+/// （与 Claude/Codex fork 前缀拷贝的同类口径一致）。
+fn aggregate_pi_tokens(agent_session_id: &str) -> Result<BTreeMap<String, DailyTokens>, String> {
+    let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
+
+    if !crate::agent::pi_history::looks_like_pi_session_path(agent_session_id) {
+        return Ok(session_daily);
+    }
+
+    let path = Path::new(agent_session_id);
+    if !path.exists() {
+        debug!(
+            target: "usage",
+            "pi session file missing, skipping token aggregation: {}",
+            path.display()
+        );
+        return Ok(session_daily);
+    }
+
+    let values = crate::agent::native_jsonl::read_json_stream_values(path)?;
+
+    let mut skipped_without_timestamp = 0usize;
+
+    // 树形会话只取活动链（线性文件返回全量），避免把放弃分支的消耗算进统计。
+    for entry in crate::agent::pi_history::select_pi_active_chain(&values) {
+        if entry.get("type").and_then(|v| v.as_str()) != Some("message") {
+            continue;
+        }
+        let Some(message) = entry.get("message") else {
+            continue;
+        };
+        if message.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(usage) = message.get("usage") else {
+            continue;
+        };
+
+        let input_tokens = read_u64_key(usage, &["input", "input_tokens", "inputTokens"]);
+        let cached_tokens = read_u64_key(
+            usage,
+            &[
+                "cacheRead",
+                "cache_read",
+                "cached_input_tokens",
+                "cachedInputTokens",
+            ],
+        );
+        let output_tokens = read_u64_key(usage, &["output", "output_tokens", "outputTokens"]);
+
+        if input_tokens == 0 && cached_tokens == 0 && output_tokens == 0 {
+            continue;
+        }
+
+        let Some(date) = pi_entry_date(entry) else {
+            skipped_without_timestamp += 1;
+            continue;
+        };
+
+        let daily = session_daily.entry(date).or_default();
+        daily.input_tokens += input_tokens;
+        daily.cached_tokens += cached_tokens;
+        daily.output_tokens += output_tokens;
+    }
+
+    if skipped_without_timestamp > 0 {
+        warn!(
+            target: "usage",
+            "pi usage aggregation skipped {} assistant message(s) without a usable timestamp: {}",
+            skipped_without_timestamp,
+            path.display()
+        );
+    }
+
+    Ok(session_daily)
+}
+
+/// 按候选键名读取 u64，兼容 pi 不同版本的 `usage` 字段命名。
+fn read_u64_key(usage: &serde_json::Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| usage.get(*key))
+        .map(|value| read_u64(Some(value)))
+        .unwrap_or(0)
+}
+
+/// pi 条目时间戳：ISO 字符串取日期部分，epoch 毫秒数字换算成日期；都不可用返回 None。
+fn pi_entry_date(entry: &serde_json::Value) -> Option<String> {
+    match entry.get("timestamp") {
+        Some(serde_json::Value::String(text)) => {
+            let date = extract_date_from_timestamp(text);
+            (!date.is_empty()).then_some(date)
+        }
+        Some(serde_json::Value::Number(number)) => number.as_i64().and_then(|millis| {
+            chrono::DateTime::from_timestamp_millis(millis)
+                .map(|time| time.format("%Y-%m-%d").to_string())
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_pi_session_fixture(
+        name: &str,
+        body: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "codemux-pi-usage-test-{}-{}",
+            name,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("2026-09-15T09-53-58-672Z_01a0a47c-d190-79b6-a31f-324e30e6d392.jsonl");
+        std::fs::write(&path, body).expect("write fixture");
+        (dir, path)
+    }
+
+    #[test]
+    fn aggregates_pi_usage_by_day_from_session_jsonl() {
+        let (dir, path) = write_pi_session_fixture(
+            "daily",
+            concat!(
+                "{\"type\":\"session\",\"id\":\"pi-session-1\"}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-09-15T09:54:14.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":8140,\"output\":193,\"cacheRead\":0,\"cacheWrite\":0,\"reasoning\":75,\"totalTokens\":8333}}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-09-15T09:54:18.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":908,\"output\":161,\"cacheRead\":8320,\"cacheWrite\":0,\"totalTokens\":9389}}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-09-16T01:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":[]}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-09-16T01:00:05.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":5}}}\n",
+            ),
+        );
+
+        let daily = aggregate_pi_tokens(&path.to_string_lossy()).expect("aggregate pi tokens");
+
+        assert_eq!(daily.len(), 2);
+        let first = daily.get("2026-09-15").expect("first day");
+        assert_eq!(first.input_tokens, 8140 + 908);
+        assert_eq!(first.cached_tokens, 8320);
+        assert_eq!(first.output_tokens, 193 + 161);
+        let second = daily.get("2026-09-16").expect("second day");
+        assert_eq!(second.input_tokens, 10);
+        assert_eq!(second.cached_tokens, 0);
+        assert_eq!(second.output_tokens, 5);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn skips_pi_mappings_without_readable_history() {
+        let (dir, path) = write_pi_session_fixture("skip", "{\"type\":\"session\"}\n");
+
+        assert!(aggregate_pi_tokens("pi:pending-abc").unwrap().is_empty());
+        assert!(aggregate_pi_tokens("01a0a47c-d190-79b6-a31f-324e30e6d392")
+            .unwrap()
+            .is_empty());
+        let missing = dir.join("missing.jsonl");
+        assert!(aggregate_pi_tokens(&missing.to_string_lossy())
+            .unwrap()
+            .is_empty());
+        assert!(aggregate_pi_tokens(&path.to_string_lossy())
+            .unwrap()
+            .is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn aggregates_pi_usage_from_active_chain_only() {
+        let (dir, path) = write_pi_session_fixture(
+            "tree",
+            concat!(
+                // a1 → b1 是活动链，a1 → a2 是被放弃的分支。
+                "{\"type\":\"message\",\"id\":\"a1\",\"timestamp\":\"2026-09-20T10:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":100,\"output\":10,\"cacheRead\":0}}}\n",
+                "{\"type\":\"message\",\"id\":\"a2\",\"parentId\":\"a1\",\"timestamp\":\"2026-09-20T10:05:00.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":900,\"output\":90,\"cacheRead\":0}}}\n",
+                "{\"type\":\"message\",\"id\":\"b1\",\"parentId\":\"a1\",\"timestamp\":\"2026-09-21T10:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":7,\"output\":3,\"cacheRead\":1}}}\n",
+            ),
+        );
+
+        let daily = aggregate_pi_tokens(&path.to_string_lossy()).expect("aggregate pi tokens");
+
+        assert_eq!(daily.len(), 2);
+        assert_eq!(
+            daily.get("2026-09-20").expect("first day").input_tokens,
+            100
+        );
+        let last = daily.get("2026-09-21").expect("second day");
+        assert_eq!(last.input_tokens, 7);
+        assert_eq!(last.cached_tokens, 1);
+        assert_eq!(last.output_tokens, 3);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn accepts_epoch_millis_timestamps_and_float_tokens() {
+        let (dir, path) = write_pi_session_fixture(
+            "numeric",
+            "{\"type\":\"message\",\"timestamp\":1757894400000,\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":8140.0,\"output\":\"193\",\"cacheRead\":0}}}\n",
+        );
+
+        let daily = aggregate_pi_tokens(&path.to_string_lossy()).expect("aggregate pi tokens");
+
+        // 1757894400000 = 2025-09-15T00:00:00Z
+        let day = daily.get("2025-09-15").expect("epoch day");
+        assert_eq!(day.input_tokens, 8140);
+        assert_eq!(day.output_tokens, 193);
+        assert_eq!(day.cached_tokens, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
