@@ -247,6 +247,12 @@ const PLACEHOLDER_HEIGHT_PX = 200;
  * 目标之上一个占位行都没有——那样的目标量不出累计偏移。turn 12 落在占位区中间。
  */
 const PRIMARY_TARGET_TURN = 12;
+/**
+ * 高亮一致性检查的轮次（工单 02/03 最后一项未验断言）：跳到这一轮落定后，
+ * 导航的高亮必须正是这一轮 —— 它验证「偏移缓存 → 纯比较热循环」在真实引擎的
+ * 滚动/跳转流里给出与视口一致的结果（jsdom 不做布局，只能在这里验）。
+ */
+const HIGHLIGHT_CHECK_TURN = 20;
 /** 字面意义上的「最早的一条用户消息」，作为对照目标。 */
 const LITERAL_EARLIEST_TURN = 0;
 /** 轮询间隔：不依赖 rAF 频率（无头窗口下 rAF 约 1fps，重布局期间更慢）。 */
@@ -1383,6 +1389,42 @@ async function runProbe(): Promise<ProbeResult> {
   // 对照目标在主目标之后测量：行会被第二次跳转预热，这一点在字段里如实标注。
   const literalEarliest = await measureTarget(container, 'literal-earliest', LITERAL_EARLIEST_TURN, navButtons);
 
+  // 高亮一致性（真实引擎）：跳到第 HIGHLIGHT_CHECK_TURN 轮，落定后导航高亮必须正是这一轮。
+  // 期望值由几何确认（该轮行顶在锚点 40px 之下、下一轮行顶在锚点之上），
+  // 实际值读导航高亮标记（active 项的 span 带 bg-foreground/72）。
+  await settleAtBottom(container);
+  const highlightButton = navButtons[HIGHLIGHT_CHECK_TURN];
+  if (!highlightButton) {
+    throw new Error(`导航标记数量不足（高亮检查需要第 ${HIGHLIGHT_CHECK_TURN} 个标记）`);
+  }
+  highlightButton.click();
+  const highlightSettle = await waitForScrollSettle(container, { expectChange: true, collectTrajectory: false });
+  await tick(3);
+
+  const containerTop = container.getBoundingClientRect().top;
+  const checkedRowTopPx = document.getElementById(`msg-${userMessageEventIndex(HIGHLIGHT_CHECK_TURN)}`)
+    ?.getBoundingClientRect().top - containerTop
+    ?? null;
+  const nextRowTopPx = document.getElementById(`msg-${userMessageEventIndex(HIGHLIGHT_CHECK_TURN + 1)}`)
+    ?.getBoundingClientRect().top - containerTop
+    ?? null;
+  // 期望值确认：本轮行顶已越过锚点（22 < 40），下一轮行顶还没有。
+  const expectedTurnConfirmed = checkedRowTopPx != null
+    && nextRowTopPx != null
+    && checkedRowTopPx <= 40
+    && nextRowTopPx > 40;
+  const actualTurn = navButtons.findIndex(
+    (button) => (button.firstElementChild?.className ?? '').includes('bg-foreground/72'),
+  );
+  const highlight = {
+    expectedTurn: expectedTurnConfirmed ? HIGHLIGHT_CHECK_TURN : null,
+    actualTurn,
+    checkedRowTopPx,
+    nextRowTopPx,
+    settleStableMs: highlightSettle.stableMs,
+    ok: expectedTurnConfirmed && actualTurn === HIGHLIGHT_CHECK_TURN,
+  };
+
   return {
     probe: 'codemux-transcript-probe',
     mode,
@@ -1402,6 +1444,7 @@ async function runProbe(): Promise<ProbeResult> {
     },
     initialBottomOffsetPx,
     earlierHistoryClicks,
+    highlight,
     primary,
     literalEarliest,
     rafRateHz,

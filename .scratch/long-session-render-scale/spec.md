@@ -1,6 +1,6 @@
 # 长会话渲染规模：让开销只与"正在看的那一段"成正比
 
-**Status:** ready-for-agent
+**Status:** implemented（三张工单全部交付；最终读数见各工单的验收清单）
 
 ## Problem Statement
 

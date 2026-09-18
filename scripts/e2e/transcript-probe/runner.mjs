@@ -290,6 +290,8 @@ function summarizeWindowMode(samples, windowMode) {
     mechanismActive,
     placeholderRowsAboveTarget: withSkip?.primary?.rowDiagnostics?.placeholderRowsAboveTarget ?? null,
     targetWasSkippedBeforeClick: withSkip?.primary?.targetWasSkippedBeforeClick ?? null,
+    /** 工单 02/03 的最后一项断言：滚动/跳转落定后，导航高亮与视口一致（真实引擎）。 */
+    highlight: withSkip?.highlight ?? null,
     complete: residualWithSkip != null && residualWithoutSkip != null,
     warnings: [
       ...collectWarnings(withSkip).map((warning) => `${PRIMARY_MODE}: ${warning}`),
@@ -405,6 +407,7 @@ function buildConclusion({ samples, neutralization, electronVersion, stylesheet 
     },
     verdict,
     mechanismActive,
+    highlight: authoritative?.highlight ?? null,
     interpretation,
     warnings,
     neutralization,
