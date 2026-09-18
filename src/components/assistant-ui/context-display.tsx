@@ -165,7 +165,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
 function getProgressColor(percentage: number) {
   if (percentage >= 85) return 'hsl(var(--destructive))';
   if (percentage >= 65) return 'hsl(var(--warning))';
-  return 'hsl(var(--primary))';
+  return 'hsl(var(--muted-foreground))';
 }
 
 function formatCompactTokens(value: number) {

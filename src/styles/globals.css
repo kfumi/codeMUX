@@ -155,7 +155,7 @@
     --destructive: 1 74% 52%;
     --destructive-foreground: 0 0% 100%;
     --success: 143 100% 32%;
-    --warning: 23 95% 46%;
+    --warning: 45 96% 40%;
     --border: 0 0% 90%;
     --input: 0 0% 89%;
     --ring: 220 7% 11%;
@@ -202,7 +202,7 @@
     --destructive: 1 100% 70%;
     --destructive-foreground: 0 0% 10%;
     --success: 142 55% 52%;
-    --warning: 22 100% 64%;
+    --warning: 45 96% 58%;
     --border: 0 0% 16%;
     --input: 0 0% 17%;
     --ring: 0 0% 100%;
