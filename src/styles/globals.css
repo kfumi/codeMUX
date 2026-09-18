@@ -66,6 +66,15 @@
   contain-intrinsic-size: auto 200px !important;
 }
 
+/*
+ * 尾部挂载窗口的首帧占位（工单 03）：只在「有界首帧提交」时渲染，稳态扩张后移除。
+ * 高度刻意与未挂载条数无关 —— 按条数估算的占位与它替代的真实行不匹配，窗口展开时
+ * 会把可见文本推走（页面翻转式跳变）。它只服务一件事：让有界后的底部可达。
+ */
+.thread-window-spacer {
+  min-height: 100vh;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {

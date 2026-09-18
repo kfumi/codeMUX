@@ -4,6 +4,13 @@ import {
   shouldKeepLiveEventsOnHistoryLoad,
   shouldPreferLocalEventsOnHistoryLoad,
 } from '../lib/attachToActiveTurn';
+import {
+  findTurnIndexByEventIndex,
+  growThreadWindow as growThreadWindowSizes,
+  revealThreadWindow as revealThreadWindowSize,
+  THREAD_WINDOW_EVENT_THRESHOLD,
+  THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+} from '../lib/threadWindow';
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import {
@@ -140,6 +147,12 @@ interface AgentState {
   turns: Record<string, ConversationTurn<AgentMessage>[]>;
   /** Timestamps (ms) for each event, recorded at arrival time */
   eventTimestamps: Record<string, number[]>;
+  /**
+   * 尾部挂载窗口的预算（轮），按会话记录。只影响渲染投影 —— events / turns 的
+   * 发布代路径不读它。键缺失 = 该会话尚在首帧提交（首帧门控在 render 期由
+   * 「键缺失」派生，不由 layout effect 翻转）或低于窗口阈值（逐字节保持现状）。
+   */
+  threadWindowSizes: Record<string, number>;
   /** Whether a query is currently running */
   isRunning: Record<string, boolean>;
   /** Scheduled/companion turns whose history should keep refreshing while running. */
@@ -209,6 +222,14 @@ interface AgentState {
   /** Clear all queued messages for a session. */
   clearQueuedQueries: (sessionId: string) => void;
   /** Clear events for a session */
+  /** 尾部挂载窗口：首帧提交之后把预算扩到稳态（仅长会话生效；常量见 lib/threadWindow）。 */
+  expandThreadWindowToSteady: (sessionId: string) => void;
+  /** 尾部挂载窗口：触顶增长一步（pre-paint 锚定由调用方在 layout 阶段完成）。 */
+  growThreadWindow: (sessionId: string) => void;
+  /** 尾部挂载窗口：一步揭示到包含该事件下标的窗口（搜索/跳转用）。返回是否真的扩了窗口。 */
+  revealThreadWindowForEvent: (sessionId: string, eventIndex: number) => boolean;
+  /** 尾部挂载窗口：按会话重置（事件被清空/重装时同步清理，预算不漏进下一次装载）。 */
+  resetThreadWindow: (sessionId: string) => void;
   clearEvents: (sessionId: string) => void;
   /** Store the latest normalized token/context usage snapshot for a session */
   setSessionTokenUsage: (sessionId: string, usage: ThreadTokenUsage | null) => void;
@@ -2621,6 +2642,7 @@ function createSessionEventHandler(
   return ({
   events: {},
   turns: {},
+  threadWindowSizes: {},
   eventTimestamps: {},
   isRunning: {},
   backgroundLive: {},
@@ -3188,7 +3210,8 @@ function createSessionEventHandler(
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
       const newTimestamps = { ...state.eventTimestamps };
-      delete newTimestamps[sessionId];
+      const newThreadWindowSizes = { ...state.threadWindowSizes };
+      delete newThreadWindowSizes[sessionId];
       const newRunning = { ...state.isRunning };
       delete newRunning[sessionId];
       const newError = { ...state.error };
@@ -3215,6 +3238,7 @@ function createSessionEventHandler(
       delete newQueuePaused[sessionId];
       return {
         events: newEvents,
+        threadWindowSizes: newThreadWindowSizes,
         eventTimestamps: newTimestamps,
         isRunning: newRunning,
         error: newError,
@@ -3230,6 +3254,75 @@ function createSessionEventHandler(
         queuePaused: newQueuePaused,
         pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] },
       };
+    });
+  },
+
+  expandThreadWindowToSteady: (sessionId: string) => {
+    const state = get();
+    // 只对跨过长会话阈值、且还没有预算（首帧提交刚完成）的会话生效。
+    if ((state.events[sessionId]?.length ?? 0) <= THREAD_WINDOW_EVENT_THRESHOLD) {
+      return;
+    }
+    if (state.threadWindowSizes[sessionId] !== undefined) {
+      return;
+    }
+    const totalTurns = state.turns[sessionId]?.length ?? 0;
+    set((current) => ({
+      threadWindowSizes: {
+        ...current.threadWindowSizes,
+        [sessionId]: growThreadWindowSizes(THREAD_WINDOW_INITIAL_COMMIT_TURNS, totalTurns),
+      },
+    }));
+  },
+
+  growThreadWindow: (sessionId: string) => {
+    const state = get();
+    const totalTurns = state.turns[sessionId]?.length ?? 0;
+    const current = state.threadWindowSizes[sessionId] ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS;
+    if (current >= totalTurns) {
+      return;
+    }
+    set((s) => ({
+      threadWindowSizes: {
+        ...s.threadWindowSizes,
+        [sessionId]: growThreadWindowSizes(current, totalTurns),
+      },
+    }));
+  },
+
+  revealThreadWindowForEvent: (sessionId: string, eventIndex: number): boolean => {
+    const state = get();
+    const turns = state.turns[sessionId];
+    if (
+      !turns
+      || turns.length === 0
+      || (state.events[sessionId]?.length ?? 0) <= THREAD_WINDOW_EVENT_THRESHOLD
+    ) {
+      return false;
+    }
+    const current = state.threadWindowSizes[sessionId] ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS;
+    const next = revealThreadWindowSize(
+      current,
+      findTurnIndexByEventIndex(turns, eventIndex),
+      turns.length,
+    );
+    if (next <= current) {
+      return false;
+    }
+    set((s) => ({
+      threadWindowSizes: { ...s.threadWindowSizes, [sessionId]: next },
+    }));
+    return true;
+  },
+
+  resetThreadWindow: (sessionId: string) => {
+    set((state) => {
+      if (state.threadWindowSizes[sessionId] === undefined) {
+        return state;
+      }
+      const next = { ...state.threadWindowSizes };
+      delete next[sessionId];
+      return { threadWindowSizes: next };
     });
   },
 

@@ -15,6 +15,7 @@ import {
   SHORT_SESSION_TURN_COUNT,
   longSessionEventCount,
 } from './longSessionFixture';
+import { THREAD_WINDOW_STEADY_TURNS } from '../threadWindow';
 
 /**
  * markdown 渲染层在 jsdom 里的代价过高（每条文本都要走 remark/rehype 并调用 Shiki），
@@ -142,7 +143,12 @@ describe('longSessionBenchmark', () => {
     // 挂载：线程真的画出来了，且带长会话离屏跳过属性。
     expect(counters.mount.longThreadAttribute).toBe(true);
     expect(counters.mount.componentCommits).toBeGreaterThan(0);
-    expect(counters.mount.messageRows).toBeGreaterThan(LONG_SESSION_EVENT_THRESHOLD);
+    // 窗口契约（工单 03）：挂载行数有界，不再随历史长度线性增长。
+    // 200 轮夹具在稳态挂载尾部 30 轮 ≈ 90 行（每轮 3 行），而不是全量的 600 行。
+    // 若未来改动使该值重新随 LONG_SESSION_TURN_COUNT 线性增长，这里会失败。
+    expect(counters.mount.messageRows).toBeGreaterThan(0);
+    expect(counters.mount.messageRows).toBeLessThanOrEqual(THREAD_WINDOW_STEADY_TURNS * 3 + 8);
+    expect(counters.mount.messageRows).toBeLessThan(LONG_SESSION_TURN_COUNT * 3);
     expect(counters.mount.domNodes).toBeGreaterThan(counters.mount.messageRows);
 
     // rewind：期望「events 与 turns 同代」恰好一代，且没有多余的只改 events / 只改 turns 的

@@ -1358,6 +1358,20 @@ async function runProbe(): Promise<ProbeResult> {
   await settleAtBottom(container);
   const initialBottomOffsetPx = scrollState(container).bottomOffset;
 
+  // 工单 03：尾部挂载窗口下主目标（turn 12）初始在窗口外。逐次点击「更早历史」
+  // 延续标记，直到窗口覆盖全部已加载历史（标记消失）——按钮下标与轮次的对应
+  // 关系因此保持，后续测量与窗口化之前逐字节一致。这一步同时验证
+  // 「延续标记 → 窗口增长 → pre-paint 锚定」的整条链。
+  let earlierHistoryClicks = 0;
+  while (earlierHistoryClicks < 12) {
+    const earlier = document.querySelector<HTMLButtonElement>('[data-testid="thread-earlier-history"]');
+    if (!earlier) {
+      break;
+    }
+    earlier.click();
+    earlierHistoryClicks += 1;
+    await settleAtBottom(container);
+  }
   const navButtons = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid="message-nav"] button'),
   );
@@ -1387,6 +1401,7 @@ async function runProbe(): Promise<ProbeResult> {
       entries: [...mutationTimeline.entries],
     },
     initialBottomOffsetPx,
+    earlierHistoryClicks,
     primary,
     literalEarliest,
     rafRateHz,

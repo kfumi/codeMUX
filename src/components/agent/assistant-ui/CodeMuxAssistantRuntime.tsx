@@ -17,6 +17,12 @@ import {
   type CodeMuxAssistantMessage,
   type CodeMuxAssistantPart,
 } from './convertAgentEvents';
+import {
+  reduceThreadWindow,
+  resolveMountedTurnStartEventIndex,
+  THREAD_WINDOW_EVENT_THRESHOLD,
+  THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+} from '../../../lib/threadWindow';
 import { reconcileAssistantMessages } from './assistantMessageIdentity';
 
 type CodeMuxAssistantRuntimeProviderProps = {
@@ -77,16 +83,52 @@ function SessionScopedAssistantRuntime({
   const eventTimestampsRef = useRef(eventTimestamps);
   eventTimestampsRef.current = eventTimestamps;
 
+  // 尾部挂载窗口（工单 03）：render 期派生，不由 layout effect 翻转。键缺失 = 首帧提交
+  // （只挂载首帧预算）；跨过长会话阈值才启用，短会话逐字节保持全量。
+  const storedWindowSize = useAgentStore((state) => state.threadWindowSizes[sessionId]);
+  const windowingActive = events.length > THREAD_WINDOW_EVENT_THRESHOLD;
+  const threadWindow = useMemo(
+    () =>
+      windowingActive
+        ? reduceThreadWindow({
+            totalTurns: conversationTurns.length,
+            windowSize: storedWindowSize ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+            initialCommit: storedWindowSize === undefined,
+          })
+        : { mountedTurns: conversationTurns.length, hiddenAboveTurns: 0, bounded: false },
+    [windowingActive, conversationTurns.length, storedWindowSize],
+  );
+  const mountStartEventIndex = useMemo(
+    () =>
+      windowingActive && threadWindow.bounded
+        ? resolveMountedTurnStartEventIndex(conversationTurns, threadWindow.mountedTurns)
+        : 0,
+    [windowingActive, threadWindow.bounded, threadWindow.mountedTurns, conversationTurns],
+  );
+  const mountedEvents = useMemo(
+    () => (mountStartEventIndex > 0 ? events.slice(mountStartEventIndex) : events),
+    [events, mountStartEventIndex],
+  );
+  const mountedTurns = useMemo(
+    () =>
+      mountStartEventIndex > 0
+        ? conversationTurns.slice(-threadWindow.mountedTurns)
+        : conversationTurns,
+    [conversationTurns, mountStartEventIndex, threadWindow.mountedTurns],
+  );
+
   // 历史身份稳定：把本次转换结果与上一次的产出做引用协调，让未变化的消息与部件
   // 保持对象身份。下游 assistant-ui 的转换缓存是 `WeakMap<外部消息对象, ThreadMessage>`，
   // 只有身份稳定时它才会真正命中；否则整条线程消息每次事件都被重新转换。
   const stableMessagesRef = useRef<CodeMuxAssistantMessage[] | undefined>(undefined);
   const messages = useMemo(() => {
-    const converted = convertAgentEventsToAssistantMessages(events, conversationTurns);
+    // 切片偏移保证 sourceEventIndex / msg-N / 去重 id 仍以绝对下标命名 ——
+    // 与全量转换逐字节一致（正确性红线：rewind 与跳转都依赖它）。
+    const converted = convertAgentEventsToAssistantMessages(mountedEvents, mountedTurns, mountStartEventIndex);
     const stable = reconcileAssistantMessages(converted, stableMessagesRef.current);
     stableMessagesRef.current = stable;
     return stable;
-  }, [events, conversationTurns]);
+  }, [mountedEvents, mountedTurns, mountStartEventIndex]);
 
   const handleMessage = useCallback(
     async (message: AppendMessage) => {

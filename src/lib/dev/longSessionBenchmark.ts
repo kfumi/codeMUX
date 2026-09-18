@@ -888,6 +888,17 @@ function runNavStep(
     throw new Error('长会话基准：找不到 [data-testid="thread-viewport"]，无法模拟滚动突发');
   }
 
+  // 工单 03：先把窗口扩到覆盖全部已加载轮次，再测量纯滚动的成本。
+  // ① 「触顶增长」的内容变化不会再打断「纯滚动零 gBCR」的契约（增长是合法的
+  //    缓存失效，但它是窗口行为，不属于滚动成本）；
+  // ② 全部导航项都已挂载 = 逐帧成本的最坏情况，指标因此保持保守。
+  const navTotalTurns = useAgentStore.getState().turns[context.sessionId]?.length ?? 0;
+  useAgentStore.setState((state) => ({
+    threadWindowSizes: { ...state.threadWindowSizes, [context.sessionId]: navTotalTurns },
+  }));
+  act(() => {});
+  clock.settle();
+
   const counter = installLayoutReadCounter([
     { element: viewport, ...VIEWPORT_GEOMETRY },
   ]);

@@ -11,7 +11,7 @@ import {
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
 
@@ -42,6 +42,14 @@ import {
   type RewindMode,
 } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
+import {
+  reduceThreadWindow,
+  resolveMountedTurnStartEventIndex,
+  shouldRenderFirstFrameSpacer,
+  THREAD_WINDOW_EVENT_THRESHOLD,
+  THREAD_WINDOW_GROW_TRIGGER_TOP_PX,
+  THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+} from '../../../lib/threadWindow';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn, ConversationTurnStatus } from '../../../types/conversationTurn';
 
@@ -194,8 +202,93 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
-  const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
+  // 尾部挂载窗口（工单 03）：与 provider 用同一套纯函数、同样的输入派生，
+  // 两处一致因为输入一致（events.length / turns.length / store 预算）。
+  const storedWindowSize = useAgentStore((state) => state.threadWindowSizes[sessionId]);
+  const growThreadWindowAction = useAgentStore((state) => state.growThreadWindow);
+  const expandThreadWindowToSteady = useAgentStore((state) => state.expandThreadWindowToSteady);
+  const resetThreadWindow = useAgentStore((state) => state.resetThreadWindow);
+  const windowingActive = events.length > THREAD_WINDOW_EVENT_THRESHOLD;
+  const threadWindow = useMemo(
+    () =>
+      windowingActive
+        ? reduceThreadWindow({
+            totalTurns: conversationTurns.length,
+            windowSize: storedWindowSize ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+            initialCommit: storedWindowSize === undefined,
+          })
+        : { mountedTurns: conversationTurns.length, hiddenAboveTurns: 0, bounded: false },
+    [windowingActive, conversationTurns.length, storedWindowSize],
+  );
+  const mountStartEventIndex = useMemo(
+    () =>
+      windowingActive && threadWindow.bounded
+        ? resolveMountedTurnStartEventIndex(conversationTurns, threadWindow.mountedTurns)
+        : 0,
+    [windowingActive, threadWindow.bounded, threadWindow.mountedTurns, conversationTurns],
+  );
+  // 会话切换（视口按 key 重挂载，但本组件不重挂载）时清掉上一会话的预算：
+  // 下一次回到该会话重新从首帧语义开始（spec「窗口按 Session 重置」）。
+  useEffect(() => {
+    return () => resetThreadWindow(sessionId);
+  }, [sessionId, resetThreadWindow]);
+  // 首帧提交完成后把预算扩到稳态（effect 在首帧绘制之后运行，稳态扩张不付首帧成本）。
+  useEffect(() => {
+    expandThreadWindowToSteady(sessionId);
+  }, [expandThreadWindowToSteady, sessionId, events.length]);
+  // 触顶增长与 pre-paint 锚定（spec「首帧与滚动锚定」）。
   const viewportRef = useRef<HTMLDivElement>(null);
+  const pendingGrowAnchorRef = useRef<number | null>(null);
+  const nearBottomRef = useRef(true);
+  const windowStateRef = useRef({ active: windowingActive, bounded: threadWindow.bounded });
+  windowStateRef.current = { active: windowingActive, bounded: threadWindow.bounded };
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) {
+      return undefined;
+    }
+    const handleScroll = () => {
+      nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+      if (
+        windowStateRef.current.active
+        && windowStateRef.current.bounded
+        && el.scrollTop <= THREAD_WINDOW_GROW_TRIGGER_TOP_PX
+      ) {
+        // 增长会在阅读位置上方加高度：先记录当前 scrollHeight，layout 阶段按差值修正。
+        pendingGrowAnchorRef.current = el.scrollHeight;
+        growThreadWindowAction(sessionId);
+      }
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [growThreadWindowAction, sessionId, viewportRef]);
+  // 窗口变化落地后的位置修复（必须在 paint 前的 layout 阶段）：
+  // 手工触顶增长用锚点差值把阅读位置钉住；首帧→稳态的自动扩张没有锚点，
+  // 用户仍贴底时重新贴底（工单：仅当仍处于贴底状态才重新贴底）。
+  const prevWindowSizeRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) {
+      return;
+    }
+    const current = storedWindowSize ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS;
+    const prev = prevWindowSizeRef.current;
+    prevWindowSizeRef.current = current;
+    if (prev === null || current <= prev) {
+      return;
+    }
+    const anchor = pendingGrowAnchorRef.current;
+    if (anchor != null) {
+      pendingGrowAnchorRef.current = null;
+      const delta = el.scrollHeight - anchor;
+      if (delta > 0) {
+        el.scrollTop += delta;
+      }
+    } else if (nearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [storedWindowSize, viewportRef]);
+  const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
   const [showMessageNav, setShowMessageNav] = useState(true);
 
@@ -332,7 +425,14 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const pendingTurnId = subagentFlowPending && conversationTurns.length > 0
     ? conversationTurns[conversationTurns.length - 1]?.id
     : undefined;
-  const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
+  const userNavItems = useMemo(() => {
+    const all = buildUserNavItems(events);
+    // 只为已挂载的行生成标记（绝对下标过滤，标记本身不变）；
+    // 被扣掉的历史由「更早历史」延续标记表达。
+    return mountStartEventIndex > 0
+      ? all.filter((item) => item.eventIndex >= mountStartEventIndex)
+      : all;
+  }, [events, mountStartEventIndex]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
     [events],
@@ -426,6 +526,12 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               )}
               style={{ maxWidth: 'var(--content-width, 52rem)' }}
             >
+              {shouldRenderFirstFrameSpacer({
+                bounded: threadWindow.bounded,
+                windowSize: storedWindowSize ?? THREAD_WINDOW_INITIAL_COMMIT_TURNS,
+              }) ? (
+                <div aria-hidden className="thread-window-spacer" data-testid="thread-window-spacer" />
+              ) : null}
               <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
                 <CodeMuxThreadMessages />
               </CodeMuxThreadRenderContext.Provider>
@@ -442,7 +548,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
             </div>
           )}
         </UnifiedThreadViewport>
-        {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
+        {showMessageNav ? (
+          <MessageNav
+            items={userNavItems}
+            scrollContainer={viewportRef}
+            disabled={isRunning}
+            earlierHistoryTurns={threadWindow.hiddenAboveTurns}
+            onGrowEarlier={() => growThreadWindowAction(sessionId)}
+          />
+        ) : null}
       </div>
     </ThreadPrimitive.Root>
   );
@@ -1185,10 +1299,16 @@ function MessageNav({
   items,
   scrollContainer,
   disabled,
+  earlierHistoryTurns = 0,
+  onGrowEarlier,
 }: {
   items: UserNavItem[];
   scrollContainer: RefObject<HTMLDivElement | null>;
   disabled?: boolean;
+  /** 被窗口扣掉、尚不生成标记的轮数（>0 时在导航顶部显示「更早历史」延续标记）。 */
+  earlierHistoryTurns?: number;
+  /** 「更早历史」标记被点击时的增长动作（保持阅读位置不跳）。 */
+  onGrowEarlier?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [previewEventIndex, setPreviewEventIndex] = useState<number | null>(null);
@@ -1345,7 +1465,8 @@ function MessageNav({
     [navMetrics.spacing, navMetrics.center, items],
   );
 
-  if (items.length <= 1) {
+  // 有被隐藏的历史时即使已挂载标记数少于常规密度，导航也保持可见（显示「更早历史」延续标记）。
+  if (items.length <= 1 && !(earlierHistoryTurns > 0)) {
     return null;
   }
 
@@ -1398,6 +1519,18 @@ function MessageNav({
           hovered ? 'opacity-100' : 'opacity-70',
         )}
       >
+        {earlierHistoryTurns > 0 ? (
+          <button
+            type="button"
+            data-testid="thread-earlier-history"
+            aria-label={`展开更早的历史（还有 ${earlierHistoryTurns} 轮）`}
+            title={`更早的历史（还有 ${earlierHistoryTurns} 轮）`}
+            onClick={onGrowEarlier}
+            className="pointer-events-auto absolute left-0 top-3 flex h-5 w-12 items-center justify-start rounded-md border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <span className="block h-px w-full border-t border-dashed border-muted-foreground/60" />
+          </button>
+        ) : null}
         {positionedItems.map((item, itemIndex) => (
           <div
             key={item.eventIndex}

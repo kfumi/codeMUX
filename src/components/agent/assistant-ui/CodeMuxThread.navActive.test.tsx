@@ -23,6 +23,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { buildConversationTurns } from '../../../lib/conversationTurns';
 import { buildLongSessionEvents, userMessageEventIndex } from '../../../lib/dev/longSessionFixture';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
@@ -317,6 +318,16 @@ describe('长会话导航高亮只读偏移缓存', () => {
     const events: AgentMessage[] = buildLongSessionEvents(NAV_TURN_COUNT, NAV_SESSION_ID);
     useAgentStore.setState((state) => ({
       events: { ...state.events, [NAV_SESSION_ID]: events },
+      // 这些测试的目的是导航行为而非窗口化：显式给出覆盖全部轮次的窗口预算，
+      // 使挂载量与窗口化之前一致（spec「短会话/全量行为等价」的测试等价物）。
+      turns: {
+        ...state.turns,
+        [NAV_SESSION_ID]: buildConversationTurns(events, { isRunning: false }),
+      },
+      threadWindowSizes: {
+        ...state.threadWindowSizes,
+        [NAV_SESSION_ID]: NAV_TURN_COUNT,
+      },
       eventTimestamps: {
         ...state.eventTimestamps,
         [NAV_SESSION_ID]: events.map((_, index) => index + 1),

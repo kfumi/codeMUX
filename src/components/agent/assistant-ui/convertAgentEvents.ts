@@ -54,6 +54,12 @@ const visibleEventKinds = ['api_retry', 'compact', 'error', 'native_session_rebu
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
   conversationTurns?: ReturnType<typeof buildConversationTurns>,
+  /**
+   * 切片偏移：`events` 是「尾部挂载窗口」切片（工单 03）时，给出它在完整历史里的
+   * 起始事件下标。转换产出的 `sourceEventIndex` / `msg-N` / 去重 id 一律以绝对下标
+   * 命名 —— 切片后必须与全量转换逐字节一致，否则 rewind 与跳转全部失灵（正确性红线）。
+   */
+  eventIndexOffset: number = 0,
 ): CodeMuxAssistantMessage[] {
   const messages: CodeMuxAssistantMessage[] = [];
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
@@ -76,7 +82,9 @@ export function convertAgentEventsToAssistantMessages(
     return candidate;
   };
 
-  events.forEach((event, index) => {
+  events.forEach((event, loopIndex) => {
+    // 绝对事件下标（正确性红线）：切片偏移加上切片内的位置 = 全量转换时的下标。
+    const index = eventIndexOffset + loopIndex;
     if (event.kind === 'user') {
       const text = event.data.content.trim();
       const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
