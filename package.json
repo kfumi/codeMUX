@@ -23,7 +23,9 @@
     "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1",
     "test": "vitest run",
     "test:sidecar": "cd src-tauri/sidecar && npm run test",
-    "test:e2e:transcript-probe": "node scripts/e2e/transcript-probe/runner.mjs"
+    "test:e2e:transcript-probe": "node scripts/e2e/transcript-probe/runner.mjs",
+    "prepare": "husky",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",
@@ -85,6 +87,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "monaco-editor": "^0.56.0",
     "postcss": "^8.4.49",
