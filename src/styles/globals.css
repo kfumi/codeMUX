@@ -718,3 +718,22 @@ html.cmx-panel-resizing webview {
     }
   }
 }
+
+
+/*
+ * 长会话内摘掉代码块的跳过渲染（第二层嵌套跳过，streamdown 内联那层的永久中和）。
+ *
+ * 依据（2026-09-18 真实引擎探针实测）：streamdown 给每个代码块内联的
+ * content-visibility:auto + contain-intrinsic-size:auto 200px 让从未布局的代码块
+ * 虚高 112.5px（202 占位 vs ~90 真实），整个 60 轮会话的内容高度虚高约 4950px。
+ * 用户每次向上滚动，途经的代码块逐块塌缩——内容上跳、滚动条收缩、导航偏移缓存
+ * 反复失效。本规则在长会话作用域内把这层跳过关掉，代价是挂载时真实布局全部已挂载
+ * 的代码块（挂载时一次性支付，且被挂载窗口约束规模）；收益是阅读滚动中不再有
+ * 占位→真实的高度突变。短会话不适用本规则（保持现状不变）。
+ *
+ * 与跳转测量作用域的关系：那条规则仍保留——短会话跳转仍需要它来稳定 streamdown
+ * 内联层，且它是唯一覆盖「未带 data-long-thread 的场景」的两侧中和。
+ */
+[data-long-thread] [data-streamdown="code-block"] {
+  content-visibility: visible !important;
+}
