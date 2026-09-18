@@ -3172,6 +3172,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const markerGaps = markerTops.slice(1).map((top, index) => top - markerTops[index]);
     expect(Math.max(...markerGaps)).toBeLessThanOrEqual(8);
 
+    // 静止态（没有悬停预览）不该像小圆点：非当前项 10px、当前项 12px，都比旧值
+    // （6/8）更长，但仍远短于悬停山形的峰值。
+    const restingWidths = navButtons.map((button) =>
+      Number.parseFloat(((button as HTMLElement).firstElementChild as HTMLElement).style.width),
+    );
+    expect(restingWidths.every((width) => width === 10 || width === 12)).toBe(true);
+    expect(restingWidths.filter((width) => width === 12).length).toBeLessThanOrEqual(1);
+
     fireEvent.mouseEnter(navButtons[2]);
 
     const widths = navButtons.map((button) =>

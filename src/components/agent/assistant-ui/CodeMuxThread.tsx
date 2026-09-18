@@ -53,7 +53,7 @@ import {
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn, ConversationTurnStatus } from '../../../types/conversationTurn';
 
-import { isInterruptMarker } from '../../../stores/agentEventParsing';
+import { isCodexCompactSummaryText, isInterruptMarker } from '../../../stores/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   CodeMuxDataMessagePart,
@@ -74,6 +74,7 @@ import {
   TranscriptUserMessageBubble,
   TranscriptUserMessageExpandButton,
 } from './CodeMuxTranscriptMessage';
+import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { RunningElapsedTimer } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
@@ -1014,6 +1015,11 @@ function getImageAttachmentItems(message: MessageState): Array<{ id: string; nam
     });
 }
 
+/**
+ * 导航条标记必须与正文同源：正文里被隐藏的「协议回声」（压缩摘要、`/compact`、
+ * 本地命令回声、工具结果回填）没有用户气泡，因此也不该有标记。判定直接复用正文
+ * 那一条（`isHiddenAssistantThreadUserEvent`），避免两边口径再次漂移。
+ */
 export function buildUserNavItems(events: AgentMessage[]): UserNavItem[] {
   const userIndexes: number[] = [];
 
@@ -1022,7 +1028,9 @@ export function buildUserNavItems(events: AgentMessage[]): UserNavItem[] {
     if (event.kind !== 'user') continue;
 
     const text = typeof event.data.content === 'string' ? event.data.content.trim() : '';
-    if (text.length === 0 || isInterruptMarker(text)) continue;
+    if (text.length === 0 || isInterruptMarker(text) || isHiddenAssistantThreadUserEvent(event)) {
+      continue;
+    }
 
     userIndexes.push(eventIndex);
   }
@@ -1060,7 +1068,9 @@ export function extractAssistantNavSummary(
     if (event.kind !== 'assistant') continue;
 
     const text = extractAssistantText(event);
-    if (text) {
+    // 自动压缩的摘要以 assistant 事件落盘，但它不是这一轮的回答：让它当摘要会把整段
+    // 压缩总结塞进导航预览（正文里它同样被隐藏，只留压缩样式标记）。
+    if (text && !isCodexCompactSummaryText(text)) {
       lastAssistantText = text;
     }
   }
@@ -1111,20 +1121,33 @@ function truncateNavText(text: string, maxLength: number): string {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+/**
+ * 导航标记的静止态宽度（没有悬停预览时）。非当前项过去只有 6px，作为「未激活」的
+ * 默认态显得太短；当前项仍比它长 2px，保留「当前项更粗」的一眼可辨。
+ */
+const NAV_MARKER_RESTING_WIDTH = 10;
+const NAV_MARKER_ACTIVE_WIDTH = 12;
+
+/**
+ * 悬停山形尾部（距预览项 ≥3）的宽度：必须高于静止态，否则一悬停，远处那些原本
+ * 10px 的标记会缩回去，整条导航先抖一下。
+ */
+const NAV_MARKER_HOVER_TAIL_WIDTH = 11;
+
 function getMessageNavMarkerWidth(
   itemIndex: number,
   previewItemIndex: number | null,
   isActive: boolean,
 ): number {
   if (previewItemIndex == null || previewItemIndex < 0) {
-    return isActive ? 8 : 6;
+    return isActive ? NAV_MARKER_ACTIVE_WIDTH : NAV_MARKER_RESTING_WIDTH;
   }
 
   const distance = Math.abs(itemIndex - previewItemIndex);
   if (distance === 0) return 34;
   if (distance === 1) return 22;
   if (distance === 2) return 14;
-  return 7;
+  return NAV_MARKER_HOVER_TAIL_WIDTH;
 }
 
 /** 导航高亮的锚点：滚动容器顶往下 40px（与原实现一致）。 */
