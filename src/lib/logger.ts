@@ -76,7 +76,7 @@ function normalizeContext(context?: LogContext, err?: unknown) {
   return Object.keys(keyValues).length > 0 ? keyValues : undefined;
 }
 
-function formatConsolePayload(scope: string, message: string, context?: LogContext, err?: unknown) {
+function formatConsolePayload(scope: string, message: string, context?: LogContext) {
   // context 必须内联进消息字符串:Electron main 的 console-message 事件
   // (renderer.log 落盘来源)只捕获首个参数文本,对象参数会变成 [object Object],
   // sessionId 等排查字段会全部丢失。

@@ -1,4 +1,6 @@
 import type { DaemonConnectionConfig } from './client';
+import type { FetchedModelNameInput } from '../modelRegistry';
+import type { BuiltinProviderTemplate } from '../../types/provider';
 
 type Fetcher = <T>(config: DaemonConnectionConfig, path: string, init?: RequestInit) => Promise<T>;
 
@@ -254,7 +256,7 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
     providersUpsert: (provider: unknown) =>
       fetch(config, '/providers', { method: 'POST', body: JSON.stringify(provider) }),
     providersDelete: (id: string) => fetch(config, `/providers/${id}`, { method: 'DELETE' }),
-    providersTemplates: () => fetch<unknown[]>(config, '/providers/templates'),
+    providersTemplates: () => fetch<BuiltinProviderTemplate[]>(config, '/providers/templates'),
     providersInstantiateTemplate: (templateId: string) =>
       fetch(config, `/providers/templates/${templateId}/instantiate`, { method: 'POST' }),
     providersSetActive: (providerId: string) =>
@@ -272,7 +274,7 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
         body: JSON.stringify({ apiKey, baseUrl }),
       }),
     providersFetchModels: (apiKey: string, baseUrl: string) =>
-      fetch<unknown[]>(config, '/providers/fetch-models', {
+      fetch<FetchedModelNameInput[]>(config, '/providers/fetch-models', {
         method: 'POST',
         body: JSON.stringify({ apiKey, baseUrl }),
       }),

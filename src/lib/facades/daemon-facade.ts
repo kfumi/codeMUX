@@ -643,7 +643,9 @@ export const daemonFacade = {
     },
     import: async (request: ImportSessionsRequest): Promise<ImportSessionsResult> => {
       const client = await ensureDaemonClient();
-      return client.importHistorySessions(request as Record<string, unknown>) as Promise<ImportSessionsResult>;
+      // `ImportSessionsRequest` is an interface, so it has no implicit index
+      // signature; spread it into a plain record for the transport layer.
+      return client.importHistorySessions({ ...request }) as Promise<ImportSessionsResult>;
     },
   },
   usage: {

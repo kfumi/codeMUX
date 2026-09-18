@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 
 import { isImportCandidateForProject } from '../../lib/importSessionPaths';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
-import type { ImportSessionsRequest, ImportSessionsResult } from '../../types/historyImport';
+import type { ImportSessionsResult } from '../../types/historyImport';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { AgentKind } from '../../types/session';
 import type { ImportCandidate } from '../../types/historyImport';
