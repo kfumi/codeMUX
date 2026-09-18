@@ -178,21 +178,20 @@ describe('longSessionBenchmark', () => {
     expect(counters.stream.updateIntervalSpreadRatio).toBeGreaterThan(1);
 
     // 导航：工单 02 的靶子。jsdom 不做布局，所以这段成本只能用调用次数钉住。
-    // 每帧的 getBoundingClientRect 次数 = 1 次容器测量 + 每个用户导航项各一次；
-    // 回退已经削掉最后一轮用户消息，因此导航项数是「轮数 - 1」。
+    // 契约：滚动突发期间**不得逐项测量**。改动前这里是每帧 1 次容器测量 + 每个
+    // 用户导航项各一次（= 1 + 轮数 - 1，实测 1600 次）；把当时的数字固定下来
+    // 等于把回归钉死在测试里，所以这里断言的是不变量而不是某次读数。
     expect(counters.nav.scrollEvents).toBe(counters.nav.flushedFrames * 2);
-    expect(counters.nav.layoutReadsByProperty.getBoundingClientRect).toBe(
-      counters.nav.flushedFrames * (1 + (LONG_SESSION_TURN_COUNT - 1)),
-    );
-    // 除 getBoundingClientRect 之外，每次滚动事件与每帧还要读 scrollHeight/clientHeight
-    // （钉底判定、内容变化判定）—— 这部分的读数就是「一帧读几次几何」的增量。
+    expect(counters.nav.layoutReadsByProperty.getBoundingClientRect ?? 0).toBe(0);
+    // 与导航项数解耦：每帧的布局读取次数必须落在与项数无关的量级。
+    // （改动前该值是每帧 200 次，即 1 次容器 + 199 个导航项。）
+    expect(counters.nav.layoutReadsPerFlushedFrame).toBeLessThan(LONG_SESSION_TURN_COUNT);
+    // 除逐项测量之外，每次滚动事件与每帧还要读 scrollHeight/clientHeight
+    // （钉底判定、内容变化判定）—— 这部分是允许的增量。
     expect(counters.nav.layoutReadsByProperty.scrollHeight).toBeGreaterThan(
       counters.nav.scrollEvents,
     );
     expect(counters.nav.layoutReadsByProperty.clientHeight).toBeGreaterThan(0);
-    expect(counters.nav.layoutReads).toBeGreaterThan(
-      counters.nav.layoutReadsByProperty.getBoundingClientRect,
-    );
 
     expect(readings.observers).toEqual({
       storeGenerations: true,
@@ -200,7 +199,9 @@ describe('longSessionBenchmark', () => {
       frameClock: true,
       perfStoreIpc: true,
     });
-  }, 30_000);
+    // 预算放宽到 90s：这条用例实测在 13.1s–33.4s 之间随机器负载波动（本轮改动前
+    // 曾撞到 30s 上限并连累后面的清理用例），30s 太紧会变成负载型假失败。
+  }, 90_000);
 
   it('短会话不进入新增度量路径，也不产出基准读数', async () => {
     const baseline = inspectShortSessionBaseline();

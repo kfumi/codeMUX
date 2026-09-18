@@ -75,7 +75,7 @@ type CodeMuxThreadProps = {
   footer?: ReactNode;
 };
 
-type UserNavItem = {
+export type UserNavItem = {
   eventIndex: number;
   title: string;
   summary: string;
@@ -1013,6 +1013,81 @@ function getMessageNavMarkerWidth(
   return 7;
 }
 
+/** 导航高亮的锚点：滚动容器顶往下 40px（与原实现一致）。 */
+const NAV_ACTIVE_ANCHOR_OFFSET_PX = 40;
+
+/** 一条导航项的缓存偏移：与 `scrollTop` 同一坐标系（相对滚动内容顶部）。 */
+export interface NavOffsetEntry {
+  eventIndex: number;
+  /** 该行顶部相对滚动内容顶部的距离（px）。 */
+  top: number;
+}
+
+/**
+ * 测量事务：一次性量出全部导航项相对滚动内容顶部的偏移。
+ *
+ * 这是导航高亮路径上**唯一**允许读布局几何的地方。滚动期间的每一帧只比较缓存，
+ * 不再逐项 `getElementById` + `getBoundingClientRect`（一次滚动突发里后者是
+ * 「1 次容器 + 每个导航项各一次」× 帧数）。源码契约断言见
+ * `CodeMuxThread.navActiveSource.test.ts`。
+ */
+export function measureNavOffsets(
+  container: HTMLElement,
+  items: readonly UserNavItem[],
+): NavOffsetEntry[] {
+  const containerTop = container.getBoundingClientRect().top;
+  const scrollTop = container.scrollTop;
+  const offsets: NavOffsetEntry[] = [];
+
+  for (const item of items) {
+    const element = document.getElementById(`msg-${item.eventIndex}`);
+    if (!element) {
+      continue;
+    }
+
+    // 换算成内容坐标系：滚动位置变化不会让它失效，因此缓存只需在布局变化时重算。
+    offsets.push({
+      eventIndex: item.eventIndex,
+      top: element.getBoundingClientRect().top - containerTop + scrollTop,
+    });
+  }
+
+  return offsets;
+}
+
+/**
+ * 滚动期的热循环：只读缓存偏移与滚动位置，不读任何布局几何。
+ *
+ * 判定顺序与原先「逐条测量」时逐个比较的结果一致：先取锚点之上最后一条，
+ * 没有则取锚点之下最近的一条，都没有则退回第一条。
+ */
+export function pickActiveEventIndex(
+  offsets: readonly NavOffsetEntry[],
+  scrollTop: number,
+  anchorOffsetPx: number,
+): number | null {
+  if (offsets.length === 0) {
+    return null;
+  }
+
+  const anchor = scrollTop + anchorOffsetPx;
+  let lastPassed: number | null = null;
+  let nextUpcoming: NavOffsetEntry | null = null;
+
+  for (const offset of offsets) {
+    if (offset.top <= anchor) {
+      lastPassed = offset.eventIndex;
+      continue;
+    }
+
+    if (nextUpcoming === null || offset.top < nextUpcoming.top) {
+      nextUpcoming = offset;
+    }
+  }
+
+  return lastPassed ?? nextUpcoming?.eventIndex ?? offsets[0]?.eventIndex ?? null;
+}
+
 function MessageNav({
   items,
   scrollContainer,
@@ -1026,6 +1101,11 @@ function MessageNav({
   const [previewEventIndex, setPreviewEventIndex] = useState<number | null>(null);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [navHeight, setNavHeight] = useState(0);
+  /**
+   * 让组件内的点击跳转能主动作废偏移缓存：跳转会让原本未参与布局的行参与进来。
+   * 由下面的 effect 挂上，避免把 effect 依赖搅进 `scrollToMessage`。
+   */
+  const invalidateNavOffsetsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = scrollContainer.current;
@@ -1035,32 +1115,27 @@ function MessageNav({
     }
 
     let animationFrame: number | null = null;
+    /** 缓存是否过期：布局变化时置脏，重算只发生在下一个帧回调里。 */
+    let offsetsStale = true;
+    let offsets: NavOffsetEntry[] = [];
 
+    /**
+     * 每帧的热路径：先按需做一次测量事务，再做纯比较。
+     * 遍历本身在 `pickActiveEventIndex` 内，不碰 DOM、不读布局几何。
+     */
     const updateActive = () => {
       animationFrame = null;
-      const anchorTop = container.getBoundingClientRect().top + 40;
-      let lastPassed: number | null = null;
-      let nextUpcoming: { eventIndex: number; top: number } | null = null;
 
-      for (const item of items) {
-        const element = document.getElementById(`msg-${item.eventIndex}`);
-        if (!element) {
-          continue;
-        }
-
-        const messageTop = element.getBoundingClientRect().top;
-
-        if (messageTop <= anchorTop) {
-          lastPassed = item.eventIndex;
-          continue;
-        }
-
-        if (nextUpcoming == null || messageTop < nextUpcoming.top) {
-          nextUpcoming = { eventIndex: item.eventIndex, top: messageTop };
-        }
+      if (offsetsStale) {
+        offsetsStale = false;
+        offsets = measureNavOffsets(container, items);
       }
 
-      const nextActiveIdx = lastPassed ?? nextUpcoming?.eventIndex ?? items[0]?.eventIndex ?? null;
+      const nextActiveIdx = pickActiveEventIndex(
+        offsets,
+        container.scrollTop,
+        NAV_ACTIVE_ANCHOR_OFFSET_PX,
+      );
       setActiveIdx((current) => (current === nextActiveIdx ? current : nextActiveIdx));
     };
 
@@ -1072,12 +1147,36 @@ function MessageNav({
       animationFrame = window.requestAnimationFrame(updateActive);
     };
 
+    /** 失效入口：只置脏并排一帧，测量本身推迟到帧回调里。 */
+    const markOffsetsStale = () => {
+      offsetsStale = true;
+      scheduleUpdateActive();
+    };
+
+    invalidateNavOffsetsRef.current = markOffsetsStale;
+
+    // 布局变化的来源：容器尺寸、滚动内容高度（含离屏行占位高度被真实高度替换）、
+    // 窗口尺寸。滚动本身不触发任何一次测量。
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(markOffsetsStale) : null;
+    resizeObserver?.observe(container);
+    const content = container.firstElementChild;
+    if (content) {
+      resizeObserver?.observe(content);
+    }
+    window.addEventListener('resize', markOffsetsStale);
+
     updateActive();
     container.addEventListener('scroll', scheduleUpdateActive, { passive: true });
     return () => {
       if (animationFrame !== null) {
         window.cancelAnimationFrame(animationFrame);
       }
+      if (invalidateNavOffsetsRef.current === markOffsetsStale) {
+        invalidateNavOffsetsRef.current = null;
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', markOffsetsStale);
       container.removeEventListener('scroll', scheduleUpdateActive);
     };
   }, [disabled, items, scrollContainer]);
@@ -1150,6 +1249,9 @@ function MessageNav({
     }
 
     setActiveIdx(eventIndex);
+    // 跳转途中原本未参与布局的行会参与进来：标记缓存过期，让下一帧重算一次偏移。
+    // 落点算式与 behavior: 'smooth' 保持原样 —— 另一条工作流在用真实引擎探针测量它们。
+    invalidateNavOffsetsRef.current?.();
     const offsetTop = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
     container.scrollTo({
       top: container.scrollTop + offsetTop - 22,
