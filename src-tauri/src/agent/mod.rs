@@ -20,7 +20,6 @@ pub mod sidecar_events;
 pub mod subagent_persist;
 pub(crate) mod timeline_persist;
 pub(crate) mod turn_artifact_summary;
-pub(crate) mod turn_perf;
 
 use crate::paths::PathRoots;
 use log::{debug, info, warn};
@@ -253,9 +252,6 @@ pub async fn spawn_sidecar(
             if line.contains("[codex][compact")
                 || line.contains("[opencode-task]")
                 || line.contains("[perf]")
-                || line.contains("[pi-task]")
-                || line.contains("[codex-app-server]")
-                || line.contains("[sidecar]")
             {
                 info!(target: "sidecar_stderr", "{}", line);
             } else if line.to_ascii_lowercase().contains("error") {

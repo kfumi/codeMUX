@@ -669,11 +669,6 @@ async fn ensure_sidecar_for_session(
                     // SQLite（默认 journal 模式下每个事务两次 fsync），跑在 tokio
                     // worker 上会把该会话后续所有 delta 广播一起堵住 —— 表现就是
                     // "突发卡顿 + 随后脉冲式补发"。解析也只做一次。
-                    if let Some(elapsed_ms) =
-                        crate::agent::turn_perf::take_elapsed_ms(&session_id_clone)
-                    {
-                        log::info!(target: "perf", "[perf] first sidecar event reached daemon elapsed_ms={elapsed_ms} session_id={session_id_clone}");
-                    }
                     let persist_started = std::time::Instant::now();
                     let broadcast_events = {
                         let state_for_persist = app_state.clone();
@@ -1735,7 +1730,6 @@ pub async fn shutdown_agent_for_companion(
             let mut sidecars = agent_state.sidecars.lock().await;
             sidecars.remove(session_id)
         };
-        crate::agent::turn_perf::clear(session_id);
         if let Some(mut handle) = sidecar {
             handle.shutdown().await;
         } else {

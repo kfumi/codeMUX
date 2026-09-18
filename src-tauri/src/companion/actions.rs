@@ -111,7 +111,6 @@ pub(crate) async fn send_companion_message_owned(
         sidecars.contains_key(session_id)
     };
     let perf_started = std::time::Instant::now();
-    crate::agent::turn_perf::mark_send(session_id);
     log::info!(
         target: "perf",
         "[perf] send received session_id={} mode={} prompt_len={}",
