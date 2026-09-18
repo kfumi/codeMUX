@@ -3568,6 +3568,147 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().turns[session.id]).toHaveLength(1);
   });
 
+  it('publishes a streamed synthetic tool_use append in a single store generation', async () => {
+    const session = await primeSession('claude_code');
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'stream a tool call', 'D:\\workspace');
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    const generations: {
+      events: boolean;
+      isRunning: boolean;
+      forceStopped: boolean;
+      timestamps: boolean;
+      turns: boolean;
+    }[] = [];
+    let watchingAppend = true;
+    const unsubscribe = useAgentStore.subscribe((state, previous) => {
+      if (!watchingAppend) { return; }
+      const eventsChanged = state.events[session.id] !== previous.events[session.id];
+      const turnsChanged = state.turns[session.id] !== previous.turns[session.id];
+      if (!eventsChanged && !turnsChanged) { return; }
+      generations.push({
+        events: eventsChanged,
+        isRunning: state.isRunning[session.id] !== previous.isRunning[session.id],
+        forceStopped: state.forceStopped[session.id] !== previous.forceStopped[session.id],
+        timestamps: state.eventTimestamps[session.id] !== previous.eventTimestamps[session.id],
+        turns: turnsChanged,
+      });
+      // Stop watching once the append itself was published: terminal handling
+      // afterwards may legitimately derive `turns` from an `isRunning` change.
+      if (eventsChanged) { watchingAppend = false; }
+    });
+
+    emitEvent?.(JSON.stringify({
+      type: 'stream_event',
+      session_id: session.id,
+      event: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'toolu-single-generation', name: 'Read' },
+      },
+    }));
+    emitEvent?.(JSON.stringify({
+      type: 'stream_event',
+      session_id: session.id,
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"file_path":"src/App.tsx"}' },
+      },
+    }));
+    emitEvent?.(JSON.stringify({
+      type: 'stream_event',
+      session_id: session.id,
+      event: { type: 'content_block_stop', index: 0, content_block: { type: 'tool_use' } },
+    }));
+    unsubscribe();
+
+    // The synthetic append must actually have happened, otherwise the generation
+    // assertions below would pass without exercising the path under test.
+    const appendedSyntheticToolUse = (useAgentStore.getState().events[session.id] || []).some(
+      (entry) => entry.kind === 'assistant'
+        && (entry.data.message.content as Array<{ type?: string; id?: string }>).some(
+          (block) => block.type === 'tool_use' && block.id === 'toolu-single-generation',
+        ),
+    );
+    expect(appendedSyntheticToolUse).toBe(true);
+
+    // The fingerprint of the old double publish: a generation that only rewrote
+    // `turns` while none of its four derivation inputs changed. It forced a second
+    // full re-render of every message row per streamed event.
+    const purelyDerivedTurns = generations.filter(
+      (generation) => !generation.events && !generation.isRunning
+        && !generation.forceStopped && !generation.timestamps,
+    );
+    expect(generations.length).toBeGreaterThan(0);
+    expect(purelyDerivedTurns).toEqual([]);
+    // The append itself must publish events and turns together.
+    expect(generations.some((generation) => generation.events && generation.turns)).toBe(true);
+  });
+
+  it('publishes a result append in a single store generation', async () => {
+    const session = await primeSession('claude_code');
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'finish a turn', 'D:\\workspace');
+
+    const generations: {
+      events: boolean;
+      isRunning: boolean;
+      forceStopped: boolean;
+      timestamps: boolean;
+      turns: boolean;
+    }[] = [];
+    let watchingAppend = true;
+    const unsubscribe = useAgentStore.subscribe((state, previous) => {
+      if (!watchingAppend) { return; }
+      const eventsChanged = state.events[session.id] !== previous.events[session.id];
+      const turnsChanged = state.turns[session.id] !== previous.turns[session.id];
+      if (!eventsChanged && !turnsChanged) { return; }
+      generations.push({
+        events: eventsChanged,
+        isRunning: state.isRunning[session.id] !== previous.isRunning[session.id],
+        forceStopped: state.forceStopped[session.id] !== previous.forceStopped[session.id],
+        timestamps: state.eventTimestamps[session.id] !== previous.eventTimestamps[session.id],
+        turns: turnsChanged,
+      });
+      // Stop watching once the append itself was published: terminal handling
+      // afterwards may legitimately derive `turns` from an `isRunning` change.
+      if (eventsChanged) { watchingAppend = false; }
+    });
+
+    emitEvent?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+    unsubscribe();
+
+    expect((useAgentStore.getState().events[session.id] || []).some((entry) => entry.kind === 'result')).toBe(true);
+    // The fingerprint of the old double publish: a generation that only rewrote
+    // `turns` while none of its four derivation inputs changed. It forced a second
+    // full re-render of every message row for one appended event.
+    const purelyDerivedTurns = generations.filter(
+      (generation) => !generation.events && !generation.isRunning
+        && !generation.forceStopped && !generation.timestamps,
+    );
+    expect(generations.length).toBeGreaterThan(0);
+    expect(purelyDerivedTurns).toEqual([]);
+    expect(generations.some((generation) => generation.events && generation.turns)).toBe(true);
+  });
+
   it('rewinds an earlier user message by turn ordinal and text fingerprint', async () => {
     const session = await primeSession('claude_code');
 

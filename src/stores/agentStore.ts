@@ -1004,11 +1004,13 @@ function commitPendingSimulatedStream(
   set((s) => {
     const prev = s.events[sessionId] || [];
     const timestamps = s.eventTimestamps[sessionId] || [];
-    return {
+    const nextTimestamps = [...timestamps, Date.now()];
+    const base = {
       events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
-      eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+      eventTimestamps: { ...s.eventTimestamps, [sessionId]: nextTimestamps },
       streamingText: { ...s.streamingText, [sessionId]: '' },
     };
+    return { ...base, ...turnsForCommit(s, sessionId, base) };
   });
 }
 
@@ -1033,10 +1035,12 @@ function simulateStreamingContent(
     set((s) => {
       const prev = s.events[sessionId] || [];
       const timestamps = s.eventTimestamps[sessionId] || [];
-      return {
+      const nextTimestamps = [...timestamps, Date.now()];
+      const base = {
         events: { ...s.events, [sessionId]: [...prev, event] },
-        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+        eventTimestamps: { ...s.eventTimestamps, [sessionId]: nextTimestamps },
       };
+      return { ...base, ...turnsForCommit(s, sessionId, base) };
     });
     return;
   }
@@ -1063,12 +1067,14 @@ function simulateStreamingContent(
       set((s) => {
         const prev = s.events[sessionId] || [];
         const timestamps = s.eventTimestamps[sessionId] || [];
-        return {
+        const nextTimestamps = [...timestamps, Date.now()];
+        const base = {
           events: { ...s.events, [sessionId]: [...prev, current.event] },
-          eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+          eventTimestamps: { ...s.eventTimestamps, [sessionId]: nextTimestamps },
           streamingText: { ...s.streamingText, [sessionId]: '' },
           streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         };
+        return { ...base, ...turnsForCommit(s, sessionId, base) };
       });
       return;
     }
@@ -2206,9 +2212,10 @@ function createSessionEventHandler(
                   } catch {}
                 }
               }
-              return {
+              const nextTimestampsForEvent = [...(s.eventTimestamps[sessionId] || []), now];
+              const base = {
                 events: { ...s.events, [sessionId]: newEvents },
-                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
+                eventTimestamps: { ...s.eventTimestamps, [sessionId]: nextTimestampsForEvent },
                 todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
                 changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
                 ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
@@ -2218,6 +2225,7 @@ function createSessionEventHandler(
                 streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
                 ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
               };
+              return { ...base, ...turnsForCommit(s, sessionId, base) };
             });
           } else {
             flushPendingStreaming(sessionId, set);
@@ -2527,15 +2535,17 @@ function createSessionEventHandler(
         }
       }
 
-      return {
+      const nextTimestampsForEvent = [...(s.eventTimestamps[sessionId] || []), now];
+      const base = {
         events: { ...s.events, [sessionId]: newEvents },
-        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
+        eventTimestamps: { ...s.eventTimestamps, [sessionId]: nextTimestampsForEvent },
         todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
         changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
         ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
         ...(event.kind === 'permission_resolved' ? { pendingPermissions: dequeueResolvedPermission(s.pendingPermissions, sessionId, event.data.request_id) } : {}),
         ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
       };
+      return { ...base, ...turnsForCommit(s, sessionId, base) };
     });
     // Update MCP runtime status from polling results (local to agentStore)
     if (event.kind === 'mcp_status') {
@@ -3430,11 +3440,12 @@ function createSessionEventHandler(
             ? state.eventTimestamps[sessionId] ?? timestamps
             : timestamps;
 
-          return {
+          const base = {
             events: { ...state.events, [sessionId]: nextEvents },
             eventTimestamps: { ...state.eventTimestamps, [sessionId]: nextTimestamps },
             todos: { ...state.todos, [sessionId]: extractTodosFromEvents(nextEvents) },
           };
+          return { ...base, ...turnsForCommit(state, sessionId, base) };
         });
 
         if (
@@ -3737,9 +3748,6 @@ function createSessionEventHandler(
 // Keep the lifecycle projection in the store so renderers do not independently
 // infer terminal state from the last assistant message. The listener only reacts
 // to inputs used by the reducer; its own `turns` update does not recurse.
-// Keep the lifecycle projection in the store so renderers do not independently
-// infer terminal state from the last assistant message. The listener only reacts
-// to inputs used by the reducer; its own `turns` update does not recurse.
 function computeSessionTurns(state: AgentState, sessionId: string): ConversationTurn<AgentMessage>[] {
   return buildConversationTurns(state.events[sessionId] ?? [], {
     isRunning: state.isRunning[sessionId] ?? false,
@@ -3747,6 +3755,23 @@ function computeSessionTurns(state: AgentState, sessionId: string): Conversation
     sessionId,
     timestamps: state.eventTimestamps[sessionId],
   });
+}
+
+/**
+ * Derive one session's turn projection inside the same `set` commit that writes
+ * its events. Leaving it to the store subscriber publishes `turns` as a second
+ * generation, which re-renders every message row twice — the cost that made
+ * streaming (and rewinding) long threads stutter.
+ */
+function turnsForCommit(
+  state: AgentState,
+  sessionId: string,
+  next: Partial<AgentState>,
+): Pick<AgentState, 'turns'> {
+  const merged = { ...state, ...next } as AgentState;
+  return {
+    turns: { ...state.turns, [sessionId]: computeSessionTurns(merged, sessionId) },
+  };
 }
 
 useAgentStore.subscribe((state, previousState) => {
