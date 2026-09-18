@@ -39,6 +39,32 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 200px;
 }
+/*
+ * 跳转测量作用域 —— 由 `MessageNav.scrollToMessage` 在跳转期间挂上、落定后立刻摘掉
+ * （见 `src/components/agent/assistant-ui/CodeMuxThread.tsx` 的 `openMeasuringScope`）。
+ *
+ * 这条规则不是冗余的：删掉它，长会话里的跳转落点会重新偏到目标行上方约 340px。
+ * 落点算式读的是**当前布局**，而长会话里有两层嵌套的跳过渲染 ——
+ *   1. 上面那条 `[data-long-thread] [data-message-row]`：从未渲染过的行只有 200px 占位；
+ *   2. streamdown 给每个 `[data-streamdown="code-block"]` 打的**内联**
+ *      `content-visibility: auto; contain-intrinsic-size: auto 200px`：从未布局过的代码块
+ *      按占位算约 202px，真实高度约 90px，每块虚高 112.5px（实测整个会话虚高 4950px）。
+ * 于是算式在虚高的坐标系里算出落点，而动画途中被途经渲染的行/代码块一塌到真实高度就把目标
+ * 行往上带。作用域把两层一起中和：坐标系在发起滚动前稳定，并在飞行期间保持稳定。
+ *
+ * `contain-intrinsic-size` 的**值必须带 auto 关键字**（这里与两层原本的声明同值，只为把
+ * auto 保住）：`auto` 才是「记住已经真实布局过的高度」的开关，而落定后摘掉属性之所以安全，
+ * 正是因为飞行期间布局过的行/代码块记下了真实高度。若这里改成 `none`，auto 关键字在作用域
+ * 期间被清掉、真实高度不会被记住，摘掉属性时目标行上方会整片弹回占位高度（实测落点从
+ * +22px 变成 +2321px）。
+ *
+ * `!important` 是必需的：第二层是 streamdown 写在元素上的内联样式，只有 !important 能压过它。
+ */
+[data-thread-measuring] [data-message-row],
+[data-thread-measuring] [data-streamdown="code-block"] {
+  content-visibility: visible !important;
+  contain-intrinsic-size: auto 200px !important;
+}
 
 @custom-variant dark (&:where(.dark, .dark *));
 

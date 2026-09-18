@@ -9,6 +9,12 @@
  *    缓存偏移且一次突发里 `getBoundingClientRect` 调用次数为 0；行高变化
  *    （ResizeObserver）与点击跳转后缓存确实被重算。
  *
+ * 工单 02（落点精确性）：`scrollToMessage` 会在长会话里开一个「跳转测量作用域」属性
+ * （`data-thread-measuring`），让落点算式在稳定坐标系里算、并在飞行期间保持稳定。
+ * 第三组测试钉住它的生命周期：进入 → 发起滚动 → 飞行期间保持 → 落定（`scrollend` 或超时）
+ * 或用户手势打断后移除；卸载也必须收尾。CSS 侧规则在 `styles/globals.css`，真实引擎里的
+ * 落点精度由 `scripts/e2e/transcript-probe` 裁决。
+ *
  * 口径说明：这里把 `scrollTop` 排除在「布局几何」之外 —— 它是滚动位置，不读它就
  * 无法判断滚到哪里；工单 01 的基准计数器（`longSessionBenchmark.ts`）同样不统计它。
  */
@@ -17,7 +23,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildLongSessionEvents } from '../../../lib/dev/longSessionFixture';
+import { buildLongSessionEvents, userMessageEventIndex } from '../../../lib/dev/longSessionFixture';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import type { Session } from '../../../types/session';
@@ -439,4 +445,110 @@ describe('长会话导航高亮只读偏移缓存', () => {
     // 用旧缓存会算成第 3 轮（偏移 2400 已通过锚点）；重算后才是第 0 轮。
     expect(activeNavIndex()).toBe(0);
   }, 30_000);
+
+  // ── 3. 跳转测量作用域的生命周期（工单 02 落点精确性） ──────────────────────
+
+  describe('跳转测量作用域', () => {
+    /** 作用域属性：在这里写成字面量，改常量名不会让这组断言静默通过。 */
+    const SCOPE_ATTRIBUTE = 'data-thread-measuring';
+    /** 落点算式里的常量：让目标行落在容器顶下方 22px。 */
+    const JUMP_OFFSET_PX = 22;
+
+    let scrollToSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      scrollToSpy = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+        configurable: true,
+        value: scrollToSpy,
+      });
+    });
+
+    it('进入 → 发起滚动 → 飞行期间保持 → scrollend 之后才移除', async () => {
+      const viewport = await mountLongThread();
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+
+      fireEvent.click(navButtons()[2]);
+
+      // 属性在算落点之前就挂上：算式这才是在稳定坐标系里算的。
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(true);
+      // 落点算式没变：目标行顶部（事件下标 × 假行高，减去当前滚动位置）再减 22。
+      expect(scrollToSpy).toHaveBeenCalledWith({
+        top: userMessageEventIndex(2) * ROW_PITCH_PX - JUMP_OFFSET_PX,
+        behavior: 'smooth',
+      });
+
+      // 飞行期间保持作用域：与动画同方向、内容高度也没变的一步是动画自己走的，不收尾。
+      // （起点在底部，目标在上方 ⇒ 动画方向是 scrollTop 变小。）
+      act(() => {
+        viewport.scrollTop -= ROW_PITCH_PX;
+        viewport.dispatchEvent(new Event('scroll'));
+      });
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(true);
+
+      act(() => {
+        viewport.dispatchEvent(new Event('scrollend'));
+      });
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+    }, 30_000);
+
+    it('用户手势打断（与动画方向相反、内容高度不变的滚动）立即收尾', async () => {
+      const viewport = await mountLongThread();
+      fireEvent.click(navButtons()[2]);
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(true);
+
+      // 动画方向是 scrollTop 变小；反向的一步只能来自用户手势（钉底路径用的是同一条归因口径）。
+      act(() => {
+        viewport.scrollTop += ROW_PITCH_PX;
+        viewport.dispatchEvent(new Event('scroll'));
+      });
+
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+    }, 30_000);
+
+    it('scrollend 不来时由计时器兜底收尾', async () => {
+      const viewport = await mountLongThread();
+      // 只假造计时器：挂载与帧回调仍走真实 rAF。
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        fireEvent.click(navButtons()[2]);
+        expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(true);
+
+        act(() => {
+          vi.advanceTimersByTime(5_000);
+        });
+
+        expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 30_000);
+
+    it('卸载时收尾，不把作用域留在 DOM 上', async () => {
+      const viewport = await mountLongThread();
+      fireEvent.click(navButtons()[2]);
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(true);
+
+      cleanup();
+
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+    }, 30_000);
+
+    it('短会话不开作用域，但跳转照旧发起', async () => {
+      // 短会话：事件数在长会话阈值以下，行级跳过规则不生效，因此不付逃生口的代价。
+      const shortEvents = buildLongSessionEvents(3, NAV_SESSION_ID);
+      useAgentStore.setState((state) => ({
+        events: { ...state.events, [NAV_SESSION_ID]: shortEvents },
+      }));
+
+      const viewport = await mountLongThread();
+      expect(screen.getByTestId('thread-content-shell').hasAttribute('data-long-thread')).toBe(false);
+      expect(navButtons()).toHaveLength(3);
+
+      fireEvent.click(navButtons()[1]);
+
+      expect(viewport.hasAttribute(SCOPE_ATTRIBUTE)).toBe(false);
+      expect(scrollToSpy).toHaveBeenCalledTimes(1);
+    }, 30_000);
+  });
 });

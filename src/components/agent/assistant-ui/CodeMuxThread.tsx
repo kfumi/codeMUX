@@ -1016,6 +1016,21 @@ function getMessageNavMarkerWidth(
 /** 导航高亮的锚点：滚动容器顶往下 40px（与原实现一致）。 */
 const NAV_ACTIVE_ANCHOR_OFFSET_PX = 40;
 
+/**
+ * 跳转期间的测量作用域属性：规则见 `src/styles/globals.css` 里的同名选择器。
+ *
+ * 它是逃生口而不是装饰 —— 长会话里有两层嵌套的跳过渲染（`[data-long-thread] [data-message-row]`
+ * 与 streamdown 打在代码块上的内联 `content-visibility`），从未布局过的行/代码块用占位高度参与
+ * 布局，跳转的落点算式就只能在虚高的坐标系里算落点（实测偏到目标行上方约 340px）。
+ * 挂上它之后两层一起变成真实布局：坐标系在发起滚动前稳定，并在飞行期间保持稳定。
+ */
+const MEASURING_SCOPE_ATTRIBUTE = 'data-thread-measuring';
+/**
+ * 落定兜底：`scrollend` 在动画被取消等情况下可能不来，超时也必须摘掉作用域 ——
+ * 绝不允许把作用域永久留在 DOM 上（那等于放弃跳过渲染的收益）。
+ */
+const MEASURING_SCOPE_TIMEOUT_MS = 2000;
+
 /** 一条导航项的缓存偏移：与 `scrollTop` 同一坐标系（相对滚动内容顶部）。 */
 export interface NavOffsetEntry {
   eventIndex: number;
@@ -1088,6 +1103,84 @@ export function pickActiveEventIndex(
   return lastPassed ?? nextUpcoming?.eventIndex ?? offsets[0]?.eventIndex ?? null;
 }
 
+/**
+ * 进入跳转测量作用域：给滚动容器挂上 `data-thread-measuring`（规则见 `globals.css` 的同名选择器）。
+ *
+ * 为什么需要：跳转的落点算式读的是**当前布局**，而长会话里有两层嵌套的跳过渲染 ——
+ *   1. `[data-long-thread] [data-message-row]`：从未渲染过的行只有 200px 占位；
+ *   2. streamdown 打在代码块上的内联 `content-visibility`：从未布局过的代码块按占位算约 202px，
+ *      真实高度约 90px（每块虚高 112.5px，实测整个会话虚高 4950px）。
+ * 于是算式在虚高的坐标系里算出落点，动画途中被途经渲染的行/代码块一塌到真实高度就把目标行
+ * 往上带（实测落点停在目标行上方约 340px）。作用域把两层一起中和，并在这里**强制一次布局**：
+ * 读 `scrollHeight` 之后浏览器已按作用域样式重排，坐标系从此稳定，可以据此算落点。
+ *
+ * 返回是否真的开了作用域：短会话不受行级跳过规则影响，按「短会话行为与现状等价」的约束不动它
+ * （作用域挂上/摘掉本身不影响短会话的落点，但没必要为它付一次全量布局与 2s 的计时器）。
+ */
+function openMeasuringScope(container: HTMLDivElement): boolean {
+  // 线程壳是滚动容器的第一个元素子节点（`measureNavOffsets` 的 ResizeObserver 也按这个口径取）。
+  const shell = container.firstElementChild;
+  if (!(shell instanceof HTMLElement) || !shell.hasAttribute('data-long-thread')) {
+    return false;
+  }
+
+  container.setAttribute(MEASURING_SCOPE_ATTRIBUTE, '');
+  void container.scrollHeight;
+  return true;
+}
+
+/**
+ * 守住跳转期间的测量作用域：落定（`scrollend`，带超时兜底）或被用户手势打断后摘掉属性。
+ *
+ * `movePx` 是本次跳转让 `scrollTop` 移动的量（即落点算式里的 `offsetTop - 22`），用来知道
+ * 动画方向。摘掉属性是安全的：`contain-intrinsic-size: auto` 记住的是「已经真实布局过的高度」，
+ * 飞行期间布局过的行/代码块不会退回占位高度 —— 这是这个方案成立的关键。
+ *
+ * 返回幂等的收尾函数。
+ */
+function watchMeasuringScope(container: HTMLDivElement, movePx: number): () => void {
+  const direction = Math.sign(movePx);
+  let finished = false;
+  let timer = 0;
+  let lastScrollTop = container.scrollTop;
+  let lastScrollHeight = container.scrollHeight;
+
+  const finish = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    window.clearTimeout(timer);
+    container.removeEventListener('scrollend', finish);
+    container.removeEventListener('scroll', handleScroll);
+    container.removeAttribute(MEASURING_SCOPE_ATTRIBUTE);
+  };
+
+  /**
+   * 飞行期间只判断一件事：动画是不是被真实手势打断了。
+   * 复用本仓库已有的手势归因口径（`useTranscriptFollowLatest.updateScrollState`：程序自己
+   * 指定的方向之外、且内容高度没变的那一步只能来自用户）—— 只是这里的「程序的方向」来自
+   * 本次跳转，而不是钉底。
+   */
+  const handleScroll = () => {
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    if (direction !== 0 && scrollHeight === lastScrollHeight && (scrollTop - lastScrollTop) * direction < 0) {
+      finish();
+      return;
+    }
+    lastScrollTop = scrollTop;
+    lastScrollHeight = scrollHeight;
+  };
+
+  // `scrollend` 是首选判据（Chromium 130 支持）；计时器只是兜底，避免作用域留在 DOM 上。
+  container.addEventListener('scrollend', finish);
+  container.addEventListener('scroll', handleScroll, { passive: true });
+  timer = window.setTimeout(finish, MEASURING_SCOPE_TIMEOUT_MS);
+
+  return finish;
+}
+
 function MessageNav({
   items,
   scrollContainer,
@@ -1106,6 +1199,21 @@ function MessageNav({
    * 由下面的 effect 挂上，避免把 effect 依赖搅进 `scrollToMessage`。
    */
   const invalidateNavOffsetsRef = useRef<(() => void) | null>(null);
+
+  /**
+   * 进行中的跳转测量作用域的收尾函数（幂等，见 `watchMeasuringScope`）。
+   * 卸载时必须收尾：绝不允许把 `data-thread-measuring` 永久留在 DOM 上。
+   */
+  const measuringScopeRef = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      const finish = measuringScopeRef.current;
+      measuringScopeRef.current = null;
+      finish?.();
+    },
+    [],
+  );
 
   useEffect(() => {
     const container = scrollContainer.current;
@@ -1250,13 +1358,28 @@ function MessageNav({
 
     setActiveIdx(eventIndex);
     // 跳转途中原本未参与布局的行会参与进来：标记缓存过期，让下一帧重算一次偏移。
-    // 落点算式与 behavior: 'smooth' 保持原样 —— 另一条工作流在用真实引擎探针测量它们。
     invalidateNavOffsetsRef.current?.();
+    // 连点两次时先收掉上一次的作用域，避免两个收尾函数互相摘属性。
+    measuringScopeRef.current?.();
+
+    // 先进入测量作用域并结算一次布局，落点算式才是在稳定坐标系里算的。
+    const measuring = openMeasuringScope(container);
     const offsetTop = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    // 落点算式与 behavior: 'smooth' 保持原样 —— 另一条工作流在用真实引擎探针测量它们。
     container.scrollTo({
       top: container.scrollTop + offsetTop - 22,
       behavior: 'smooth',
     });
+    // 飞行期间保持作用域（否则中途又会塌缩），落定或被手势打断后由收尾函数摘掉。
+    if (measuring) {
+      const finish = watchMeasuringScope(container, offsetTop - 22);
+      measuringScopeRef.current = () => {
+        finish();
+        measuringScopeRef.current = null;
+      };
+    } else {
+      measuringScopeRef.current = null;
+    }
   };
 
   return (
