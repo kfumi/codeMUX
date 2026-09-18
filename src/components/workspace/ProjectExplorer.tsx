@@ -114,9 +114,9 @@ function TreeNode({
           >
             {isDirectory ? (
               expanded ? (
-                <ChevronDown className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
+                <ChevronDown className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/70" />
               ) : (
-                <ChevronRight className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40" />
+                <ChevronRight className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/70" />
               )
             ) : (
               <span className="w-3 shrink-0" />
@@ -125,13 +125,13 @@ function TreeNode({
               expanded ? (
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-glow))]/72" />
               ) : (
-                <Folder className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/54" />
+                <Folder className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/70" />
               )
             ) : (
               <FileTypeIcon filePath={node.path} className="h-3.5 w-3.5" />
             )}
             <span className="truncate">{node.name}</span>
-            {loading && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-[hsl(var(--sidebar-fg))]/35" />}
+            {loading && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-[hsl(var(--sidebar-fg))]/70" />}
           </button>
         </ContextMenuTrigger>
         <ProjectExplorerContextMenu
@@ -146,7 +146,7 @@ function TreeNode({
         <div>
           {loading && children.length === 0 ? (
             <div
-              className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-[hsl(var(--sidebar-fg))]/38"
+              className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-[hsl(var(--sidebar-fg))]/70"
               style={{ paddingLeft: `${(level + 1) * 14 + 10}px` }}
             >
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -234,7 +234,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
             type="button"
             aria-label="刷新文件树"
             onClick={() => void loadTree()}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[hsl(var(--sidebar-fg))]/45 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
           </button>
@@ -242,33 +242,33 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
       </div>
 
       <div className="border-b border-[hsl(var(--sidebar-border))]/35 px-2.5 py-2">
-        <label className="flex h-7 items-center gap-2 rounded-md border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-muted))]/45 px-2 text-[hsl(var(--sidebar-fg))]/45 focus-within:border-[hsl(var(--sidebar-glow))]/45">
+        <label className="flex h-7 items-center gap-2 rounded-md border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-muted))]/45 px-2 text-[hsl(var(--sidebar-fg))]/70 focus-within:border-[hsl(var(--sidebar-glow))]/45">
           <Search className="h-3.5 w-3.5 shrink-0" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索文件..."
-            className="min-w-0 flex-1 bg-transparent text-ui-compact text-[hsl(var(--sidebar-fg))]/82 outline-none placeholder:text-[hsl(var(--sidebar-fg))]/38"
+            className="min-w-0 flex-1 bg-transparent text-ui-compact text-[hsl(var(--sidebar-fg))]/82 outline-none placeholder:text-[hsl(var(--sidebar-fg))]/70"
           />
         </label>
       </div>
 
-      <div className="flex items-center gap-2 px-3 py-2 text-ui-caption text-[hsl(var(--sidebar-fg))]/45">
+      <div className="flex items-center gap-2 px-3 py-2 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
         <span className="truncate font-medium">{project.name}</span>
-        <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/30">{nodes.length}</span>
+        <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/70">{nodes.length}</span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">
         {isLoading ? (
-          <div className="flex items-center justify-center gap-2 px-4 py-8 text-ui-caption text-[hsl(var(--sidebar-fg))]/42">
+          <div className="flex items-center justify-center gap-2 px-4 py-8 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
             正在加载文件树
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center gap-2 px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/48">
+          <div className="flex flex-col items-center gap-2 px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
             <FileWarning className="h-5 w-5 text-[hsl(var(--destructive))]/75" />
             <span>文件树加载失败</span>
-            <span className="break-all text-ui-micro text-[hsl(var(--sidebar-fg))]/35">{error}</span>
+            <span className="break-all text-ui-micro text-[hsl(var(--sidebar-fg))]/70">{error}</span>
             <button
               type="button"
               onClick={() => void loadTree()}
@@ -278,7 +278,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
             </button>
           </div>
         ) : visibleNodes.length === 0 ? (
-          <div className="px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/42">
+          <div className="px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
             {query ? '没有匹配的文件' : '项目中没有可显示的文件'}
           </div>
         ) : (
@@ -296,7 +296,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
         )}
       </div>
 
-      <div className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/32" title={project.path}>
+      <div className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/70" title={project.path}>
         {project.path}
       </div>
     </div>

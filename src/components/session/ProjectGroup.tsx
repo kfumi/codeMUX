@@ -91,8 +91,8 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-1 transition-colors duration-150',
-          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-base transition-colors duration-150',
+          'text-[hsl(var(--sidebar-fg))]/86 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
         )}
@@ -122,7 +122,7 @@ export function ProjectGroup({
             onClick={(event) => event.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate text-ui-title font-medium">{project.name}</span>
+          <span className="flex-1 truncate text-base font-medium">{project.name}</span>
         )}
         <div
           className={cn(
@@ -202,7 +202,7 @@ export function ProjectGroup({
         </div>
       </div>
       {expanded && (
-        <div className="ml-2.5 mt-1 space-y-0.5 border-l border-[hsl(var(--sidebar-border))]/45 pl-1.5">
+        <div className="ml-2.5 mt-1 space-y-1 border-l border-[hsl(var(--sidebar-border))]/45 pl-1.5">
           {visibleSessions.map((session) => (
             <SessionItem
               key={session.id}
@@ -222,7 +222,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`展开显示项目 ${project.name} 的更多对话`}
                   onClick={handleExpandSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronDown className="h-3 w-3" />
                   展开显示
@@ -233,7 +233,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`折叠显示项目 ${project.name} 的对话`}
                   onClick={handleCollapseSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronUp className="h-3 w-3" />
                   折叠显示

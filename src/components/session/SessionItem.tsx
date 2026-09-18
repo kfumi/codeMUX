@@ -84,7 +84,7 @@ function SessionStatusIcon({
         <AgentBrandIcon agent={agentDef} size="sm" />
       ) : (
         <span className={cn(
-          'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal',
+          'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-ui-micro font-semibold tracking-normal',
           isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
         )}>
           {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
@@ -190,8 +190,8 @@ export function SessionItem({
             <HoverCardTrigger asChild>
               <div
                 className={cn(
-                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-1 text-ui-title transition-colors duration-150 select-none [-webkit-touch-callout:none]',
-                  'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
+                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-0.5 text-base transition-colors duration-150 select-none [-webkit-touch-callout:none]',
+                  'cursor-pointer text-[hsl(var(--sidebar-fg))]/86',
                   'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
                   'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
                   isActive && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.105)]',
@@ -215,7 +215,7 @@ export function SessionItem({
                   />
                 ) : (
                   <>
-                    <span className={cn('flex-1 truncate transition-colors duration-200', isActive && 'font-medium')}>
+                    <span className="flex-1 truncate font-medium transition-colors duration-200">
                       {session.title || '未命名对话'}
                     </span>
                     {session.is_read_only && (
@@ -226,7 +226,7 @@ export function SessionItem({
                     <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-150 group-hover:w-12">
                       <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
                         {awaitsConfirmation ? (
-                          <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-[10px] font-medium leading-4 text-white">
+                          <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-ui-micro font-medium leading-4 text-white">
                             等待确认
                           </span>
                         ) : flowActive ? (
