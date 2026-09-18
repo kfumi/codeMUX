@@ -102,6 +102,8 @@ export class OpenCodeRuntime {
   private readonly idleStreamKind: { kind: 'thinking' | 'text' } = { kind: 'thinking' };
   private eventSequence = 0;
   private turnStartedAt = 0;
+  private turnFirstSdkEventLogged = false;
+  private turnFirstMessageEventLogged = false;
   private turnId = 0;
   private permissionCancellationEpoch = 0;
   private permissionClosing = false;
@@ -538,6 +540,7 @@ export class OpenCodeRuntime {
     }
 
     this.state = 'starting';
+    const startInternalStartedAt = Date.now();
     if (!this.client) {
       let resources: OpenCodeSdkReadyResources;
       try {
@@ -565,6 +568,7 @@ export class OpenCodeRuntime {
       }
       this.server = resources.server;
       this.client = resources.client;
+      writeLog('[opencode-task]', `[perf] opencode sdk.start (server boot + client) elapsed_ms=${Date.now() - startInternalStartedAt}`);
     }
 
     const client = this.client;
@@ -574,14 +578,18 @@ export class OpenCodeRuntime {
     }
 
     try {
+      const sessionCreateStartedAt = Date.now();
       const session = this.agentSessionId
         ? await client.restoreSession({ cwd: this.config.cwd, sessionId: this.agentSessionId })
         : await client.createSession({ cwd: this.config.cwd });
+      writeLog('[opencode-task]', `[perf] opencode session ${this.agentSessionId ? 'restored' : 'created'} elapsed_ms=${Date.now() - sessionCreateStartedAt}`);
       this.agentSessionId = session.id;
       this.state = 'started';
       // 恢复的会话可能已在底层生成过标题（新建会话为占位标题，被过滤）。
       this.emitNativeSessionTitle(readString((session as { title?: unknown })?.title));
+      const subscribeStartedAt = Date.now();
       await this.subscribeToEvents();
+      writeLog('[opencode-task]', `[perf] opencode event subscription established elapsed_ms=${Date.now() - subscribeStartedAt} startInternal_total_ms=${Date.now() - startInternalStartedAt}`);
       return this.mapping();
     } catch (error) {
       const requestedSessionId = this.config.agentSessionId;
@@ -751,6 +759,14 @@ export class OpenCodeRuntime {
     const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
     if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
       return;
+    }
+    if (!this.turnFirstSdkEventLogged && this.activeTask) {
+      this.turnFirstSdkEventLogged = true;
+      writeLog('[opencode-task]', `[perf] first sdk event after sendInput type=${type} elapsed_ms=${Date.now() - this.turnStartedAt}`);
+    }
+    if (!this.turnFirstMessageEventLogged && this.activeTask && type.toLowerCase().includes('message')) {
+      this.turnFirstMessageEventLogged = true;
+      writeLog('[opencode-task]', `[perf] first message event after sendInput type=${type} elapsed_ms=${Date.now() - this.turnStartedAt}`);
     }
     if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
       if (identity) {
@@ -1141,6 +1157,8 @@ export class OpenCodeRuntime {
     this.nextSection.kind = 'idle';
     this.idleStreamKind.kind = 'thinking';
     this.turnStartedAt = Date.now();
+    this.turnFirstSdkEventLogged = false;
+    this.turnFirstMessageEventLogged = false;
   }
 
   private rememberSeenEventId(identity: string): void {

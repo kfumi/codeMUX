@@ -455,6 +455,7 @@ function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
   async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, serverStartTimeoutMs = DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits }) {
+    const perfStartedAt = Date.now();
     const runtimeLoaded = loadRuntime(runtimeRef);
     const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
     const cliPath = executable?.executablePath ?? '(托管 Runtime CLI 路径未解析)';
@@ -465,6 +466,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     // 仅从 CodeMUX 托管 Runtime 动态加载 OpenCode SDK。
     const { createOpencodeServer } = await loadOpenCodeServerSdk(runtimeLoaded);
     const { createOpencodeClient } = await loadOpenCodeClientSdk(runtimeLoaded);
+    process.stderr.write(`[opencode-task] [perf] opencode sdk modules loaded elapsed_ms=${Date.now() - perfStartedAt}\n`);
 
     const existingConfig = await readNativeOpenCodeConfig();
     const serverConfig = buildOpenCodeServerConfig({
@@ -477,12 +479,14 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
       mcpServers,
       modelLimits,
     });
+    const serverBootStartedAt = Date.now();
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
       config: serverConfig,
       timeout: serverStartTimeoutMs,
     });
+    process.stderr.write(`[opencode-task] [perf] opencode serve booted elapsed_ms=${Date.now() - serverBootStartedAt}\n`);
     try {
       const client = createOpencodeClient({
         baseUrl: server.url,
@@ -526,6 +530,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
             throw new Error(`OpenCode session deletion failed${response.error ? `: ${formatSdkError(response.error)}` : ''}`);
           },
           async switchAgent({ sessionId, agent }: { sessionId: string; agent: string }) {
+            const switchAgentStartedAt = Date.now();
             process.stderr.write(`[opencode-task] switchAgent CALL sessionId=${sessionId} agent=${agent}\n`);
             try {
               const res = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/api/session/${encodeURIComponent(sessionId)}/agent`, {
@@ -539,7 +544,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 process.stderr.write(`[opencode-task] switchAgent FAILED sessionId=${sessionId} agent=${agent} status=${res.status} body=${text.slice(0, 500)}\n`);
                 return;
               }
-              process.stderr.write(`[opencode-task] switchAgent OK sessionId=${sessionId} agent=${agent}\n`);
+              process.stderr.write(`[opencode-task] switchAgent OK sessionId=${sessionId} agent=${agent} elapsed_ms=${Date.now() - switchAgentStartedAt}\n`);
             } catch (err) {
               process.stderr.write(`[opencode-task] switchAgent ERROR sessionId=${sessionId} agent=${agent} error=${err instanceof Error ? err.message : String(err)}\n`);
             }
@@ -554,6 +559,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 url: image.dataUrl,
               })),
             ];
+            const promptStartedAt = Date.now();
             process.stderr.write(`[opencode-task] SDK promptAsync CALL sessionId=${sessionId} model=${provider}/${model} agent=${agent ?? 'default'} prompt_len=${(inputPayload?.text ?? prompt).length} parts=${parts.length}\n`);
             try {
               const sdkResponse = await client.session.promptAsync({
@@ -587,7 +593,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               }
               throw new Error(`[opencode-task] SDK promptAsync failed: ${errMsg}${errStack ? `\n${errStack}` : ''}`);
             }
-            process.stderr.write(`[opencode-task] SDK promptAsync ACCEPTED sessionId=${sessionId}\n`);
+            process.stderr.write(`[opencode-task] SDK promptAsync ACCEPTED sessionId=${sessionId} elapsed_ms=${Date.now() - promptStartedAt}\n`);
           },
           async compactSession({ cwd: sessionCwd, sessionId, provider: providerId, model: modelId }) {
             const sessionApi = client.session as unknown as {

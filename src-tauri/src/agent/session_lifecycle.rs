@@ -669,6 +669,12 @@ async fn ensure_sidecar_for_session(
                     // SQLite（默认 journal 模式下每个事务两次 fsync），跑在 tokio
                     // worker 上会把该会话后续所有 delta 广播一起堵住 —— 表现就是
                     // "突发卡顿 + 随后脉冲式补发"。解析也只做一次。
+                    if let Some(elapsed_ms) =
+                        crate::agent::turn_perf::take_elapsed_ms(&session_id_clone)
+                    {
+                        log::info!(target: "perf", "[perf] first sidecar event reached daemon elapsed_ms={elapsed_ms} session_id={session_id_clone}");
+                    }
+                    let persist_started = std::time::Instant::now();
                     let broadcast_events = {
                         let state_for_persist = app_state.clone();
                         let raw_event = event.clone();
@@ -689,6 +695,10 @@ async fn ensure_sidecar_for_session(
                             Vec::new()
                         })
                     };
+                    let persist_elapsed_ms = persist_started.elapsed().as_millis();
+                    if persist_elapsed_ms >= 100 {
+                        log::warn!(target: "perf", "[perf] slow sidecar event persist blocked broadcast elapsed_ms={persist_elapsed_ms} session_id={session_id_clone}");
+                    }
                     crate::companion::handle_sidecar_event_for_companion(
                         &app_state,
                         &agent_state_task,
@@ -1651,6 +1661,7 @@ pub async fn start_agent_session_core(
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Starting agent session wrapper");
+        let perf_started = std::time::Instant::now();
 
         let lifecycle_lock = session_lifecycle_lock(&agent_state, &session_id).await;
         let _lifecycle_guard = lifecycle_lock.lock().await;
@@ -1680,6 +1691,7 @@ pub async fn start_agent_session_core(
             runtime_config.timeouts,
             runtime_config.model_limits,
         )?;
+        log::info!(target: "perf", "[perf] cold prep (agent kind/config/skills/ensure cmd) elapsed_ms={} session_id={}", perf_started.elapsed().as_millis(), session_id);
 
         ensure_sidecar_for_session(
             state,
@@ -1691,6 +1703,7 @@ pub async fn start_agent_session_core(
             replace_event_channel,
         )
         .await?;
+        log::info!(target: "perf", "[perf] ensure_sidecar done (incl. spawn+ready when cold) elapsed_ms={} session_id={}", perf_started.elapsed().as_millis(), session_id);
 
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
@@ -1699,7 +1712,9 @@ pub async fn start_agent_session_core(
         if let Some(payload) = input_payload {
             input_cmd["inputPayload"] = payload;
         }
-        send_command_to_session(&agent_state, &session_id, input_cmd).await
+        let send_result = send_command_to_session(&agent_state, &session_id, input_cmd).await;
+        log::info!(target: "perf", "[perf] cold path commands dispatched total_elapsed_ms={} session_id={}", perf_started.elapsed().as_millis(), session_id);
+        send_result
     })
     .await
 }
@@ -1720,6 +1735,7 @@ pub async fn shutdown_agent_for_companion(
             let mut sidecars = agent_state.sidecars.lock().await;
             sidecars.remove(session_id)
         };
+        crate::agent::turn_perf::clear(session_id);
         if let Some(mut handle) = sidecar {
             handle.shutdown().await;
         } else {

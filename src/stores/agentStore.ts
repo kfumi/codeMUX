@@ -320,6 +320,7 @@ function getSessionHistoryEpoch(sessionId: string): number {
 }
 
 const sessionsWithLiveTextStream = new Set<string>();
+const firstStreamingDeltaLoggedSessions = new Set<string>();
 /** Per-session live stream phase. OpenCode often emits reasoning as text_delta;
  * keep content in the reasoning panel until we explicitly enter the answer phase. */
 const sessionStreamPhase = new Map<string, 'thinking' | 'answer'>();
@@ -2077,6 +2078,18 @@ function createSessionEventHandler(
           }
         } else if (eventType === 'content_block_delta') {
           const delta = streamEvent.delta as Record<string, unknown> | undefined;
+          if (
+            !firstStreamingDeltaLoggedSessions.has(sessionId)
+            && (delta?.type === 'thinking_delta' || delta?.type === 'text_delta')
+          ) {
+            firstStreamingDeltaLoggedSessions.add(sessionId);
+            const queryStartedAt = get().queryStartTime[sessionId];
+            logger.info('MODEL_TRACE first streaming delta', {
+              sessionId,
+              kind: delta?.type === 'thinking_delta' ? 'thinking' : 'text',
+              elapsedMs: queryStartedAt ? Date.now() - queryStartedAt : null,
+            });
+          }
           if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
             const toolId = findToolId(streamEvent.index as number | undefined);
             if (toolId) {
@@ -2764,6 +2777,7 @@ function createSessionEventHandler(
     }
 
     clearPendingStreaming(sessionId);
+    firstStreamingDeltaLoggedSessions.delete(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
     resetSessionStreamPhase(sessionId);

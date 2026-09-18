@@ -110,6 +110,15 @@ pub(crate) async fn send_companion_message_owned(
         let sidecars = agent_state.sidecars.lock().await;
         sidecars.contains_key(session_id)
     };
+    let perf_started = std::time::Instant::now();
+    crate::agent::turn_perf::mark_send(session_id);
+    log::info!(
+        target: "perf",
+        "[perf] send received session_id={} mode={} prompt_len={}",
+        session_id,
+        if sidecar_running { "warm" } else { "cold" },
+        prompt.len(),
+    );
 
     if sidecar_running {
         // 会话未收尾即排队：父回合活跃之外，后台子智能体仍在运行、或刚全部
@@ -137,10 +146,13 @@ pub(crate) async fn send_companion_message_owned(
                 if let Some(request_id) = request_id {
                     cmd["requestId"] = serde_json::Value::String(request_id.to_string());
                 }
-                return send_command_to_session(&agent_state, session_id, cmd).await;
+                let result = send_command_to_session(&agent_state, session_id, cmd).await;
+                log::info!(target: "perf", "[perf] steer dispatched elapsed_ms={} ok={}", perf_started.elapsed().as_millis(), result.is_ok());
+                return result;
             }
             ActiveSidecarSendDecision::Enqueue => {
                 companion_state.enqueue_message(session_id, prompt.to_string(), input_payload);
+                log::info!(target: "perf", "[perf] send ENQUEUED (turn busy) session_id={session_id} — dispatched when current turn finishes");
                 return Ok(());
             }
             ActiveSidecarSendDecision::StartTurn => {
@@ -154,6 +166,7 @@ pub(crate) async fn send_companion_message_owned(
                 if result.is_err() {
                     let _ = companion_state.finish_turn(session_id);
                 }
+                log::info!(target: "perf", "[perf] warm send dispatched elapsed_ms={} ok={}", perf_started.elapsed().as_millis(), result.is_ok());
                 return result;
             }
         }
@@ -183,6 +196,7 @@ pub(crate) async fn send_companion_message_owned(
         false,
     )
     .await;
+    log::info!(target: "perf", "[perf] cold start+send finished elapsed_ms={} ok={}", perf_started.elapsed().as_millis(), result.is_ok());
     if result.is_err() {
         let _ = companion_state.finish_turn(session_id);
     }

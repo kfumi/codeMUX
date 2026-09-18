@@ -343,6 +343,8 @@ export class SessionRuntime {
   private claudeSdk: ClaudeSdkModule | null = null;
   /** 托管 Runtime 加载结果，用于解析 SDK 路径。 */
   private runtimeLoaded: RuntimeLoadResult | null = null;
+  /** [perf] 最近一次 query() 消费起点：首条 SDK 消息耗时的基准。 */
+  private lastQueryStartedAt = 0;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
@@ -363,11 +365,13 @@ export class SessionRuntime {
       ...(normalized.agentSessionId ? { providerSessionId: normalized.agentSessionId } : {}),
     });
 
+    const ensureStartedAt = Date.now();
     await this.resetForReconfigure();
 
     // 生产与开发环境都必须从 CodeMUX 托管 Runtime 路径动态加载 Claude SDK。
     this.runtimeLoaded = this.loadRuntimeIfNeeded();
     this.claudeSdk = await loadClaudeSdk(this.runtimeLoaded);
+    process.stderr.write(`[sidecar] [perf] claude ensure (runtime load + sdk modules) elapsed_ms=${Date.now() - ensureStartedAt}\n`);
 
     emit({
       type: 'mcp_status_update',
@@ -768,6 +772,7 @@ export class SessionRuntime {
       });
     };
 
+    const warmupStartedAt = Date.now();
     this.warmPromise = warmAttempt('Calling startup() to pre-warm MCP connections in the background...')
       .then((warm: WarmQuery) => {
         if (configGeneration !== this.activeConfigGeneration) {
@@ -780,7 +785,7 @@ export class SessionRuntime {
         }
         this.warmQuery = warm;
         emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-        process.stderr.write('[sidecar] Background startup() complete\n');
+        process.stderr.write(`[sidecar] [perf] claude background startup() (MCP init) complete elapsed_ms=${Date.now() - warmupStartedAt}\n`);
         return warm;
       })
       .catch(async (startupErr: unknown) => {
@@ -813,14 +818,14 @@ export class SessionRuntime {
             }
             this.warmQuery = warm;
             emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-            process.stderr.write('[sidecar] Background startup() recovered after clearing stale resume mapping\n');
+            process.stderr.write(`[sidecar] [perf] claude background startup() recovered after clearing stale resume mapping elapsed_ms=${Date.now() - warmupStartedAt}\n`);
             return warm;
           } catch (retryErr) {
             startupErr = retryErr;
           }
         }
 
-        process.stderr.write(`[sidecar] Background startup() failed: ${startupErr}\n`);
+        process.stderr.write(`[sidecar] [perf] claude background startup() failed elapsed_ms=${Date.now() - warmupStartedAt}: ${startupErr}\n`);
         if (configGeneration === this.activeConfigGeneration && this.providerMode.supportsDeferredToolSearch) {
           emit({ type: 'mcp_status_update', servers: {}, status: 'deferred' });
         }
@@ -833,6 +838,7 @@ export class SessionRuntime {
       throw new Error('Missing runtime config');
     }
 
+    const warmWaitStartedAt = Date.now();
     const warm = this.warmPromise
       ? await withTimeout(this.warmPromise, WARM_QUERY_WAIT_WINDOW_MS)
       : null;
@@ -845,13 +851,13 @@ export class SessionRuntime {
     }
 
     if (warm) {
-      process.stderr.write('[sidecar] Starting persistent query from pre-warmed session\n');
+      process.stderr.write(`[sidecar] [perf] claude query from pre-warmed session (waited ${Date.now() - warmWaitStartedAt}ms for warmup)\n`);
       this.warmQuery = null;
       this.promptStream = new ClaudePromptStream(includeImages);
       this.promptStream.pushInitial(prompt, inputPayload);
       this.queryHandle = warm.query(this.promptStream.stream);
     } else {
-      process.stderr.write('[sidecar] Starting persistent query directly via query()\n');
+      process.stderr.write(`[sidecar] [perf] claude warmup NOT ready after ${Date.now() - warmWaitStartedAt}ms — paying cold query() init (CLI spawn + MCP connect)\n`);
       emit({
         type: 'mcp_status_update',
         servers: {},
@@ -878,6 +884,7 @@ export class SessionRuntime {
       emit(buildClaudeCompactBoundaryEvent(this.config.sessionId, 'compacting', { trigger: 'manual' }));
     }
 
+    this.lastQueryStartedAt = Date.now();
     void this.consumeQuery(
       this.queryHandle,
       this.config.sessionId,
@@ -1314,6 +1321,9 @@ export class SessionRuntime {
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
+        if (msgCount === 1 && prompt) {
+          process.stderr.write(`[sidecar] [perf] claude first sdk message after sendInput type=${String(msg.type)} subtype=${String(msg.subtype || 'none')} elapsed_ms=${Date.now() - this.lastQueryStartedAt}\n`);
+        }
         const messageUuid = typeof msg.uuid === 'string' ? msg.uuid : undefined;
         if (messageUuid && appSessionId) {
           setLogCtx({ sessionId: appSessionId, messageId: messageUuid });

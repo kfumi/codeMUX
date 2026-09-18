@@ -20,6 +20,7 @@ pub mod sidecar_events;
 pub mod subagent_persist;
 pub(crate) mod timeline_persist;
 pub(crate) mod turn_artifact_summary;
+pub(crate) mod turn_perf;
 
 use crate::paths::PathRoots;
 use log::{debug, info, warn};
@@ -180,6 +181,7 @@ pub async fn spawn_sidecar(
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
     info!(target: "agent", "Using node runtime {}", node_path.display());
 
+    let spawn_started = std::time::Instant::now();
     let mut command = Command::new(&node_path);
     configure_sidecar_command(
         command
@@ -248,7 +250,13 @@ pub async fn spawn_sidecar(
                 debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
                 continue;
             }
-            if line.contains("[codex][compact") || line.contains("[opencode-task]") {
+            if line.contains("[codex][compact")
+                || line.contains("[opencode-task]")
+                || line.contains("[perf]")
+                || line.contains("[pi-task]")
+                || line.contains("[codex-app-server]")
+                || line.contains("[sidecar]")
+            {
                 info!(target: "sidecar_stderr", "{}", line);
             } else if line.to_ascii_lowercase().contains("error") {
                 warn!(target: "sidecar_stderr", "{}", line);
@@ -286,7 +294,10 @@ pub async fn spawn_sidecar(
 
     // Wait for sidecar to signal ready
     match ready_rx.await {
-        Ok(Ok(())) => info!(target: "agent", "Sidecar reported ready"),
+        Ok(Ok(())) => {
+            info!(target: "agent", "Sidecar reported ready");
+            info!(target: "perf", "[perf] sidecar spawn->ready elapsed_ms={}", spawn_started.elapsed().as_millis());
+        }
         Ok(Err(e)) => return Err(e),
         Err(_) => {
             let stderr_summary = {

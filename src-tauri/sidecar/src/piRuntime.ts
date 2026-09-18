@@ -158,6 +158,7 @@ export class PiRuntime {
   private turnOpen = false;
   /** 当前 turn 开始时刻（prompt/compact 发起处），用于 turn_finished 的 duration_ms。 */
   private turnStartedAt: number | undefined;
+  private turnFirstEventLogged = false;
   private agentSessionFile: string | undefined;
   private piSessionId: string | undefined;
   private stopping = false;
@@ -259,6 +260,7 @@ export class PiRuntime {
     this.clearFinishCheck();
     this.turnOpen = true;
     this.turnStartedAt = Date.now();
+    this.turnFirstEventLogged = false;
     this.usageBaseline = await this.readUsageSnapshot(transport);
     const turn = new Promise<void>((resolve, reject) => {
       this.pendingTurn = { resolve, reject };
@@ -266,11 +268,13 @@ export class PiRuntime {
 
     const images = mapPiImages(payload);
     try {
+      const promptRequestStartedAt = Date.now();
       await transport.request({
         type: 'prompt',
         message: payload.text,
         ...(images.length > 0 ? { images } : {}),
       });
+      writeLog('[pi-task]', `[perf] pi prompt accepted elapsed_ms=${Date.now() - promptRequestStartedAt}`);
     } catch (error) {
       this.pendingTurn = undefined;
       const messageText = error instanceof Error ? error.message : String(error);
@@ -486,6 +490,7 @@ export class PiRuntime {
 
   private async start(): Promise<PiSessionMapping> {
     this.state = 'starting';
+    const startStartedAt = Date.now();
     // resume 路径取最新已知会话文件（崩溃自动恢复时 config 里的还是旧值）。
     const spawnConfig: PiSessionConfig = {
       ...this.config,
@@ -513,6 +518,7 @@ export class PiRuntime {
       : createDefaultPiTransport(spawnConfig, extensionFile?.path, mcpConfigFile?.path);
     this.transport = transport;
     transport.onMessage((message) => this.handlePiEvent(message as PiRuntimeEvent));
+    writeLog('[pi-task]', `[perf] pi process spawned elapsed_ms=${Date.now() - startStartedAt}`);
     void transport.waitForExit().then((info) => {
       this.handleProcessExit(info.code, info.signal);
     });
@@ -532,6 +538,7 @@ export class PiRuntime {
       this.mcpConfigFile = undefined;
       throw error;
     }
+    writeLog('[pi-task]', `[perf] pi start complete (spawn+handshake+session identity) elapsed_ms=${Date.now() - startStartedAt}`);
     this.ctx.agentSessionId = this.agentSessionFile;
     this.state = 'started';
     writeLog('[pi-task]', `ensure STARTED session=${this.currentNativeSessionId()} approvalMode=${spawnConfig.approvalMode ?? 'confirm_before_edit'}`);
@@ -591,6 +598,10 @@ export class PiRuntime {
   }
 
   private handlePiEvent(event: PiRuntimeEvent): void {
+    if (this.turnOpen && this.turnStartedAt && !this.turnFirstEventLogged) {
+      this.turnFirstEventLogged = true;
+      writeLog('[pi-task]', `[perf] pi first event after sendInput type=${event.type} elapsed_ms=${Date.now() - this.turnStartedAt}`);
+    }
     if (event.type === 'session_info_changed') {
       // pi 的会话名由用户/扩展设置（`set_session_name`、`pi.setSessionName()`），
       // 变化时以 session_info_changed 推送；清空（name 缺失）不投影。

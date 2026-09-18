@@ -160,6 +160,8 @@ type CodexSessionBootstrap = {
 type ActiveTurnState = {
   sessionId: string;
   startedAt: number;
+  /** [perf] 首个通知已记录（每回合一次）。 */
+  firstNotificationLogged?: boolean;
   turnId: string | null;
   normalizer: CodexTurnEventNormalizer;
   usage: CodexTurnUsage | null;
@@ -266,6 +268,7 @@ export class CodexAppServerRuntime {
       return;
     }
 
+    const ensureStartedAt = Date.now();
     await this.teardownTransport();
 
     // Issue 09: providers flagged codex_needs_proxy (or non-official hosts)
@@ -335,6 +338,7 @@ export class CodexAppServerRuntime {
       },
     });
     this.transport = transport;
+    process.stderr.write(`[codex-app-server] [perf] codex app-server spawned+initialized elapsed_ms=${Date.now() - ensureStartedAt}\n`);
     this.approvalBridge = new CodexAppServerApprovalBridge({
       emitPermissionRequest: (projection) => {
         this.emitEvent({
@@ -365,6 +369,7 @@ export class CodexAppServerRuntime {
 
     const result = await this.startOrResumeThread(requestedConfig, threadParams);
     this.threadId = result.threadId;
+    writeLog('[codex-app-server]', `[perf] codex thread ensured (start/resume) elapsed_ms=${Date.now() - ensureStartedAt}`);
 
     // Issue 07: resolve the collaboration mode presets once per app-server
     // connection so plan/default turns can pass explicit collaborationMode.
@@ -389,6 +394,7 @@ export class CodexAppServerRuntime {
     process.stderr.write(
       `[codex-app-server] Session ensured: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${result.threadId} resumed=${result.resumed} rebuilt=${result.rebuilt ? 'true' : 'false'}\n`,
     );
+    writeLog('[codex-app-server]', `[perf] codex ensure total elapsed_ms=${Date.now() - ensureStartedAt}`);
     this.emitEvent({
       type: 'agent_session_mapping',
       app_session_id: requestedConfig.sessionId ?? '',
@@ -975,6 +981,10 @@ export class CodexAppServerRuntime {
       return;
     }
 
+    if (turn && !turn.firstNotificationLogged) {
+      turn.firstNotificationLogged = true;
+      writeLog('[codex-app-server]', `[perf] codex first notification after sendInput method=${method} elapsed_ms=${Date.now() - turn.startedAt}`);
+    }
     switch (method) {
       case 'turn/started': {
         const turnId = readStringRecordField(params.turn, 'id') ?? readString(params.turnId);
