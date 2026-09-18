@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { SidecarCommand } from './types.js';
-import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarCommandDispatcher } from './index.js';
+import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarCommandDispatcher, waitForWarmup } from './index.js';
 // 静态导入:在 it() 内 await import 会把首次模块图加载计入该用例的超时预算。
 import { SteerUnavailableError } from './steer.js';
 
@@ -722,5 +722,47 @@ describe('sidecar command dispatcher', () => {
       error: expect.stringContaining('no active Claude turn'),
     });
     expect(claude.sendInput).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The warmup wait used to collapse "warmup failed" and "warmup still running"
+ * into the same `null`, which made a failing warmup look like a slow one in the
+ * daemon log. These tests pin the three distinct outcomes.
+ */
+describe('waitForWarmup', () => {
+  const fakeWarmSession = () => ({ query: vi.fn(), close: vi.fn() }) as never;
+
+  it('returns the warmed session when the warmup settles', async () => {
+    const warm = fakeWarmSession();
+    await expect(waitForWarmup(Promise.resolve(warm), 1_000)).resolves.toEqual({
+      kind: 'ready',
+      warm,
+    });
+  });
+
+  it('reports a settled warmup that produced no reusable session', async () => {
+    await expect(waitForWarmup(Promise.resolve(null), 1_000)).resolves.toEqual({
+      kind: 'settled_empty',
+    });
+  });
+
+  it('reports a rejected warmup as settled rather than timing out', async () => {
+    await expect(
+      waitForWarmup(Promise.reject(new Error('startup() failed')), 1_000),
+    ).resolves.toEqual({ kind: 'settled_empty' });
+  });
+
+  it('reports a timeout only when the warmup is still pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = new Promise<never>(() => {});
+      const result = waitForWarmup(pending, 2_000);
+      await vi.advanceTimersByTimeAsync(1_999);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toEqual({ kind: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

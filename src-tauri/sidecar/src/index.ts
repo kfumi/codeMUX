@@ -83,7 +83,17 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const WARM_START_TIMEOUT_MS = 30_000;
-const WARM_QUERY_WAIT_WINDOW_MS = 500;
+/**
+ * How long a prompt waits for the background `startup()` warmup before falling
+ * back to a cold `query()`. Measured on this machine: the warmup produces a
+ * reusable session in ~2.4s, while a cold `query()` needs 3.7–4.3s (CLI spawn +
+ * init), so adopting the warm session is worth roughly 1.5–2s. The window is
+ * that measured budget plus margin for machine load. A warmup that already
+ * settled (with or without a reusable session) resolves the wait immediately,
+ * and a failed one rejects fast (~30ms), so the wait only costs extra when the
+ * warmup is genuinely slow.
+ */
+const WARM_QUERY_WAIT_WINDOW_MS = 4_000;
 const MESSAGE_TIMEOUT_MS = 300_000;
 const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 /** Silence window after which a pending continuation turn is considered ended. */
@@ -270,18 +280,34 @@ function isQueryIdleTimeout(errorText: string): boolean {
   return errorText.includes('Query timed out: no message received');
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+/** Outcome of waiting for the background warmup session before prompting. */
+type WarmWaitResult =
+  | { kind: 'ready'; warm: WarmQuery }
+  | { kind: 'settled_empty' }
+  | { kind: 'timeout' }
+  | { kind: 'absent' };
+
+/**
+ * Await the background warmup for at most `timeoutMs`, keeping "the warmup
+ * settled without a reusable session" distinct from "the warmup is still
+ * pending". The previous helper collapsed both into `null`, which made a failed
+ * warmup and a slow one indistinguishable in the logs.
+ */
+export function waitForWarmup(
+  promise: Promise<WarmQuery | null>,
+  timeoutMs: number,
+): Promise<WarmWaitResult> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), timeoutMs);
+    const timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs);
     if (timer.unref) timer.unref();
     promise
-      .then((value) => {
+      .then((warm) => {
         clearTimeout(timer);
-        resolve(value);
+        resolve(warm ? { kind: 'ready', warm } : { kind: 'settled_empty' });
       })
       .catch(() => {
         clearTimeout(timer);
-        resolve(null);
+        resolve({ kind: 'settled_empty' });
       });
   });
 }
@@ -755,6 +781,41 @@ export class SessionRuntime {
     return true;
   }
 
+  /**
+   * Adopt a completed background `startup()` session so the next prompt can
+   * reuse it. When the session is no longer usable — the config changed while
+   * the warmup was in flight, or an interactive query already took over — close
+   * it and log why: a silently discarded warmup is indistinguishable from a
+   * hung one when reading the daemon log.
+   */
+  private adoptWarmQuery(
+    warm: WarmQuery,
+    configGeneration: number,
+    warmupStartedAt: number,
+    via: string,
+  ): WarmQuery | null {
+    if (configGeneration !== this.activeConfigGeneration) {
+      process.stderr.write(
+        `[sidecar] [perf] claude warmup result discarded (${via}): config generation changed ${configGeneration} -> ${this.activeConfigGeneration}; closing warmed session\n`,
+      );
+      warm.close();
+      return null;
+    }
+    if (this.queryHandle) {
+      process.stderr.write(
+        `[sidecar] [perf] claude warmup result discarded (${via}): an interactive query already started; closing warmed session\n`,
+      );
+      warm.close();
+      return null;
+    }
+    this.warmQuery = warm;
+    emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
+    process.stderr.write(
+      `[sidecar] [perf] claude background startup() complete elapsed_ms=${Date.now() - warmupStartedAt} (${via})\n`,
+    );
+    return warm;
+  }
+
   private startWarmup(configGeneration: number): void {
     if (!this.config) return;
     if (!this.claudeSdk) {
@@ -773,21 +834,11 @@ export class SessionRuntime {
     };
 
     const warmupStartedAt = Date.now();
-    this.warmPromise = warmAttempt('Calling startup() to pre-warm MCP connections in the background...')
-      .then((warm: WarmQuery) => {
-        if (configGeneration !== this.activeConfigGeneration) {
-          warm.close();
-          return null;
-        }
-        if (this.queryHandle) {
-          warm.close();
-          return null;
-        }
-        this.warmQuery = warm;
-        emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-        process.stderr.write(`[sidecar] [perf] claude background startup() (MCP init) complete elapsed_ms=${Date.now() - warmupStartedAt}\n`);
-        return warm;
-      })
+    this.warmPromise = warmAttempt(
+      'Calling startup() to pre-warm the Claude session (CLI spawn + MCP connect) in the background...',
+    ).then((warm: WarmQuery) =>
+      this.adoptWarmQuery(warm, configGeneration, warmupStartedAt, 'initial'),
+    )
       .catch(async (startupErr: unknown) => {
         if (this.config?.resumeOnly && this.config.agentSessionId) {
           process.stderr.write(`[sidecar] External session restore failed: ${startupErr}\n`);
@@ -808,18 +859,12 @@ export class SessionRuntime {
           process.stderr.write('[sidecar] Retrying background startup() without stale resume mapping...\n');
           try {
             const warm = await warmAttempt('Retrying startup() after clearing stale resume mapping...');
-            if (configGeneration !== this.activeConfigGeneration) {
-              warm.close();
-              return null;
-            }
-            if (this.queryHandle) {
-              warm.close();
-              return null;
-            }
-            this.warmQuery = warm;
-            emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
-            process.stderr.write(`[sidecar] [perf] claude background startup() recovered after clearing stale resume mapping elapsed_ms=${Date.now() - warmupStartedAt}\n`);
-            return warm;
+            return this.adoptWarmQuery(
+              warm,
+              configGeneration,
+              warmupStartedAt,
+              'recovered after clearing stale resume mapping',
+            );
           } catch (retryErr) {
             startupErr = retryErr;
           }
@@ -839,9 +884,10 @@ export class SessionRuntime {
     }
 
     const warmWaitStartedAt = Date.now();
-    const warm = this.warmPromise
-      ? await withTimeout(this.warmPromise, WARM_QUERY_WAIT_WINDOW_MS)
-      : null;
+    const warmOutcome: WarmWaitResult = this.warmPromise
+      ? await waitForWarmup(this.warmPromise, WARM_QUERY_WAIT_WINDOW_MS)
+      : { kind: 'absent' };
+    const warm = warmOutcome.kind === 'ready' ? warmOutcome.warm : null;
 
     if (queryGeneration !== this.generation || configGeneration !== this.activeConfigGeneration) {
       if (warm) {
@@ -857,7 +903,14 @@ export class SessionRuntime {
       this.promptStream.pushInitial(prompt, inputPayload);
       this.queryHandle = warm.query(this.promptStream.stream);
     } else {
-      process.stderr.write(`[sidecar] [perf] claude warmup NOT ready after ${Date.now() - warmWaitStartedAt}ms — paying cold query() init (CLI spawn + MCP connect)\n`);
+      const warmupWaitMs = Date.now() - warmWaitStartedAt;
+      let warmupReason = `produced no reusable session (settled after ${warmupWaitMs}ms)`;
+      if (warmOutcome.kind === 'timeout') {
+        warmupReason = `still pending after ${warmupWaitMs}ms (window=${WARM_QUERY_WAIT_WINDOW_MS}ms)`;
+      } else if (warmOutcome.kind === 'absent') {
+        warmupReason = 'was never started for this session';
+      }
+      process.stderr.write(`[sidecar] [perf] claude warmup unusable — ${warmupReason}; paying cold query() init (CLI spawn + MCP connect)\n`);
       emit({
         type: 'mcp_status_update',
         servers: {},
