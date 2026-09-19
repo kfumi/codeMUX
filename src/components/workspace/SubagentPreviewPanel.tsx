@@ -14,15 +14,17 @@ import {
   convertAgentEventsToAssistantMessages,
   type CodeMuxAssistantMessage,
 } from '@/components/agent/assistant-ui/convertAgentEvents';
-import { RunningElapsedTimer } from '@/components/agent/assistant-ui/RunningElapsed';
+import { RunningElapsedTimer, formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
 import { TooltipHint } from '@/components/ui/tooltip';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
+import { subagentTabTitle, useSubagentStore, type SubagentStatus } from '@/stores/subagentStore';
 import { EMPTY_ACTIVITY_RUNS, buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
 import { buildConversationTurns } from '@/lib/conversationTurns';
+import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
+import { cn } from '@/lib/utils';
 
 interface SubagentPreviewPanelProps {
   sessionId: string;
@@ -30,6 +32,14 @@ interface SubagentPreviewPanelProps {
 }
 
 const EMPTY_PARENT_EVENTS: AgentMessage[] = [];
+
+/** 表头状态胶囊的配色：与节点卡的状态点同一套语义色（completed→success 等）。 */
+const SUBAGENT_STATUS_TONE: Record<SubagentStatus, string> = {
+  running: 'bg-primary/10 text-primary',
+  completed: 'bg-success/10 text-success',
+  failed: 'bg-destructive/10 text-destructive',
+  canceled: 'bg-warning/10 text-warning',
+};
 
 /**
  * Read-only real-time preview of one subagent's timeline. There is no
@@ -48,6 +58,22 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
 
   const isRunning = descriptor?.status === 'running';
   const eventCount = rawEvents?.length ?? 0;
+
+  // 表头第一行取智能体名（`title`，如 `explore`），退回任务描述：参考实现里第一行是
+  // 智能体名、第二行才是模型，任务文本留在正文里，不占表头。
+  const headerName = useMemo(
+    () => descriptor?.title?.trim() || subagentTabTitle(descriptor),
+    [descriptor],
+  );
+  // 模型名来自时间线事件（sidecar 在 `assistant_message` 上补的 `modelID`）；拿不到就
+  // 退回 provider（`opencode` / `claude`），与节点卡同一个兜底规则。
+  const headerModel = useMemo(() => {
+    const fromEvents = subagentModelFromEvents(rawEvents ?? []);
+    return fromEvents
+      ? { value: fromEvents, source: 'event' as const }
+      : { value: descriptor?.provider ?? '', source: 'provider' as const };
+  }, [rawEvents, descriptor?.provider]);
+  const statusLabel = subagentStatusLabel(descriptor?.status ?? 'running');
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
@@ -146,24 +172,73 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
     followKey: `${eventCount}:${isRunning ? 'running' : 'idle'}`,
   });
 
-  // 计时与主线程对齐：从首条事件时间起算，重开标签页不清零。
-  const runningStartTs = useMemo(() => timestamps.find((ts) => ts > 0), [timestamps]);
+  // 计时与主线程对齐：从首条事件起算（重开标签页不清零）。运行中的时长由表头计时器
+  // 每秒推进；已结束的直接取首末事件之差，不挂计时器（终态不会再变）。
+  const timelineBounds = useMemo(() => {
+    let first: number | undefined;
+    let last: number | undefined;
+    for (const ts of timestamps) {
+      if (ts <= 0) continue;
+      if (first === undefined) first = ts;
+      last = ts;
+    }
+    return { first, last };
+  }, [timestamps]);
+  const finishedDuration = timelineBounds.first !== undefined && timelineBounds.last !== undefined
+    ? formatElapsed(Math.max(0, timelineBounds.last - timelineBounds.first))
+    : '';
 
   const isEmpty = displayMessages.length === 0;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col text-ui-body">
+      {/* 表头对齐参考实现：第一行智能体名、第二行模型，右侧状态胶囊 + 时长。时长原先
+          另画在时间线底部，与这里的胶囊重复，已合并到表头这一处。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/25 px-4 py-2.5">
         <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-        <span className="truncate text-ui-meta text-muted-foreground">
-          {subagentTabTitle(descriptor)}
+        <div className="min-w-0 flex-1">
+          <div
+            data-slot="subagent-panel-title"
+            className="truncate text-ui-compact font-semibold text-foreground"
+          >
+            {headerName}
+          </div>
+          {headerModel.value ? (
+            <div
+              data-slot="subagent-panel-model"
+              data-model-source={headerModel.source}
+              className="truncate font-mono text-ui-micro text-muted-foreground"
+              title={headerModel.value}
+            >
+              {headerModel.value}
+            </div>
+          ) : null}
+        </div>
+        <span
+          data-slot="subagent-panel-status"
+          className={cn(
+            'shrink-0 rounded-sm px-1.5 py-0.5 text-ui-micro font-medium',
+            SUBAGENT_STATUS_TONE[descriptor?.status ?? 'running'],
+          )}
+        >
+          {statusLabel}
+        </span>
+        <span
+          data-slot="subagent-panel-duration"
+          className="shrink-0 font-mono text-ui-micro text-muted-foreground"
+        >
+          {isRunning && timelineBounds.first !== undefined ? (
+            <RunningElapsedTimer label="" startTime={timelineBounds.first} active={false} />
+          ) : (
+            finishedDuration
+          )}
         </span>
       </div>
 
       <div
         ref={viewportRef}
         data-testid="subagent-viewport"
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        className="min-h-0 flex-1 overflow-y-auto px-4 pt-3"
       >
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
@@ -180,7 +255,11 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
             )}
           </div>
         ) : (
-          <div className="space-y-2">
+          /* 底部留白放在内容列表上（而不是滚动容器上）：空状态是 `h-full` 居中的，
+             滚动容器带不对称内边距会把它顶偏。留白取 56px（pb-14）是为了让开浮起的
+             「回到底部」按钮：它 `bottom-4` + `h-8`，占住离底 16–48px 那条带，
+             留白比它小时最后一行会被按钮压住。 */
+          <div className="space-y-2 pb-14">
             {displayMessages.map((message, messageIndex) => {
               const collapseInfo = compactAiOutput
                 ? getCollapseInfoForSourceIndices(
@@ -232,12 +311,6 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                 />
               );
             })}
-            {isRunning ? (
-              <div className="flex items-center gap-2 pl-1 text-ui-meta text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <RunningElapsedTimer label="运行中" startTime={runningStartTs} />
-              </div>
-            ) : null}
           </div>
         )}
       </div>

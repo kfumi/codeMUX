@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest';
 import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
+import { buildActivityRuns } from '../../../lib/activityRuns';
+import { buildConversationTurns } from '../../../lib/conversationTurns';
+
+/**
+ * 这些事件在渲染侧被分成几段（处理段）——「相邻工具仍属同一个工具组」这条契约现在由
+ * 分段保证：转换器不再把相邻工具卡合并进同一条消息，而是各自一行。
+ */
+function activityRunCount(events: AgentMessage[]): number {
+  const timestamps = events.map((_, index) => (index + 1) * 1000);
+  const turns = buildConversationTurns(events, { isRunning: true, timestamps });
+  return buildActivityRuns(events, turns, timestamps, { isRunning: true }).runs.length;
+}
+
 describe('convertAgentEventsToAssistantMessages', () => {
   it('merges repeated tool_started projections into one card with refreshed args', () => {
     // OpenCode tool parts arrive with empty input at `pending`; the real
@@ -743,7 +756,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
-  it('coalesces consecutive tool-only assistant events into one message for tool grouping', () => {
+  it('keeps consecutive tool-only events as their own message rows', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -815,25 +828,32 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     const messages = convertAgentEventsToAssistantMessages(events);
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content).toEqual([
-      {
-        type: 'tool-call',
-        toolCallId: 'tool-1',
-        toolName: 'Read',
-        args: { file_path: 'src/App.tsx' },
-        result: 'app',
-        isError: false,
-      },
-      {
-        type: 'tool-call',
-        toolCallId: 'tool-2',
-        toolName: 'Read',
-        args: { file_path: 'src/main.tsx' },
-        result: 'main',
-        isError: false,
-      },
+    // 相邻工具各自一行：一个步骤一个 `data-message-row`，不再合并进上一条消息。
+    expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.content)).toEqual([
+      [
+        {
+          type: 'tool-call',
+          toolCallId: 'tool-1',
+          toolName: 'Read',
+          args: { file_path: 'src/App.tsx' },
+          result: 'app',
+          isError: false,
+        },
+      ],
+      [
+        {
+          type: 'tool-call',
+          toolCallId: 'tool-2',
+          toolName: 'Read',
+          args: { file_path: 'src/main.tsx' },
+          result: 'main',
+          isError: false,
+        },
+      ],
     ]);
+    // 行拆开了，分段不变：两次调用仍属同一个处理段。
+    expect(activityRunCount(events)).toBe(1);
   });
 
   it('keeps reasoning separate from tool events between text messages', () => {
@@ -988,12 +1008,12 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     const messages = convertAgentEventsToAssistantMessages(events);
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'tool-call']);
-    expect(messages[0]?.content.map((part) => part.type === 'tool-call' ? part.toolName : part.type)).toEqual([
-      'Read',
-      'bash',
-    ]);
+    // 空文本事件既不产出行也不切段：两个工具各自一行，仍属同一个处理段。
+    expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.content.map((part) => (
+      part.type === 'tool-call' ? part.toolName : part.type
+    )))).toEqual([['Read'], ['bash']]);
+    expect(activityRunCount(events)).toBe(1);
   });
 
   it('keeps trailing thinking with the final answer text instead of merging into tools', () => {
@@ -1144,11 +1164,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
   });
 
-  it('merges write and edit tools into consecutive grouped tool messages', () => {
+  it('keeps write and edit tools as their own rows inside one tool group', () => {
     const mutationNames = ['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'NotebookEdit', 'apply_patch'];
 
     for (const name of mutationNames) {
-      const messages = convertAgentEventsToAssistantMessages([
+      const events: AgentMessage[] = [
         {
           kind: 'assistant',
           data: {
@@ -1214,18 +1234,20 @@ describe('convertAgentEventsToAssistantMessages', () => {
             parent_tool_use_id: null,
           },
         },
-      ]);
+      ];
 
+      const messages = convertAgentEventsToAssistantMessages(events);
+
+      // 各自一行；「同一个工具组」由分段保证（原先靠合并消息）。
       expect(messages.map((message) => message.content.map((part) => (
         part.type === 'tool-call' ? part.toolName : part.type
-      ))), name).toEqual([
-        ['Read', name, 'Bash'],
-      ]);
+      ))), name).toEqual([['Read'], [name], ['Bash']]);
+      expect(activityRunCount(events), name).toBe(1);
     }
   });
 
-  it('merges Codex apply_patch shell commands into surrounding tool groups', () => {
-    const messages = convertAgentEventsToAssistantMessages([
+  it('keeps Codex apply_patch shell commands as their own row inside one tool group', () => {
+    const events: AgentMessage[] = [
       {
         kind: 'assistant',
         data: {
@@ -1272,13 +1294,14 @@ describe('convertAgentEventsToAssistantMessages', () => {
           parent_tool_use_id: null,
         },
       },
-    ]);
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
 
     expect(messages.map((message) => message.content.map((part) => (
       part.type === 'tool-call' ? part.toolName : part.type
-    )))).toEqual([
-      ['Read', 'shell_command', 'Bash'],
-    ]);
+    )))).toEqual([['Read'], ['shell_command'], ['Bash']]);
+    expect(activityRunCount(events)).toBe(1);
   });
 
   it('keeps trailing thinking with the final answer text instead of peeling into tools', () => {

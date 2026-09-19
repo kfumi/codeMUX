@@ -53,4 +53,13 @@ describe('RunningElapsedTimer', () => {
     });
     expect(screen.getAllByText('正在执行 · 1m 10s').length).toBeGreaterThan(0);
   });
+  it('空 label 只渲染时长，不留下孤立的分隔符', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
+
+    render(<RunningElapsedTimer label="" startTime={Date.now() - 90_000} active={false} />);
+
+    expect(screen.getByText('1m 30s')).toBeTruthy();
+    expect(screen.queryByText(/·/)).toBeNull();
+  });
 });

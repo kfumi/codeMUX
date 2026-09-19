@@ -132,7 +132,7 @@ describe('SubagentPreviewPanel', () => {
     expect(screen.getByText('没有可显示的子智能体记录')).toBeTruthy();
   });
 
-  it('运行中在时间线底部显示运行中指示', () => {
+  it('运行中在表头显示状态胶囊与实时计时', () => {
     seedStore({
       status: 'running',
       events: [
@@ -145,13 +145,56 @@ describe('SubagentPreviewPanel', () => {
       ],
     });
 
-    renderPanel();
+    const { container } = renderPanel();
 
-    // 与主线程一致：运行中显示计时（自首条事件起算），不再展示最新活动 subtitle。
-    // shimmer 会把计时文本渲染两份，故用 getAllByText。
-    expect(screen.getAllByText(/运行中 · \d+d/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Reading src\/main\.tsx/)).toBeNull();
-    expect(screen.getByText(/正在检查 package\.json/)).toBeTruthy();
+    // 状态与时长都收在表头：胶囊说状态，计时器自首条事件起算、每秒推进。
+    expect(container.querySelector('[data-slot="subagent-panel-status"]')?.textContent).toBe('运行中');
+    expect(container.querySelector('[data-slot="subagent-panel-duration"]')?.textContent).toMatch(/[0-9]+[dhms]/);
+    // 不再展示最新活动 subtitle。
+    expect(screen.queryByText(/Reading src/)).toBeNull();
+    expect(screen.getByText(/正在检查 package/)).toBeTruthy();
+  });
+
+  it('表头显示智能体名、事件里的模型名、状态胶囊与整段时长', () => {
+    seedStore({
+      status: 'completed',
+      events: [
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '先列目录' }],
+          model: 'mimo-v2.5-free',
+          event_id: 'e1',
+          timestamp: '2026-08-29T05:47:19.000Z',
+        },
+        {
+          type: 'assistant_message',
+          content: [{ type: 'text', text: '汇总完成' }],
+          event_id: 'e2',
+          timestamp: '2026-08-29T05:47:25.000Z',
+        },
+      ],
+    });
+
+    const { container } = renderPanel();
+
+    // 第一行是智能体名（`title`），任务描述留给正文。
+    expect(container.querySelector('[data-slot="subagent-panel-title"]')?.textContent).toBe('Explore');
+    const model = container.querySelector('[data-slot="subagent-panel-model"]');
+    expect(model?.getAttribute('data-model-source')).toBe('event');
+    expect(model?.textContent).toBe('mimo-v2.5-free');
+    expect(container.querySelector('[data-slot="subagent-panel-status"]')?.textContent).toBe('已完成');
+    // 终态时长取首末事件之差：静态数字，不挂计时器。
+    expect(container.querySelector('[data-slot="subagent-panel-duration"]')?.textContent).toBe('6s');
+  });
+
+  it('事件里没有模型名时表头退回 provider', () => {
+    seedStore({ status: 'completed', events: completedProcessEvents });
+
+    const { container } = renderPanel();
+
+    const model = container.querySelector('[data-slot="subagent-panel-model"]');
+    expect(model?.getAttribute('data-model-source')).toBe('provider');
+    expect(model?.textContent).toBe('claude');
   });
 
   it('中间过程的 assistant 消息不显示 footer，仅回合最后一条显示', () => {
@@ -536,6 +579,21 @@ describe('SubagentPreviewPanel', () => {
     await waitFor(() => {
       expect(viewport.scrollTop).toBe(800);
     });
+  });
+
+  it('内容列表底部留白让开浮起的回到底部按钮，最后一行不贴面板下边缘', () => {
+    seedStore({ status: 'completed', events: completedProcessEvents });
+
+    const { container } = renderPanel();
+    const viewport = container.querySelector('[data-testid="subagent-viewport"]') as HTMLElement;
+
+    // 底内边距挂在内容列表上、滚动容器保持对称：空状态的 `h-full` 居中才不会被顶偏。
+    expect(viewport.className).toContain('pt-3');
+    expect(viewport.className).not.toContain('pb-');
+    const list = viewport.firstElementChild as HTMLElement;
+    expect(list.className).toContain('space-y-2');
+    // 56px（pb-14）> 按钮的 bottom-4 + h-8 = 48px：滚到底时最后一行不会被按钮压住。
+    expect(list.className).toContain('pb-14');
   });
 
   it('紧凑输出开启时中间过程收成已处理，展开后才看到过程', () => {

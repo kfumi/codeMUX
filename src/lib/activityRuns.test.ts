@@ -377,9 +377,40 @@ describe('buildActivityRuns', () => {
     expect(placementByEventIndex.has(2)).toBe(false);
   });
 
+  it('bridges subagent stream deltas, which render no row', () => {
+    // 子智能体时间线把流式增量（text_delta / reasoning_delta / content_started /
+    // content_finished）也原样留着，一个回合里它们占九成以上；主线程的同名事件由
+    // agentStore 就地消费、从不进入事件序列。convertAgentEvents 对它们不产出行，
+    // 所以它们不能当成分段边界——否则每个内容块都会切开一次，一个回合变成一串
+    // 「已处理 N 个步骤」组（线上实例：opencode 子智能体 102 步被切成 10 段）。
+    const delta = (type: string, value: string) => ({
+      kind: 'streaming',
+      data: { event: { type, session_id: 'sub-1', text: value } },
+    } as unknown as AgentMessage);
+    const events = [
+      user('go'),
+      thinking('先找 Cargo.toml'),
+      delta('reasoning_delta', '先找 '),
+      delta('content_finished', ''),
+      tool('glob-1', 'Glob', { pattern: '**/Cargo.toml' }),
+      toolResult('glob-1'),
+      delta('content_started', ''),
+      delta('reasoning_delta', '再看 package.json'),
+      thinking('再看 package.json'),
+      tool('glob-2', 'Glob', { pattern: '**/package.json' }),
+    ];
+
+    const { runs, placementByEventIndex } = runsFor(events, true);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.eventIndices).toEqual([1, 4, 8, 9]);
+    expect(runs[0]!.stepCount).toBe(4);
+    expect(placementByEventIndex.has(2)).toBe(false);
+  });
+
   it('bridges an error that gets absorbed by a pending tool card instead of splitting the run', () => {
     // convertAgentEvents 会把错误文本当成最近一个尚无结果的工具的结果贴上去
-    // （attachLatestPendingToolError）：这时错误事件一行都画不出来，两次调用在同一行里是两张卡。
+    // （attachLatestPendingToolError）：这时错误事件一行都画不出来，两次调用仍属同一段（各自一行）。
     const events = [
       user('go'),
       tool('read-1', 'Read', { file_path: 'a.ts' }),

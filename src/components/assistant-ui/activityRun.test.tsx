@@ -81,6 +81,31 @@ describe('ActivityRunHeader', () => {
     expect(container.querySelector('[data-slot="activity-run-caret"]')?.getAttribute('class')).toContain('opacity-0');
   });
 
+  it('字号不同的两截共享基线：文字走 items-baseline，图标仍按中线居中', () => {
+    const { container } = render(
+      <ActivityRunHeader
+        open={false}
+        onToggle={() => {}}
+        live={false}
+        onlyThinking={false}
+        durationMs={22000}
+        stepCount={42}
+      />,
+    );
+
+    // 「已处理 22s」(14px) 与「42 个步骤」(13px) 必须落在同一条基线上：一起
+    // `items-center` 会让后一截的行盒各自居中、基线上浮约 1px。
+    const text = container.querySelector('[data-slot="activity-run-text"]');
+    expect(text?.className).toContain('items-baseline');
+    expect(text?.querySelector('[data-slot="activity-run-label"]')?.textContent).toBe('已处理 22s');
+    expect(text?.querySelector('[data-slot="activity-run-count"]')?.textContent).toBe('42 个步骤');
+
+    // 图标不是文字：它跟文字这一组按按钮的中线对齐，不进基线组。
+    const trigger = container.querySelector('[data-slot="activity-run-trigger"]');
+    expect(trigger?.className).toContain('items-center');
+    expect(text?.contains(container.querySelector('[data-slot="activity-run-icon"]'))).toBe(false);
+  });
+
   it('只有一步时不显示「1 个步骤」', () => {
     const { container } = render(
       <ActivityRunHeader
@@ -216,6 +241,24 @@ describe('ActivityStepThinking', () => {
     // SVG 的 className 是对象，断言要走 getAttribute('class')。
     expect(container.querySelector('[data-slot="reasoning-trigger-pulse"]')?.getAttribute('class'))
       .toContain('animate-pulse');
+  });
+
+  it('流式思考不画行内单行摘要，思考结束收起后才显示', () => {
+    const { container, rerender } = render(
+      <ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming />,
+    );
+
+    // 流式中这一行默认展开、正文就在下面：右侧摘要不跟着 delta 实时变长。
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('[data-slot="reasoning-trigger-summary"]')).toBeNull();
+    expect(container.querySelector('[data-slot="reasoning-trigger-label"]')?.textContent).toBe('思考');
+
+    rerender(<ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming={false} />);
+
+    // 思考结束、行收起：这时一次性给出摘要。
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-slot="reasoning-trigger-summary"]')?.textContent)
+      .toBe('先看目录结构 再核对任务入口');
   });
 
   it('已结束的思考步骤默认收起，不渲染正文', () => {

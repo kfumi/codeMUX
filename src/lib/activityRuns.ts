@@ -162,9 +162,9 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
  *
  * 这类事件（工具结果、实时叙述草稿、转不出消息部分的助手事件）在渲染层被跳过，
  * 所以它们既不该开启一个处理段，也不该打断一个处理段：Claude/Codex 的流里
- * `assistant(tool_use)` ↔ `user(tool_result)` 交替出现，而相邻的工具调用会被
- * `convertAgentEvents` 合成**同一行**里的多张工具卡——按事件切段会让段头的步骤数
- * 与行内可见的卡片数对不上。
+ * `assistant(tool_use)` ↔ `user(tool_result)` 交替出现，结果事件夹在两次工具调用之间，
+ * 按事件切段会让同一个处理段凭空断成两段、各画一个组头（步骤数之和还等于全部步骤，
+ * 读者却以为分了两波）。
  *
  * 判据取自 `convertAgentEventsToAssistantMessages` 的实际行为：只有 `user`、
  * `assistant`、`ask_user_question` 与 `visibleEventKinds` 里那几种事件会产出消息行。
@@ -177,6 +177,19 @@ function rendersNoRow(event: AgentMessage | undefined): boolean {
     return true;
   }
   if (isEphemeralLiveStreamNarrationEvent(event)) {
+    return true;
+  }
+  /**
+   * 子智能体时间线把流式增量（`text_delta` / `reasoning_delta` / `content_started` /
+   * `content_finished`）也原样留在事件序列里（主线程的同名事件由 `agentStore` 就地消费，
+   * 从不进入 `events`），一个回合里这类事件能占九成以上。
+   *
+   * 它们一行都不画：内容已经落在聚合后的 `assistant_message` 里，
+   * `convertAgentEventsToAssistantMessages` 对它们不产出任何消息行。所以它们既不该开段，
+   * 也不该断段——按「不是 assistant 就画一行」处理会把每个内容块边界都当成断点，把同一个
+   * 回合切成十几个「已处理 N 个步骤」组。
+   */
+  if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
     return true;
   }
   // 工具结果只把结果贴回已有的工具卡，自己不画行（两种投影：独立 kind 与 user 消息）。
@@ -404,7 +417,7 @@ export function buildActivityRuns(
         continue;
       }
       // 不画任何行的事件（工具结果、实时叙述、被工具卡吸收的错误、空内容事件）既不属于段
-      // 也不打断段：它们夹在两次工具调用之间时，那两次调用在界面上本来就是同一行里的两张卡。
+      // 也不打断段：它们夹在两次工具调用之间时，两次调用仍属同一个处理段。
       if (noRow[pos] === true) {
         continue;
       }

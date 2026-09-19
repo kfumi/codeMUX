@@ -49,7 +49,8 @@ export function RunningElapsedTimer({
     };
   }, [base]);
 
-  const text = `${label} · ${formatElapsed(elapsed)}`;
+  // 空 label：只要时长（状态由旁边的状态胶囊表达），别留下「 · 」这种孤立分隔符。
+  const text = label ? `${label} · ${formatElapsed(elapsed)}` : formatElapsed(elapsed);
 
   return (
     <span className="relative inline-block leading-none">

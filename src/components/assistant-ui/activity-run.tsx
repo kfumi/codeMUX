@@ -96,27 +96,36 @@ export function ActivityRunHeader({
         >
           <Sparkles aria-hidden size={15} />
         </span>
+        {/* 图标居中、文字共基线：`已处理 22s` 是 14px、`42 个步骤` 是 13px，两截一起
+            `items-center` 时各自的行盒分别居中，后一截基线会偏高约 1px（截图实测墨迹中心
+            115.5 vs 116.5）。规则与本文件思考步骤行的「动作词 + 等宽摘要」一致：文字内层按
+            基线对齐，行（含图标、箭头）整体仍居中，所以图标位置不变。 */}
         <span
-          data-slot="activity-run-label"
-          className="relative inline-flex shrink-0 items-center font-medium"
+          data-slot="activity-run-text"
+          className="inline-flex min-w-0 items-baseline gap-[5px]"
         >
-          {label}
-          {live ? (
+          <span
+            data-slot="activity-run-label"
+            className="relative inline-flex shrink-0 items-center font-medium"
+          >
+            {label}
+            {live ? (
+              <span
+                data-slot="activity-run-pulse"
+                aria-hidden
+                className="ml-[6px] inline-block size-1 shrink-0 animate-pulse rounded-full bg-current motion-reduce:animate-none"
+              />
+            ) : null}
+          </span>
+          {stepCount > 1 ? (
             <span
-              data-slot="activity-run-pulse"
-              aria-hidden
-              className="ml-[6px] inline-block size-1 shrink-0 animate-pulse rounded-full bg-current motion-reduce:animate-none"
-            />
+              data-slot="activity-run-count"
+              className="min-w-0 truncate text-ui-compact tabular-nums"
+            >
+              {stepCount} 个步骤
+            </span>
           ) : null}
         </span>
-        {stepCount > 1 ? (
-          <span
-            data-slot="activity-run-count"
-            className="min-w-0 truncate text-ui-compact tabular-nums"
-          >
-            {stepCount} 个步骤
-          </span>
-        ) : null}
         <ChevronRight
           data-slot="activity-run-caret"
           aria-hidden
@@ -149,6 +158,8 @@ export function ActivityRunHeader({
  * 动作词与等宽摘要放在同一个按**基线**对齐的内层（两种字体的 ascent/descent 不同，
  * 纯几何居中会让摘要偏高约 1px）；行本身仍整体居中，图标与箭头的位置因此不变。
  * 展开后的思考正文按全局 UI 字号渲染（正文跟设置走），只有动作词与单行摘要比正文小一号。
+ * 流式期间（`streaming`）不画右侧单行摘要：这一行此时是展开的、正文就在下面，摘要跟着
+ * 每个 delta 实时变长只会把动作词挤来挤去；思考结束、行自动收起后再一次性给出摘要。
  */
 export function ActivityStepThinking({
   text,
@@ -205,7 +216,10 @@ export function ActivityStepThinking({
               className="ml-[6px] inline-block size-1 shrink-0 self-center animate-pulse rounded-full bg-current motion-reduce:animate-none"
             />
           ) : null}
-          {summary ? (
+          {/* 流式思考不在行内实时长摘要：这一行在流式期间是展开的（正文就在下面），
+              右侧单行摘要会跟着每个 delta 变长、把动作词挤来挤去。等这段思考结束、
+              行自动收起之后再一次性给出摘要。 */}
+          {summary && !streaming ? (
             <span
               data-slot="reasoning-trigger-summary"
               className="ml-1 min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground"
@@ -264,9 +278,10 @@ export function ActivityRunSteps({
   children,
   className,
   /**
-   * 同一个处理段在本行之后还有步骤：行距被压到与段内步距一致（主线程 3px），竖线再向下
-   * 多探一个行距接上下一行的竖线。取 8px 是为了同时覆盖预览面板的 8px 行距：多探的部分
-   * 只落在下一行左侧的缩进空白里，与它自己的竖线重合，看不出多画了。
+   * 同一个处理段在本行之后还有步骤：行距被压到与段内步距一致（3px，由
+   * `assistantMessageBottomSpacing` 的 `continuesRun` 给），竖线再向下多探一截接上下一行
+   * 的竖线。取 8px 是个够用的上界：多探的部分只落在下一行左侧的缩进空白里，与它自己的
+   * 竖线重合，看不出多画了（行距 3px 时多探 5px，同样只是与下一段的竖线重叠）。
    */
   extendsIntoGap = false,
   /**

@@ -141,44 +141,16 @@ export function convertAgentEventsToAssistantMessages(
           index,
         );
         const messageIndex = messages.length;
-        const mergedMessageIndex = mergeIntoPreviousToolOnlyMessage(
-          messages,
-          message,
-          messageIndex,
-          toolCallLocationById,
-        );
-
-        if (mergedMessageIndex != null) {
-          message.content.forEach((part, partIndex) => {
-            if (part.type === 'tool-call') {
-              const mergedPartIndex = messages[mergedMessageIndex]?.content.length - message.content.length + partIndex;
-              toolCallLocationById.set(part.toolCallId, {
-                messageIndex: mergedMessageIndex,
-                partIndex: mergedPartIndex,
-              });
-              const pendingResult = pendingToolResultsById.get(part.toolCallId);
-              if (pendingResult) {
-                attachToolResult(
-                  messages,
-                  toolCallLocationById,
-                  part.toolCallId,
-                  pendingResult.content,
-                  pendingResult.isError,
-                );
-                pendingToolResultsById.delete(part.toolCallId);
-              }
-            }
-          });
-
-          return;
-        }
-
-        if (messageIndex < messages.length) {
-          messages.splice(messageIndex, 0, message);
-          shiftLocationIndexes(toolCallLocationById, messageIndex);
-        } else {
-          messages.push(message);
-        }
+        // 一条事件一行：相邻的工具卡**不再**合并进上一条消息——每个步骤（思考 / 工具）各自
+        // 一个 `data-message-row`，DOM 结构与处理段组头「N 个步骤」的计数一一对应。步骤之间
+        // 的视觉归属由处理段承担（段内 3px 步距、跨行竖线接续见 `activityRuns` 与
+        // `ActivityRunSteps`），不依赖把消息合并成一行。
+        //
+        // 这里曾经有 `mergeIntoPreviousToolOnlyMessage()`：起因是 OpenCode 把同一个 provider
+        // 消息拆成多条 codeMUX 事件，需要把工具卡拼回一行；那条规则后来放宽成「任何相邻的
+        // tool-only 消息都合并」，于是思考永远独占一行、相邻工具却挤成一行——同一种步骤两种
+        // DOM 形状。这个不一致已按「一步一行」移除，别再合并回来。
+        messages.push(message);
 
         message.content.forEach((part, partIndex) => {
           if (part.type === 'tool-call') {
@@ -502,58 +474,6 @@ function findFinalAssistantMessageIndex(
   return textIndices[textIndices.length - 1] ?? candidateIndices[candidateIndices.length - 1] ?? -1;
 }
 
-function mergeIntoPreviousToolOnlyMessage(
-  messages: CodeMuxAssistantMessage[],
-  nextMessage: CodeMuxAssistantMessage,
-  insertionIndex: number,
-  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
-): number | undefined {
-  const previousIndex = insertionIndex - 1;
-  const previousMessage = messages[previousIndex];
-
-  if (
-    !previousMessage ||
-    !isToolOnlyAssistantMessage(previousMessage) ||
-    !isToolOnlyAssistantMessage(nextMessage)
-  ) {
-    return undefined;
-  }
-
-  messages[previousIndex] = {
-    ...previousMessage,
-    content: [...previousMessage.content, ...nextMessage.content],
-    metadata: {
-      ...previousMessage.metadata,
-      sourceEventIndices: [
-        ...previousMessage.metadata.sourceEventIndices,
-        ...nextMessage.metadata.sourceEventIndices,
-      ],
-    },
-  };
-
-  for (const [, location] of toolCallLocationById) {
-    if (location.messageIndex === insertionIndex) {
-      location.messageIndex = previousIndex;
-    }
-  }
-
-  return previousIndex;
-}
-
-function isToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
-  if (message.role !== 'assistant' || message.content.length === 0) {
-    return false;
-  }
-
-  return message.content.every((part) => (
-    part.type === 'tool-call' && !isStandaloneToolCall(part)
-  ));
-}
-
-function isStandaloneToolCall(part: Extract<CodeMuxAssistantPart, { type: 'tool-call' }>): boolean {
-  return isAskUserQuestionToolName(part.toolName);
-}
-
 function convertContentBlockToParts(
   block: PersistedContentBlock,
   eventIndex: number,
@@ -713,19 +633,6 @@ function attachLatestPendingToolError(
 
   return false;
 }
-
-function shiftLocationIndexes(
-  locations: Map<string, { messageIndex: number; partIndex: number }>,
-  insertedAt: number,
-): void {
-  for (const [, location] of locations) {
-    if (location.messageIndex >= insertedAt) {
-      location.messageIndex += 1;
-    }
-  }
-}
-
-
 function getToolResults(
   event: Extract<AgentMessage, { kind: 'tool_result' }>,
 ): Array<{ toolUseId: string; content: string; isError: boolean }> {
