@@ -32,6 +32,12 @@ function projectAssistantToolEvents(
   const remainingContent: unknown[] = [];
   let planModeChange: 'on' | undefined;
 
+  // 帧上带的模型名：tool_use-only 的 assistant 帧不会留下 `assistant_message`（见
+  // `buildRemainingEvent`），所以模型得随工具事件一起进时间线，否则 Claude 子智能体的
+  // 时间线里一个 `model` 都没有，界面只能退回 provider（`claude`）。
+  const rawModel = message.model;
+  const frameModel = typeof rawModel === 'string' && rawModel.length > 0 ? rawModel : undefined;
+
   for (const block of content) {
     const value = asRecord(block);
     if (value?.type !== 'tool_use' || typeof value.id !== 'string' || typeof value.name !== 'string') {
@@ -44,6 +50,7 @@ function projectAssistantToolEvents(
       toolUseId: value.id,
       name: value.name,
       input: asRecord(value.input) ?? {},
+      ...(frameModel ? { model: frameModel } : {}),
     });
     if (value.name === 'EnterPlanMode') {
       planModeChange = 'on';

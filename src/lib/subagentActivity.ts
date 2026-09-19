@@ -18,8 +18,10 @@ export type SubagentActivityNode = {
   name: string;
   provider: string;
   /**
-   * 事件里带出来的模型名（sidecar 侧正在补 `model` 字段）。取不到就是 `undefined`，
-   * 展示层退回 `provider`（`claude` / `opencode`），不留空、不崩。
+   * 事件里带出来的模型名：OpenCode 挂在 `assistant_message.model` 上，Claude 的侧链子
+   * 智能体常年只调工具、不产文本，模型挂在 `tool_started.model` 上（见 sidecar 的
+   * `claudeToolEvents.ts`）。取不到就是 `undefined`，展示层退回 `provider`
+   * （`claude` / `opencode`），不留空、不崩。
    */
   model?: string;
   /** 运行中 / 已完成 / 失败 / 已取消。 */
@@ -97,7 +99,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  *
  * 防御式读取：`event.model` → `event.data?.model` → `event.message?.model`，三者都做
  * `typeof === 'string'` 校验，取第一个非空值；一个都没有就返回 `undefined`
- * （调用方退回显示 `provider`）。字段是另一路改动正在补的，这里不能因为缺失而留空或抛错。
+ * （调用方退回显示 `provider`）。两种 provider 的载体不同：OpenCode 是
+ * `assistant_message.model`，Claude 侧链是 `tool_started.model`（tool-use-only 帧不产
+ * assistant_message）；这里只按字段名找，不关心事件类型，缺失也不留空、不抛错。
  */
 export function subagentModelFromEvents(
   events: readonly Record<string, unknown>[],

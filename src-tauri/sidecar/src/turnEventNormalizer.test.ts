@@ -93,4 +93,42 @@ describe('TurnEventNormalizer tool input refresh', () => {
       }),
     ]);
   });
+  it('carries the model on tool_started so tool-only subagents keep it', () => {
+    const normalizer = new TurnEventNormalizer('session-1', () => 'event-9');
+
+    expect(normalizer.accept({
+      kind: 'tool_started',
+      toolUseId: 'tool-1',
+      name: 'Read',
+      input: { file_path: 'src/main.ts' },
+      model: 'glm-5.3-flash',
+    })).toEqual([{
+      type: 'tool_started',
+      session_id: 'session-1',
+      tool_use_id: 'tool-1',
+      name: 'Read',
+      input: { file_path: 'src/main.ts' },
+      model: 'glm-5.3-flash',
+      event_id: 'event-9',
+      sequence: 0,
+    }]);
+
+    // 没有模型时不带 `model` 键（安全降级）。
+    const second = new TurnEventNormalizer('session-1', () => 'event-10');
+    expect(second.accept({
+      kind: 'tool_started',
+      toolUseId: 'tool-2',
+      name: 'Read',
+      input: {},
+    })).toEqual([{
+      type: 'tool_started',
+      session_id: 'session-1',
+      tool_use_id: 'tool-2',
+      name: 'Read',
+      input: {},
+      event_id: 'event-10',
+      sequence: 0,
+    }]);
+  });
+
 });

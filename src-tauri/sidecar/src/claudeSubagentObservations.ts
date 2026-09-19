@@ -247,3 +247,86 @@ export function observeClaudeSdkMessage(message: Record<string, unknown>): Subag
       return [];
   }
 }
+
+/**
+ * 侧链流式文本的拼装器。
+ *
+ * 线上实测（会话 8ba20d2b 的两个 Claude 子智能体）：SDK 给我们的子会话**聚合帧只带
+ * `tool_use`**（DB 里 tool_started 条数 38 / 23，与原生子会话记录里 tool_use 帧数一模一样），
+ * 子会话的思考与正文**只以 `stream_event` 增量**形态到达。而子智能体时间线只渲染
+ * `assistant_message`（面板的转换器不渲染 `text_delta` 这类流式事件），这些增量此前被整批
+ * 丢弃 —— 表现为「子智能体面板只有工具行、没有正文」，模型名也随之下不来。
+ *
+ * 这里按 content block 累积增量，块结束时合成一条 `assistant_message` 交回 fold：与
+ * OpenCode 子智能体在 part 完成时产出聚合消息的做法同形。
+ */
+export class ClaudeSidechainStreamAssembler {
+  /** key = `${parentToolUseId}#${index}`：该内容块累积的文本与类型。 */
+  private readonly buffers = new Map<string, { kind: 'text' | 'reasoning'; text: string }>();
+
+  consume(message: Record<string, unknown>): SubagentObservation[] {
+    if (message.type !== 'stream_event' || !isClaudeSidechainMessage(message)) return [];
+    const parentToolUseId = asString(message.parent_tool_use_id);
+    // 没有父工具 id 就无法定位是哪个子智能体：与既有 timeline 观察同一套路由前提，
+    // 拿不到就丢弃（不猜、不塞进父线程）。
+    if (!parentToolUseId) return [];
+    const inner = asRecord(message.event);
+    if (!inner || typeof inner.type !== 'string') return [];
+    const index = typeof inner.index === 'number' ? inner.index : 0;
+    const key = `${parentToolUseId}#${index}`;
+
+    if (inner.type === 'content_block_start') {
+      const block = asRecord(inner.content_block);
+      this.buffers.set(key, { kind: block?.type === 'thinking' ? 'reasoning' : 'text', text: '' });
+      return [];
+    }
+    if (inner.type === 'content_block_delta') {
+      const delta = asRecord(inner.delta);
+      const buffer = this.buffers.get(key) ?? { kind: 'text' as const, text: '' };
+      if (delta?.type === 'text_delta' && typeof delta.text === 'string') buffer.text += delta.text;
+      else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') buffer.text += delta.thinking;
+      this.buffers.set(key, buffer);
+      return [];
+    }
+    if (inner.type === 'content_block_stop') return this.flush(key, parentToolUseId);
+    // 一条消息结束：把该子智能体还没闭合的块一起收掉（同一条流里可能有多个块）。
+    if (inner.type === 'message_stop') return this.flushSubagent(parentToolUseId);
+    return [];
+  }
+
+  reset(): void {
+    this.buffers.clear();
+  }
+
+  private flush(key: string, parentToolUseId: string): SubagentObservation[] {
+    const buffer = this.buffers.get(key);
+    this.buffers.delete(key);
+    if (!buffer) return [];
+    return materialize(parentToolUseId, buffer);
+  }
+
+  private flushSubagent(parentToolUseId: string): SubagentObservation[] {
+    const observations: SubagentObservation[] = [];
+    for (const key of [...this.buffers.keys()]) {
+      if (!key.startsWith(`${parentToolUseId}#`)) continue;
+      observations.push(...this.flush(key, parentToolUseId));
+    }
+    return observations;
+  }
+}
+
+/** 空白块（只有空格/换行）不合成消息，避免面板出现空行。 */
+function materialize(
+  parentToolUseId: string,
+  buffer: { kind: 'text' | 'reasoning'; text: string },
+): SubagentObservation[] {
+  if (buffer.text.trim().length === 0) return [];
+  const block = buffer.kind === 'reasoning'
+    ? { type: 'thinking', thinking: buffer.text }
+    : { type: 'text', text: buffer.text };
+  return [{
+    kind: 'timeline',
+    parentToolUseId,
+    events: [{ kind: 'assistant_message', content: [block] }],
+  }];
+}

@@ -1,5 +1,5 @@
 import type { CodeMuxSubagentEvent } from './codeMuxProtocol.js';
-import { observeClaudeSdkMessage } from './claudeSubagentObservations.js';
+import { ClaudeSidechainStreamAssembler, observeClaudeSdkMessage } from './claudeSubagentObservations.js';
 import {
   createEmptySubagentFoldState,
   foldCancelRunningForegroundTasks,
@@ -24,8 +24,15 @@ export type SubagentObserveContext = {
 export class ClaudeTaskProtocolSource {
   private foldState: SubagentFoldState = createEmptySubagentFoldState();
 
+  /** 侧链增量帧的拼装器：把 `stream_event` 增量在块结束时合成 `assistant_message`。 */
+  private readonly streamAssembler = new ClaudeSidechainStreamAssembler();
+
   observe(sdkMessage: Record<string, unknown>, context: SubagentObserveContext = {}): CodeMuxSubagentEvent[] {
-    const observations = observeClaudeSdkMessage(sdkMessage);
+    // 增量帧（`stream_event`）本身产不出时间线事件，交给拼装器；两类观察一起按顺序折叠。
+    const observations = [
+      ...observeClaudeSdkMessage(sdkMessage),
+      ...this.streamAssembler.consume(sdkMessage),
+    ];
     if (observations.length === 0) return [];
     const result = foldSubagentObservations(observations, this.foldState, this.context(context));
     this.foldState = result.state;
@@ -64,6 +71,7 @@ export class ClaudeTaskProtocolSource {
   /** Session teardown only. */
   reset(): void {
     this.foldState = createEmptySubagentFoldState();
+    this.streamAssembler.reset();
   }
 
   private context(context: SubagentObserveContext): SubagentFoldContext {

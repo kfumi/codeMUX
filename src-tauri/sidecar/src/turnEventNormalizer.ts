@@ -16,7 +16,12 @@ export type TurnSourceEvent =
   | { kind: 'content_started'; index: number; contentKind: 'text' | 'reasoning' }
   | { kind: 'text_delta' | 'reasoning_delta'; index: number; text: string }
   | { kind: 'content_finished'; index: number }
-  | { kind: 'tool_started'; toolUseId: string; name: string; input: Record<string, unknown> }
+  /**
+   * `model`：产生这次工具调用的模型。Claude 侧链里只调工具、不产文本的 assistant 帧
+   * 不会留下 `assistant_message`，模型名只能挂在这里；否则子智能体面板与节点卡都只能
+   * 退回显示 provider（`claude`）。
+   */
+  | { kind: 'tool_started'; toolUseId: string; name: string; input: Record<string, unknown>; model?: string }
   | { kind: 'tool_finished'; toolUseId: string; content: string; isError: boolean }
   | { kind: 'user_message'; content: string | Array<Record<string, unknown>> }
   | { kind: 'error'; subtype: string; message: string };
@@ -130,6 +135,7 @@ export class TurnEventNormalizer {
         return [this.withSequence({
           type: 'tool_started', session_id: this.sessionId, tool_use_id: source.toolUseId,
           name: source.name, input: merged, event_id: this.eventIdFactory(), sequence: 0,
+          ...(source.model ? { model: source.model } : {}),
         })];
       }
       this.startedToolIds.add(source.toolUseId);
@@ -137,6 +143,7 @@ export class TurnEventNormalizer {
       return [this.withSequence({
         type: 'tool_started', session_id: this.sessionId, tool_use_id: source.toolUseId,
         name: source.name, input: source.input, event_id: this.eventIdFactory(), sequence: 0,
+        ...(source.model ? { model: source.model } : {}),
       })];
     }
     if (source.kind === 'tool_finished') {

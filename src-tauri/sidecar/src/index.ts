@@ -57,7 +57,7 @@ import {
 import { isSteerBlockedPrompt, isSteerUnavailableError, SteerUnavailableError } from './steer.js';
 import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
-import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
+import { isClaudeSidechainMessage, shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
 import {
   applyClaudeModelAliasEnv,
   buildClaudeModelAliasEnv,
@@ -1420,6 +1420,18 @@ export class SessionRuntime {
         const subagentEvents = this.subagents.observe(msg, appSessionId ? { sessionId: appSessionId } : {});
         if (subagentEvents.length > 0) {
           this.emitSubagentEvents(subagentEvents);
+        }
+
+        // 侧链帧「产不出任何事件」时最容易静默丢内容（子智能体的思考/正文就走
+        // `stream_event` 增量）。开启 CODEMUX_MESSAGE_DEBUG=1 时记一行形状，便于定位。
+        if (DEBUG_MESSAGE_LOGS && subagentEvents.length === 0 && isClaudeSidechainMessage(msg as unknown as Record<string, unknown>)) {
+          const frame = msg as unknown as Record<string, unknown>;
+          const inner = frame.event as Record<string, unknown> | undefined;
+          process.stderr.write(
+            `[claude-debug] SIDECHAIN no-events type=${String(frame.type)}`
+            + ` parent_tool_use_id=${String(frame.parent_tool_use_id ?? '(none)')}`
+            + ` inner=${String(inner?.type ?? '(none)')}\n`,
+          );
         }
 
         if (!shouldForwardClaudeSdkMessage(msg)) {

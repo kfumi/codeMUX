@@ -24,7 +24,7 @@ CodeMUX is a local-first desktop app: an Electron shell (supervisor), a standalo
 - `npm run build:daemon` (and `build:daemon:release`) builds the `codemux-daemon` binary.
 - `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `desktop-electron/release/` (see `docs/desktop-release-guide.md`).
 - `npm run build:web` builds the unified frontend into `dist-web/`; the daemon serves that directory to browser clients and the installer bundles it.
-- `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime; dev and release flows rebuild it automatically via `npm run build:sidecar`. After editing sidecar source without going through those commands, rebuild manually or the app runs stale code.
+- `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime. `npm run dev:desktop` does not build unconditionally: it compares the newest `src-tauri/sidecar/src/**` mtime against `dist/index.js` and runs `build:sidecar` only when the source is newer (~60 ms when fresh, 3–5 s when it has to build); `npm run build:electron-installer` always builds it. When you launch Electron another way (`npm run dev:electron` against an already-running daemon), run `npm run build:sidecar` yourself or the app silently runs stale code.
 - `cd desktop-electron && npm run typecheck` type-checks the shell's main/preload TypeScript.
 - `cd src-tauri && cargo fmt --all -- --check` verifies Rust formatting.
 - `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` runs Rust lints.

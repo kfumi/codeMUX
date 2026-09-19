@@ -189,6 +189,10 @@ describe('buildSubagentActivity', () => {
     expect(subagentModelFromEvents([{ model: 'claude-sonnet-4-5' }])).toBe('claude-sonnet-4-5');
     expect(subagentModelFromEvents([{ data: { model: 'claude-opus-4-1' } }])).toBe('claude-opus-4-1');
     expect(subagentModelFromEvents([{ message: { model: 'glm-4.6' } }])).toBe('glm-4.6');
+    // Claude 侧链的 tool-only 子智能体没有 assistant_message，模型挂在工具事件上。
+    expect(subagentModelFromEvents([
+      { type: 'tool_started', tool_use_id: 't1', name: 'Read', model: 'glm-5.3-flash' },
+    ])).toBe('glm-5.3-flash');
     expect(subagentModelFromEvents([
       { model: '   ' },
       { data: { model: '' } },

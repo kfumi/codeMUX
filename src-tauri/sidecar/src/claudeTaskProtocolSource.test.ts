@@ -282,6 +282,48 @@ describe('ClaudeTaskProtocolSource.observe', () => {
     expect(plain?.event).not.toHaveProperty('model');
   });
 
+  it('tool-only sidechain frames carry the model on the tool_started event', () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted(), {});
+
+    // Explore 类子智能体常年只调工具、不产文本：这种帧不会留下 assistant_message，
+    // 模型名必须挂在 tool_started 上，否则界面上只能退回显示 provider（`claude`）。
+    const toolOnly = source.observe({
+      type: 'assistant',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      uuid: 'sidechain-tool-only-1',
+      message: {
+        role: 'assistant',
+        model: 'glm-5.3-flash',
+        content: [{ type: 'tool_use', id: 'toolu_child_1', name: 'Read', input: { file_path: 'src/main.ts' } }],
+      },
+    }, {});
+
+    const timeline = toolOnly.filter(isTimeline);
+    expect(timeline.some((event) => event.event.type === 'assistant_message')).toBe(false);
+    const started = timeline.find((event) => event.event.type === 'tool_started');
+    expect(started?.event).toMatchObject({
+      type: 'tool_started',
+      tool_use_id: 'toolu_child_1',
+      model: 'glm-5.3-flash',
+    });
+
+    // 帧上没有模型时不加 `model` 键（安全降级）。
+    const withoutModel = source.observe({
+      type: 'assistant',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      uuid: 'sidechain-tool-only-2',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'toolu_child_2', name: 'Read', input: { file_path: 'src/app.ts' } }],
+      },
+    }, {});
+    const plain = withoutModel.filter(isTimeline).find((event) => event.event.type === 'tool_started');
+    expect(plain?.event).not.toHaveProperty('model');
+  });
+
   it('ignores non-task and non-sidechain messages', () => {
     const source = new ClaudeTaskProtocolSource();
     expect(source.observe({ type: 'assistant', message: { role: 'assistant', content: [] } }, {})).toHaveLength(0);
@@ -295,4 +337,51 @@ describe('ClaudeTaskProtocolSource.observe', () => {
     expect(source.hasRunningTasks()).toBe(false);
     expect(source.resolveSubagentId('toolu_1')).toBeUndefined();
   });
+  it('assembles sidechain stream deltas into an assistant_message on the subagent', () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted(), {});
+
+    // 线上实测（会话 8ba20d2b）：子会话的思考/正文只以 stream_event 增量到达，
+    // 聚合帧只带 tool_use。增量本身不能进时间线（面板不渲染半截文本）。
+    const streamFrame = (inner: Record<string, unknown>): Record<string, unknown> => ({
+      type: 'stream_event',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      event: inner,
+    });
+
+    expect(source.observe(streamFrame({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }), {})).toEqual([]);
+    expect(source.observe(streamFrame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'I will ' } }), {})).toEqual([]);
+    expect(source.observe(streamFrame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'read the config.' } }), {})).toEqual([]);
+
+    const flushed = source.observe(streamFrame({ type: 'content_block_stop', index: 0 }), {});
+    const message = flushed.filter(isTimeline)[0];
+    expect(message?.subagent_id).toBe('toolu_1');
+    expect(message?.event).toMatchObject({
+      type: 'assistant_message',
+      content: [{ type: 'text', text: 'I will read the config.' }],
+    });
+
+    // 思考块合成 thinking 块。
+    source.observe(streamFrame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }), {});
+    source.observe(streamFrame({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '先看目录' } }), {});
+    const thinking = source.observe(streamFrame({ type: 'content_block_stop', index: 0 }), {}).filter(isTimeline)[0];
+    expect(thinking?.event).toMatchObject({
+      type: 'assistant_message',
+      content: [{ type: 'thinking', thinking: '先看目录' }],
+    });
+
+    // 只有空白的块不合成消息。
+    source.observe(streamFrame({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }), {});
+    source.observe(streamFrame({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '   ' } }), {});
+    expect(source.observe(streamFrame({ type: 'content_block_stop', index: 1 }), {})).toEqual([]);
+
+    // 没有父工具 id 的流帧无从归属：丢弃，而不是塞进父线程。
+    expect(source.observe({
+      type: 'stream_event',
+      isSidechain: true,
+      event: { type: 'content_block_stop', index: 0 },
+    }, {})).toEqual([]);
+  });
+
 });

@@ -38,6 +38,12 @@ export type CodeMuxToolEvent =
       tool_use_id: string;
       name: string;
       input: Record<string, unknown>;
+      /**
+       * 产生这次工具调用的模型。Claude 的侧链子智能体常年只调工具、不产文本，那种帧不会
+       * 产出 `assistant_message`，模型只能随工具事件进时间线（前端取时间线上第一个非空
+       * `model`）；OpenCode 走的是 `assistant_message.model`。取不到就不带这个键。
+       */
+      model?: string;
       event_id: string;
       sequence: number;
     }
