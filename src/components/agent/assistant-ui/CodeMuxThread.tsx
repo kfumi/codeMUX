@@ -7,19 +7,38 @@ import {
   useAui,
   useAuiState,
   type MessageState,
+  type PartState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
-import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import {
+  ActivityRunHeader,
+  ActivityRunSteps,
+  ActivityStepThinking,
+} from '@/components/assistant-ui/activity-run';
+import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
+import {
+  EMPTY_ACTIVITY_RUNS,
+  buildActivityRuns,
+  isActivityRunPart,
+  rowRunContinues,
+  type ActivityRunPlacement,
+  type ActivityRuns,
+} from '@/lib/activityRuns';
+import {
+  buildRunSubagentActivity,
+  type SubagentActivity,
+} from '@/lib/subagentActivity';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
+import { isSubagentToolName } from '@/lib/subagentTools';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { useStreamingTextReveal } from './useStreamingTextReveal';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
@@ -27,12 +46,6 @@ import { Button } from '@/components/ui/button';
 import { DotMatrix } from '@/components/ui/dot-matrix';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  ReasoningContent,
-  ReasoningRoot,
-  ReasoningText,
-  ReasoningTrigger,
-} from '@/components/reasoning';
 import { cn } from '../../../lib/utils';
 import {
   AGENT_REWIND_CAPABILITIES,
@@ -57,7 +70,6 @@ import { isCodexCompactSummaryText, isInterruptMarker } from '../../../stores/ag
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   CodeMuxDataMessagePart,
-  CodeMuxReasoningMessagePart,
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
@@ -97,6 +109,13 @@ type CodeMuxThreadRenderContextValue = {
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
+  /** 处理段（连续思考+工具）的分段与计时。 */
+  activityRuns: ActivityRuns;
+  expandedRunKeys: Set<string>;
+  claimedRunKeys: Set<string>;
+  onToggleRun: (runKey: string, currentlyOpen: boolean) => void;
+  /** 处理段里的委派：段 key → 该段的子智能体拓扑（含委派的段才有条目）。 */
+  subagentRunActivity: Map<string, SubagentActivity>;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
@@ -109,6 +128,9 @@ type CodeMuxThreadRenderContextValue = {
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TURNS: ConversationTurn<AgentMessage>[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
+const EMPTY_SUBAGENT_ORDER: string[] = [];
+const EMPTY_SUBAGENT_DESCRIPTORS: Record<string, never> = {};
+const EMPTY_SUBAGENT_EVENTS: Record<string, never> = {};
 const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
@@ -120,8 +142,10 @@ const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
  */
 const LONG_THREAD_EVENT_THRESHOLD = 120;
 const GROUP_BY_PART_INNER = groupPartByType({
-  reasoning: ['group-thinking'],
-  'tool-call': ['group-tool-call'],
+  // 思考与工具指向同一个组 key：`buildGroupTree` 是相邻合并，于是「连续的思考+工具」
+  // 自动成为一段（处理段）；文本与 data 部分天然打断分段并保持源码顺序。
+  reasoning: ['group-activity-run'],
+  'tool-call': ['group-activity-run'],
   'standalone-tool-call': [],
 });
 const GROUP_BY_PART = (
@@ -174,21 +198,37 @@ export function shouldRenderAssistantFooter(input: {
     && input.turnId !== input.pendingTurnId;
 }
 
-/** Bottom margin of an assistant row: the row right above the composer keeps
- * only a small tail — the composer's sticky footer already adds its own
- * breathing room. */
+/** Bottom margin of an assistant row: rows inside a turn keep a tight rhythm
+ * so the process area reads as one block, while the row that ends a turn
+ * (footer / collapse head) keeps the larger gap. The row right above the
+ * composer keeps only a small tail — the sticky footer adds its own room. */
 export function assistantMessageBottomSpacing(input: {
   isLastRow: boolean;
   isToggleMessage: boolean;
   shouldRenderFooter: boolean;
+  /**
+   * 同一个处理段在本行之后还有步骤：这一段跨了多个消息行，行距必须压到与段内步距
+   * （3px）一致，否则每跨一行就多出一段空隙——竖线也会跟着断掉。
+   */
+  continuesRun?: boolean;
 }): string {
   if (input.isLastRow) {
     return 'mb-2';
   }
-  if (input.isToggleMessage || input.shouldRenderFooter) {
+  // 「已处理」整轮开关是它所领起的那块内容的标题：标题下留 8px 加一条分隔线
+  // （见 AssistantCollapseToggle），展开与收起两种状态用同一个值，避免内容跳动。
+  // 它是标题而不是段内的一行，所以即使这一段在下一行继续，也不压行距——竖线由
+  // ActivityRunSteps 的多探部分接上。
+  if (input.isToggleMessage) {
+    return 'mb-2';
+  }
+  if (input.continuesRun) {
+    return 'mb-[3px]';
+  }
+  if (input.shouldRenderFooter) {
     return 'mb-4';
   }
-  return 'mb-5';
+  return 'mb-2';
 }
 
 const MESSAGE_COMPONENTS = {
@@ -291,10 +331,16 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   }, [storedWindowSize, viewportRef]);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+  // 处理段的展开状态：未被用户点过的段跟随 live 自动开合（运行中展开、结束后收起），
+  // 用户点过一次之后由用户接管（对齐参考实现的 useAutomaticDisclosure）。
+  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
+  const [claimedRunKeys, setClaimedRunKeys] = useState<Set<string>>(() => new Set());
   const [showMessageNav, setShowMessageNav] = useState(true);
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
+    setExpandedRunKeys(new Set());
+    setClaimedRunKeys(new Set());
   }, [sessionId, compactAiOutput]);
 
   useEffect(() => {
@@ -342,6 +388,20 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
         next.delete(turnKey);
       } else {
         next.add(turnKey);
+      }
+      return next;
+    });
+  }, []);
+
+  /** `currentlyOpen` 是这一行当前生效的开合状态：自动展开的段首次被点击要能收起来。 */
+  const toggleRun = useCallback((runKey: string, currentlyOpen: boolean) => {
+    setClaimedRunKeys((current) => (current.has(runKey) ? current : new Set(current).add(runKey)));
+    setExpandedRunKeys((current) => {
+      const next = new Set(current);
+      if (currentlyOpen) {
+        next.delete(runKey);
+      } else {
+        next.add(runKey);
       }
       return next;
     });
@@ -481,6 +541,35 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return finalMap;
   }, [events, eventTimestamps, isRunning, stopped, subagentFlowPending]);
 
+  // 处理段（连续思考+工具）的分段、计时与实时状态。
+  const activityRuns = useMemo(
+    () => (events.length === 0
+      ? EMPTY_ACTIVITY_RUNS
+      : buildActivityRuns(events, conversationTurns, eventTimestamps, { isRunning })),
+    [events, conversationTurns, eventTimestamps, isRunning],
+  );
+  // 委派（Task/Agent）：每个处理段里起了哪些子智能体、它们各自的进度。
+  // 段头据此改画委派卡片；不含委派的段仍是普通组头。
+  const sessionSubagents = useSubagentStore((state) => state.sessions[sessionId]);
+  const subagentRunActivity = useMemo(
+    () => buildRunSubagentActivity({
+      runs: activityRuns.runs,
+      agentEvents: events,
+      order: sessionSubagents?.order ?? EMPTY_SUBAGENT_ORDER,
+      descriptors: sessionSubagents?.descriptors ?? EMPTY_SUBAGENT_DESCRIPTORS,
+      subagentEvents: sessionSubagents?.events ?? EMPTY_SUBAGENT_EVENTS,
+    }),
+    [activityRuns, events, sessionSubagents],
+  );
+  const tailRun = activityRuns.runs[activityRuns.runs.length - 1];
+  // 仍在运行的尾段如果已经展开，实时思考就画在它里面（缩进、不再重复一个组头）。
+  const liveRunHostKey = tailRun?.live
+    && (claimedRunKeys.has(tailRun.runKey)
+      ? expandedRunKeys.has(tailRun.runKey)
+      : tailRun.live)
+    ? tailRun.runKey
+    : undefined;
+
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
@@ -488,10 +577,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     collapseInfoByEventIndex,
     expandedTurnKeys,
     onToggleExpandedTurn: toggleExpandedTurn,
+    activityRuns,
+    expandedRunKeys,
+    claimedRunKeys,
+    onToggleRun: toggleRun,
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
     pendingTurnId,
+    subagentRunActivity,
   }), [
     sessionId,
     compactAiOutput,
@@ -499,10 +593,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     collapseInfoByEventIndex,
     expandedTurnKeys,
     toggleExpandedTurn,
+    activityRuns,
+    expandedRunKeys,
+    claimedRunKeys,
+    toggleRun,
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
     pendingTurnId,
+    subagentRunActivity,
   ]);
 
   return (
@@ -522,7 +621,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               data-testid="thread-content-shell"
               data-long-thread={events.length > LONG_THREAD_EVENT_THRESHOLD ? '' : undefined}
               className={cn(
-                'mx-auto flex w-full flex-1 flex-col pt-5',
+                'mx-auto flex w-full flex-1 flex-col pt-4',
                 showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
               )}
               style={{ maxWidth: 'var(--content-width, 52rem)' }}
@@ -537,11 +636,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
                 <CodeMuxThreadMessages />
               </CodeMuxThreadRenderContext.Provider>
               {stopped ? <InterruptBanner /> : null}
-              <StreamingContent sessionId={sessionId} events={events} />
-              <SubagentRunningRow sessionId={sessionId} />
+              <StreamingContent sessionId={sessionId} events={events} liveRunKey={liveRunHostKey} />
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
-                className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-1 pb-4"
+                className="sticky bottom-0 mt-auto z-10 flex flex-col gap-2 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-1 pb-3"
               >
                 {scrollToBottomButton}
                 {footer}
@@ -761,10 +859,15 @@ function CodeMuxAssistantMessage() {
     collapseInfoByEventIndex,
     expandedTurnKeys,
     onToggleExpandedTurn,
+    activityRuns,
+    expandedRunKeys,
+    claimedRunKeys,
+    onToggleRun,
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
     pendingTurnId,
+    subagentRunActivity,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -775,17 +878,22 @@ function CodeMuxAssistantMessage() {
       collapseInfoByEventIndex={collapseInfoByEventIndex}
       expandedTurnKeys={expandedTurnKeys}
       onToggleExpandedTurn={onToggleExpandedTurn}
+      activityRuns={activityRuns}
+      expandedRunKeys={expandedRunKeys}
+      claimedRunKeys={claimedRunKeys}
+      onToggleRun={onToggleRun}
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
       turnOrdinalById={turnOrdinalById}
       pendingTurnId={pendingTurnId}
+      subagentRunActivity={subagentRunActivity}
     />
   );
 }
 
 function InterruptBanner() {
   return (
-    <div className="mb-4 flex w-full justify-center">
+    <div className="mb-3 flex w-full justify-center">
       <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
         {INTERRUPT_LABEL}
       </div>
@@ -829,7 +937,7 @@ function UserMessage({
 
   if (isInterruptMarker(text)) {
     return (
-      <div className="mb-4 flex w-full justify-center">
+      <div className="mb-3 flex w-full justify-center">
         <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
           {INTERRUPT_LABEL}
         </div>
@@ -841,7 +949,7 @@ function UserMessage({
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
       data-message-row
-      className="group/message-row mb-3 flex w-full justify-end"
+      className="group/message-row mb-2.5 flex w-full justify-end"
     >
       <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
         {imageAttachments.length > 0 ? (
@@ -958,7 +1066,7 @@ function UserEditComposer({ message, sourceEventIndex }: { message: MessageState
   return (
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
-      className="mb-5 flex w-full justify-end"
+      className="mb-3 flex w-full justify-end"
     >
       <ComposerPrimitive.Root
         onSubmit={(event) => {
@@ -1614,10 +1722,15 @@ function AssistantLikeMessage({
   collapseInfoByEventIndex,
   expandedTurnKeys,
   onToggleExpandedTurn,
+  activityRuns,
+  expandedRunKeys,
+  claimedRunKeys,
+  onToggleRun,
   toolDurations,
   turnByEventIndex,
   turnOrdinalById,
   pendingTurnId,
+  subagentRunActivity,
 }: {
   message: MessageState;
   sessionId: string;
@@ -1626,28 +1739,73 @@ function AssistantLikeMessage({
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
+  activityRuns: ActivityRuns;
+  expandedRunKeys: Set<string>;
+  claimedRunKeys: Set<string>;
+  onToggleRun: (runKey: string, currentlyOpen: boolean) => void;
+  subagentRunActivity: Map<string, SubagentActivity>;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
   pendingTurnId?: string;
 }) {
+  const openSubagentInSidePanel = useSubagentStore((state) => state.openInSidePanel);
   const forkSession = useSessionStore((state) => state.forkSession);
   const [isForking, setIsForking] = useState(false);
   // The tight mb-2 tail is only for a row that actually sits above the composer.
+  // The tight mb-2 tail is only for a row that actually sits above the composer.
   // While a turn is running, the last row is followed by the live streaming block
-  // (StreamingContent / SubagentRunningRow) and must keep the normal rhythm.
+  // (StreamingContent) and must keep the normal rhythm.
   const isLastRow = useIsLastMessage(message) && !isRunning;
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
-  if (message.content.length === 0 && !collapseInfo?.isToggleMessage) {
+
+  // 这一行属于哪个处理段（连续思考 + 工具）：段首画组头，段内其余行只画缩进的步骤行。
+  const sourceEventIndex = getSourceEventIndex(message);
+  const runPlacement: ActivityRunPlacement | undefined = sourceEventIndex != null
+    ? activityRuns.placementByEventIndex.get(sourceEventIndex)
+    : undefined;
+  const run = runPlacement ? activityRuns.runByKey.get(runPlacement.runKey) : undefined;
+  // 整轮折叠（「已处理」开关）负责整轮的显隐；段自己的折叠在整轮展开后照常工作。
+  const compactToggle = collapseInfo?.isToggleMessage === true;
+  if (message.content.length === 0 && !compactToggle) {
     return null;
   }
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
   const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
   const shouldHideCollapsedReasoning = collapseInfo?.hideReasoningOnly && !isCollapseExpanded;
-
-  if (shouldHideCollapsedContent && !collapseInfo.isToggleMessage) {
-    return null;
-  }
+  // 委派（Task/Agent）段：段头改画委派卡片，段内的委派工具行不再单独渲染。
+  const subagentActivity = run ? subagentRunActivity.get(run.runKey) : undefined;
+  const delegationRunning = subagentActivity != null && subagentActivity.summary.running > 0;
+  // 未被用户点过的段跟随 live 自动开合：运行中展开、结束后收起；用户点过之后由用户接管。
+  // 含委派的段还要看子智能体：父段本身可能早就「结束」了，而子智能体还在跑。
+  const runOpen = run
+    ? (claimedRunKeys.has(run.runKey)
+      ? expandedRunKeys.has(run.runKey)
+      : run.live || delegationRunning)
+    : true;
+  // 每个处理段都画自己的段组头：段首行即使正好是「本轮处理」开关所在行也照画，
+  // 否则首段会退化成一堆没有开合入口、也没有缩进归属的裸步骤行。
+  const runHeaderVisible = run != null
+    && runPlacement?.isHead === true
+    && (collapseInfo == null || isCollapseExpanded);
+  // 段收起时不渲染步骤行；同行里的正文等独立部分由 hasIndependentPart 兜底保持可见。
+  const runRowsVisible = run == null || runOpen;
+  // 与处理段无关、必须始终可见的部分（正文 / 数据卡片 / 问询卡片）：段收起时它们照常渲染。
+  const hasIndependentPart = message.content.some((part) => (
+    part.type === 'text'
+    || part.type === 'data'
+    || (part.type === 'tool-call' && isAskUserQuestionToolName(part.toolName))
+  ));
+  const partsVisible = !shouldHideCollapsedContent && (runRowsVisible || hasIndependentPart);
+  // 同一个处理段可能跨多个消息行（一边说一边调工具时，每个事件各成一行）：这一行之后若还有
+  // 本段的步骤，行距压到与段内步距一致、竖线向下多探 3px 接上下一行，整段读起来是一条线。
+  // 只有步骤真的画出来时才算「连续」——段收起时后面的行会整行消失，行距要照旧。
+  const continuesRun = runRowsVisible
+    && rowRunContinues(activityRuns.placementByEventIndex, run, getSourceEventIndices(message));
+  // 含委派的段不再画「已处理 N 个步骤」组头，改由卡片承担（收起态也能开合）。
+  const delegationCardVisible = runHeaderVisible
+    && subagentActivity != null
+    && subagentActivity.nodes.length > 0;
 
   const sourceTimestamp = getSourceTimestamp(message);
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
@@ -1666,6 +1824,11 @@ function AssistantLikeMessage({
     turnId: turn?.id,
     pendingTurnId,
   });
+  const footerVisible = !shouldHideCollapsedContent && shouldRenderFooter;
+  // 整行都没有可见内容时直接不渲染：整轮「已处理」收起、段收起、且不是段首时即如此。
+  if (!compactToggle && !runHeaderVisible && !partsVisible && !footerVisible) {
+    return null;
+  }
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
   const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;
   const sourceProviderTurnOrdinal = turn ? turnOrdinalById.get(turn.id) : undefined;
@@ -1692,100 +1855,133 @@ function AssistantLikeMessage({
   };
   const messageBottomSpacing = assistantMessageBottomSpacing({
     isLastRow,
-    isToggleMessage: collapseInfo?.isToggleMessage === true,
+    isToggleMessage: compactToggle,
     shouldRenderFooter,
+    continuesRun,
   });
+  const runDurationMs = run && run.startedAt != null
+    ? (run.live ? Date.now() : (run.endedAt ?? run.startedAt)) - run.startedAt
+    : undefined;
+  /**
+   * 段内单个过程步骤（思考 / 工具）的渲染。处理段里的步骤有两个落点：普通段的
+   * `ActivityRunSteps`，以及含委派段的卡片主体——两处共用这一个开关。
+   */
+  const renderLeafPart = (part: PartState): ReactNode => {
+    switch (part.type) {
+      case 'text':
+        return (
+          <CodeMuxTextMessagePart
+            text={part.text}
+            parsePlan={isFinal && turn?.status === 'completed'}
+          />
+        );
+      case 'reasoning':
+        if (shouldHideCollapsedReasoning) {
+          return null;
+        }
+        return (
+          <ActivityStepThinking
+            text={part.text}
+            streaming={part.status?.type === 'running'}
+          />
+        );
+      case 'tool-call':
+        return (
+          <CodeMuxToolCallMessagePart
+            toolName={part.toolName}
+            toolCallId={part.toolCallId}
+            sessionId={sessionId}
+            args={asRecord(part.args)}
+            argsText={part.argsText}
+            result={part.result}
+            isError={part.isError}
+            status={part.status}
+            durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
+          />
+        );
+      case 'data':
+        return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} messageText={messageText} />;
+      default:
+        return null;
+    }
+  };
 
   return (
     <MessagePrimitive.Root
       data-message-row
+      data-activity-run={run?.runKey}
+      data-activity-run-head={runHeaderVisible ? '' : undefined}
       className={cn('group/message-row flex w-full justify-start', messageBottomSpacing)}
     >
       <div
         className={cn(
-          'w-full min-w-0 space-y-2 text-sm leading-relaxed',
+          'w-full min-w-0 space-y-1 text-ui-body leading-relaxed',
           message.metadata.custom?.sourceRole === 'system' && 'text-muted-foreground',
         )}
       >
-        {collapseInfo?.isToggleMessage ? (
+        {compactToggle ? (
           <AssistantCollapseToggle
             expanded={isCollapseExpanded}
             durationMs={collapseInfo.durationMs}
             onClick={() => onToggleExpandedTurn(collapseInfo.turnKey)}
           />
         ) : null}
-        {!shouldHideCollapsedContent ? (
+        {delegationCardVisible && run && subagentActivity ? (
+          <SubagentActivityCard
+            activity={subagentActivity}
+            live={run.live || subagentActivity.summary.running > 0}
+            open={runOpen}
+            onToggle={() => onToggleRun(run.runKey, runOpen)}
+            onOpenSubagent={(subagentId) => openSubagentInSidePanel(sessionId, subagentId)}
+          >
+            {message.content.map((part, index) => (
+              isActivityRunPart(part)
+                && !(part.type === 'tool-call' && isSubagentToolName(part.toolName)) ? (
+                <Fragment key={`subagent-step-${index}`}>{renderLeafPart(part as PartState)}</Fragment>
+              ) : null
+            ))}
+          </SubagentActivityCard>
+        ) : runHeaderVisible && run ? (
+          <ActivityRunHeader
+            open={runOpen}
+            onToggle={() => onToggleRun(run.runKey, runOpen)}
+            live={run.live}
+            onlyThinking={run.onlyThinking}
+            durationMs={runDurationMs}
+            stepCount={run.stepCount}
+            tail={run.tail}
+          />
+        ) : null}
+        {partsVisible ? (
           <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
             {({ part, children }) => {
               switch (part.type) {
-                case 'group-thinking':
-                  if (shouldHideCollapsedReasoning) {
+                case 'group-activity-run':
+                  // 含委派的段：过程步骤已经画进段头的委派卡片（拓扑在前、步骤在后）。
+                  if (delegationCardVisible) {
                     return null;
                   }
-                  return (
-                    <CodeMuxReasoningGroup
-                      startIndex={part.indices[0] ?? 0}
-                      endIndex={part.indices[part.indices.length - 1] ?? 0}
-                    >
-                      {children}
-                    </CodeMuxReasoningGroup>
-                  );
-
-                case 'group-tool-call': {
-                  const toolCalls = part.indices
-                    .map((idx) => message.content[idx])
-                    .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call');
-                  const toolNames = toolCalls.map((c) => c.toolName);
-                  const toolCallIds = toolCalls.map((c) => c.toolCallId).filter((id): id is string => typeof id === 'string');
-                  return (
-                    <CodeMuxToolGroup
-                      sessionId={sessionId}
-                      startIndex={part.indices[0] ?? 0}
-                      endIndex={part.indices[part.indices.length - 1] ?? 0}
-                      toolNames={toolNames}
-                      toolCallIds={toolCallIds}
-                    >
-                      {children}
-                    </CodeMuxToolGroup>
-                  );
-                }
-
+                  // 段收起时只收起过程步骤行：同一行里的正文（「思考 + 最终答复」同一个事件时
+                  // 它们同属一段）必须始终可见，否则最终答复会随段一起消失。
+                  if (!runRowsVisible) {
+                    return null;
+                  }
+                  // 段内步骤缩进 + 段头图标中线上的竖线，视觉上归属上面的组头。
+                  return <ActivityRunSteps extendsIntoGap={continuesRun}>{children}</ActivityRunSteps>;
+                case 'indicator':
+                  return null;
                 case 'text':
-                  return (
-                    <CodeMuxTextMessagePart
-                      text={part.text}
-                      parsePlan={isFinal && turn?.status === 'completed'}
-                    />
-                  );
-
                 case 'reasoning':
-                  return <CodeMuxReasoningMessagePart />;
-
                 case 'tool-call':
-                  return (
-                    <CodeMuxToolCallMessagePart
-                      toolName={part.toolName}
-                      toolCallId={part.toolCallId}
-                      sessionId={sessionId}
-                      args={asRecord(part.args)}
-                      argsText={part.argsText}
-                      result={part.result}
-                      isError={part.isError}
-                      status={part.status}
-                      durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
-                    />
-                  );
-
                 case 'data':
-                  return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} messageText={messageText} />;
-
+                  return renderLeafPart(part);
                 default:
                   return null;
               }
             }}
           </MessagePrimitive.GroupedParts>
         ) : null}
-        {!shouldHideCollapsedContent && shouldRenderFooter ? (
+        {footerVisible ? (
           <MessageFooter
             timestamp={sourceTimestamp}
             stats={footerStats}
@@ -1799,132 +1995,6 @@ function AssistantLikeMessage({
         ) : null}
       </div>
     </MessagePrimitive.Root>
-  );
-}
-
-function CodeMuxReasoningGroup({
-  children,
-  startIndex,
-  endIndex,
-}: {
-  children?: ReactNode;
-  startIndex: number;
-  endIndex: number;
-}) {
-  const isRunning = useAuiState((state) => {
-    if (state.message.status?.type !== 'running') return false;
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      if (state.message.parts[index]?.status.type === 'running') return true;
-    }
-    return false;
-  });
-
-  return (
-    <ReasoningRoot streaming={isRunning} variant="ghost">
-      <ReasoningTrigger active={isRunning} />
-      <ReasoningContent aria-busy={isRunning}>
-        <ReasoningText>{children}</ReasoningText>
-      </ReasoningContent>
-    </ReasoningRoot>
-  );
-}
-
-function CodeMuxToolGroup({
-  children,
-  sessionId,
-  startIndex,
-  endIndex,
-  toolNames,
-  toolCallIds,
-}: {
-  children?: ReactNode;
-  sessionId?: string;
-  startIndex: number;
-  endIndex: number;
-  toolNames: string[];
-  toolCallIds: string[];
-}) {
-  const isRunning = useAuiState((state) => {
-    if (state.message.status?.type !== 'running') return false;
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      if (state.message.parts[index]?.status.type === 'running') return true;
-    }
-    return false;
-  });
-  // A subagent descriptor still running keeps its Agent/Task tool group in the
-  // running state even after the parent turn has finished.
-  const hasRunningSubagent = useSubagentStore((state) => {
-    if (!sessionId || toolCallIds.length === 0) return false;
-    const descriptors = state.sessions[sessionId]?.descriptors;
-    if (!descriptors) return false;
-    return toolCallIds.some((toolCallId) => descriptors[toolCallId]?.status === 'running');
-  });
-
-  return (
-    <ToolGroup
-      startIndex={startIndex}
-      endIndex={endIndex}
-      toolNames={toolNames}
-      active={isRunning || hasRunningSubagent}
-      running={hasRunningSubagent}
-    >
-      {children}
-    </ToolGroup>
-  );
-}
-
-/**
- * Async-agent progress: the parent turn is over but background subagents are
- * still exploring. Without this row the completed result card would make the
- * conversation look finished.
- */
-function SubagentRunningRow({ sessionId }: { sessionId: string }) {
-  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
-  // 用户停止后子智能体会被置为 failed/canceled,不再有"自动继续"——行要隐藏。
-  const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
-  const runningCount = useSubagentStore((state) => {
-    const session = state.sessions[sessionId];
-    if (!session) return 0;
-    return session.order.filter((id) => session.descriptors[id]?.status === 'running').length;
-  });
-  // Children all terminal but the parent's summary turn has not settled yet —
-  // the flow is still alive from the user's point of view.
-  const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
-  // The overall async flow started with the latest user message; keep a live
-  // count-up so the wait does not read as a frozen, finished conversation.
-  const startedAt = useAgentStore((state) => {
-    const sessionEvents = state.events[sessionId];
-    const stamps = state.eventTimestamps[sessionId];
-    if (!sessionEvents) return undefined;
-    for (let index = sessionEvents.length - 1; index >= 0; index -= 1) {
-      if (sessionEvents[index].kind === 'user') {
-        return stamps?.[index];
-      }
-    }
-    return undefined;
-  });
-
-  if (stopped || isRunning || (runningCount === 0 && !continuationPending)) {
-    return null;
-  }
-
-  const label = runningCount > 0
-    ? `子智能体仍在后台运行 ×${runningCount}`
-    : '子智能体已完成，主智能体继续输出中';
-
-  return (
-    <div className="mb-5 flex w-full justify-start" data-testid="subagent-running-row">
-      <div className="flex items-center gap-2 pl-1 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-        <span>
-          <RunningElapsedTimer
-            label={label}
-            startTime={startedAt}
-          />
-          ，完成后会自动继续
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -1955,7 +2025,18 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
   );
 });
 
-function StreamingContent({ sessionId, events }: { sessionId: string; events: AgentMessage[] }) {
+function StreamingContent({
+  sessionId,
+  events,
+  liveRunKey,
+}: {
+  sessionId: string;
+  events: AgentMessage[];
+  /** 仍在运行的尾段 key：实时思考行归属这个段，画在它里面，不再重复一个组头。 */
+  liveRunKey?: string;
+}) {
+  // 实时思考在没有可归属的尾段（上一段已被文本打断或不存在）时自带一个可折叠组头。
+  const [liveRunOpen, setLiveRunOpen] = useState(true);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
@@ -2012,31 +2093,48 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
 
   const isThinking = visibleThinking.length > 0;
 
+  const liveThinkingStep = (
+    <ActivityStepThinking
+      text={visibleThinking}
+      streaming={isRunning}
+      body={
+        <pre className="whitespace-pre-wrap font-sans text-ui-body leading-relaxed text-muted-foreground">
+          {revealedThinking}
+        </pre>
+      }
+    />
+  );
+
   return (
-    <div className="mb-5 flex w-full justify-start">
-      <div className="w-full min-w-0 space-y-2 text-lg leading-relaxed">
-        {isThinking ? (
+    <div className="mb-2 flex w-full justify-start">
+      <div className="w-full min-w-0 space-y-1 text-lg leading-relaxed">
+        {isThinking && (liveRunKey != null || liveRunOpen) ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
-            <ReasoningRoot streaming={isRunning} variant="ghost">
-              <ReasoningTrigger active={isRunning} />
-              <ReasoningContent aria-busy={isRunning}>
-                <ReasoningText>
-                  <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">
-                    {revealedThinking}
-                  </pre>
-                </ReasoningText>
-              </ReasoningContent>
-            </ReasoningRoot>
+            {liveRunKey == null ? (
+              <ActivityRunHeader
+                open={liveRunOpen}
+                onToggle={() => setLiveRunOpen((value) => !value)}
+                live
+                onlyThinking
+                durationMs={queryStartTime != null ? Date.now() - queryStartTime : undefined}
+                stepCount={1}
+              />
+            ) : null}
+            {liveRunKey == null ? (
+              liveThinkingStep
+            ) : (
+              // 这个实时思考行归属仍在运行的尾段：与已提交的步骤行共用缩进与竖线。
+              <ActivityRunSteps className="w-full min-w-0" extendsUpward>{liveThinkingStep}</ActivityRunSteps>
+            )}
           </div>
         ) : null}
 
         {visibleText ? (
           <div
             data-streaming-text="markdown"
-            className="relative text-sm leading-6 text-foreground"
+            className="relative text-ui-body leading-relaxed text-foreground"
           >
             <Streamdown
-              mode="streaming"
               {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}
             >
               {revealedText}

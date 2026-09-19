@@ -28,6 +28,8 @@ type CodeMuxToolEvent = {
 type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
+  /** Provider model that produced the message; subagent timelines may carry it. */
+  model?: string;
   content?: AgentAssistantMessage['message']['content'];
   provider_message_id?: string;
   opencode_session_id?: string;

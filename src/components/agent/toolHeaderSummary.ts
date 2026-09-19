@@ -385,3 +385,81 @@ export function getToolGroupPhrase(toolName: string, count: number): string {
   const phrase = TOOL_GROUP_PHRASES[normalizeToolName(toolName)];
   return phrase ? phrase(count) : `${getToolDisplayName(toolName)} ${count} 次`;
 }
+
+/**
+ * 工具的动作分类。工具行展示的是「动作词」而不是原始工具名（对齐参考实现的
+ * `TOOL_ACTION_KEYS` 措辞）：`Bash` 显示「运行 / 正在运行」，`Grep` 显示「搜索 / 正在搜索」。
+ */
+export type ToolAction =
+  | 'read'
+  | 'list'
+  | 'search'
+  | 'write'
+  | 'edit'
+  | 'run'
+  | 'fetch'
+  | 'delegate'
+  | 'use';
+
+const TOOL_ACTION_BY_NAME: Record<string, ToolAction> = {
+  Read: 'read',
+  NotebookRead: 'read',
+  view_image: 'read',
+  LS: 'list',
+  Glob: 'list',
+  Grep: 'search',
+  WebSearch: 'search',
+  tool_search: 'search',
+  Write: 'write',
+  Edit: 'edit',
+  MultiEdit: 'edit',
+  NotebookEdit: 'edit',
+  apply_patch: 'edit',
+  Bash: 'run',
+  shell_command: 'run',
+  js: 'run',
+  js_repl: 'run',
+  js_repl_reset: 'run',
+  WebFetch: 'fetch',
+  Agent: 'delegate',
+  Task: 'delegate',
+  subagent: 'delegate',
+  spawn_agent: 'delegate',
+  send_input: 'delegate',
+  wait_agent: 'delegate',
+  close_agent: 'delegate',
+  resume_agent: 'delegate',
+  TaskStop: 'delegate',
+};
+
+const TOOL_ACTION_LABELS: Record<ToolAction, { done: string; running: string }> = {
+  read: { done: '读取', running: '正在读取' },
+  list: { done: '列出', running: '正在列出' },
+  search: { done: '搜索', running: '正在搜索' },
+  write: { done: '写入', running: '正在写入' },
+  edit: { done: '编辑', running: '正在编辑' },
+  run: { done: '运行', running: '正在运行' },
+  fetch: { done: '获取', running: '正在获取' },
+  delegate: { done: '委派', running: '正在委派' },
+  use: { done: '调用', running: '正在调用' },
+};
+
+export function getToolAction(toolName: string): ToolAction {
+  if (toolName.startsWith('mcp__')) {
+    return 'use';
+  }
+  return TOOL_ACTION_BY_NAME[normalizeToolName(toolName)] ?? 'use';
+}
+
+/**
+ * 工具行的动作词。`use` 类没有统一动词（`更新待办`/`技能`/`退出计划模式` 各自都已经是
+ * 可读的动作），回落到既有的中文展示名。
+ */
+export function getToolActionLabel(toolName: string, options: { running?: boolean } = {}): string {
+  const action = getToolAction(toolName);
+  if (action === 'use') {
+    return getToolDisplayName(toolName);
+  }
+  const labels = TOOL_ACTION_LABELS[action];
+  return options.running ? labels.running : labels.done;
+}

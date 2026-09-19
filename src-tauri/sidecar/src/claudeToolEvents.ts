@@ -118,6 +118,7 @@ export function toClaudeAssistantMessageEvent(event: Record<string, unknown>): T
   const content = (message as Record<string, unknown>).content;
   if (!Array.isArray(content)) return undefined;
   const stopReason = (message as Record<string, unknown>).stop_reason;
+  const model = (message as Record<string, unknown>).model;
   const providerMessageId = typeof event.uuid === 'string' && event.uuid.length > 0
     ? event.uuid
     : undefined;
@@ -127,6 +128,7 @@ export function toClaudeAssistantMessageEvent(event: Record<string, unknown>): T
   return {
     kind: 'assistant_message',
     content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
+    ...(typeof model === 'string' && model.length > 0 ? { model } : {}),
     ...(typeof stopReason === 'string' || stopReason === null ? { stopReason } : {}),
     ...(providerMessageId ? { providerMessageId } : {}),
     ...(supersedesProviderMessageIds?.length ? { supersedesProviderMessageIds } : {}),

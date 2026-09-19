@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolGroupPhrase, getToolHeaderSummary, isFileMutationTool, isShellCommandTool } from './toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolAction, getToolActionLabel, getToolDisplayName, getToolGroupPhrase, getToolHeaderSummary, isFileMutationTool, isShellCommandTool } from './toolHeaderSummary';
 
 describe('toolHeaderSummary', () => {
   it('shows update_plan explanation as the header summary and omits it from displayable args', () => {
@@ -223,5 +223,47 @@ describe('getToolGroupPhrase', () => {
   it('falls back to the display name phrase for MCP and unknown tools', () => {
     expect(getToolGroupPhrase('mcp__context7__query_docs', 2)).toBe('调用 2 次 context7');
     expect(getToolGroupPhrase('some_custom_tool', 3)).toBe('some_custom_tool 3 次');
+  });
+});
+
+describe('getToolActionLabel', () => {
+  it('使用动作词而不是原始工具名，并按运行中切词', () => {
+    expect(getToolActionLabel('Read')).toBe('读取');
+    expect(getToolActionLabel('Read', { running: true })).toBe('正在读取');
+    expect(getToolActionLabel('Grep')).toBe('搜索');
+    expect(getToolActionLabel('Grep', { running: true })).toBe('正在搜索');
+    expect(getToolActionLabel('Write')).toBe('写入');
+    expect(getToolActionLabel('Edit')).toBe('编辑');
+    expect(getToolActionLabel('Bash')).toBe('运行');
+    expect(getToolActionLabel('Bash', { running: true })).toBe('正在运行');
+    expect(getToolActionLabel('WebFetch')).toBe('获取');
+    expect(getToolActionLabel('Glob')).toBe('列出');
+    expect(getToolActionLabel('LS')).toBe('列出');
+    expect(getToolActionLabel('Task')).toBe('委派');
+    expect(getToolActionLabel('WebSearch')).toBe('搜索');
+    expect(getToolActionLabel('apply_patch')).toBe('编辑');
+    expect(getToolActionLabel('shell_command')).toBe('运行');
+  });
+
+  it('识别别名与大小写', () => {
+    expect(getToolActionLabel('read')).toBe('读取');
+    expect(getToolActionLabel('bash')).toBe('运行');
+    expect(getToolActionLabel('BASH')).toBe('运行');
+    // 别名表未收录的小写写法与 getToolDisplayName 行为一致（一起回落原名）。
+    expect(getToolActionLabel('notebookedit')).toBe(getToolDisplayName('notebookedit'));
+  });
+
+  it('MCP 与无统一动词的工具回落到原有可读展示名', () => {
+    // 这些工具名本身已经是可读动作（「更新待办」「技能」…），不该被硬塞成「调用」。
+    expect(getToolActionLabel('mcp__context7__query_docs')).toBe(getToolDisplayName('mcp__context7__query_docs'));
+    expect(getToolActionLabel('TodoWrite')).toBe(getToolDisplayName('TodoWrite'));
+    expect(getToolActionLabel('Skill')).toBe(getToolDisplayName('Skill'));
+  });
+
+  it('动作分类：MCP 与未知工具都归到 use', () => {
+    expect(getToolAction('mcp__context7__query_docs')).toBe('use');
+    expect(getToolAction('some_custom_tool')).toBe('use');
+    expect(getToolAction('Read')).toBe('read');
+    expect(getToolAction('Bash')).toBe('run');
   });
 });

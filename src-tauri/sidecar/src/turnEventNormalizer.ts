@@ -8,6 +8,8 @@ export type TurnSourceEvent =
       providerMessageId?: string;
       providerTurnId?: string;
       supersedesProviderMessageIds?: string[];
+      /** Provider model that produced the message, when the runtime reports one. */
+      model?: string;
     }
   | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> }
   | { kind: 'permission_requested'; requestId: string; permissionId?: string; permissionType: string; description: string; metadata?: Record<string, unknown> }
@@ -72,6 +74,7 @@ export class TurnEventNormalizer {
       return [this.withSequence({
         type: 'assistant_message', session_id: this.sessionId, content: source.content,
         ...(source.stopReason !== undefined ? { stop_reason: source.stopReason } : {}),
+        ...(source.model ? { model: source.model } : {}),
         ...(source.providerMessageId ? { provider_message_id: source.providerMessageId } : {}),
         ...(source.providerTurnId ? { provider_turn_id: source.providerTurnId } : {}),
         ...(source.supersedesProviderMessageIds?.length

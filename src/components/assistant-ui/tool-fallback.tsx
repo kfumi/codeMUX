@@ -1,13 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AlertCircleIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  LoaderIcon,
-  XCircleIcon,
-} from 'lucide-react';
+import { AlertCircleIcon, ChevronDownIcon, XCircleIcon } from 'lucide-react';
 import {
   type ToolCallMessagePart,
   type ToolCallMessagePartProps,
@@ -21,6 +15,9 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+import { getToolActionLabel, getToolDisplayName } from '@/components/agent/toolHeaderSummary';
+import { ToolActionIcon } from '@/components/assistant-ui/tool-action-icon';
 
 const ANIMATION_DURATION = 200;
 
@@ -63,7 +60,7 @@ function ToolFallbackRoot({
       data-slot="tool-fallback-root"
       open={isOpen}
       onOpenChange={handleOpenChange}
-      className={cn('aui-tool-fallback-root group/tool-fallback-root w-full py-1', className)}
+      className={cn('aui-tool-fallback-root group/tool-fallback-root group/tool-row w-full', className)}
       style={{ '--animation-duration': `${ANIMATION_DURATION}ms` } as React.CSSProperties}
       {...props}
     >
@@ -72,14 +69,13 @@ function ToolFallbackRoot({
   );
 }
 
-type ToolStatus = ToolCallMessagePartStatus['type'];
-const statusIconMap: Record<ToolStatus, React.ElementType> = {
-  running: LoaderIcon,
-  complete: CheckIcon,
-  incomplete: XCircleIcon,
-  'requires-action': AlertCircleIcon,
-};
-
+/**
+ * 工具行：动作图标 + 动作词 + 等宽摘要（由调用方通过 `children` 传入）+ 行尾状态 + 箭头。
+ * 动作词与状态分离，是因为一行里「在做什么」和「做完没有」是两件事——参考实现里
+ * 状态靠行尾的 spinner / 失败文字表达，图标只说明动作类别，读一列工具行时可以按形状扫读。
+ * 动作词是 UI 字体、右侧摘要是等宽字体：两种字体的 ascent/descent 不同，按几何居中会让
+ * 等宽摘要比动作词高出约 2px，所以这一组按**基线**对齐（图标、状态、箭头仍各自居中）。
+ */
 function ToolFallbackTrigger({
   toolName,
   status,
@@ -87,55 +83,94 @@ function ToolFallbackTrigger({
   children,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
+  /** 原始工具名。展示用的动作词与图标都由它推导。 */
   toolName: string;
   status?: ToolCallMessagePartStatus;
 }) {
   const statusType = status?.type ?? 'complete';
   const isRunning = statusType === 'running';
   const isCancelled = status?.type === 'incomplete' && status.reason === 'cancelled';
-  const Icon = statusIconMap[statusType];
+  const isError = status?.type === 'incomplete' && !isCancelled;
   // 窄屏没有 hover:展开箭头常显(触发按钮本身可点,但箭头指示不应隐形)。
   const isNarrow = useIsNarrowViewport();
+  const label = getToolActionLabel(toolName, { running: isRunning });
+  const displayName = getToolDisplayName(toolName);
+  // 无障碍名带上原始展示名：动作词让一列工具行可扫读，但读者仍需要知道具体是哪个工具。
+  const accessibleName = displayName && displayName !== label
+    ? `${label} · ${displayName}`
+    : label;
+
+  const statusNode = isRunning ? (
+    <span
+      data-slot="tool-fallback-status"
+      role="status"
+      aria-live="polite"
+      aria-label="运行中"
+      className="size-[11px] shrink-0 animate-spin rounded-full border-[1.5px] border-border border-t-muted-foreground motion-reduce:animate-none"
+    />
+  ) : isError ? (
+    <span
+      data-slot="tool-fallback-status"
+      role="status"
+      aria-live="polite"
+      className="inline-flex shrink-0 items-center gap-1 text-ui-caption text-destructive"
+    >
+      <XCircleIcon className="size-3" aria-hidden />
+      失败
+    </span>
+  ) : isCancelled ? (
+    <span
+      data-slot="tool-fallback-status"
+      role="status"
+      aria-live="polite"
+      className="shrink-0 text-ui-caption text-muted-foreground"
+    >
+      已取消
+    </span>
+  ) : statusType === 'requires-action' ? (
+    <span
+      data-slot="tool-fallback-status"
+      role="status"
+      aria-live="polite"
+      className="inline-flex shrink-0 items-center text-[hsl(var(--warning))]"
+    >
+      <AlertCircleIcon className="size-3.5" aria-hidden />
+    </span>
+  ) : null;
 
   return (
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
+      aria-label={accessibleName}
       className={cn(
-        'aui-tool-fallback-trigger group/trigger inline-flex max-w-full items-center gap-2 text-sm font-normal text-muted-foreground/52 transition-colors hover:text-muted-foreground/78',
+        'aui-tool-fallback-trigger group/trigger -mx-1 inline-flex min-h-6 max-w-full items-center gap-1 rounded-sm px-1 text-ui-compact font-normal text-muted-foreground transition-colors hover:bg-[hsl(var(--surface-2))]/60 hover:text-foreground',
         className,
       )}
       {...props}
     >
-      <Icon
-        className={cn(
-          'size-3.5 shrink-0',
-          isCancelled && 'text-muted-foreground/72',
-          isRunning && 'animate-spin text-muted-foreground/72',
-          statusType === 'complete' && 'text-muted-foreground/68',
-          statusType === 'incomplete' && !isCancelled && 'text-[hsl(var(--destructive)/0.72)]',
-        )}
-      />
+      <ToolActionIcon toolName={toolName} className="text-muted-foreground" />
       <span
         data-slot="tool-fallback-trigger-label"
         className={cn(
-          'relative inline-flex min-w-0 items-center gap-2 overflow-hidden text-start leading-none',
+          'relative inline-flex min-w-0 items-baseline gap-1.5 overflow-hidden text-start',
           isCancelled && 'text-muted-foreground line-through',
         )}
       >
-        <span className="shrink-0">
-          <span>{toolName}</span>
+        <span data-slot="tool-fallback-trigger-name" className="shrink-0 font-medium">
+          {label}
         </span>
         {children}
       </span>
+      {statusNode}
       <ChevronDownIcon
         data-slot="tool-fallback-trigger-chevron"
         className={cn(
-          'size-3.5 shrink-0 text-muted-foreground/52',
+          'size-3.5 shrink-0 text-muted-foreground',
           'transition-[transform,opacity]',
           'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
           isNarrow
             ? 'opacity-100'
-            : 'opacity-0 group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
+            : 'opacity-0 group-hover/trigger:opacity-100 group-hover/tool-row:opacity-100 group-focus-visible/trigger:opacity-100',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0 group-data-[state=open]/trigger:opacity-100',
         )}
@@ -170,7 +205,7 @@ function ToolFallbackContent({
     >
       <div
         className={cn(
-          'mt-1 flex flex-col gap-2 text-xs scrollbar-gutter-stable ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+          'mt-0.5 flex flex-col gap-1.5 text-xs scrollbar-gutter-stable ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
           'group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1',
           'group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1',
           'group-data-open/collapsible-content:duration-(--animation-duration) group-data-closed/collapsible-content:duration-(--animation-duration)',

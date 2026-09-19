@@ -589,6 +589,31 @@ html.cmx-panel-resizing webview {
   padding-block: 0.125rem;
 }
 
+/* 对话/预览共用的 Markdown 块间节奏（streamdown 根节点）。
+   根节点带 Tailwind 的 space-y-4，而 v4 的 space-y 实现为「非最后一个子元素的
+   margin-block-end」——只改 margin-block-start 时，相邻外边距折叠后仍旧回到 16px，
+   所以这里先把两个方向清零，再用单一的上边距表达节奏：
+   块与块 8px；标题上方 12px、标题下方 4px；代码块/表格/图片/列表同样落在 8px 上，
+   且末尾不留尾巴（不再依赖各元素自带的 my-4）。
+   作用域写成 .aui-md.space-y-4：只命中 streamdown 根节点，不影响用 react-markdown
+   渲染工具结果气泡的那处 .aui-md（它没有 space-y-4）。
+   本文件是无 layer 普通 CSS，层叠上压过 utilities 层（与上面 list-item 的覆盖同机制）。 */
+.aui-md.space-y-4 > * {
+  margin-block: 0;
+}
+
+.aui-md.space-y-4 > * + * {
+  margin-block-start: 0.5rem;
+}
+
+.aui-md.space-y-4 > * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-block-start: 0.75rem;
+}
+
+.aui-md.space-y-4 > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-block-start: 0.25rem;
+}
+
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"] *))::after {
   content: none;
@@ -697,7 +722,6 @@ html.cmx-panel-resizing webview {
    * 路径，也顺带让 reduce 下的观感与「动画效果打开」时一致。
    * （`--animation-duration` 由组件内联设为 200ms，这里留兜底值。）
    */
-  html [data-slot='tool-group-content'],
   html [data-slot='tool-fallback-content'],
   html [data-slot='reasoning-content'] {
     animation-duration: var(--animation-duration, 200ms) !important;
@@ -745,4 +769,387 @@ html.cmx-panel-resizing webview {
  */
 [data-long-thread] [data-streamdown="code-block"] {
   content-visibility: visible !important;
+}
+
+/*
+ * 委派（Task/Agent）卡片：收起态只有一行组头，展开态一级拓扑。
+ * 结构与数值对齐参考实现（messages.css 的 `.tool-activity-group.has-subagents` /
+ * `.subagent-activity-metrics` / `.subagent-topology*`），颜色一律走语义 token。
+ *
+ * 容器查询挂在卡片自身上：窄容器（520px 以内）把三列拓扑折成「主 Agent 节点在上、
+ * 竖脊线在左」的单列竖排。
+ */
+.subagent-activity-card {
+  width: 100%;
+  min-width: 0;
+  margin: 7px 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-2));
+  container: subagent-activity / inline-size;
+}
+
+.subagent-activity-header {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 8px 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-ui-body);
+  text-align: left;
+}
+
+.subagent-activity-header:hover {
+  background: hsl(var(--surface-3));
+}
+
+.subagent-activity-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: hsl(var(--muted-foreground));
+}
+
+.subagent-activity-label {
+  flex: none;
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}
+
+.subagent-activity-label.running {
+  color: hsl(var(--muted-foreground));
+}
+
+.subagent-activity-metrics {
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-activity-caret {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-inline-start: auto;
+  color: hsl(var(--muted-foreground));
+  transition: transform 150ms ease;
+}
+
+.subagent-activity-caret.open {
+  transform: rotate(90deg);
+}
+
+
+.subagent-activity-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms ease, opacity 120ms ease;
+}
+
+.subagent-activity-collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.subagent-activity-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 展开后平铺的该段其余步骤（委派工具调用自己不再渲染）。 */
+.subagent-activity-steps {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 12px 10px;
+}
+
+/* 一级拓扑：主 Agent 节点 — 连接线 — 子智能体节点列（节点单列纵向堆叠）。 */
+.subagent-topology {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(120px, 0.58fr) 28px minmax(200px, 1.42fr);
+  align-items: center;
+  padding: 8px 12px 12px;
+}
+
+.subagent-topology-root {
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-1));
+  padding: 10px;
+}
+
+.subagent-topology-root-icon,
+.subagent-topology-node-avatar {
+  position: relative;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: hsl(var(--surface-3));
+  color: hsl(var(--muted-foreground));
+}
+
+.subagent-topology-root-copy,
+.subagent-topology-node-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.subagent-topology-root-copy strong {
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: var(--text-ui-compact);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-topology-root-copy > span {
+  margin-top: 3px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-ui-caption);
+}
+
+.subagent-topology-connector {
+  height: 2px;
+  border-radius: 9999px;
+  background: hsl(var(--border));
+}
+
+.subagent-topology-agents {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding-left: 12px;
+}
+
+.subagent-topology-node {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-1));
+}
+
+/*
+ * 节点卡的连线：短接线（脊线 → 本卡垂直中线）+ 脊线两段。
+ *
+ * 脊线不按节点高度写死 top/bottom，而是每段只跨一个节点：上半段从本卡顶到中线，下半段
+ * 从中线到下一个节点顶（中线 + 半个自身高度 + 行距 8px）。首节点不画上半段、末节点不画
+ * 下半段，所以脊线正好停在首尾节点的中线上——末端不会多出一截，节点变高也不会错位。
+ */
+.subagent-topology-branch {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 13px;
+  height: 2px;
+  margin-top: -1px;
+  background: hsl(var(--border));
+}
+
+.subagent-topology-node::before,
+.subagent-topology-node::after {
+  position: absolute;
+  left: -12px;
+  width: 2px;
+  background: hsl(var(--border));
+  content: "";
+}
+
+/*
+ * 两段脊线：绝对定位的百分比以节点的 **padding box** 为准，而节点卡自带 1px 边框，
+ * 所以首尾都要补回这 1px（否则每个节点顶部都会留一道 2px 的缝）。
+ */
+.subagent-topology-node::before {
+  top: -1px;
+  height: calc(50% + 1px);
+}
+
+.subagent-topology-node::after {
+  top: 50%;
+  height: calc(50% + 8px + 1px);
+}
+
+.subagent-topology-node:first-child::before,
+.subagent-topology-node:last-child::after {
+  display: none;
+}
+
+.subagent-topology-node-header {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  align-items: flex-start;
+  gap: 9px;
+  border-radius: inherit;
+  padding: 9px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.subagent-topology-node-header:hover {
+  background: hsl(var(--surface-2));
+}
+
+.subagent-topology-node-header:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.55);
+  outline-offset: -2px;
+}
+
+/* 状态点：贴在头像右下角，用节点卡自己的底色做描边（挖空环）。 */
+.subagent-topology-node-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid hsl(var(--surface-1));
+  border-radius: 9999px;
+  background: hsl(var(--muted-foreground));
+}
+
+.subagent-topology-node.is-completed .subagent-topology-node-status-dot {
+  background: hsl(var(--success));
+}
+
+.subagent-topology-node.is-failed .subagent-topology-node-status-dot {
+  background: hsl(var(--destructive));
+}
+
+.subagent-topology-node.is-canceled .subagent-topology-node-status-dot {
+  background: hsl(var(--warning));
+}
+
+.subagent-topology-node-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.subagent-topology-node-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: var(--text-ui-compact);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-topology-node-model {
+  min-width: 0;
+  max-width: 38%;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-topology-node-status {
+  flex: none;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-micro);
+  white-space: nowrap;
+}
+
+.subagent-topology-node-summary {
+  margin-top: 3px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-ui-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-topology-node-steps {
+  margin-top: 2px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 运行中转圈：形状照参考实现的 `.tool-spinner`，动画用 Tailwind 的 animate-spin，
+   这样「减少动效」下的降速规则（html .animate-spin）自动覆盖到它。 */
+.subagent-topology-node-spinner {
+  flex: none;
+  align-self: center;
+  width: 11px;
+  height: 11px;
+  margin-left: auto;
+  border: 1.5px solid hsl(var(--border));
+  border-top-color: hsl(var(--muted-foreground));
+  border-radius: 9999px;
+}
+
+/* 窄容器：三列拓扑回退成单列竖排（主 Agent → 竖线 → 节点列）。 */
+@container subagent-activity (max-width: 520px) {
+  .subagent-activity-header {
+    flex-wrap: wrap;
+  }
+
+  .subagent-activity-metrics {
+    order: 3;
+    width: calc(100% - 24px);
+    margin-left: 20px;
+  }
+
+  .subagent-topology {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subagent-topology-connector {
+    width: 2px;
+    height: 16px;
+    margin-left: 24px;
+    justify-self: start;
+  }
+
+  .subagent-topology-agents {
+    padding-left: 26px;
+  }
+
+  .subagent-topology-node::before,
+  .subagent-topology-node::after {
+    left: -14px;
+  }
+
+  .subagent-topology-branch {
+    width: 14px;
+  }
 }

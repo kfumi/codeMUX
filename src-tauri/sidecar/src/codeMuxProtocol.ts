@@ -54,6 +54,12 @@ export type CodeMuxToolEvent =
 export type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
+  /**
+   * Model that produced this assistant message, when the provider reports it.
+   * Only subagent timeline events carry it today (the parent turn path does
+   * not project a per-message model); absent for providers with no source.
+   */
+  model?: string;
   content: Array<Record<string, unknown>>;
   provider_message_id?: string;
   provider_turn_id?: string;

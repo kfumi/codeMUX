@@ -20,6 +20,7 @@ import {
   shouldRouteChipCommandToHandler,
 } from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap, extractUserNavTitle } from './CodeMuxThread';
+import { ACTIVITY_RUN_STEP_INDENT } from '../../assistant-ui/activity-run';
 
 /**
  * 真实 markdown 渲染层在 jsdom 里的代价过高：这个文件的长会话用例（480 条事件 /
@@ -424,6 +425,209 @@ const fileMutationSplitEvents: AgentMessage[] = [
         content: [{ type: 'text', text: '文件已写好。' }],
       },
       parent_tool_use_id: null,
+    },
+  },
+];
+
+/**
+ * 思考 / 工具交替的单个处理段：整段只有段首那一条段头，步骤行按源码顺序平铺，
+ * 文本片段在段之后（会打断分段）。注意这里刻意不给工具结果事件——连续的过程
+ * 事件才合成一段。
+ */
+const interleavedActivityEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'check the project' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-order-think-1',
+      session_id: 'session-activity-order',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '先看目录结构' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-order-read-1',
+      session_id: 'session-activity-order',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'activity-order-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-order-think-2',
+      session_id: 'session-activity-order',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '再核对任务入口' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-order-bash-1',
+      session_id: 'session-activity-order',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'activity-order-bash-1', name: 'Bash', input: { command: 'npm run build' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-order-final',
+      session_id: 'session-activity-order',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '架构已摸清。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'activity-order-result',
+      session_id: 'session-activity-order',
+      duration_ms: 5_000,
+      duration_api_ms: 5_000,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  },
+];
+
+/**
+ * 与 `interleavedActivityEvents` 同形，但在两次工具调用之间插了一条**独立**的文本事件：
+ * 这种文本是分段的唯一依据（工具结果事件不切段）。
+ */
+const textSplitActivityEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'check the project' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-split-think-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '先看目录结构' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-split-read-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'activity-split-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'activity-split-result-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'activity-split-read-1', content: 'app' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-split-text-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '先确认范围。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-split-bash-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '再核对任务入口' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'activity-split-grep-1',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'activity-split-grep-1', name: 'Grep', input: { pattern: 'AgentPanel' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'activity-split-result-2',
+      session_id: 'session-activity-split',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'activity-split-grep-1', content: 'matches' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'activity-split-result',
+      session_id: 'session-activity-split',
+      duration_ms: 4_000,
+      duration_api_ms: 4_000,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 1, output_tokens: 1 },
     },
   },
 ];
@@ -1285,6 +1489,22 @@ function openRewindMenu(trigger: Element) {
   fireEvent.click(trigger);
 }
 
+/**
+ * 处理段内步骤行的缩进容器：有可见段头的段带 `ACTIVITY_RUN_STEP_INDENT`（`pl-5`），
+ * 段头让位给整轮「已处理」开关的段不缩进。步骤行本身是按钮，往上找到那个 `gap-[3px]`
+ * 的段容器（不越过消息行）。
+ */
+function stepIndentContainer(element: Element): HTMLElement | null {
+  let node: HTMLElement | null = element.parentElement;
+  while (node && !node.className.includes('group/message-row')) {
+    if (node.className.includes('gap-[3px]')) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 describe('CodeMuxAssistantRuntimeProvider', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1325,6 +1545,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-grouped-tools': groupedToolEvents,
         'session-explore-group': exploreGroupEvents,
         'session-file-mutation-split': fileMutationSplitEvents,
+        'session-activity-order': interleavedActivityEvents,
+        'session-activity-split': textSplitActivityEvents,
         'session-directives': directiveUserEvents,
         'session-skill-directive': skillDirectiveUserEvents,
         'session-long-user': longUserEvents,
@@ -1357,6 +1579,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-claude-split-history': [1, 2, 3, 4, 5, 6, 7, 8],
         'session-opencode-tool-turn': [1, 2, 3, 4],
         'session-opencode-history-turn': [1, 2, 3, 4, 5, 6, 7],
+        'session-activity-order': interleavedActivityEvents.map((_, index) => 1_700_000_000_000 + index * 1_000),
+        'session-activity-split': textSplitActivityEvents.map((_, index) => 1_700_000_000_000 + index * 1_000),
         'session-footer-snapshot': [
           Date.parse('2026-06-29T10:00:00Z'),
           Date.parse('2026-06-29T10:00:05Z'),
@@ -1493,15 +1717,25 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByRole('button', { name: /运行 1 个命令/ })).toBeTruthy();
-    expect(screen.getByText('运行 1 个命令')).toBeTruthy();
-    expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
+    // 段收起时不渲染步骤行：先展开这个只含一次工具调用的处理段。
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger).toBeTruthy();
+    expect(runTrigger.getAttribute('data-live')).toBe('false');
+    expect(container.querySelector('[data-slot="tool-fallback-trigger"]')).toBeNull();
 
-    const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
-    if (trigger) fireEvent.click(trigger);
+    fireEvent.click(runTrigger);
 
+    const toolTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLElement;
+    expect(toolTrigger.getAttribute('aria-label')).toBe('运行 · 终端');
+    expect(toolTrigger.querySelector('[data-slot="tool-fallback-status"]')?.textContent).toContain('失败');
     expect(container.querySelector('.lucide-circle-x')).toBeTruthy();
     expect(container.querySelector('.lucide-loader')).toBeNull();
+
+    // 失败的工具调用显示为错误（错误输出在详情里），而不是一直转圈。
+    fireEvent.click(toolTrigger);
+
+    expect(toolTrigger.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Command failed with exit code 1');
   });
 
   it('hides footer (copy button + timestamp) on intermediate or incomplete assistant messages', () => {
@@ -1670,83 +1904,235 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const finalMessageText = await screen.findByText('Latest version is 1.0.0.');
     const finalMessageRow = finalMessageText.closest('[data-message-row]');
-    const toolGroupRow = container.querySelector('[data-slot="tool-group-root"]')?.closest('[data-message-row]');
+    const toolRunRow = container.querySelector('[data-slot="activity-run-trigger"]')?.closest('[data-message-row]');
 
     await waitFor(() => {
       expect(within(finalMessageRow as HTMLElement).getByText(/耗时 1s/)).toBeTruthy();
     });
     expect(within(finalMessageRow as HTMLElement).queryByText(/token/)).toBeNull();
-    expect(toolGroupRow).toBeTruthy();
-    expect(within(toolGroupRow as HTMLElement).queryByText(/耗时 1s/)).toBeNull();
-    expect(within(toolGroupRow as HTMLElement).queryByText(/token/)).toBeNull();
+    expect(toolRunRow).toBeTruthy();
+    expect(within(toolRunRow as HTMLElement).queryByText(/耗时 1s/)).toBeNull();
+    expect(within(toolRunRow as HTMLElement).queryByText(/token/)).toBeNull();
   });
 
   it('renders the reasoning trigger like the native assistant-ui component', () => {
     const { container } = render(<Harness sessionId="session-reasoning" />);
+
+    // 思考步骤行属于处理段：段收起时不渲染，先展开段头。
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger).toBeTruthy();
+    fireEvent.click(runTrigger);
+
     const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
-    const childSlots = Array.from(trigger?.children ?? []).map((element) =>
+    // 摘要嵌在 label 里（两者按基线对齐），所以断言文档顺序，而不是直接子元素顺序。
+    const slots = Array.from(trigger?.querySelectorAll('[data-slot]') ?? []).map((element) =>
       element.getAttribute('data-slot'),
     );
 
-    expect(childSlots).toEqual([
+    expect(slots).toEqual([
       'reasoning-trigger-icon',
       'reasoning-trigger-label',
+      'reasoning-trigger-summary',
       'reasoning-trigger-chevron',
     ]);
   });
 
-  it('renders consecutive related tool calls inside one tool group', () => {
+  it('renders consecutive related tool calls inside one activity run', () => {
     const { container } = render(<Harness sessionId="session-grouped-tools" />);
-    const toolGroup = container.querySelector('[data-slot="tool-group-root"]');
 
-    expect(toolGroup).toBeTruthy();
-    expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
-    expect(container.querySelector('[data-slot="tool-group-trigger"]')).toBeTruthy();
+    // 两个连续的工具调用合成一段：只有段首一条段头，步骤行收起时不渲染。
+    const runTriggers = container.querySelectorAll('[data-slot="activity-run-trigger"]');
+    expect(runTriggers).toHaveLength(1);
+    expect(runTriggers[0]!.getAttribute('aria-expanded')).toBe('false');
+    // 同一个界面行里的两张工具卡必须在段头计数里如实反映（工具结果事件不切段）。
+    expect(runTriggers[0]!.textContent).toContain('2 个步骤');
+    expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
+
+    fireEvent.click(runTriggers[0]!);
+
+    const toolTriggers = Array.from(container.querySelectorAll('[data-slot="tool-fallback-trigger"]'));
+    expect(toolTriggers).toHaveLength(2);
+    expect(toolTriggers.map((trigger) => trigger.getAttribute('aria-label'))).toEqual(['读取', '读取']);
+    expect(toolTriggers[0]!.textContent).toContain('App.tsx');
+    expect(toolTriggers[1]!.textContent).toContain('main.tsx');
   });
 
-  it('keeps thinking separate from grouped tools between two text messages', () => {
+  it('keeps the whole turn visible while the delegation splits it into three activity runs', () => {
     const { container } = render(<Harness sessionId="session-explore-group" />);
 
+    // 两条正文都必须始终可见：一条是独立文本事件，另一条与思考同属一个事件。
+    // 「思考 + 最终答复」同一事件的回合里，答复绝不能随段收起一起消失。
     expect(screen.getByText('先确认范围。')).toBeTruthy();
     expect(screen.getByText('架构已摸清。')).toBeTruthy();
-    expect(screen.getByText('读取 1 次文件')).toBeTruthy();
-    expect(screen.getByText('执行 1 次任务 · 匹配 1 次文件 · 运行 1 个命令')).toBeTruthy();
-    expect(screen.queryByText('先探索下当前桌面端架构。')).toBeNull();
-    expect(screen.queryByText('再核对任务入口。')).toBeNull();
-    expect(screen.queryByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeNull();
-    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: /思考/ })).toHaveLength(3);
+    // 旧的「读取 1 次文件 · 执行 1 次任务…」汇总文案已被段头取代。
+    expect(screen.queryByText('读取 1 次文件')).toBeNull();
+    expect(screen.queryByText('执行 1 次任务 · 匹配 1 次文件 · 运行 1 个命令')).toBeNull();
+    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(0);
 
-    const exploreGroupTriggers = container.querySelectorAll('[data-slot="tool-group-trigger"]');
-    fireEvent.click(exploreGroupTriggers[0]!);
-    fireEvent.click(exploreGroupTriggers[1]!);
+    // 委派事件（Task）自成一段：它不并进左边的步骤组、也不接在右边那一段后面，
+    // 于是整轮从 1 段 7 步变成 3 段——3 步 / 3 步（同一事件里的三个 tool_use 不可拆）/ 1 步。
+    const runTriggers = Array.from(
+      container.querySelectorAll('[data-slot="activity-run-trigger"]'),
+    ) as HTMLElement[];
+    expect(runTriggers).toHaveLength(3);
+    expect(runTriggers.map((trigger) => trigger.getAttribute('aria-expanded')))
+      .toEqual(['false', 'false', 'false']);
+    expect(runTriggers.map((trigger) => trigger.getAttribute('aria-label')))
+      .toEqual(['已处理', '已处理', '思考']);
+    // 步骤计数逐段钉住（1 步的段照实现不显示计数，所以末段是 null）。
+    expect(runTriggers.map((trigger) => (
+      trigger.querySelector('[data-slot="activity-run-count"]')?.textContent ?? null
+    ))).toEqual(['3 个步骤', '3 个步骤', null]);
+    // 收起时连步骤行都不渲染（思考正文也没有机会铺开）。
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="activity-step-body"]')).toHaveLength(0);
 
-    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
-    fireEvent.click(reasoningTriggers[0]!);
-    fireEvent.click(reasoningTriggers[1]!);
-    fireEvent.click(reasoningTriggers[2]!);
+    for (const trigger of runTriggers) {
+      fireEvent.click(trigger);
+    }
 
-    expect(screen.getByText('先探索下当前桌面端架构。')).toBeTruthy();
-    expect(screen.getByText('再核对任务入口。')).toBeTruthy();
-    expect(screen.getByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeTruthy();
-    expect(screen.getByText('读取')).toBeTruthy();
-    expect(screen.getByText('任务')).toBeTruthy();
-    expect(screen.getByText('匹配文件')).toBeTruthy();
-    expect(screen.getByText('终端')).toBeTruthy();
+    expect(runTriggers.map((trigger) => trigger.getAttribute('aria-expanded')))
+      .toEqual(['true', 'true', 'true']);
+    // 步骤行按 DOM 文档序渲染：思考 → 读取 → 思考 ｜ 委派 → 匹配文件 → 终端 ｜ 思考。
+    const stepOrder = Array.from(
+      container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'),
+    ).map((step) => step.getAttribute('aria-label'));
+    expect(stepOrder).toEqual([
+      '展开思考内容',
+      '读取',
+      '展开思考内容',
+      '委派 · 任务',
+      '列出 · 匹配文件',
+      '运行 · 终端',
+      '展开思考内容',
+    ]);
+
+    for (const trigger of screen.getAllByRole('button', { name: '展开思考内容' })) {
+      fireEvent.click(trigger);
+    }
+
+    const bodies = Array.from(container.querySelectorAll('[data-slot="activity-step-body"]'))
+      .map((body) => body.textContent ?? '');
+    expect(bodies).toHaveLength(3);
+    expect(bodies[0]).toContain('先探索下当前桌面端架构。');
+    expect(bodies[1]).toContain('再核对任务入口。');
+    expect(bodies[2]).toContain('架构已摸清。先给你我的分析，再确认几个关键决策点。');
   });
 
-  it('groups write tools with surrounding tools in one tool group', () => {
+  it('把含委派的处理段画成可开合的委派卡片，点节点打开侧栏预览', () => {
+    useSubagentStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        'session-explore-group': {
+          order: ['explore-task-1'],
+          descriptors: {
+            'explore-task-1': {
+              subagentId: 'explore-task-1',
+              provider: 'claude',
+              title: 'Inspect architecture',
+              description: '检查桌面端架构',
+              status: 'running',
+              toolCallId: 'explore-task-1',
+              subtitle: 'Reading src/App.tsx',
+              updatedAt: 1,
+            },
+          },
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    }));
+
+    try {
+      const { container } = render(<Harness sessionId="session-explore-group" />);
+
+      // 含委派的段：段头换成委派卡片，它自己不再画「已处理 N 个步骤」组头；但委派事件
+      // 把左右两边的普通步骤组切开，所以卡片之外仍有两个普通段头（左边 3 步、右边 1 步）。
+      const runTriggers = Array.from(
+        container.querySelectorAll('[data-slot="activity-run-trigger"]'),
+      ) as HTMLElement[];
+      expect(runTriggers).toHaveLength(2);
+      expect(runTriggers[0]!.textContent).toContain('3 个步骤');
+      expect(runTriggers[0]!.querySelector('[data-slot="activity-run-count"]')).not.toBeNull();
+      // 右侧只剩末段 1 步：照实现不显示步骤计数，段头文案是纯思考的「思考」。
+      expect(runTriggers[1]!.querySelector('[data-slot="activity-run-count"]')).toBeNull();
+      expect(runTriggers[1]!.getAttribute('aria-label')).toBe('思考');
+      const header = container.querySelector('[data-slot="subagent-activity-header"]') as HTMLElement | null;
+      expect(header).not.toBeNull();
+      expect(header?.textContent).toContain('Subagent 正在工作');
+      expect(header?.textContent).toContain('1 个 Subagent');
+      // 子智能体还在跑：段默认展开，节点卡直接可见。
+      expect(header?.getAttribute('aria-expanded')).toBe('true');
+      // 卡片所在的段与左右两边的普通段互不重叠：三个段头分属三行。
+      const cardRow = header?.closest('[data-message-row]') ?? null;
+      expect(runTriggers[0]!.closest('[data-message-row]')).not.toBe(cardRow);
+      expect(runTriggers[1]!.closest('[data-message-row]')).not.toBe(cardRow);
+      const nodeHeader = container.querySelector('[data-slot="subagent-topology-node-header"]') as HTMLElement | null;
+      expect(nodeHeader?.textContent).toContain('Inspect architecture');
+
+      fireEvent.click(nodeHeader as HTMLElement);
+
+      const panel = useSidePanelStore.getState();
+      expect(panel.isOpen).toBe(true);
+      expect(panel.tabs.find((entry) => entry.kind === 'subagent')).toMatchObject({
+        subagentId: 'explore-task-1',
+        subagentSessionId: 'session-explore-group',
+      });
+    } finally {
+      useSidePanelStore.getState().reset();
+      useSubagentStore.setState((state) => {
+        const { 'session-explore-group': _removed, ...rest } = state.sessions;
+        return { sessions: rest };
+      });
+    }
+  });
+
+  it('splits the activity run where a standalone assistant text breaks in', () => {
+    const { container } = render(<Harness sessionId="session-activity-split" />);
+
+    // 「思考 + 读取」一段、「思考 + 搜索」一段：中间那条独立文本事件是唯一的分段依据。
+    const runTriggers = Array.from(container.querySelectorAll('[data-slot="activity-run-trigger"]'));
+    expect(runTriggers).toHaveLength(2);
+    // 两段各 2 步，都显示计数。
+    expect(runTriggers.map((trigger) => trigger.textContent)).toEqual([
+      expect.stringContaining('2 个步骤'),
+      expect.stringContaining('2 个步骤'),
+    ]);
+    // 被打断处的正文与段头一起在，且顺序是「段 → 文本 → 段」。
+    const orderedText = container.textContent ?? '';
+    expect(orderedText.indexOf('2 个步骤')).toBeLessThan(orderedText.indexOf('先确认范围。'));
+    expect(orderedText.indexOf('先确认范围。')).toBeLessThan(orderedText.lastIndexOf('2 个步骤'));
+
+    runTriggers.forEach((trigger) => fireEvent.click(trigger));
+
+    expect(
+      Array.from(container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'))
+        .map((step) => step.getAttribute('aria-label')),
+    ).toEqual(['展开思考内容', '读取', '展开思考内容', '搜索 · 搜索文本']);
+  });
+
+
+
+  it('keeps write tools in the same activity run as their neighbours', () => {
     const { container } = render(<Harness sessionId="session-file-mutation-split" />);
 
-    const toolGroupTrigger = screen.getByRole('button', { name: /读取 1 次文件/ });
-    expect(toolGroupTrigger.textContent).toContain('读取 1 次文件');
-    expect(toolGroupTrigger.textContent).toContain('写入 1 次文件');
-    expect(toolGroupTrigger.textContent).toContain('运行 1 个命令');
     expect(screen.getByText('文件已写好。')).toBeTruthy();
-    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
+    // 读取 / 写入 / 运行同属一段（段头只有一条），展开后才看到各工具卡片。
+    const runTriggers = container.querySelectorAll('[data-slot="activity-run-trigger"]');
+    expect(runTriggers).toHaveLength(1);
+    expect(runTriggers[0]!.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
-    fireEvent.click(toolGroupTrigger);
+    fireEvent.click(runTriggers[0]!);
+
+    const toolTriggers = Array.from(container.querySelectorAll('[data-slot="tool-fallback-trigger"]'));
+    expect(toolTriggers.map((trigger) => trigger.getAttribute('aria-label'))).toEqual([
+      '读取',
+      '写入',
+      '运行 · 终端',
+    ]);
     expect(screen.getByText('写入')).toBeTruthy();
+    expect(screen.getByText('pwd')).toBeTruthy();
   });
 
   it('keeps expanded tool details open across large-history running updates', async () => {
@@ -1768,9 +2154,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-perf-large" />);
 
-    const firstToolGroupTrigger = container.querySelector('[data-slot="tool-group-trigger"]');
-    expect(firstToolGroupTrigger).toBeTruthy();
-    fireEvent.click(firstToolGroupTrigger!);
+    const firstActivityRunTrigger = container.querySelector('[data-slot="activity-run-trigger"]');
+    expect(firstActivityRunTrigger).toBeTruthy();
+    fireEvent.click(firstActivityRunTrigger!);
 
     const firstTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
     expect(firstTrigger).toBeTruthy();
@@ -2248,20 +2634,29 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-stream-short" />);
 
-    // 流式思考仍显示在思考面板中，但默认保持折叠。
-    expect(container.textContent).not.toContain(shortThinking);
-    expect(container.querySelector('[data-testid="thread-viewport"] [data-streaming-reasoning="true"]')).not.toBeNull();
-    const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
+    // 实时思考是一个默认展开的「思考」步骤行（streaming 时打开），正文按分帧揭示渲染。
+    const livePanel = container.querySelector('[data-testid="thread-viewport"] [data-streaming-reasoning="true"]');
+    expect(livePanel).not.toBeNull();
+    const trigger = livePanel?.querySelector('[data-slot="reasoning-trigger"]');
     expect(trigger).not.toBeNull();
-    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
     expect(trigger?.textContent).toContain('思考');
+    expect(livePanel?.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain(shortThinking);
+    expect(container.textContent).not.toContain('tokens');
     expect(container.textContent).not.toContain('tokens');
 
     cleanup();
     const longView = render(<Harness sessionId="session-stream-long" />);
-    expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).not.toBeNull();
+    const longTrigger = longView.container.querySelector('[data-slot="reasoning-trigger"]');
+    expect(longTrigger).not.toBeNull();
+    expect(longTrigger?.getAttribute('aria-expanded')).toBe('true');
     expect(longView.container.textContent).toContain('思考');
-    expect(longView.container.textContent).not.toContain(longThinking);
+    expect(longView.container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain(longThinking);
+
+    fireEvent.click(longTrigger!);
+
+    // 收起后正文不渲染：长思考的正文不留在 DOM 里。
+    expect(longView.container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
     expect(longView.container.textContent).not.toContain('tokens');
   });
 
@@ -2318,14 +2713,23 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId={sessionId} />);
-    const toolGroupRoot = container.querySelector('[data-slot="tool-group-root"]');
+    // 尾段还在跑：段头自动展开并标记为 live，工具步骤行直接可见。
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger.getAttribute('data-live')).toBe('true');
+    expect(runTrigger.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('[data-slot="tool-fallback-trigger"]')?.getAttribute('aria-label')).toBe('正在读取 · 读取');
 
-    expect(toolGroupRoot?.getAttribute('data-active')).toBe('true');
-    expect(toolGroupRoot?.textContent).not.toContain('正在确认项目入口');
+    // 实时思考由运行中的尾段托管：仍在实时思考面板里可见，且不再重复一个段头。
+    const liveThinking = container.querySelector('[data-streaming-reasoning="true"]');
+    expect(liveThinking).not.toBeNull();
+    expect(liveThinking?.querySelector('[data-slot="activity-run-trigger"]')).toBeNull();
+    expect(liveThinking?.textContent).toContain('思考');
+    const toolRow = container.querySelector('[data-slot="tool-fallback-trigger"]')?.closest('[data-message-row]');
+    expect(toolRow?.textContent).not.toContain('正在确认项目入口');
     expect(useAgentStore.getState().streamingThinking[sessionId]).toBe('正在确认项目入口');
   });
 
-  it('keeps the normal bottom rhythm on the last message row while the turn is streaming', () => {
+  it('keeps the in-turn bottom rhythm on the last message row while the turn is streaming', () => {
     const sessionId = 'session-running-last-row-rhythm';
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: '继续改' } },
@@ -2353,11 +2757,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     render(<Harness sessionId={sessionId} />);
 
-    // Running turn: the row above StreamingContent keeps the normal tail (mb-5),
-    // not the composer-tightened mb-2.
-    const row = screen.getByRole('button', { name: /编辑 1 次文件/ }).closest('[data-message-row]');
-    expect(row?.className).toContain('mb-5');
-    expect(row?.className).not.toContain('mb-2');
+    // Streaming turn: the row above StreamingContent uses the tight in-turn
+    // rhythm (mb-2), not the wider turn-boundary gap (mb-4).
+    const row = screen.getByRole('button', { name: /编辑/ }).closest('[data-message-row]');
+    expect(row?.className).toContain('mb-2');
+    expect(row?.className).not.toContain('mb-4');
   });
 
   it('suppresses the stale live preview once thinking is committed across assistant messages', () => {
@@ -2406,10 +2810,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId={sessionId} />);
-    const toolGroupRoot = container.querySelector('[data-slot="tool-group-root"]');
-
-    expect(toolGroupRoot?.getAttribute('data-active')).toBe('true');
+    // 已提交的思考在运行中的尾段里作为步骤行出现一次，不再额外渲染实时预览。
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger.getAttribute('data-live')).toBe('true');
+    expect(runTrigger.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.textContent)
+      .toContain('当前思考消息来自另一个 assistant event');
     expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+    expect(container.textContent).not.toContain('正在继续探索项目结构');
   });
 
   it('does not render a stale live preview after an intervening answer segment', () => {
@@ -2687,7 +3096,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('I am checking files first.')).toBeNull();
 
     const toggle = screen.getByRole('button', { name: /灞曞紑AI杩囩▼|展开AI过程/ });
-    expect(toggle.textContent).toContain('已处理');
+    expect(toggle.textContent).toContain('本轮处理');
     expect(toggle.textContent).toContain('1m 13s');
 
     fireEvent.click(toggle);
@@ -2696,7 +3105,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
   });
 
-  it('keeps the latest turn expanded with a live wait row while background subagents run', () => {
+  it('keeps the latest turn expanded while background subagents run', () => {
     useSettingsStore.setState((state) => ({
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
@@ -2726,11 +3135,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     try {
       render(<Harness sessionId="session-completed-turn" />);
 
-      // The async flow is still running: the wait row is visible with a live
-      // timer, and the turn being waited on is not collapsed as finished.
-      expect(screen.getByTestId('subagent-running-row')).toBeTruthy();
-      // The shimmer overlay duplicates the timer text, hence getAllByText.
-      expect(screen.getAllByText(/子智能体仍在后台运行 ×1/).length).toBeGreaterThan(0);
+      // 异步流仍在跑：这一回合不会被折成「已处理」开关，过程内容保持可见。
       expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
       expect(screen.getByText('I am checking files first.')).toBeTruthy();
       expect(screen.getByText('Fixed and verified.')).toBeTruthy();
@@ -2773,10 +3178,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     try {
       render(<Harness sessionId="session-completed-turn" />);
 
-      // No child is running anymore, but the parent's summary turn has not
-      // settled: keep the spinner row and the expanded turn.
-      expect(screen.getByTestId('subagent-running-row')).toBeTruthy();
-      expect(screen.getAllByText(/子智能体已完成，主智能体继续输出中/).length).toBeGreaterThan(0);
+      // 没有子智能体还在跑，但父回合的汇总回合还没落地：这一回合必须继续
+      // 看起来是活的（不折成「已处理」开关），过程内容保持可见。
       expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
       expect(screen.getByText('I am checking files first.')).toBeTruthy();
     } finally {
@@ -2796,7 +3199,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('Here is the final answer.')).toBeTruthy();
     expect(screen.queryByText('I am preparing the next question.')).toBeNull();
     const toggle = screen.getByRole('button', { name: /展开AI过程/ });
-    expect(toggle.textContent).toContain('已处理');
+    expect(toggle.textContent).toContain('本轮处理');
 
     fireEvent.click(toggle);
 
@@ -2808,26 +3211,44 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
-    render(<Harness sessionId="session-claude-thinking-turn" />);
+    const { container } = render(<Harness sessionId="session-claude-thinking-turn" />);
 
     expect(screen.getByText('最终总结结果')).toBeTruthy();
-    expect(screen.queryByText('内部思考过程')).toBeNull();
-    expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
+    // 整轮收起：过程行什么都不渲染——没有段组头，也没有步骤行（思考正文自然也不在）。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
+    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+    const toggle = screen.getByRole('button', { name: /展开AI过程/ });
+    expect(toggle).toBeTruthy();
 
     const textRow = screen.getByText('最终总结结果').closest('[data-message-row]');
-    const toggleRow = screen.getByRole('button', { name: /展开AI过程/ }).closest('[data-message-row]');
+    const toggleRow = toggle.closest('[data-message-row]');
     expect(textRow?.querySelector('[data-message-footer]')).toBeTruthy();
     expect(textRow).toBe(toggleRow);
     expect(screen.getAllByText(/耗时/)).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
+    fireEvent.click(toggle);
 
-    const reasoningTrigger = screen.getByRole('button', { name: /思考/ });
+    // 展开整轮后：这段的段首正好是「本轮处理」开关那一行——它现在照画自己的段组头
+    // （不再让位给开关），思考这一步因此始终缩进在自己的组头下面。
+    const expandedToggleRow = toggle.closest('[data-message-row]');
+    const toggleRunTrigger = expandedToggleRow?.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement | null;
+    expect(toggleRunTrigger).not.toBeNull();
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(1);
+    expect(toggleRunTrigger?.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggleRunTrigger!);
+
+    // 段自己的折叠照常工作：这一步只有单行摘要，正文仍需再展开一次。
+    const reasoningTrigger = screen.getByRole('button', { name: '展开思考内容' });
+    expect(reasoningTrigger.closest('[data-message-row]')).toBe(expandedToggleRow);
+    expect(stepIndentContainer(reasoningTrigger)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
     expect(reasoningTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
 
     fireEvent.click(reasoningTrigger);
 
-    expect(screen.getByText('内部思考过程')).toBeTruthy();
+    expect(container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain('内部思考过程');
   });
 
   it('collapses split Claude history output without a persisted result event', () => {
@@ -2835,30 +3256,71 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
-    render(<Harness sessionId="session-claude-split-history" />);
+    const { container } = render(<Harness sessionId="session-claude-split-history" />);
 
     expect(screen.getByText('最终总结结果')).toBeTruthy();
     expect(screen.queryByText('第一段内部思考')).toBeNull();
     expect(screen.queryByText("I'll create a statusline-setup agent...")).toBeNull();
     expect(screen.queryByText('第二段内部思考')).toBeNull();
+    // 整轮收起：过程段的段组头与步骤行都不渲染。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
     expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
-    expect(screen.getByRole('button', { name: /执行 1 次任务/ })).toBeTruthy();
+    // 三段各画自己的段头：第一段的段首正好是「本轮处理」开关那一行（不再让位），
+    // 中段是委派事件（Task）自成的一段，末段思考（事件里带正文）在另一行。都已结束 → 默认收起。
+    const runTriggers = Array.from(
+      container.querySelectorAll('[data-slot="activity-run-trigger"]'),
+    ) as HTMLElement[];
+    expect(runTriggers).toHaveLength(3);
+    expect(runTriggers.map((trigger) => trigger.getAttribute('aria-expanded')))
+      .toEqual(['false', 'false', 'false']);
+    // 三段各只有 1 步：都不显示步骤计数，段头文案依次是「思考 / 已处理 / 思考」。
+    expect(runTriggers.map((trigger) => trigger.querySelector('[data-slot="activity-run-count"]')))
+      .toEqual([null, null, null]);
+    expect(runTriggers[0]!.textContent).toContain('思考');
+    expect(runTriggers[1]!.textContent).toContain('已处理');
+    expect(runTriggers[2]!.textContent).toContain('思考');
+    expect(screen.queryByRole('button', { name: '委派 · 任务' })).toBeNull();
 
-    const firstReasoningTrigger = screen.getAllByRole('button', { name: /思考/ })[0]!;
-    expect(firstReasoningTrigger.getAttribute('aria-expanded')).toBe('false');
+    const firstSegmentRow = screen.getByRole('button', { name: '收起AI过程' }).closest('[data-message-row]');
+    expect(runTriggers[0]!.closest('[data-message-row]')).toBe(firstSegmentRow);
+
+    // 中段（委派）：点段头之后才渲染它自己那一步工具行，缩进到段头下面；它不吞前一段的思考行。
+    fireEvent.click(runTriggers[1]!);
+
+    expect(runTriggers[1]!.getAttribute('aria-expanded')).toBe('true');
+    const toolStep = screen.getByRole('button', { name: '委派 · 任务' });
+    expect(toolStep.closest('[data-message-row]')).not.toBe(firstSegmentRow);
+    expect(stepIndentContainer(toolStep)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+
+    // 第一段（段首就是开关那一行）：点段头之后思考步骤行渲染，同样缩进。
+    fireEvent.click(runTriggers[0]!);
+
+    // 同段里可能已有别的思考步骤行，按行取用，避免跨行歧义。
+    const firstReasoningTrigger = firstSegmentRow?.querySelector('[data-slot="reasoning-trigger"]') as HTMLElement | null;
+    expect(firstReasoningTrigger).not.toBeNull();
+    expect(stepIndentContainer(firstReasoningTrigger!)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+    expect(firstReasoningTrigger?.getAttribute('aria-expanded')).toBe('false');
+
     fireEvent.click(firstReasoningTrigger);
-    expect(screen.getByText('第一段内部思考')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /执行 1 次任务/ }));
-    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
-    expect(reasoningTriggers).toHaveLength(2);
-    expect(reasoningTriggers[1]?.getAttribute('aria-expanded')).toBe('false');
+    // 思考正文只在展开后出现（收起时连步骤行都不渲染）。
+    expect(firstSegmentRow?.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain('第一段内部思考');
 
-    fireEvent.click(reasoningTriggers[1]!);
-    expect(screen.getByText('第二段内部思考')).toBeTruthy();
+    // 第三段（末段思考）在自己的段头下面：展开后它是唯一还没展开的思考步骤行。
+    fireEvent.click(runTriggers[2]!);
+
+    const secondReasoningTrigger = screen.getByRole('button', { name: '展开思考内容' });
+    fireEvent.click(secondReasoningTrigger);
+
+    const bodies = Array.from(container.querySelectorAll('[data-slot="activity-step-body"]'))
+      .map((body) => body.textContent ?? '');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('第一段内部思考');
+    expect(bodies[1]).toContain('第二段内部思考');
   });
 
   it('shows completed OpenCode tool-only turns directly instead of collapsing them', () => {
@@ -2866,12 +3328,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
-    render(<Harness sessionId="session-opencode-tool-turn" />);
+    const { container } = render(<Harness sessionId="session-opencode-tool-turn" />);
 
+    // 只有工具调用的回合不会被收成「已处理」。
     expect(screen.queryByRole('button', { name: /展开AI过程/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /运行 1 个命令/ }));
-    expect(screen.getByText('终端')).toBeTruthy();
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(runTrigger);
+
+    expect(screen.getByRole('button', { name: '运行 · 终端' })).toBeTruthy();
   });
 
   it('collapses OpenCode historical process messages across intermediate results', () => {
@@ -2885,24 +3351,51 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('历史过程一')).toBeNull();
     expect(screen.queryByText('历史过程二')).toBeNull();
     expect(screen.queryByText('最终思考泄漏')).toBeNull();
+    // 整轮收起：段头与步骤行都不渲染（末段思考正文自然也不在），工具步骤行同样不铺开。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="activity-step-body"]')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /读取/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '搜索 · 搜索文本' })).toBeNull();
 
     const toggle = screen.getByRole('button', { name: /展开AI过程/ });
-    expect(toggle.textContent).toContain('已处理');
+    expect(toggle.textContent).toContain('本轮处理');
 
     fireEvent.click(toggle);
 
     expect(screen.getByText('历史过程一')).toBeTruthy();
     expect(screen.getByText('历史过程二')).toBeTruthy();
-    expect(screen.queryByText('最终思考泄漏')).toBeNull();
+    // 三段各自有段头——包括段首正好是「本轮处理」开关那一行的那一段（不再让位）——且都已结束：
+    // 默认收起，步骤行要等点段头才渲染。
+    const runTriggers = Array.from(
+      container.querySelectorAll('[data-slot="activity-run-trigger"]'),
+    ) as HTMLElement[];
+    expect(runTriggers).toHaveLength(3);
+    expect(runTriggers.map((trigger) => trigger.getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false']);
+    const toggleRow = toggle.closest('[data-message-row]');
+    expect(runTriggers[0]!.closest('[data-message-row]')).toBe(toggleRow);
+    // 展开整轮只放出步骤行（末段思考只显示单行摘要），正文仍需再展开一次。
+    expect(container.querySelectorAll('[data-slot="activity-step-body"]')).toHaveLength(0);
 
-    const exploreTriggers = container.querySelectorAll('[data-slot="tool-group-trigger"]');
-    fireEvent.click(exploreTriggers[exploreTriggers.length - 1]!);
-    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
+    runTriggers.forEach((trigger) => fireEvent.click(trigger));
+
+    // 第一段（段首就是开关那一行）的步骤行缩进在自己的段头下面。
+    const reasoningTriggers = screen.getAllByRole('button', { name: '展开思考内容' });
+    expect(reasoningTriggers).toHaveLength(3);
+    const firstReasoningTrigger = reasoningTriggers[0]!;
+    expect(firstReasoningTrigger.closest('[data-message-row]')).toBe(toggleRow);
+    expect(stepIndentContainer(firstReasoningTrigger)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+    // 同属第一段的工具步骤行（Read package.json）也一并铺开，并同样缩进。
+    const firstToolStep = container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLElement;
+    expect(firstToolStep).toBeTruthy();
+    expect(firstToolStep.closest('[data-message-row]')).toBe(toggleRow);
+    expect(stepIndentContainer(firstToolStep)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+
     fireEvent.click(reasoningTriggers[reasoningTriggers.length - 1]!);
 
-    expect(screen.getByText('最终思考泄漏')).toBeTruthy();
     const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
     expect(finalRow?.querySelector('[data-slot="reasoning-trigger"]')).toBeTruthy();
+    expect(finalRow?.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain('最终思考泄漏');
   });
 
   it('keeps the session summary card outside the compact process group', () => {
@@ -2994,7 +3487,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
     }));
 
-    render(<Harness sessionId="session-summary-outside-process" />);
+    const { container } = render(<Harness sessionId="session-summary-outside-process" />);
 
     expect(screen.getByText('已完成。About 页面中的 Ztwo 已改为 Ztwo123。')).toBeTruthy();
     expect(screen.getByText('1 个文件已更改')).toBeTruthy();
@@ -3008,10 +3501,35 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(toggle);
 
-    const executedTrigger = screen.getByRole('button', { name: /编辑 1 次文件/ });
-    fireEvent.click(executedTrigger);
+    // 末段（思考 + 正文）有它自己的段头，挂在正文那一行上；已结束 → 默认收起。
+    const finalRunTrigger = textRow?.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement | null;
+    expect(finalRunTrigger).not.toBeNull();
+    expect(finalRunTrigger?.getAttribute('aria-expanded')).toBe('false');
+    // 工具段的段首正好是「本轮处理」开关那一行：它同样照画自己的段头（不再让位）。
+    const toggleRowTrigger = toggle.closest('[data-message-row]')
+      ?.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement | null;
+    expect(toggleRowTrigger).not.toBeNull();
+    expect(toggleRowTrigger).not.toBe(finalRunTrigger);
+    expect(screen.queryByRole('button', { name: '展开思考内容' })).toBeNull();
 
+    fireEvent.click(finalRunTrigger!);
+
+    const finalReasoningTrigger = screen.getByRole('button', { name: '展开思考内容' });
+    expect(finalReasoningTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(stepIndentContainer(finalReasoningTrigger)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+
+    fireEvent.click(finalReasoningTrigger);
+
+    expect(
+      textRow?.querySelector('[data-slot="activity-step-body"]')?.textContent,
+    ).toContain('改完 About 文案就可以收尾了。');
+
+    // 工具段打开后，工具步骤行渲染在自己的段头下面（缩进）。
+    fireEvent.click(toggleRowTrigger!);
+
+    const editTrigger = screen.getByRole('button', { name: '编辑' });
     expect(screen.getByText('编辑')).toBeTruthy();
+    expect(stepIndentContainer(editTrigger)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
     expect(screen.getByText('1 个文件已更改').closest('[data-message-row]')).toBe(textRow);
   });
 
@@ -3299,5 +3817,55 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     // No event-reported durations, so returns empty
     expect(buildToolDurationMap(events)).toEqual({});
+  });
+
+  it('renders interleaved thinking and tool steps in source order inside one run', () => {
+    const { container } = render(<Harness sessionId="session-activity-order" />);
+
+    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(runTrigger).toBeTruthy();
+    expect(runTrigger.textContent).toContain('4 个步骤');
+
+    fireEvent.click(runTrigger);
+
+    const steps = Array.from(
+      container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'),
+    );
+    expect(steps.map((step) => step.getAttribute('data-slot'))).toEqual([
+      'reasoning-trigger',
+      'tool-fallback-trigger',
+      'reasoning-trigger',
+      'tool-fallback-trigger',
+    ]);
+    expect(steps[0]!.textContent).toContain('先看目录结构');
+    expect(steps[1]!.getAttribute('aria-label')).toContain('读取');
+    expect(steps[2]!.textContent).toContain('再核对任务入口');
+    expect(steps[3]!.getAttribute('aria-label')).toContain('运行');
+
+    const follows = (first: Element, second: Element) => (
+      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    );
+    // 段内步骤严格按源码顺序铺开，而不是按类型分组。
+    expect(follows(steps[0]!, steps[1]!)).toBe(true);
+    expect(follows(steps[1]!, steps[2]!)).toBe(true);
+    expect(follows(steps[2]!, steps[3]!)).toBe(true);
+
+    // 文本片段落在整段之后：段到此为止，答复不再卷在步骤行后面。
+    const answer = screen.getByText('架构已摸清。');
+    expect(follows(runTrigger, answer)).toBe(true);
+    expect(follows(steps[3]!, answer)).toBe(true);
+  });
+
+  it('puts interleaved thinking and tool calls into a single activity run', () => {
+    const { container } = render(<Harness sessionId="session-activity-order" />);
+
+    // 连续的过程事件（思考 / 工具）只合成一段：一条段头 + 4 个步骤。
+    const runTriggers = container.querySelectorAll('[data-slot="activity-run-trigger"]');
+    expect(runTriggers).toHaveLength(1);
+    expect(runTriggers[0]!.textContent).toContain('4 个步骤');
+    expect(runTriggers[0]!.getAttribute('aria-label')).toContain('已处理');
+    expect(
+      container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'),
+    ).toHaveLength(0);
   });
 });

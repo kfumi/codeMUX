@@ -81,7 +81,7 @@ describe('assistantMessageBottomSpacing', () => {
     })).toBe('mb-2');
   });
 
-  it('历史消息保持原有节奏：footer 行 mb-4，其余 mb-5', () => {
+  it('回合边界保持原有分隔：footer 行 mb-4，回合内消息行 mb-2，已处理开关 mb-2', () => {
     expect(assistantMessageBottomSpacing({
       isLastRow: false,
       isToggleMessage: false,
@@ -91,11 +91,36 @@ describe('assistantMessageBottomSpacing', () => {
       isLastRow: false,
       isToggleMessage: false,
       shouldRenderFooter: false,
-    })).toBe('mb-5');
+    })).toBe('mb-2');
     expect(assistantMessageBottomSpacing({
       isLastRow: false,
       isToggleMessage: true,
       shouldRenderFooter: false,
-    })).toBe('mb-4');
+    // 「已处理」开关是它领起的正文的标题：末尾留 8px，再加开关下方那条分隔线。
+    })).toBe('mb-2');
+  });
+
+  it('同一个处理段跨行时行距压到段内步距（3px），开关行除外', () => {
+    // 段内的步距是 gap-[3px]：跨行的行距必须与它一致，否则每跨一行都会多出空隙、竖线断开。
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: false,
+      shouldRenderFooter: false,
+      continuesRun: true,
+    })).toBe('mb-[3px]');
+    // 「本轮处理」开关是标题而不是段内的一行：保留 8px 与它的分隔线，竖线由多探部分接上。
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: true,
+      shouldRenderFooter: false,
+      continuesRun: true,
+    })).toBe('mb-2');
+    // 段收起时不压行距（后面那几行整行不渲染，行距要照旧）。
+    expect(assistantMessageBottomSpacing({
+      isLastRow: false,
+      isToggleMessage: false,
+      shouldRenderFooter: false,
+      continuesRun: false,
+    })).toBe('mb-2');
   });
 });

@@ -104,6 +104,8 @@ export type OpenCodeChildProjectionState = {
   /** Child user-message ids; their text parts must not render as child speech. */
   userMessageIds: Set<string>;
   assistantMessageIds: Set<string>;
+  /** Assistant message id → provider `modelID`, recorded from `message.updated`. */
+  assistantMessageModels: Map<string, string>;
   compactionSummaryMessageIds: Set<string>;
   assistantMessageIdsBeforeCompaction: Set<string>;
   compactionSummaryInFlight: boolean;
@@ -116,6 +118,7 @@ export function createOpenCodeChildProjectionState(): OpenCodeChildProjectionSta
     idleStreamKind: { kind: 'thinking' },
     userMessageIds: new Set(),
     assistantMessageIds: new Set(),
+    assistantMessageModels: new Map(),
     compactionSummaryMessageIds: new Set(),
     assistantMessageIdsBeforeCompaction: new Set(),
     compactionSummaryInFlight: false,
@@ -156,9 +159,18 @@ export function projectOpenCodeChildEvent(
       : undefined,
   };
   const projected = toCodeMuxEvent(event, context);
+  // `message.updated` carries the assistant message's provider model and the
+  // message's parts follow it, so every assistant envelope this part finalizes
+  // can be stamped with it. Providers that never report `modelID` (and frames
+  // that arrive before the message info) simply produce no `model` key.
+  const model = readAssistantMessageModel(event, childState);
   const sourceEvents: TurnSourceEvent[] = [];
   for (const projectedEvent of projected) {
-    const source = toOpenCodeTurnSourceEvent(projectedEvent);
+    const source = toOpenCodeTurnSourceEvent(
+      model && projectedEvent.type === 'assistant_message'
+        ? { ...projectedEvent, model }
+        : projectedEvent,
+    );
     if (source) sourceEvents.push(source);
   }
   return sourceEvents;
@@ -172,7 +184,13 @@ function trackChildMessageRoles(event: unknown, childState: OpenCodeChildProject
   const role = readString(info?.role);
   if (!messageId) return;
   if (role === 'user') childState.userMessageIds.add(messageId);
-  if (role === 'assistant') childState.assistantMessageIds.add(messageId);
+  if (role === 'assistant') {
+    childState.assistantMessageIds.add(messageId);
+    // Bare `modelID` is what the parent path projects and what the Rust history
+    // reader reads; `providerID` is deliberately not folded into the value.
+    const modelId = readString(info?.modelID);
+    if (modelId) childState.assistantMessageModels.set(messageId, modelId);
+  }
 }
 
 /** Map one projected CodeMUX event onto the parent normalizer's source shape. */
@@ -191,6 +209,7 @@ export function toOpenCodeTurnSourceEvent(event: Record<string, unknown>): TurnS
       const supersedes = Array.isArray(event.supersedes_provider_message_ids)
         ? event.supersedes_provider_message_ids.filter((id): id is string => typeof id === 'string')
         : [];
+      const model = readString(event.model);
       return {
         kind: 'assistant_message',
         content: Array.isArray(event.content) ? (event.content as Array<Record<string, unknown>>) : [],
@@ -203,6 +222,7 @@ export function toOpenCodeTurnSourceEvent(event: Record<string, unknown>): TurnS
           ? { providerMessageId: `${providerMessageId}#${stableContentKey(event.content)}` }
           : {}),
         ...(supersedes.length > 0 ? { supersedesProviderMessageIds: supersedes } : {}),
+        ...(model ? { model } : {}),
       };
     }
     case 'tool_started':
@@ -241,6 +261,20 @@ export function mapOpenCodeChildTerminalStatus(type: string): 'completed' | 'fai
     default:
       return undefined;
   }
+}
+
+/**
+ * Provider model that produced the child event's assistant message, when known.
+ * The message id comes from `properties.part.messageID` (part events) or
+ * `properties.messageID` (deltas); it is resolved against the model recorded
+ * from that message's `message.updated` info. Unknown ids degrade to
+ * `undefined` so the persisted event simply has no `model` key.
+ */
+function readAssistantMessageModel(event: unknown, childState: OpenCodeChildProjectionState): string | undefined {
+  const record = asRecord(event);
+  const properties = asRecord(record?.properties);
+  const messageId = readString(asRecord(properties?.part)?.messageID) ?? readString(properties?.messageID);
+  return messageId ? childState.assistantMessageModels.get(messageId) : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

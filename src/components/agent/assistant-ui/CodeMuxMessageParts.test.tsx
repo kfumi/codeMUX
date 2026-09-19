@@ -55,28 +55,30 @@ describe('CodeMuxToolCallMessagePart', () => {
     cleanup();
   });
 
-  it('只展示子智能体工具消息本身，不再追加子智能体详情面板', () => {
+  it('没有子智能体描述符时委派工具调用退化成普通工具行，不再渲染子智能体详情面板', () => {
     const { container } = renderWithTooltip(
       <CodeMuxToolCallMessagePart
         toolName="Agent"
         args={{ description: '检查消息渲染', prompt: '内部子智能体提示词\n\n请只返回结论' }}
-        result="子智能体最终结果：**已完成**"
+        result="子智能体最终结果：已完成"
       />,
     );
 
+    // 找不到描述符时无法确认这是真正的委派：保留工具行，委派不会在对话流里凭空消失。
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    expect(trigger).not.toBeNull();
+    // 子智能体预览入口由委派卡片的节点卡承担，工具行上不再挂 chip。
+    expect(container.querySelector('[data-slot="subagent-preview-chip"]')).toBeNull();
     expect(screen.queryByText(/内部子智能体提示词/)).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /子智能体/ }));
+    fireEvent.click(trigger as HTMLElement);
 
-    const argsText = screen.getByText(/内部子智能体提示词/);
-    const resultText = screen.getByText(/子智能体最终结果：/);
-
-    expect(argsText.closest('[data-slot="tool-fallback-args"]')?.className).toContain('justify-end');
-    expect(resultText.closest('[data-slot="tool-fallback-result"]')?.className).toContain('justify-start');
-    expect(argsText.closest('[data-slot="tool-fallback-args"]')?.textContent).toBe('内部子智能体提示词\n\n请只返回结论');
-    expect(screen.queryByText(/"prompt"/)).toBeNull();
-    expect(screen.queryByText(/"description"/)).toBeNull();
-    expect(container.querySelector('[data-slot="tool-fallback-result"] .aui-md strong')?.textContent).toBe('已完成');
+    // 展开后是普通工具参数/结果详情，不再走子智能体对话式气泡。
+    const argsBlock = container.querySelector('[data-slot="tool-fallback-args"]');
+    const resultBlock = container.querySelector('[data-slot="tool-fallback-result"]');
+    expect(argsBlock?.textContent).toContain('内部子智能体提示词');
+    expect(argsBlock?.className).not.toContain('justify-end');
+    expect(resultBlock?.textContent).toContain('子智能体最终结果');
   });
 
   it('普通工具参数和结果保持原始详情样式，不使用子智能体对话式气泡或 Markdown 渲染', () => {
@@ -354,7 +356,7 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(diffViewer?.className).toContain('overflow-auto');
   });
 
-  it('子智能体卡片在描述符存在时显示运行状态徽标，点击打开预览面板', () => {
+  it('描述符存在时委派工具行不再渲染，入口由委派卡片的节点卡承担', () => {
     useSubagentStore.setState({
       sessions: {
         'session-1': {
@@ -387,21 +389,11 @@ describe('CodeMuxToolCallMessagePart', () => {
       />,
     );
 
-    // 描述符 running 时，即使 tool result 已返回，卡片状态也是运行中徽标。
-    const chip = container.querySelector('[data-slot="subagent-preview-chip"]');
-    expect(chip?.textContent).toContain('运行中');
-    expect(chip?.getAttribute('data-subagent-id')).toBe('toolu_1');
-
-    fireEvent.click(chip as HTMLElement);
-
-    const panel = useSidePanelStore.getState();
-    expect(panel.isOpen).toBe(true);
-    const tab = panel.tabs.find((entry) => entry.kind === 'subagent');
-    expect(tab).toMatchObject({
-      subagentId: 'toolu_1',
-      subagentSessionId: 'session-1',
-      subagentStatus: 'running',
-    });
+    // 能按 toolCallId 找到描述符 = 这是一次真正的委派：委派卡片取代工具行，
+    // 这里什么都不画（打开预览的入口是卡片的节点卡，见 subagent-activity.test.tsx）。
+    expect(container.querySelector('[data-slot="tool-fallback-root"]')).toBeNull();
+    expect(container.querySelector('[data-slot="subagent-preview-chip"]')).toBeNull();
+    expect(useSidePanelStore.getState().isOpen).toBe(false);
   });
 });
 

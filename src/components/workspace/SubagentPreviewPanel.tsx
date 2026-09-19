@@ -20,6 +20,8 @@ import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
+import { EMPTY_ACTIVITY_RUNS, buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
+import { buildConversationTurns } from '@/lib/conversationTurns';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
 
 interface SubagentPreviewPanelProps {
@@ -40,12 +42,17 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
   const parentEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_PARENT_EVENTS);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+  // 处理段的展开状态：未被点过的段跟随 live 自动开合，点过一次后由用户接管。
+  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
+  const [claimedRunKeys, setClaimedRunKeys] = useState<Set<string>>(() => new Set());
 
   const isRunning = descriptor?.status === 'running';
   const eventCount = rawEvents?.length ?? 0;
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
+    setExpandedRunKeys(new Set());
+    setClaimedRunKeys(new Set());
   }, [sessionId, subagentId, compactAiOutput]);
 
   const toggleExpandedTurn = useCallback((turnKey: string) => {
@@ -55,6 +62,20 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
         next.delete(turnKey);
       } else {
         next.add(turnKey);
+      }
+      return next;
+    });
+  }, []);
+
+  /** `currentlyOpen` 是这一行当前生效的开合状态：自动展开的段首次被点击要能收起来。 */
+  const toggleRun = useCallback((runKey: string, currentlyOpen: boolean) => {
+    setClaimedRunKeys((current) => (current.has(runKey) ? current : new Set(current).add(runKey)));
+    setExpandedRunKeys((current) => {
+      const next = new Set(current);
+      if (currentlyOpen) {
+        next.delete(runKey);
+      } else {
+        next.add(runKey);
       }
       return next;
     });
@@ -83,6 +104,19 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
       timestamps: parsedTimestamps,
     };
   }, [rawEvents]);
+
+  // 子智能体的处理段（连续思考 + 工具）——与主线程同一套投影。
+  const activityRuns = useMemo(() => {
+    if (parsedEvents.length === 0) {
+      return EMPTY_ACTIVITY_RUNS;
+    }
+    return buildActivityRuns(
+      parsedEvents,
+      buildConversationTurns(parsedEvents, { isRunning }),
+      timestamps,
+      { isRunning },
+    );
+  }, [parsedEvents, timestamps, isRunning]);
 
   const displayMessages = useMemo(
     () => supplementSubagentMessagesWithParentSummary(
@@ -146,7 +180,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
             )}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-2">
             {displayMessages.map((message, messageIndex) => {
               const collapseInfo = compactAiOutput
                 ? getCollapseInfoForSourceIndices(
@@ -158,6 +192,20 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                   },
                 )
                 : undefined;
+              // 这一行属于哪个处理段（连续思考 + 工具）：段首画组头，段内只画缩进的步骤行。
+              const runPlacement = activityRuns.placementByEventIndex.get(message.metadata.sourceEventIndex);
+              const run = runPlacement ? activityRuns.runByKey.get(runPlacement.runKey) : undefined;
+              // 未被用户点过的段跟随 live 自动开合：运行中展开、结束后收起；用户点过之后由用户接管。
+              const runOpen = run
+                ? (claimedRunKeys.has(run.runKey) ? expandedRunKeys.has(run.runKey) : run.live)
+                : true;
+              // 同一个处理段跨了多个消息行时，让这一行的竖线接上下一行（预览面板行距 8px）。
+              const runContinuesAfterRow = rowRunContinues(
+                activityRuns.placementByEventIndex,
+                run,
+                message.metadata.sourceEventIndices,
+              );
+
               return (
                 <CodeMuxTranscriptMessage
                   key={message.id}
@@ -171,6 +219,11 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                   })}
                   footerVariant="minimal"
                   userMode="prompt"
+                  run={run}
+                  runPlacement={runPlacement}
+                  runOpen={runOpen}
+                  onToggleRun={run ? () => toggleRun(run.runKey, runOpen) : undefined}
+                  runContinuesAfterRow={runContinuesAfterRow}
                   collapseInfo={collapseInfo}
                   collapseExpanded={collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false}
                   onToggleCollapse={collapseInfo
@@ -180,7 +233,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
               );
             })}
             {isRunning ? (
-              <div className="flex items-center gap-2 pl-1 text-ui-meta text-muted-foreground/72">
+              <div className="flex items-center gap-2 pl-1 text-ui-meta text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 <RunningElapsedTimer label="运行中" startTime={runningStartTs} />
               </div>

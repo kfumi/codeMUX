@@ -6,21 +6,20 @@ import {
   ToolFallbackContent,
   ToolFallbackResult,
   ToolFallbackCommandOutput,
-  ToolFallbackConversationResult,
   ToolFallbackRoot,
   ToolFallbackTrigger,
   ToolFallbackArgs,
-  ToolFallbackConversationArgs,
 } from '@/components/assistant-ui/tool-fallback';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
+import { findSubagentIdByToolCallId } from '../../../lib/subagentActivity';
+import { useSubagentStore } from '../../../stores/subagentStore';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
-import { AlertTriangle, Bot, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
-import { useSubagentStore } from '../../../stores/subagentStore';
 import { cn } from '../../../lib/utils';
 import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
 import { countDiffLines, parseUnifiedDiffPatch } from '../../../lib/diffStats';
@@ -30,6 +29,7 @@ import { getAgentDefinition } from '@/types/agentRegistry';
 import type { AgentKind } from '@/types/session';
 import { ReferencedMarkdownFilesList } from '../ReferencedMarkdownFilesList';
 import { extractReferencedMarkdownFiles } from '@/lib/referencedMarkdownFiles';
+import { isSubagentToolName } from '../../../lib/subagentTools';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -136,7 +136,7 @@ function ProposedPlanCard({ planMarkdown }: { planMarkdown: string }) {
   };
 
   return (
-    <div className="rounded-lg border border-border/55 bg-[hsl(var(--surface-2))]/42 p-4 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
+    <div className="rounded-lg border border-border/55 bg-[hsl(var(--surface-2))]/42 p-3.5 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
       <div className="mb-3 flex items-center justify-between gap-3 text-muted-foreground/72">
         <div className="flex min-w-0 items-center gap-2 text-xs font-medium">
           <ListTodo className="h-3.5 w-3.5 shrink-0" />
@@ -165,7 +165,7 @@ function ProposedPlanCard({ planMarkdown }: { planMarkdown: string }) {
           </TooltipHint>
         </div>
       </div>
-      <h2 className="mb-3 text-xl font-semibold leading-7 text-foreground">{title}</h2>
+      <h2 className="mb-2 text-xl font-semibold leading-7 text-foreground">{title}</h2>
       {preview ? (
         <div
           data-testid="proposed-plan-preview"
@@ -234,21 +234,21 @@ export function CodeMuxToolCallMessagePart({
   status,
 }: CodeMuxToolCallPartProps) {
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
-  const subagentDescriptor = useSubagentStore((state) => (
-    sessionId && toolCallId ? state.sessions[sessionId]?.descriptors[toolCallId] : undefined
-  ));
-  const openSubagentPanel = useSubagentStore((state) => state.openInSidePanel);
   const headerSummary = getToolHeaderSummary(toolName, args);
-  // For Agent/Task tools the descriptor owns the card state: the async launch
-  // tool result only means the child was declared, not that it finished.
-  const subagentStatus = subagentDescriptor?.status;
-  const resolvedStatus: ToolCallMessagePartStatus | undefined = subagentStatus === 'running'
-    ? { type: 'running' }
-    : subagentStatus === 'failed'
-      ? { type: 'incomplete', reason: 'error' }
-      : subagentStatus === 'canceled'
-        ? { type: 'incomplete', reason: 'cancelled' }
-        : resolveToolStatus(status, result, isError);
+  // 委派（Task/Agent）工具行由委派卡片取代：一个段里的委派由卡片表达（组头 + 拓扑 + 步骤），
+  // 工具行只会重复它的信息，卡片节点才是打开预览的入口。
+  //
+  // 只在**能按 toolCallId 找到子智能体描述符**时才吞掉这一行：没有描述符（例如历史里没带
+  // 子智能体元数据、或同名工具并非真正的委派）时保留工具行，否则委派会在对话流里凭空消失。
+  const delegatedSubagentId = useSubagentStore((state) => {
+    if (!sessionId || !toolCallId || !isSubAgentTool(toolName)) return undefined;
+    const descriptors = state.sessions[sessionId]?.descriptors;
+    return descriptors ? findSubagentIdByToolCallId(descriptors, toolCallId) : undefined;
+  });
+  if (delegatedSubagentId !== undefined) {
+    return null;
+  }
+  const resolvedStatus: ToolCallMessagePartStatus | undefined = resolveToolStatus(status, result, isError);
   const askQuestions = getAskUserQuestions(toolName, args);
   if (askQuestions && sessionId && toolCallId) {
     const resultContent = typeof result === 'string' ? result : result == null ? undefined : stringifyResult(result);
@@ -256,7 +256,7 @@ export function CodeMuxToolCallMessagePart({
     if (isSubmittedQuestion) {
       return (
         <ToolFallbackRoot>
-          <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
+          <ToolFallbackTrigger toolName={toolName} status={resolvedStatus}>
             <span className="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-ui-caption font-medium text-primary">
               {askQuestions.length} 已回答
             </span>
@@ -284,10 +284,9 @@ export function CodeMuxToolCallMessagePart({
   const shellCommand = isShellCommandTool(toolName) ? getShellCommand(args) : undefined;
   const isShellCommandPanel = Boolean(shellCommand) && !codeFilePath;
   const displayableArgs = codeFilePath || isShellCommandPanel ? null : getToolDisplayableArgs(toolName, args, []);
-  const subAgentPrompt = getSubAgentPrompt(toolName, args);
-  const isSubAgentToolCall = isSubAgentTool(toolName);
-  const resolvedArgsText = subAgentPrompt
-    ?? (argsText && displayableArgs ? JSON.stringify(displayableArgs, null, 2) : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined);
+  const resolvedArgsText = argsText && displayableArgs
+    ? JSON.stringify(displayableArgs, null, 2)
+    : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined;
 
   const tooltipPath = headerSummary.fullPath;
   const exitPlanModePlanFilePath = toolName === 'ExitPlanMode' ? getStringArg(args, 'planFilePath') : undefined;
@@ -295,22 +294,14 @@ export function CodeMuxToolCallMessagePart({
 
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
-      <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
-        {isSubAgentTool(toolName) && subagentDescriptor && sessionId && toolCallId ? (
-          <SubagentPreviewChip
-            sessionId={sessionId}
-            subagentId={subagentDescriptor.subagentId}
-            status={subagentDescriptor.status}
-            onOpen={() => openSubagentPanel(sessionId, subagentDescriptor.subagentId)}
-          />
-        ) : null}
+      <ToolFallbackTrigger toolName={toolName} status={resolvedStatus}>
         {exitPlanModePlanFilePath ? (
           <TooltipHint content={exitPlanModePlanFilePath}>
             <span
               role="button"
               tabIndex={0}
               aria-label={`预览计划 ${exitPlanModePlanFilePath}`}
-              className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-primary underline underline-offset-2 transition-colors hover:text-primary/80"
+              className="min-w-0 truncate align-middle text-ui-caption font-normal text-primary underline underline-offset-2 transition-colors hover:text-primary/80"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -333,7 +324,7 @@ export function CodeMuxToolCallMessagePart({
           tooltipPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-muted-foreground/48">
+                <span className="min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground">
                   {headerText}
                 </span>
               </TooltipTrigger>
@@ -342,13 +333,13 @@ export function CodeMuxToolCallMessagePart({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-muted-foreground/48">
+            <span className="min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground">
               {headerText}
             </span>
           )
         )}
         {codeChangeStats && (
-          <span className="ml-2 inline-flex shrink-0 gap-1.5 font-mono text-ui-caption tabular-nums">
+          <span className="inline-flex shrink-0 gap-1.5 font-mono text-ui-caption tabular-nums">
             {(codeChangeStats.additions > 0 || codeChangeStats.deletions > 0) && (
               <>
                 <span className="text-green-600 dark:text-green-400">
@@ -362,7 +353,10 @@ export function CodeMuxToolCallMessagePart({
           </span>
         )}
         {durationMs != null && (
-          <span className="inline-flex rounded-md border border-border/16 bg-[hsl(var(--surface-3))]/20 px-1.5 py-0.5 text-ui-caption tabular-nums text-muted-foreground/56">
+          <span
+            data-slot="tool-fallback-duration"
+            className="shrink-0 text-ui-caption tabular-nums text-muted-foreground"
+          >
             {formatDuration(durationMs)}
           </span>
         )}
@@ -375,16 +369,10 @@ export function CodeMuxToolCallMessagePart({
           />
         ) : (
           <>
-            {resolvedArgsText && (
-              isSubAgentToolCall
-                ? <ToolFallbackConversationArgs argsText={resolvedArgsText} />
-                : <ToolFallbackArgs argsText={resolvedArgsText} />
-            )}
+            {resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}
             {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
             {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
-              isSubAgentToolCall
-                ? <ToolFallbackConversationResult result={subagentStatus === 'running' ? undefined : stringifyResult(result)} />
-                : <ToolFallbackResult result={stringifyResult(result)} />
+              <ToolFallbackResult result={stringifyResult(result)} />
             )}
           </>
         )}
@@ -412,7 +400,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const knownError = getKnownSidecarErrorDisplay(errorMsg);
     if (knownError) {
       return (
-        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.14)]">
+        <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.14)]">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span className="break-all whitespace-pre-wrap">{knownError}</span>
@@ -425,7 +413,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const label = match ? match[1].trim() : undefined;
     const message = match ? match[2].trim() : errorMsg;
     return (
-      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+      <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
         <div className="flex items-start gap-2">
           <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <div className="min-w-0">
@@ -445,7 +433,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const Icon = display.icon === 'error' ? XCircle : AlertTriangle;
 
     return (
-      <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${toneClass}`}>
+      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${toneClass}`}>
         <div className="flex items-start gap-2">
           <Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${display.pulse ? 'animate-pulse' : ''}`} />
           <span className="break-all whitespace-pre-wrap">{display.text}</span>
@@ -458,7 +446,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const { attempt, max_retries, error_status, error } = data.event.data as any;
     const isLastRetry = attempt >= max_retries;
     return (
-      <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${
+      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${
         isLastRetry
           ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
           : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
@@ -472,7 +460,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const metadata = data.event.data.compact_metadata;
     if (metadata?.status === 'compacting') {
       return (
-        <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
           <span className="text-ui-caption text-muted-foreground tracking-normal font-medium animate-pulse">
             — 正在压缩上下文… —
           </span>
@@ -482,7 +470,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: C
     const preTokens = metadata?.pre_tokens;
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
-      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
         <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
           — 上下文已压缩{tokenText} —
         </span>
@@ -601,7 +589,7 @@ function isPermissionUpdateDeferredData(value: unknown): value is { eventKind: s
 
 function PermissionUpdateDeferredSeam({ event }: { event: Extract<AgentMessage, { kind: 'permission_update_deferred' }> }) {
   return (
-    <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
       <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
         — {event.data.content} —
       </span>
@@ -627,7 +615,7 @@ function NativeSessionRebuiltSeam({ event }: { event: Extract<AgentMessage, { ki
 
   return (
     <TooltipHint content={event.data.content}>
-      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
         <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
           {caption}
         </span>
@@ -771,17 +759,13 @@ function formatShellCommandOutput(result: unknown): string | undefined {
   return stringifyResult(result);
 }
 
-function getSubAgentPrompt(toolName: string, args: Record<string, unknown>): string | undefined {
-  if (!isSubAgentTool(toolName)) {
-    return undefined;
-  }
-
-  const prompt = args.prompt;
-  return typeof prompt === 'string' && prompt.trim().length > 0 ? prompt : undefined;
-}
-
-function isSubAgentTool(toolName: string): boolean {
-  return toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent' || toolName === 'task';
+/**
+ * 委派工具判定（口径在 `@/lib/subagentTools`，段分组也用它）：Claude 的 `Task`、
+ * Codex/OpenCode 的 `Agent`/`subagent` 都算。段内命中它、且能按 toolCallId 找到子智能体
+ * 描述符时，这一行由委派卡片取代。
+ */
+export function isSubAgentTool(toolName: string): boolean {
+  return isSubagentToolName(toolName);
 }
 
 function getToolDisplayableArgs(
@@ -888,7 +872,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
   };
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
       <button
         className="group flex w-full items-center gap-3 bg-[hsl(var(--surface-2))]/72 px-3.5 py-2.5 text-left text-sm transition-[background-color,border-color] duration-200 hover:bg-[hsl(var(--surface-3))]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.35)] focus-visible:ring-inset"
         aria-expanded={expanded}
@@ -1050,55 +1034,4 @@ function getNumericField(record: Record<string, unknown>, keys: string[]): numbe
   }
 
   return undefined;
-}
-
-const SUBAGENT_STATUS_LABEL: Record<string, string> = {
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  canceled: '已取消',
-};
-
-function SubagentPreviewChip({
-  sessionId,
-  subagentId,
-  status,
-  onOpen,
-}: {
-  sessionId: string;
-  subagentId: string;
-  status: string;
-  onOpen: () => void;
-}) {
-  return (
-    <TooltipHint content="在右侧面板查看子智能体">
-      <span
-        role="button"
-        tabIndex={0}
-        aria-label={`查看子智能体 ${SUBAGENT_STATUS_LABEL[status] ?? status}`}
-        data-slot="subagent-preview-chip"
-        data-session-id={sessionId}
-        data-subagent-id={subagentId}
-        className={cn(
-          'ml-2 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-border/45 bg-[hsl(var(--surface-3))]/30 px-1.5 py-0.5 align-middle text-ui-caption font-normal text-muted-foreground/78 transition-colors hover:border-primary/30 hover:text-primary',
-        )}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onOpen();
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          onOpen();
-        }}
-      >
-        <Bot className={cn('h-3 w-3 shrink-0', status === 'running' && 'animate-pulse')} />
-        <span>{SUBAGENT_STATUS_LABEL[status] ?? status}</span>
-      </span>
-    </TooltipHint>
-  );
 }

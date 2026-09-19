@@ -246,6 +246,42 @@ describe('ClaudeTaskProtocolSource.observe', () => {
     });
   });
 
+  it('carries the sidechain frame model on the projected assistant_message event', () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted(), {});
+
+    const sidechainFrame = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+      type: 'assistant',
+      isSidechain: true,
+      parent_tool_use_id: 'toolu_1',
+      ...overrides,
+    });
+
+    const withModel = source.observe(sidechainFrame({
+      uuid: 'sidechain-model-1',
+      message: {
+        role: 'assistant',
+        model: 'glm-5.3-flash',
+        content: [{ type: 'text', text: 'reading main.ts' }],
+      },
+    }), {});
+
+    const assistant = withModel
+      .filter(isTimeline)
+      .find((event) => event.event.type === 'assistant_message');
+    expect(assistant?.event).toMatchObject({ type: 'assistant_message', model: 'glm-5.3-flash' });
+
+    // A frame without a model must not gain a `model` key (safe degrade).
+    const withoutModel = source.observe(sidechainFrame({
+      uuid: 'sidechain-model-2',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    }), {});
+    const plain = withoutModel
+      .filter(isTimeline)
+      .find((event) => event.event.type === 'assistant_message');
+    expect(plain?.event).not.toHaveProperty('model');
+  });
+
   it('ignores non-task and non-sidechain messages', () => {
     const source = new ClaudeTaskProtocolSource();
     expect(source.observe({ type: 'assistant', message: { role: 'assistant', content: [] } }, {})).toHaveLength(0);

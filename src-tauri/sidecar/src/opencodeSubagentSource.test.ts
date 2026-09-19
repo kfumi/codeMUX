@@ -173,6 +173,32 @@ describe('OpenCodeSubagentSource child routing', () => {
     expect(finalTimeline.some((event) => event.event.type === 'assistant_message')).toBe(true);
   });
 
+  it('carries the child message model recorded from message.updated', () => {
+    const source = new OpenCodeSubagentSource(() => 'event-1');
+    source.observeParentEvent(subtaskPart(), {});
+    source.observeParentEvent(taskToolPart(), {});
+
+    // OpenCode announces the assistant message (and its provider/model) before
+    // the parts that finalize the assistant envelope.
+    source.observeChildEvent(
+      childEvent('message.updated', {
+        info: { id: 'cm1', role: 'assistant', providerID: 'codemux-openai', modelID: 'gpt-5' },
+      }),
+      'child-session-1',
+      {},
+    );
+    const events = source.observeChildEvent(
+      childEvent('message.part.updated', { part: { id: 'p1', messageID: 'cm1', type: 'text', text: '正在检查代码' } }),
+      'child-session-1',
+      {},
+    );
+
+    const assistant = events
+      .filter(isTimeline)
+      .find((event) => event.event.type === 'assistant_message');
+    expect(assistant?.event).toMatchObject({ type: 'assistant_message', model: 'gpt-5' });
+  });
+
   it('suppresses the child user prompt text (declaration prompt already emitted)', () => {
     const source = new OpenCodeSubagentSource(() => 'event-1');
     source.observeParentEvent(subtaskPart(), {});

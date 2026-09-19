@@ -3,7 +3,7 @@
 // thinking → assistant_message → text → assistant_message repeatedly within
 // one turn). Guards the StreamingContent visibility rules in CodeMuxThread.
 
-import { cleanup, render, act } from '@testing-library/react';
+import { cleanup, render, act, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../../stores/agentStore';
@@ -180,6 +180,12 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     send({ type: 'reasoning_delta', event_id: 'e2', index: 0, text: 'SEG1 thinking' });
     await flush();
     expectLiveReasoning(container, true);
+    // 实时思考正文与完成后（ActivityStepThinking 自己的正文容器）同字号：都走全局正文档。
+    const liveThinkingBody = container.querySelector(
+      '[data-streaming-reasoning="true"] [data-slot="activity-step-body"] pre',
+    );
+    expect(liveThinkingBody?.getAttribute('class')).toContain('text-ui-body');
+    expect(liveThinkingBody?.getAttribute('class')).not.toContain('text-ui-caption');
 
     send({ type: 'assistant_message', event_id: 'em1', content: [{ type: 'thinking', thinking: 'SEG1 thinking' }], provider_message_id: 'msg-1' });
     await flush();
@@ -208,6 +214,10 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     send({ type: 'text_delta', event_id: 'e4', index: 1, text: 'ANSWER-1 final answer' });
     await flush();
     expect(container.querySelector('[data-streaming-text="markdown"]')).toBeTruthy();
+    // 实时正文气泡与完成后正文同字号（text-ui-body），不再自降一档成 text-sm。
+    const liveTextBubble = container.querySelector('[data-streaming-text="markdown"]');
+    expect(liveTextBubble?.getAttribute('class')).toContain('text-ui-body');
+    expect(liveTextBubble?.getAttribute('class')).not.toContain('text-sm');
 
     send({ type: 'assistant_message', event_id: 'em2', content: [{ type: 'text', text: 'ANSWER-1 final answer' }], provider_message_id: 'msg-1' });
     await flush();
@@ -232,7 +242,16 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('ANSWER-1 final answer');
     expect(text).toContain('ANSWER-2 second answer');
-    // Both committed reasoning bubbles exist as collapsed triggers.
+    // 两段过程被两条文本打断，各占一个组头；收起态下不铺开步骤行。
+    const runTriggers = Array.from(
+      container.querySelectorAll('[data-slot="activity-run-trigger"]'),
+    ) as HTMLElement[];
+    expect(runTriggers).toHaveLength(2);
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
+
+    runTriggers.forEach((trigger) => fireEvent.click(trigger));
+
+    // 展开后两段各自的那条思考步骤行才出现。
     const triggers = container.querySelectorAll('[data-slot="reasoning-trigger"]');
     expect(triggers.length).toBe(2);
   }, 30000);

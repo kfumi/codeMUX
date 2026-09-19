@@ -161,7 +161,7 @@ function ReasoningTrigger({
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        "aui-reasoning-trigger group/trigger flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm font-normal text-muted-foreground/52 transition-[color,scale] hover:text-muted-foreground/78 active:scale-[0.98]",
+        "aui-reasoning-trigger group/trigger flex max-w-[75%] origin-left items-center gap-2 py-1 text-sm font-normal text-muted-foreground/52 transition-[color,scale] hover:text-muted-foreground/78 active:scale-[0.98]",
         className,
       )}
       {...props}
@@ -240,7 +240,7 @@ function ReasoningText({
     <div
       data-slot="reasoning-text"
       className={cn(
-        "aui-reasoning-text relative z-0 ps-6 pt-2 pb-2 leading-relaxed text-pretty",
+        "aui-reasoning-text relative z-0 ps-5 pt-1 pb-1 leading-relaxed text-pretty",
         "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)]",
         "motion-reduce:animate-none",
         "group-data-open/collapsible-content:animate-in",
@@ -257,7 +257,7 @@ function ReasoningText({
       )}
       {...props}
     >
-      <div className="aui-reasoning-text-content space-y-4">
+      <div className="aui-reasoning-text-content space-y-2">
         {children}
       </div>
     </div>

@@ -151,7 +151,10 @@ export function AssistantCollapseToggle({
   onClick: () => void;
 }) {
   return (
-    <div className="pb-2">
+    // 整轮开关是它领起的那块内容的标题：不加图标（正文里的过程行才带动作图标），
+    // 时间与「已处理」同字号。标题下始终留一条分隔线：展开与收起两种状态下
+    // 「开关 → 下面内容」的距离必须一致，否则同一块内容会在两种状态之间跳动。
+    <div>
       <Button
         type="button"
         variant="ghost"
@@ -159,13 +162,15 @@ export function AssistantCollapseToggle({
         aria-expanded={expanded}
         aria-label={expanded ? '收起AI过程' : '展开AI过程'}
         onClick={onClick}
-        className="h-auto gap-1.5 px-0 py-0 pl-1 text-sm font-medium text-muted-foreground/80 hover:bg-transparent hover:text-muted-foreground/80"
+        className="group/trigger -mx-[3px] h-auto min-h-[26px] max-w-full items-center gap-[5px] rounded-sm px-[5px] py-0 text-ui-body font-medium text-muted-foreground hover:bg-[hsl(var(--surface-2))]/60 hover:text-foreground"
       >
-        <span>已处理</span>
-        {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
-        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="inline-flex shrink-0 items-center">本轮处理</span>
+        {durationMs != null ? (
+          <span className="min-w-0 truncate tabular-nums">{formatCompactDuration(durationMs)}</span>
+        ) : null}
+        {expanded ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
       </Button>
-      {expanded ? <div className="mt-1.5 border-b border-border/40" /> : null}
+      <div data-slot="assistant-collapse-divider" className="mt-1.5 border-b border-border/40" />
     </div>
   );
 }
