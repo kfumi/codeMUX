@@ -18,6 +18,12 @@ export type CodexCollabItemInfo = {
   id: string;
   tool: string | null;
   prompt: string | null;
+  /**
+   * Model the spawned child runs on. Spawn calls declare it (`model` +
+   * `reasoningEffort`); orchestration calls send null. This is the only place
+   * the app-server exposes a child's model — see the stream preview design doc.
+   */
+  model: string | null;
   /** Adapted item status: in_progress / completed / failed / declined. */
   status: string | null;
   /** Child agent threads this collab call addresses. */
@@ -47,6 +53,7 @@ export function extractCodexCollabItem(rawItem: unknown): CodexCollabItemInfo | 
     id,
     tool: asString(item.tool) ?? null,
     prompt: asString(item.prompt) ?? null,
+    model: asString(item.model) ?? null,
     status: asString(item.status) ?? null,
     receiverThreadIds: Array.isArray(item.receiverThreadIds)
       ? item.receiverThreadIds.filter((value): value is string => typeof value === 'string' && value.length > 0)

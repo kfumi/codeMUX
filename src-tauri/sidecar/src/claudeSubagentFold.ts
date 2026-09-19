@@ -11,6 +11,12 @@ export type SubagentDescriptorState = {
   status: SubagentStatus;
   tool_call_id: string;
   subtitle?: string | null;
+  /**
+   * Model the provider declared for this subagent. Never reaches the upsert
+   * (the protocol's descriptor has no model field); it is stamped onto the
+   * timeline events so the preview can label the subagent with it.
+   */
+  model?: string | null;
 };
 
 export type SubagentFoldEntry = {
@@ -129,7 +135,11 @@ function timelineEvents(
       // The wire format carries transport timestamps on parent-path events
       // (the batcher stamps them); the protocol union simply doesn't declare
       // the optional field, so widen it here for the persisted row.
-      const withTimestamp = { ...normalized, timestamp: at } as CodeMuxRuntimeEvent & { timestamp: string };
+      const withTimestamp = {
+        ...normalized,
+        ...(entry.descriptor.model ? { model: entry.descriptor.model } : {}),
+        timestamp: at,
+      } as CodeMuxRuntimeEvent & { timestamp: string };
       events.push({
         type: 'subagent_timeline',
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -198,6 +208,10 @@ export function foldSubagentObservations(
             entry.descriptor.subtitle = observation.subtitle;
             patch.subtitle = observation.subtitle;
           }
+
+          if (observation.model !== undefined && observation.model !== entry.descriptor.model) {
+            entry.descriptor.model = observation.model;
+          }
           const status = applyStatus(entry, 'running');
           if (status) patch.status = status;
           for (const toolUseId of observation.toolUseIds) {
@@ -236,6 +250,7 @@ export function foldSubagentObservations(
             status: 'running',
             tool_call_id: subagentId,
             subtitle: observation.subtitle ?? null,
+            model: observation.model ?? null,
           },
           isBackgrounded: undefined,
           seenBackgroundedPatch: false,

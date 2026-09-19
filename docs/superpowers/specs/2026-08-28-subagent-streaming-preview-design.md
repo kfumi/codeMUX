@@ -379,6 +379,8 @@ CLI 历史投影与 live 对齐(`codex_history.rs`):`spawn_agent` 只在输出�
 - **父卡片由运行时合成**：变体 B 没有可投影的 collab item,运行时从声明直接发 `tool_started`（工具名 `subagent`,必须留在前端 `isSubAgentToolName` 白名单里;`tool_use_id` = 声明 call id）,输入只带 `agent_path`,**不编造任务文本**。父 turn 不活跃时只声明轨道、不画卡片（没有可归属的 turn）；同理,派生完成的 `tool_finished` 只在卡片确实画出来时才发,不留孤儿结果行。
 - `thread/started` **不会**为协作子线程发出,因此不能作为父子绑定来源（父历史 fork 出来的子线程只有 `SubAgentSource.thread_spawn` 里的 `agent_path`/`agent_nickname`,而当前链路拿不到）。
 - 失败形态对照：变体 B 未支持时,整支静默——父对话没有卡片、轨道事件 0 条、子线程通知全部停在 pending 缓冲;这正是 2026-09-19 排查的现场。
+- **子智能体的模型从哪来（2026-09-20 真机实证）**：`session_subagents` 没有 model 列，前端 `subagentModelFromEvents` 从轨道事件里取，取不到才回退 provider。变体 A 的 spawn collab item 自带 `model`（另有 `reasoningEffort`），适配器把 model 盖到该轨道每条时间线事件上，UI 因此能显示真实模型。变体 B 在协议层拿不到：`subAgentActivity` 无 model 字段；子线程不发 `thread/settings/updated`（实测只有根线程发过），也不发 `thread/started`；`Thread` 与 `thread/read` 只带 `modelProvider`；父线程 `spawn_agent` 的工具参数只有 `task_name`/`fork_turns`/`message`。变体 B 因此保持 provider 兜底 `codex`；它的真实模型只存在于 codex 自己的 rollout（`~/.codex/sessions/**/rollout-*-<agentThreadId>.jsonl` 的 `turn_context.model`，`agentThreadId` 可从 `subAgentActivity` 取到），要展示得新增读 rollout 的链路，不在本期范围。
+- **fork 继承的父历史是子线程自己的 item**：`spawn_agent` 不带 `fork_turns`（或为 `full`）时，codex 把父会话历史复制进子线程，子线程时间线里于是出现父线程的旧旁白；适配器按线程忠实投影，不做内容去重（回放的 item 带的是回放时刻的新时间戳，按时间也区分不出来）。2026-09-20 的实例里，被 fork 的子线程直接把自己当成父代理重新派活，又撞上并发槽上限。
 
 ## Further Notes
 

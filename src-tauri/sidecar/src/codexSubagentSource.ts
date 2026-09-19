@@ -160,6 +160,7 @@ export class CodexSubagentSource {
             toolUseIds: [collab.id],
             title: 'Sub-agent',
             ...(collab.prompt ? { prompt: collab.prompt, description: collab.prompt } : {}),
+            ...(collab.model ? { model: collab.model } : {}),
             isWorkflow: false,
             provider: 'codex',
           });

@@ -52,6 +52,28 @@ describe('CodexSubagentSource declarations', () => {
     expect(source.routeThreadId('child-thread-1', 'parent-thread-1')).toBe('child');
   });
 
+  it('carries the spawn-declared model onto the child track without a model upsert', () => {
+    const source = new CodexSubagentSource();
+    const events = source.observeParentItem(
+      collabItem({ model: 'deepseek-flash', reasoningEffort: 'high' }),
+      'started',
+      { sessionId: 'app-1' },
+    );
+
+    // The app-server exposes a child's model only on the spawn call, and the
+    // descriptor upsert has no model field: the fold stamps the timeline instead.
+    expect(events.filter(isUpsert)[0]).not.toHaveProperty('model');
+    expect(events.filter(isTimeline)[0].event).toEqual(
+      expect.objectContaining({ type: 'user_message', model: 'deepseek-flash' }),
+    );
+  });
+
+  it('never invents a model when the spawn call declares none', () => {
+    const source = new CodexSubagentSource();
+    const events = source.observeParentItem(collabItem(), 'started', {});
+    expect(events.filter(isTimeline)[0].event).not.toHaveProperty('model');
+  });
+
   it('does not declare collab items without child threads or tool', () => {
     const source = new CodexSubagentSource();
     const events = source.observeParentItem(
@@ -122,6 +144,28 @@ describe('CodexSubagentSource child timeline projection', () => {
     });
     // All timeline events carry the canonical subagent id.
     expect(timelines.every((event) => event.subagent_id === 'call-1')).toBe(true);
+  });
+
+  it('stamps the declared model on the child timeline, not just on the declaration', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(collabItem({ model: 'deepseek-flash' }), 'started', {});
+    source.observeChildNotification(
+      'item/agentMessage/delta',
+      { threadId: 'child-thread-1', itemId: 'msg-1', delta: 'he' },
+      {},
+    );
+    const completed = source.observeChildNotification(
+      'item/completed',
+      { threadId: 'child-thread-1', item: { type: 'agentMessage', id: 'msg-1', text: 'hello world' } },
+      {},
+    );
+
+    const timelines = completed.filter(isTimeline);
+    expect(timelines).toHaveLength(2);
+    expect(timelines.map((event) => event.event)).toEqual([
+      expect.objectContaining({ model: 'deepseek-flash' }),
+      expect.objectContaining({ model: 'deepseek-flash' }),
+    ]);
   });
 
   it('projects child command execution lifecycle as tool events', () => {

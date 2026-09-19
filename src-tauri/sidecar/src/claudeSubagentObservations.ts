@@ -22,6 +22,12 @@ export type SubagentObservation =
       isWorkflow: boolean;
       /** Defaults to 'claude'; OpenCode declarations set 'opencode'. */
       provider?: string;
+      /**
+       * Model the declaration names for this child (codex spawn calls carry it).
+       * It never reaches the upsert: the fold stamps it onto the timeline events
+       * so the subagent preview can label the child with it.
+       */
+      model?: string;
     }
   | { kind: 'status'; taskId: string; status: SubagentStatus }
   | { kind: 'subtitle'; taskId: string; subtitle: string }
