@@ -31,7 +31,7 @@ export function AgentSetupChecklist({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 rounded-xl border border-border/45 bg-[hsl(var(--surface-2))]/42 px-3 py-2 text-[11px] text-muted-foreground',
+        'flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 rounded-xl border border-border/45 bg-[hsl(var(--surface-2))]/42 px-3 py-2 text-ui-caption text-muted-foreground',
         compact && 'justify-start',
       )}
       aria-label={`智能体准备状态，${readyCount} 项就绪`}

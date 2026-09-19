@@ -145,7 +145,7 @@ export function GitBranchBar({
           >
             <span>{area === 'unstaged' ? '未提交' : '已暂存'}</span>
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70" />
-            <span className="ml-1 flex items-center gap-1 font-mono text-[10px] font-medium">
+            <span className="ml-1 flex items-center gap-1 font-mono text-ui-micro font-medium">
               <span className="text-[hsl(var(--success))]">+{totals.additions}</span>
               <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
             </span>

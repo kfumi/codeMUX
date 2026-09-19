@@ -99,11 +99,11 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
       <div className="flex items-center justify-between border-b border-border/45 px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-foreground/86">排队消息</span>
-          <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+          <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-ui-micro tabular-nums text-muted-foreground">
             {queuedQueries.length}
           </span>
           {queuePaused ? (
-            <span className="text-[10px] text-muted-foreground">已暂停</span>
+            <span className="text-ui-micro text-muted-foreground">已暂停</span>
           ) : null}
         </div>
         <div className="flex items-center gap-1">
@@ -111,7 +111,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
             <button
               type="button"
               onClick={() => resumeQueuedQueries(sessionId)}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-foreground/72 transition-colors hover:bg-muted/70 hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-ui-caption text-foreground/72 transition-colors hover:bg-muted/70 hover:text-foreground"
               aria-label="继续执行排队消息"
             >
               <Play className="h-3 w-3" />
@@ -121,7 +121,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
           <button
             type="button"
             onClick={() => clearQueuedQueries(sessionId)}
-            className="rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            className="rounded-md px-1.5 py-1 text-ui-caption text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
             aria-label="清空排队消息"
           >
             清空
@@ -225,12 +225,12 @@ function QueuedMessageRow({
       >
         <GripVertical className="h-4 w-4" />
       </button>
-      <span className="w-4 shrink-0 text-center text-[10px] tabular-nums text-muted-foreground/55">
+      <span className="w-4 shrink-0 text-center text-ui-micro tabular-nums text-muted-foreground/55">
         {index + 1}
       </span>
       <span className="min-w-0 flex-1 truncate text-left text-xs text-foreground/82" title={content}>
         {content}
-        {hasImages ? <span className="ml-1 text-[10px] text-muted-foreground">· 图片</span> : null}
+        {hasImages ? <span className="ml-1 text-ui-micro text-muted-foreground">· 图片</span> : null}
       </span>
       <div
         className={cn(
@@ -295,7 +295,7 @@ function QueuedMessageGhost({
       <GripVertical className="h-4 w-4 shrink-0 text-primary/75" />
       <span className="min-w-0 flex-1 truncate">
         {content}
-        {hasImages ? <span className="ml-1 text-[10px] text-muted-foreground">· 图片</span> : null}
+        {hasImages ? <span className="ml-1 text-ui-micro text-muted-foreground">· 图片</span> : null}
       </span>
     </div>
   );

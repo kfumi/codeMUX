@@ -205,7 +205,7 @@ export function AgentModelSelector({
             <button
               type="button"
               className={cn(
-                'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                'rounded-full px-2.5 py-1 text-ui-caption font-medium transition-colors',
                 providerFilter === null
                   ? 'bg-foreground text-background'
                   : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -219,7 +219,7 @@ export function AgentModelSelector({
                 key={provider.id}
                 type="button"
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium transition-colors',
+                  'inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-ui-caption font-medium transition-colors',
                   providerFilter === provider.id
                     ? 'bg-foreground text-background'
                     : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground',

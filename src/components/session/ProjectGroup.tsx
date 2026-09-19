@@ -91,7 +91,7 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-base transition-colors duration-150',
+          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-150',
           'text-[hsl(var(--sidebar-fg))]/86 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
@@ -122,7 +122,7 @@ export function ProjectGroup({
             onClick={(event) => event.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate text-base font-medium">{project.name}</span>
+          <span className="flex-1 truncate text-sm font-medium">{project.name}</span>
         )}
         <div
           className={cn(

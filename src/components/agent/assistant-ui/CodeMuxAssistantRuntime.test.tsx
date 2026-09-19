@@ -1940,11 +1940,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders consecutive related tool calls inside one activity run', () => {
     const { container } = render(<Harness sessionId="session-grouped-tools" />);
 
-    // 两个连续的工具调用合成一段：只有段首一条段头，步骤行收起时不渲染。
+    // 两个连续的工具调用合成一段：各自一行、只有段首一条段头，步骤行收起时不渲染。
     const runTriggers = container.querySelectorAll('[data-slot="activity-run-trigger"]');
     expect(runTriggers).toHaveLength(1);
     expect(runTriggers[0]!.getAttribute('aria-expanded')).toBe('false');
-    // 同一个界面行里的两张工具卡必须在段头计数里如实反映（工具结果事件不切段）。
+    // 段头的步骤数按事件算（工具结果事件不切段）：两张工具卡各自一行、同属这一段。
     expect(runTriggers[0]!.textContent).toContain('2 个步骤');
     expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
@@ -3657,7 +3657,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-20');
+    expect(shell.className).toContain('px-10');
     expect(shell.className).not.toContain('pl-14');
     expect(shell.className).not.toContain('pr-4');
     expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');

@@ -1162,7 +1162,7 @@ function TriggerMenuItem({
             {item.label}
           </span>
           {getCommandSourceLabel(item) && (
-            <span className="shrink-0 text-[11px] text-muted-foreground/65">
+            <span className="shrink-0 text-ui-caption text-muted-foreground/65">
               {getCommandSourceLabel(item)}
             </span>
           )}

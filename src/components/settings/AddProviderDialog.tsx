@@ -180,7 +180,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
                 onChange={(event) => setOpenaiUrl(event.target.value)}
                 placeholder="https://example.com"
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-ui-caption text-muted-foreground">
                 填写根地址即可，请求时会自动拼接 /v1/...
               </p>
             </div>
@@ -191,7 +191,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
                 onChange={(event) => setResponsesUrl(event.target.value)}
                 placeholder="https://example.com/v1"
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-ui-caption text-muted-foreground">
                 可选；Codex 直连 Responses 接口，配置后不再使用兼容代理
               </p>
             </div>
@@ -202,7 +202,7 @@ export function AddProviderDialog({ open, onOpenChange, onSubmit }: AddProviderD
                 onChange={(event) => setAnthropicUrl(event.target.value)}
                 placeholder="https://example.com"
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-ui-caption text-muted-foreground">
                 填写根地址即可，请求时会自动拼接 /v1/messages
               </p>
             </div>

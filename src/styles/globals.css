@@ -634,7 +634,7 @@ html.cmx-panel-resizing webview {
   top: 0;
   right: 0;
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: calc(var(--code-font-size) - 3px);
   font-family: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 500;
   letter-spacing: 0.05em;

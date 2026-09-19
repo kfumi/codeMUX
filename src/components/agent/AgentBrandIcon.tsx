@@ -63,7 +63,7 @@ export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
           ? 'h-8 w-8 text-sm'
           : size === 'md'
             ? 'h-5 w-5 text-xs'
-            : 'h-4 w-4 text-[10px]',
+            : 'h-4 w-4 text-ui-micro',
       )}
       aria-hidden="true"
     >

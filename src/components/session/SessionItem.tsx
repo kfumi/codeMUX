@@ -190,7 +190,7 @@ export function SessionItem({
             <HoverCardTrigger asChild>
               <div
                 className={cn(
-                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-0.5 text-base transition-colors duration-150 select-none [-webkit-touch-callout:none]',
+                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-150 select-none [-webkit-touch-callout:none]',
                   'cursor-pointer text-[hsl(var(--sidebar-fg))]/86',
                   'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
                   'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',

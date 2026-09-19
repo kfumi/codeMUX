@@ -78,7 +78,7 @@ export function ConfirmDialog({
             size="sm"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
-            className="h-8 px-3.5 text-[max(12px,calc(var(--ui-font-size)-1px))]"
+            className="h-8 px-3.5 text-ui-compact"
           >
             {cancelLabel}
           </Button>
@@ -87,7 +87,7 @@ export function ConfirmDialog({
             size="sm"
             onClick={() => void handleConfirm()}
             disabled={isLoading}
-            className="h-8 gap-1.5 px-3.5 text-[max(12px,calc(var(--ui-font-size)-1px))]"
+            className="h-8 gap-1.5 px-3.5 text-ui-compact"
           >
             {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {isLoading ? '正在删除…' : confirmLabel}

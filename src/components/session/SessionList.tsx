@@ -71,7 +71,7 @@ function SectionHeader({
         onClick={onToggle}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-[hsl(var(--sidebar-muted))]/70"
       >
-        <span className="min-w-0 truncate text-base font-medium text-[hsl(var(--sidebar-fg))]">
+        <span className="min-w-0 truncate text-sm font-medium text-[hsl(var(--sidebar-fg))]">
           {title}
         </span>
         {/* 展开/收起箭头跟在标题右侧,悬停该行才出现;窄屏(触摸)没有 hover,常显。 */}

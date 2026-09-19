@@ -416,7 +416,7 @@ export function SkillsSettingsPanel() {
           <DialogHeader>
             <DialogTitle>{previewTitle}</DialogTitle>
           </DialogHeader>
-          <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto">
+          <div className="prose dark:prose-invert max-w-none overflow-x-auto text-ui-body">
             <MarkdownRenderer content={previewContent || ''} />
           </div>
         </DialogContent>

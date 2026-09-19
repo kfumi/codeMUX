@@ -133,7 +133,7 @@ const EMPTY_SUBAGENT_DESCRIPTORS: Record<string, never> = {};
 const EMPTY_SUBAGENT_EVENTS: Record<string, never> = {};
 const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
-const THREAD_CONTENT_PADDING_WITH_NAV = 'px-20';
+const THREAD_CONTENT_PADDING_WITH_NAV = 'px-10';
 const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
 /**
  * Above this event count (~60 messages) the transcript is long enough that
@@ -215,15 +215,17 @@ export function assistantMessageBottomSpacing(input: {
   if (input.isLastRow) {
     return 'mb-2';
   }
+  // 同一个处理段跨行时，行距要压到与段内步距一致（3px），否则每跨一行都会多出空隙、竖线断开。
+  // 「本轮处理」开关行同时是它自己那一段的组头（「已处理 … 个步骤」）时，段头下面紧接着的
+  // 就是这一段的第一行：两边给同一个 4px —— 与段头和自己的步骤行同处一行时的 space-y-1
+  // 一致，跨行与否都不会错层；不能沿用标题的 8px，否则跨过去那一步看起来比段内步距松。
+  if (input.continuesRun) {
+    return input.isToggleMessage ? 'mb-1' : 'mb-[3px]';
+  }
   // 「已处理」整轮开关是它所领起的那块内容的标题：标题下留 8px 加一条分隔线
   // （见 AssistantCollapseToggle），展开与收起两种状态用同一个值，避免内容跳动。
-  // 它是标题而不是段内的一行，所以即使这一段在下一行继续，也不压行距——竖线由
-  // ActivityRunSteps 的多探部分接上。
   if (input.isToggleMessage) {
     return 'mb-2';
-  }
-  if (input.continuesRun) {
-    return 'mb-[3px]';
   }
   if (input.shouldRenderFooter) {
     return 'mb-4';
@@ -2107,7 +2109,7 @@ function StreamingContent({
 
   return (
     <div className="mb-2 flex w-full justify-start">
-      <div className="w-full min-w-0 space-y-1 text-lg leading-relaxed">
+      <div className="w-full min-w-0 space-y-1 text-ui-body leading-relaxed">
         {isThinking && (liveRunKey != null || liveRunOpen) ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
             {liveRunKey == null ? (

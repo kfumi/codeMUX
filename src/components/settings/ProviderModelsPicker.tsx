@@ -177,7 +177,7 @@ export function ProviderModelsPicker({
                       <div className="truncate text-sm font-medium text-foreground">
                         {resolveModelDisplayName(model)}
                       </div>
-                      <div className="truncate text-[11px] text-muted-foreground">{model.id}</div>
+                      <div className="truncate text-ui-caption text-muted-foreground">{model.id}</div>
                     </div>
                     <Button
                       type="button"
