@@ -19,11 +19,12 @@ import { TooltipHint } from '@/components/ui/tooltip';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { subagentTabTitle, useSubagentStore, type SubagentStatus } from '@/stores/subagentStore';
+import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
 import { EMPTY_ACTIVITY_RUNS, buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
 import { buildConversationTurns } from '@/lib/conversationTurns';
 import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
+import { SUBAGENT_STATUS_TONES } from '@/lib/subagentStatusTone';
 import { cn } from '@/lib/utils';
 
 interface SubagentPreviewPanelProps {
@@ -32,14 +33,6 @@ interface SubagentPreviewPanelProps {
 }
 
 const EMPTY_PARENT_EVENTS: AgentMessage[] = [];
-
-/** 表头状态胶囊的配色：与节点卡的状态点同一套语义色（completed→success 等）。 */
-const SUBAGENT_STATUS_TONE: Record<SubagentStatus, string> = {
-  running: 'bg-primary/10 text-primary',
-  completed: 'bg-success/10 text-success',
-  failed: 'bg-destructive/10 text-destructive',
-  canceled: 'bg-warning/10 text-warning',
-};
 
 /**
  * Read-only real-time preview of one subagent's timeline. There is no
@@ -207,7 +200,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
             <div
               data-slot="subagent-panel-model"
               data-model-source={headerModel.source}
-              className="truncate font-mono text-ui-micro text-muted-foreground"
+              className="truncate text-ui-micro text-muted-foreground"
               title={headerModel.value}
             >
               {headerModel.value}
@@ -218,14 +211,14 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
           data-slot="subagent-panel-status"
           className={cn(
             'shrink-0 rounded-sm px-1.5 py-0.5 text-ui-micro font-medium',
-            SUBAGENT_STATUS_TONE[descriptor?.status ?? 'running'],
+            SUBAGENT_STATUS_TONES[descriptor?.status ?? 'running'].pill,
           )}
         >
           {statusLabel}
         </span>
         <span
           data-slot="subagent-panel-duration"
-          className="shrink-0 font-mono text-ui-micro text-muted-foreground"
+          className="shrink-0 text-ui-micro text-muted-foreground tabular-nums"
         >
           {isRunning && timelineBounds.first !== undefined ? (
             <RunningElapsedTimer label="" startTime={timelineBounds.first} active={false} />

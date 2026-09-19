@@ -825,16 +825,18 @@ html.cmx-panel-resizing webview {
   color: hsl(var(--muted-foreground));
 }
 
+/* 组头的计数行（`2 个 Subagent · 已完成 1/2 · 3m 33s`）是界面文案，跟着界面字体与
+   界面字号走；数字用 tabular-nums 对齐，所以不需要等宽字体——`--font-mono` 不可由
+   用户配置，中文落进去只会被替换成系统兜底字体。 */
 .subagent-activity-metrics {
   min-width: 0;
   overflow: hidden;
   color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono);
   font-size: var(--text-ui-meta);
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .subagent-activity-caret {
   display: inline-flex;
   flex: none;
@@ -1024,7 +1026,9 @@ html.cmx-panel-resizing webview {
   outline-offset: -2px;
 }
 
-/* 状态点：贴在头像右下角，用节点卡自己的底色做描边（挖空环）。 */
+/* 状态点：贴在头像右下角，用节点卡自己的底色做描边（挖空环）。
+   颜色语义与其他两处状态指示器共用 `src/lib/subagentStatusTone.ts`：
+   运行中=黄、已完成=绿、失败=红、已取消=中性灰（守卫见 subagentStatusTone.test.ts）。 */
 .subagent-topology-node-status-dot {
   position: absolute;
   right: -2px;
@@ -1036,6 +1040,10 @@ html.cmx-panel-resizing webview {
   background: hsl(var(--muted-foreground));
 }
 
+.subagent-topology-node.is-running .subagent-topology-node-status-dot {
+  background: hsl(var(--warning));
+}
+
 .subagent-topology-node.is-completed .subagent-topology-node-status-dot {
   background: hsl(var(--success));
 }
@@ -1045,7 +1053,7 @@ html.cmx-panel-resizing webview {
 }
 
 .subagent-topology-node.is-canceled .subagent-topology-node-status-dot {
-  background: hsl(var(--warning));
+  background: hsl(var(--muted-foreground));
 }
 
 .subagent-topology-node-title-row {
@@ -1066,12 +1074,13 @@ html.cmx-panel-resizing webview {
   white-space: nowrap;
 }
 
+/* 模型名与状态文案都是界面文案（不是代码块）：走界面字体 + 界面字号令牌。
+   只有真正的代码 / 路径 / 正文才配 `font-mono text-code`，那才跟随「代码字体大小」。 */
 .subagent-topology-node-model {
   min-width: 0;
   max-width: 38%;
   overflow: hidden;
   color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono);
   font-size: var(--text-ui-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1080,8 +1089,8 @@ html.cmx-panel-resizing webview {
 .subagent-topology-node-status {
   flex: none;
   color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono);
   font-size: var(--text-ui-micro);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -1098,8 +1107,8 @@ html.cmx-panel-resizing webview {
   margin-top: 2px;
   overflow: hidden;
   color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono);
   font-size: var(--text-ui-micro);
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1113,7 +1122,8 @@ html.cmx-panel-resizing webview {
   height: 11px;
   margin-left: auto;
   border: 1.5px solid hsl(var(--border));
-  border-top-color: hsl(var(--muted-foreground));
+  /* 运行中的弧线与「运行中」状态点同色（黄），整块卡片只有一个「运行中」色调。 */
+  border-top-color: hsl(var(--warning));
   border-radius: 9999px;
 }
 

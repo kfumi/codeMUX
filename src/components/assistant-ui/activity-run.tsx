@@ -98,7 +98,7 @@ export function ActivityRunHeader({
         </span>
         {/* 图标居中、文字共基线：`已处理 22s` 是 14px、`42 个步骤` 是 13px，两截一起
             `items-center` 时各自的行盒分别居中，后一截基线会偏高约 1px（截图实测墨迹中心
-            115.5 vs 116.5）。规则与本文件思考步骤行的「动作词 + 等宽摘要」一致：文字内层按
+            115.5 vs 116.5）。规则与本文件思考步骤行的「动作词 + 摘要」一致：文字内层按
             基线对齐，行（含图标、箭头）整体仍居中，所以图标位置不变。 */}
         <span
           data-slot="activity-run-text"
@@ -153,9 +153,9 @@ export function ActivityRunHeader({
 }
 
 /**
- * 思考步骤行。行壳与工具行同形（图标 + 动作词 + 等宽摘要 + 箭头），展开后是这段思考的
+ * 思考步骤行。行壳与工具行同形（图标 + 动作词 + 摘要 + 箭头），展开后是这段思考的
  * Markdown；`data-slot="reasoning-trigger*"` 与既有断言、既有测试保持同名。
- * 动作词与等宽摘要放在同一个按**基线**对齐的内层（两种字体的 ascent/descent 不同，
+ * 动作词与摘要放在同一个按**基线**对齐的内层（两截字号不同、ascent/descent 比例也不同，
  * 纯几何居中会让摘要偏高约 1px）；行本身仍整体居中，图标与箭头的位置因此不变。
  * 展开后的思考正文按全局 UI 字号渲染（正文跟设置走），只有动作词与单行摘要比正文小一号。
  * 流式期间（`streaming`）不画右侧单行摘要：这一行此时是展开的、正文就在下面，摘要跟着
@@ -222,7 +222,7 @@ export function ActivityStepThinking({
           {summary && !streaming ? (
             <span
               data-slot="reasoning-trigger-summary"
-              className="ml-1 min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground"
+              className="ml-1 min-w-0 truncate text-ui-meta font-normal text-muted-foreground"
             >
               {summary}
             </span>

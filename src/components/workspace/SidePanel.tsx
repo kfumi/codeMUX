@@ -21,6 +21,7 @@ import { SubagentPreviewPanel } from './SubagentPreviewPanel';
 import { BrowserPanel } from '../browser/BrowserPanel';
 import { composerSessionIdForBrowserPanel } from '../../lib/browserPanelTab';
 import { useBrowserDropdownHostGuard, useBrowserOverlayOpenChange } from '../../lib/useNativeViewOccluder';
+import { SUBAGENT_STATUS_TONES } from '../../lib/subagentStatusTone';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 
 interface SidePanelProps {
@@ -463,15 +464,15 @@ function TabButton({
 }
 
 function SubagentStatusDot({ status }: { status: NonNullable<SidePanelTab['subagentStatus']> }) {
+  // 取色只有一处语义表（运行中=黄、已完成=绿、失败=红、已取消=中性灰），
+  // 与委派卡片的节点状态点、子智能体面板表头的状态胶囊同源。
   return (
     <span
       aria-label={`子智能体状态: ${status}`}
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        status === 'running' && 'animate-pulse bg-success',
-        status === 'completed' && 'bg-primary',
-        status === 'failed' && 'bg-destructive',
-        status === 'canceled' && 'bg-muted-foreground/55',
+        SUBAGENT_STATUS_TONES[status].dot,
+        status === 'running' && 'animate-pulse',
       )}
     />
   );
