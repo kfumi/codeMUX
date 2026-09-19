@@ -326,3 +326,314 @@ describe('CodexSubagentSource teardown', () => {
     expect(source.routeThreadId('child-thread-1', 'parent-thread-1')).toBe('pending');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Variant B (`subAgentActivity`) — raw payloads copied from a captured session
+// (codex 0.146.1, model deepseek-flash, 2026-09-19): no `collabAgentToolCall`
+// spawn item exists at all, the activity item *is* the declaration.
+// ---------------------------------------------------------------------------
+
+const ACTIVITY_SCAN_SRC = {
+  type: 'subAgentActivity',
+  id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+  kind: 'started',
+  agentThreadId: '01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432',
+  agentPath: '/root/scan_src',
+};
+
+/** Same child, second declaration under a fresh call id (`interacted`). */
+const ACTIVITY_SCAN_SRC_INTERACTED = {
+  type: 'subAgentActivity',
+  id: 'call_00_IKVpksPhX0o98pqRBbmu7205',
+  kind: 'interacted',
+  agentThreadId: '01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432',
+  agentPath: '/root/scan_src',
+};
+
+const ACTIVITY_LIST_DIRS = {
+  type: 'subAgentActivity',
+  id: 'call_00_ve8rk9zc7gFaheNbTy8f6403',
+  kind: 'started',
+  agentThreadId: '01a0ba43-41ee-7d60-8a4f-0acae8dcbc07',
+  agentPath: '/root/list_tauri_dirs',
+};
+
+/** Declared *by* ACTIVITY_LIST_DIRS' child, on that child's own thread. */
+const ACTIVITY_GRANDCHILD = {
+  type: 'subAgentActivity',
+  id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+  kind: 'started',
+  agentThreadId: '01a0ba43-66c8-7f82-a9bf-3f4166ef0eb8',
+  agentPath: '/root/list_tauri_dirs/scan_src',
+};
+
+const ROOT_THREAD = '01a0ba42-9b75-7cf2-bb41-741f548473bb';
+
+describe('CodexSubagentSource variant B declarations', () => {
+  it('declares a track from a parent-thread subAgentActivity item', () => {
+    const source = new CodexSubagentSource();
+    const declaration = source.activityDeclaration(ACTIVITY_SCAN_SRC);
+    expect(declaration).toEqual({
+      callId: 'call_00_KapLrhSWlODQdZDkANYI1759',
+      agentPath: '/root/scan_src',
+    });
+
+    const events = source.observeParentItem(ACTIVITY_SCAN_SRC, 'started', { sessionId: 'app-1' });
+
+    const upserts = events.filter(isUpsert);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]).toMatchObject({
+      type: 'subagent_upsert',
+      session_id: 'app-1',
+      subagent_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+      provider: 'codex',
+      status: 'running',
+      tool_call_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+      title: 'scan_src',
+      subtitle: '/root/scan_src',
+    });
+    // No invented task text: the child's own inbound message carries it.
+    expect(events.filter(isTimeline)).toEqual([]);
+    expect(source.routeThreadId('01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432', ROOT_THREAD)).toBe('child');
+  });
+
+  it('declares once: the completed mirror changes nothing and yields no second card', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(ACTIVITY_SCAN_SRC, 'started', {});
+
+    expect(source.activityDeclaration(ACTIVITY_SCAN_SRC)).toBeNull();
+    expect(source.observeParentItem(ACTIVITY_SCAN_SRC, 'completed', {})).toEqual([]);
+  });
+
+  it('replays child notifications buffered before the declaration', () => {
+    const source = new CodexSubagentSource();
+    const early = source.observeChildNotification(
+      'item/agentMessage/delta',
+      { threadId: '01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432', itemId: 'msg-1', delta: 'hi' },
+      {},
+    );
+    expect(early).toEqual([]);
+
+    const events = source.observeParentItem(ACTIVITY_SCAN_SRC, 'started', {});
+    const timelines = events.filter(isTimeline);
+    expect(timelines.map((event) => event.event.type)).toEqual(['content_started', 'text_delta']);
+    expect(timelines.every((event) => event.subagent_id === 'call_00_KapLrhSWlODQdZDkANYI1759')).toBe(true);
+  });
+
+  it('merges a second declaration of the same child under a new call id as an alias', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(ACTIVITY_SCAN_SRC, 'started', {});
+
+    // `interacted` reuses the child with a different call id.
+    expect(source.activityDeclaration(ACTIVITY_SCAN_SRC_INTERACTED)).toBeNull();
+    expect(source.observeParentItem(ACTIVITY_SCAN_SRC_INTERACTED, 'started', {})).toEqual([]);
+
+    const events = source.observeChildNotification(
+      'item/completed',
+      {
+        threadId: '01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432',
+        item: { type: 'agentMessage', id: 'msg-1', text: 'done' },
+      },
+      {},
+    );
+    expect(events.filter(isTimeline).every((event) => event.subagent_id === 'call_00_KapLrhSWlODQdZDkANYI1759')).toBe(true);
+  });
+
+  it('refreshes the subtitle from interacted without touching the lifecycle', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem({ ...ACTIVITY_SCAN_SRC, agentPath: '/root/scan' }, 'started', {});
+
+    const events = source.observeParentItem(ACTIVITY_SCAN_SRC_INTERACTED, 'completed', {});
+
+    expect(events.filter(isUpsert)).toEqual([
+      expect.objectContaining({ subagent_id: 'call_00_KapLrhSWlODQdZDkANYI1759', subtitle: '/root/scan_src' }),
+    ]);
+    expect(events.filter(isUpsert)[0]).not.toHaveProperty('status');
+  });
+
+  it('maps interrupted to canceled, and never declares a track from an interruption', () => {
+    const source = new CodexSubagentSource();
+    const orphan = { ...ACTIVITY_SCAN_SRC, kind: 'interrupted' };
+    expect(source.observeParentItem(orphan, 'started', {})).toEqual([]);
+    expect(source.routeThreadId('01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432', ROOT_THREAD)).toBe('pending');
+
+    source.observeParentItem(ACTIVITY_SCAN_SRC, 'started', {});
+    const events = source.observeParentItem(orphan, 'completed', {});
+    expect(events.filter(isUpsert).map((event) => event.status)).toEqual(['canceled']);
+  });
+
+  it('ignores interacted for an unknown child', () => {
+    const source = new CodexSubagentSource();
+    expect(source.observeParentItem(ACTIVITY_SCAN_SRC_INTERACTED, 'started', {})).toEqual([]);
+    expect(source.routeThreadId('01a0ba42-c01b-7db0-b6b7-a1ba1cd8e432', ROOT_THREAD)).toBe('pending');
+  });
+});
+
+describe('CodexSubagentSource nested declarations', () => {
+  it("declares a grandchild from a declaration on the child's own thread", () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(ACTIVITY_LIST_DIRS, 'started', {});
+    expect(source.routeThreadId('01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', ROOT_THREAD)).toBe('child');
+
+    const events = source.observeChildNotification(
+      'item/started',
+      { threadId: '01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', item: ACTIVITY_GRANDCHILD },
+      { sessionId: 'app-1' },
+    );
+
+    expect(events.filter(isUpsert)).toEqual([
+      expect.objectContaining({
+        subagent_id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+        session_id: 'app-1',
+        status: 'running',
+        title: 'scan_src',
+        subtitle: '/root/list_tauri_dirs/scan_src',
+      }),
+    ]);
+    expect(source.routeThreadId('01a0ba43-66c8-7f82-a9bf-3f4166ef0eb8', ROOT_THREAD)).toBe('child');
+  });
+
+  it('projects the grandchild timeline and terminal status onto its own track', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(ACTIVITY_LIST_DIRS, 'started', {});
+    source.observeChildNotification(
+      'item/started',
+      { threadId: '01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', item: ACTIVITY_GRANDCHILD },
+      {},
+    );
+
+    const delta = source.observeChildNotification(
+      'item/agentMessage/delta',
+      { threadId: '01a0ba43-66c8-7f82-a9bf-3f4166ef0eb8', itemId: 'g1', delta: 'deep' },
+      {},
+    );
+    expect(delta.filter(isTimeline).map((event) => event.event.type)).toEqual(['content_started', 'text_delta']);
+    expect(delta.filter(isTimeline).every((event) => event.subagent_id === 'call_00_A3wWiqSPMRmchObp9eKT2275')).toBe(true);
+
+    const done = source.observeChildNotification(
+      'turn/completed',
+      { threadId: '01a0ba43-66c8-7f82-a9bf-3f4166ef0eb8', turn: { status: 'completed' } },
+      {},
+    );
+    expect(done.filter(isUpsert)).toEqual([
+      expect.objectContaining({ subagent_id: 'call_00_A3wWiqSPMRmchObp9eKT2275', status: 'completed' }),
+    ]);
+    // The intermediate track is untouched by its child's lifecycle.
+    expect(source.routeThreadId('01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', ROOT_THREAD)).toBe('child');
+  });
+
+  it('declares the grandchild immediately, without waiting for its own thread to be claimed', () => {
+    const source = new CodexSubagentSource();
+    // The intermediate child has not been declared yet — and must not have to
+    // be: a declaration is applied straight away, so the pending buffer (which
+    // trims its oldest entries under pressure) can never eat one.
+    const declared = source.observeChildNotification(
+      'item/started',
+      { threadId: '01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', item: ACTIVITY_GRANDCHILD },
+      {},
+    );
+    expect(declared.filter(isUpsert).map((event) => event.subagent_id)).toEqual([
+      'call_00_A3wWiqSPMRmchObp9eKT2275',
+    ]);
+    expect(source.routeThreadId('01a0ba43-66c8-7f82-a9bf-3f4166ef0eb8', ROOT_THREAD)).toBe('child');
+
+    // The parent's later declaration of the intermediate child still lands its
+    // own track, and never re-declares the grandchild.
+    const parent = source.observeParentItem(ACTIVITY_LIST_DIRS, 'started', {});
+    expect(parent.filter(isUpsert).map((event) => event.subagent_id)).toEqual([
+      'call_00_ve8rk9zc7gFaheNbTy8f6403',
+    ]);
+  });
+
+  it('patches title and subtitle when a re-declaration reports a fuller agent path', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem({ ...ACTIVITY_LIST_DIRS, agentPath: '/root' }, 'started', {});
+
+    const events = source.observeParentItem(ACTIVITY_LIST_DIRS, 'started', {});
+
+    expect(events.filter(isUpsert)).toEqual([
+      expect.objectContaining({
+        subagent_id: 'call_00_ve8rk9zc7gFaheNbTy8f6403',
+        title: 'list_tauri_dirs',
+        subtitle: '/root/list_tauri_dirs',
+      }),
+    ]);
+  });
+
+  it('takes the display name from the final path segment, whatever the separator', () => {
+    const source = new CodexSubagentSource();
+
+    const windows = source.observeParentItem(
+      { ...ACTIVITY_SCAN_SRC, agentPath: 'C:\\work\\scan_src' },
+      'started',
+      {},
+    );
+    expect(windows.filter(isUpsert)[0]).toMatchObject({
+      subagent_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+      title: 'scan_src',
+      subtitle: 'C:\\work\\scan_src',
+    });
+
+    // A path with no segment yields no name; the descriptor keeps a null title
+    // and the frontend shows its unnamed-subagent fallback.
+    const nameless = source.observeParentItem(
+      { ...ACTIVITY_SCAN_SRC, id: 'call_00_root_only', agentThreadId: 'thread-root-only', agentPath: '/' },
+      'started',
+      {},
+    );
+    expect(nameless.filter(isUpsert)[0]).toMatchObject({
+      subagent_id: 'call_00_root_only',
+      title: null,
+      subtitle: '/',
+    });
+  });
+
+  it('declares the grandchild only once when the nested declaration is mirrored', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(ACTIVITY_LIST_DIRS, 'started', {});
+    const nested = { threadId: '01a0ba43-41ee-7d60-8a4f-0acae8dcbc07', item: ACTIVITY_GRANDCHILD };
+    expect(source.observeChildNotification('item/started', nested, {}).filter(isUpsert)).toHaveLength(1);
+    expect(source.observeChildNotification('item/completed', nested, {})).toEqual([]);
+  });
+});
+
+describe('CodexSubagentSource orchestration calls', () => {
+  it.each(['wait', 'sendInput', 'resumeAgent', 'closeAgent'])(
+    'never creates a track from %s without a target thread',
+    (tool) => {
+      const source = new CodexSubagentSource();
+      const item = {
+        type: 'collabAgentToolCall',
+        id: 'call_00_hgxonyQ5m14XHo6HaGxKh5416',
+        tool,
+        status: 'inProgress',
+        receiverThreadIds: [],
+        agentsStates: {},
+      };
+
+      expect(source.observeParentItem(item, 'started', {})).toEqual([]);
+      expect(source.observeParentItem({ ...item, status: 'completed' }, 'completed', {})).toEqual([]);
+      expect(source.hasRunningTasks()).toBe(false);
+    },
+  );
+
+  it('aggregates an orchestration call onto the declared child instead of forking a track', () => {
+    const source = new CodexSubagentSource();
+    source.observeParentItem(collabItem(), 'started', {});
+
+    const events = source.observeParentItem(
+      collabItem({
+        id: 'call-2',
+        tool: 'wait',
+        status: 'completed',
+        agentsStates: { 'child-thread-1': { status: 'completed' } },
+      }),
+      'started',
+      {},
+    );
+
+    expect(events.filter(isUpsert)).toEqual([
+      expect.objectContaining({ subagent_id: 'call-1', status: 'completed' }),
+    ]);
+  });
+});

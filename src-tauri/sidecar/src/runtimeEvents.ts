@@ -29,6 +29,22 @@ export type CodexThreadItem = {
   agents_states?: Record<string, string>;
 };
 
+/**
+ * The only collab tool that launches a child. Every other tool
+ * (`wait`/`sendInput`/`resumeAgent`/`closeAgent`) is orchestration: it may
+ * aggregate onto a child a spawn declared, never create one.
+ */
+export function isSpawnCollabTool(tool: string | null | undefined): boolean {
+  return tool === 'spawnAgent';
+}
+
+/**
+ * Parent-card tool name for a delegation. Must stay inside the frontend
+ * `isSubAgentToolName` whitelist (`src/lib/subagentTools.ts`), otherwise the
+ * card loses its preview chip and the panel binding.
+ */
+export const SUBAGENT_TOOL_NAME = 'subagent';
+
 export type CodexTokenUsage = {
   input_tokens: number;
   cached_input_tokens: number;
@@ -94,15 +110,13 @@ export function buildCodexToolUseContent(item: CodexThreadItem, context: ToolUse
     case 'collab_agent_tool_call':
       // Only spawn calls launch a child and get a parent card (the clickable
       // Sub-agent track); wait/sendInput/closeAgent are orchestration noise.
-      // The name must stay in the frontend `isSubAgentTool` whitelist so the
-      // preview chip and panel binding attach to the descriptor.
-      if (item.tool !== 'spawnAgent') {
+      if (!isSpawnCollabTool(item.tool)) {
         return null;
       }
       return {
         type: 'tool_use',
         id: item.id,
-        name: 'subagent',
+        name: SUBAGENT_TOOL_NAME,
         input: {
           ...(item.prompt ? { prompt: item.prompt } : {}),
         },
@@ -182,6 +196,13 @@ export function buildCodexToolResultContent(item: CodexThreadItem): string | nul
         ? `Patch ${item.status}: ${item.changes?.map((change: { kind: string; path: string }) => `${change.kind} ${change.path}`).join(', ')}`
         : `Patch ${item.status}`;
     case 'collab_agent_tool_call': {
+      // Orchestration calls (wait/sendInput/resumeAgent/closeAgent) render no
+      // parent card, so their completion must not render a result either: an
+      // orphan `Sub-agent call …` row without a matching start is exactly the
+      // noise this adapter stopped producing.
+      if (!isSpawnCollabTool(item.tool)) {
+        return null;
+      }
       // Full child thread ids — truncated prefixes collide on uuidv7 spawns
       // from the same millisecond.
       const entries = Object.entries(item.agents_states ?? {});
@@ -289,9 +310,9 @@ export function adaptAppServerItem(item: Record<string, unknown> | null | undefi
           : [],
         agents_states: collectAgentsStates(item.agentsStates),
       };
-    // subAgentActivity items carry no parent-renderable content — the collab
-    // tool call card is the parent-side representation; activity items only
-    // feed the subagent observation source.
+    // `subAgentActivity` items carry no parent-renderable content: they are a
+    // *declaration* source (variant B emits no spawned collab item at all), and
+    // the parent card is synthesized from them by the runtime — not here.
     default:
       return null;
   }

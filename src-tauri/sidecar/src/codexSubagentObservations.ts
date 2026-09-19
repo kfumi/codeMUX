@@ -73,6 +73,19 @@ export function extractCodexSubAgentActivity(rawItem: unknown): CodexSubAgentAct
   };
 }
 
+/**
+ * Display name for a declaration that only carries an agent path: its last
+ * segment (`/root/scan_src` → `scan_src`, `C:\work\scan_src` → `scan_src`).
+ * Variant B never reports a nickname, so the path segment is the best identity
+ * available; a path with no segment at all yields no name (the descriptor then
+ * falls back to the frontend's unnamed label).
+ */
+export function agentPathDisplayName(agentPath: string | null): string | undefined {
+  if (!agentPath) return undefined;
+  const segments = agentPath.split(/[\\/]/).filter((segment) => segment.length > 0);
+  return segments.length > 0 ? segments[segments.length - 1] : undefined;
+}
+
 function extractAgentsStates(value: unknown): Record<string, string> {
   const record = asRecord(value);
   if (!record) return {};
@@ -162,8 +175,12 @@ export function createCodexChildProjectionState(): CodexChildProjectionState {
 
 /**
  * Project one child-thread app-server notification into TurnSourceEvents for
- * the subagent timeline. Nested collab calls (grandchildren) are skipped —
- * the v1 spec scopes the panel to one track per direct child.
+ * the subagent timeline. `subAgentActivity` items never reach this function:
+ * they declare the *next* level's tracks, so the source intercepts them before
+ * projection. A child's own collab items stay unprojected as well: in captured
+ * traffic every `collabAgentToolCall` spawn arrives on the parent thread (so
+ * nesting there goes through the parent path), and the child-thread collab
+ * items are that child's own `wait`/`sendInput` orchestration.
  */
 export function projectCodexChildNotification(
   method: string,

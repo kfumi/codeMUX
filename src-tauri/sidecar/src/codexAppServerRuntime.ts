@@ -67,6 +67,8 @@ import {
   buildCodexToolResultContent,
   buildCodexToolUseContent,
   isCodexToolResultError,
+  isSpawnCollabTool,
+  SUBAGENT_TOOL_NAME,
   type CodexThreadItem,
 } from './runtimeEvents.js';
 import {
@@ -87,7 +89,11 @@ import {
   resolveCodexModelCatalogPath,
 } from './codexModelCatalog.js';
 import type { CodeMuxSubagentEvent } from './codeMuxProtocol.js';
-import { CodexSubagentSource, type CodexSubagentContext } from './codexSubagentSource.js';
+import {
+  CodexSubagentSource,
+  type CodexSubagentContext,
+  type CodexSubagentDeclaration,
+} from './codexSubagentSource.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 
 export { emit } from './streamEventBatcher.js';
@@ -216,6 +222,13 @@ export class CodexAppServerRuntime {
   private planApprovalPending = false;
   /** Codex collab subagent adapter: child-thread routes and timelines. */
   private readonly subagents = new CodexSubagentSource();
+  /**
+   * Parent-card ids this turn/connection actually rendered. A collab result may
+   * only be emitted for one of these: a `tool_finished` whose card never
+   * appeared is the orphan `Sub-agent call …` row the card rule exists to
+   * prevent.
+   */
+  private readonly renderedSubagentCards = new Set<string>();
   /** 原生标题探测：首个完成的 turn 后 thread/read 一次（name 仅在线程被命名时存在）。 */
   private codexTitleSynced = false;
   private lastEmittedNativeTitle: string | null = null;
@@ -971,13 +984,12 @@ export class CodexAppServerRuntime {
     // child threadId. Route them into the subagent track before any
     // parent-turn projection can misattribute them.
     const route = this.subagents.routeThreadId(threadId, this.threadId);
-    if (route === 'child') {
+    if (route !== 'parent') {
+      // One call for both child and unclaimed threads: the source declares on
+      // `subAgentActivity` (a declaration must never sit in the pending queue,
+      // which trims oldest-first) and buffers everything else until a
+      // declaration claims the route.
       this.emitSubagentEvents(this.subagents.observeChildNotification(method, params, this.subagentContext()));
-      return;
-    }
-    if (route === 'pending') {
-      // Unclaimed child thread: buffer until a collabAgentToolCall declares it.
-      this.subagents.bufferPendingNotification(threadId!, method, params);
       return;
     }
 
@@ -1021,9 +1033,21 @@ export class CodexAppServerRuntime {
         }
       }
       case 'item/started': {
+        // `subAgentActivity` is a first-class declaration source: this variant
+        // has no collab spawn item, so the parent card is synthesized from the
+        // declaration. Read it *before* observing the item — registering the
+        // route is what makes the next announcement return null again, so the
+        // card fires exactly once — and only when there is a turn to render
+        // into (with no active turn the track is still declared, but a card
+        // must not be invented for a turn that does not exist).
+        const declaration = turn ? this.subagents.activityDeclaration(params.item) : null;
         // Collab items declare subagent tracks before the card is projected.
         this.emitSubagentEvents(this.subagents.observeParentItem(params.item, 'started', this.subagentContext()));
         if (!turn) return;
+        if (declaration) {
+          this.emitSubagentDeclarationCard(turn, declaration);
+          return;
+        }
         // A re-announced spawn (codex repeats the item with thread ids once
         // the children exist) must not render a duplicate parent card.
         if (isAliasCollabItem(params.item, this.subagents)) return;
@@ -1031,8 +1055,14 @@ export class CodexAppServerRuntime {
         return;
       }
       case 'item/completed': {
+        // A declaration that only surfaced on completion still gets its card.
+        const declaration = turn ? this.subagents.activityDeclaration(params.item) : null;
         this.emitSubagentEvents(this.subagents.observeParentItem(params.item, 'completed', this.subagentContext()));
         if (!turn) return;
+        if (declaration) {
+          this.emitSubagentDeclarationCard(turn, declaration);
+          return;
+        }
         this.handleItemCompleted(turn, retargetAliasCollabItem(params.item, this.subagents));
         return;
       }
@@ -1111,6 +1141,27 @@ export class CodexAppServerRuntime {
     turn.settle({ outcome: 'failed', reason: message });
   }
 
+  /**
+   * Variant B declares children through `subAgentActivity` instead of a
+   * `collabAgentToolCall` spawn item, so there is no collab item to project:
+   * the parent card is synthesized from the declaration. Same shape as the
+   * collab card — the tool name is inside the frontend subagent whitelist, and
+   * `tool_use_id` is the declaration's call id, which is also the track id.
+   * The task text is deliberately not invented here: it arrives as the child
+   * thread's own inbound message.
+   */
+  private emitSubagentDeclarationCard(
+    turn: ActiveTurnState,
+    declaration: CodexSubagentDeclaration,
+  ): void {
+    this.renderedSubagentCards.add(declaration.callId);
+    this.emitTurnEvent(turn, {
+      kind: 'tool_started',
+      toolUseId: declaration.callId,
+      name: SUBAGENT_TOOL_NAME,
+      input: declaration.agentPath ? { agent_path: declaration.agentPath } : {},
+    });
+  }
   private handleItemStarted(turn: ActiveTurnState, rawItem: unknown): void {
     if (!isRecord(rawItem)) {
       return;
@@ -1134,6 +1185,9 @@ export class CodexAppServerRuntime {
       workdir: this.config?.cwd,
     });
     if (toolUse?.type === 'tool_use') {
+      if (toolUse.name === SUBAGENT_TOOL_NAME) {
+        this.renderedSubagentCards.add(toolUse.id);
+      }
       this.emitTurnEvent(turn, {
         kind: 'tool_started',
         toolUseId: toolUse.id,
@@ -1192,6 +1246,11 @@ export class CodexAppServerRuntime {
       if (typeof item.text === 'string' && item.text.trim()) {
         turn.planText = item.text;
       }
+      return;
+    }
+    // A collab completion only closes a card that exists (spawn-only cards are
+    // the parent timeline's delegation entries).
+    if (item.type === 'collab_agent_tool_call' && !this.renderedSubagentCards.has(item.id)) {
       return;
     }
     const result = buildCodexToolResultContent(item);
@@ -1747,6 +1806,7 @@ export class CodexAppServerRuntime {
     this.abortPendingPlanApproval();
     // Session teardown (or reconfigure): subagent tracks die with the query.
     this.subagents.reset();
+    this.renderedSubagentCards.clear();
     const transport = this.transport;
     this.transport = null;
     this.threadId = null;

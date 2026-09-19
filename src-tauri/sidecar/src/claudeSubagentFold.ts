@@ -193,6 +193,11 @@ export function foldSubagentObservations(
             entry.descriptor.description = observation.description;
             patch.description = observation.description;
           }
+
+          if (observation.subtitle !== undefined && observation.subtitle !== entry.descriptor.subtitle) {
+            entry.descriptor.subtitle = observation.subtitle;
+            patch.subtitle = observation.subtitle;
+          }
           const status = applyStatus(entry, 'running');
           if (status) patch.status = status;
           for (const toolUseId of observation.toolUseIds) {
@@ -230,7 +235,7 @@ export function foldSubagentObservations(
             description: observation.description ?? null,
             status: 'running',
             tool_call_id: subagentId,
-            subtitle: null,
+            subtitle: observation.subtitle ?? null,
           },
           isBackgrounded: undefined,
           seenBackgroundedPatch: false,
@@ -246,6 +251,7 @@ export function foldSubagentObservations(
           title: observation.title ?? null,
           description: observation.description ?? null,
           status: 'running',
+          ...(observation.subtitle ? { subtitle: observation.subtitle } : {}),
           tool_call_id: subagentId,
         }, sessionId, newEventId, timestamp));
         if (observation.prompt) {

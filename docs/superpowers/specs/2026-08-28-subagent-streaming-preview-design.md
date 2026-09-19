@@ -333,10 +333,10 @@ Codex 走 app-server 协议(ADR 0010),collab 子代理是同进程里的真实 t
 | Codex 信号 | 适配器行为 |
 |---|---|
 | 父线程 `item/started`+`item/completed`,`item.type === 'collabAgentToolCall'` | 发出 `declared`:规范 id = item id(父对话子智能体卡片 id),`prompt` 写成时间线第一条 `user_message`;`tool === 'spawnAgent'` 的 item 投影为父时间线卡片(`tool_started`/`tool_finished`,工具名 `subagent`,必须与前端 `isSubAgentTool` 白名单一致才有预览 chip 与点击);`wait`/`sendInput`/`closeAgent` 等编排调用不出父卡片。`receiverThreadIds` 逐个注册进 `childThreadId → 规范 id` 路由表;`agentsStates` 聚合为描述符状态。 |
-| 父线程 item `subAgentActivity`(`kind: started/interacted/interrupted`) | `agentThreadId` 注册进路由表(若尚未注册);`started`/`interacted` 只补状态,`interrupted` → `canceled`。 |
+| `subAgentActivity` item,`kind: started/interacted/interrupted` | **一等声明源**(变体 B 的唯一声明信号,见下节):`started` 把 `agentThreadId` 注册进 `childThreadId → 规范 id` 路由表(规范 id = item id),立即按序重放该线程的缓冲通知;`interacted` 只刷新副标题,不建轨道也不改状态;`interrupted` → `canceled`(未认领的线程忽略,不凭一条中断声明建轨道)。父/子路由同一套例程,因此孙代理同形可见。 |
 | 子线程 `item/started` / `item/completed` / `item/agentMessage/delta` / `item/reasoning/*` / `turn/completed` 等 | 复用与父线程相同的投影逻辑(`adaptAppServerItem` + 流式 delta),折回 `TurnSourceEvent` 包进 `subagent_timeline`;流式状态(`streamingParts`、去重集)按子线程各一份。 |
 | 子线程 `turn/completed` | `status: completed`(interrupted → canceled,failed → failed)。 |
-| 竞态:子线程通知早于声明到达 | pending 缓冲(每线程上限 128 条,线程数上限 32,溢出丢弃最旧),声明注册后按序重放。 |
+| 竞态:子线程通知早于声明到达 | pending 缓冲(每线程上限 128 条,线程数上限 32,溢出丢弃最旧),声明注册后按序重放;缓冲里若含下一层声明(孙代理),回放时同样建立下一层轨道。 |
 | codex 对同一 spawn 发两次 `item/started`(首次无 `receiverThreadIds`,子线程创建后带 id 重新宣布) | 二次宣布按 prompt 合并进首次轨道(unresolved-spawn 表;多个候选时 prompt 唯一匹配,唯一候选免匹配);别名 item 不渲染父卡片,其完成结果重定向为规范卡片的 `tool_finished`。真机实证(2026-08-30):不合并会产生永远 `running` 的幽灵描述符,子时间线挂错轨道。 |
 | 用户 Stop / `turn/interrupt` / runtime teardown | `failRunningTasks()`:所有 `running` 描述符变 `failed`。 |
 
@@ -349,6 +349,36 @@ Codex 走 app-server 协议(ADR 0010),collab 子代理是同进程里的真实 t
 CLI 历史投影与 live 对齐(`codex_history.rs`):`spawn_agent` 只在输出确认启动了子线程时出卡片(改名 `subagent`,input 收敛为 `{prompt}`);`wait_agent`/`close_agent`/`send_input`/`resume_agent` 编排调用与失败重试一律不出父卡片——同一 spawn 被模型重复调用(真机实证:参数错误重试会产生第二个 call_id)时按 prompt 去重,先成功者得卡片。
 
 文件落点:`codexSubagentObservations.ts`(纯函数:collab item 观察、子线程通知→TurnSourceEvent 投影)、`codexSubagentSource.ts`(路由表、pending 缓冲、per-thread 流式状态、failRunningTasks/reset)、`codexAppServerRuntime.ts` 接线(`handleNotification` 按 threadId 分流 + collab item 分支)。`claudeSubagentFold` 原样复用(`provider: 'codex'`)。Rust 表、前端 store、SidePanel 零改动。
+
+#### 变体 B：`subAgentActivity` 作为声明源（2026-09-19 真机实证）
+
+同一个 codex CLI（0.146.1）下存在**两套协作实现**。它们由 codex 侧决定（触发条件未完全定位,与模型/团队指令形态相关）,同一 CodeMUX 版本下不同会话会走不同变体,因此实现必须两套都成立,不得把变体 A 当作唯一事实。
+
+| | 变体 A（thread-spawn / 自动昵称） | 变体 B（agent path / 父历史 fork） |
+|---|---|---|
+| 声明信号 | 父线程 `collabAgentToolCall{tool:'spawnAgent'}` 的 `item/started`+`item/completed` | 声明线程上的 `subAgentActivity{kind:'started'}`,**完全没有 spawn 的 collab item** |
+| 子线程归属 | `receiverThreadIds`(首次可能为空,子线程建好后二次宣告才带 id) | `agentThreadId` |
+| 轨道规范 id | collab item id(= spawn call id) | `subAgentActivity.id`(= 该次派生的 call id) |
+| 显示名与任务 | `title` 固定 `Sub-agent`,`prompt` 写成时间线第一条 `user_message` | `title` = `agentPath` 末段、`subtitle` = 完整 `agentPath`;**拿不到 prompt**,任务原文由子线程自己的入站消息在轨道里出现 |
+| 编排调用 | spawn 之后另有 `wait`/`sendInput`/`closeAgent` 等 collab item | 只有编排用的 collab item(`wait` 等),没有 spawn |
+
+`subAgentActivity` 的字段语义（codex `app-server generate-json-schema` 的 `SubAgentActivityThreadItem`,`id`/`kind`/`agentThreadId`/`agentPath` 全部必填,没有昵称字段）：
+
+| 字段 | 语义 | 适配器用途 |
+|---|---|---|
+| `id` | 该次派生的 call id（与 `collabAgentToolCall.id` 同一命名空间） | 轨道 `subagent_id` 与父卡片 `tool_use_id`——前端按 `toolCallId` 关联卡片与轨道,两套变体因此不分叉 |
+| `agentThreadId` | 被派生的子线程 id | `childThreadId → 规范 id` 路由键 |
+| `agentPath` | 协作树里的路径（如 `/root/list_tauri_dirs/scan_src`） | `title` 取末段、`subtitle` 取全路径;本次不做缩进（轨道扁平,层级靠路径表达） |
+| `kind` | `started` / `interacted` / `interrupted` | `started` 声明并建轨道;`interacted` 只刷新副标题;`interrupted` → `canceled` |
+
+配套约束：
+
+- **声明可以出现在子线程上**（孙代理）：子路由上的 `subAgentActivity` 与父路由走同一段声明例程,并登记下一层路由。声明**不进 pending 缓冲**——缓冲会裁剪最旧条目,把声明挤掉就等于把整支内容永久搁置;声明到达即刻生效,它认领的线程若已有缓冲内容,随即按到达顺序回放。
+- **只有派生能建轨道**：`wait`/`sendInput`/`resumeAgent`/`closeAgent` 只允许把状态聚合到已声明的子智能体（带 `receiverThreadIds` 时）;不带目标线程 id 时既不建轨道、也不出结果行。修复前每次 `wait` 都会建一条标题固定、描述为空、内容永远为 0 的伪轨道,外加一条没有对应开始的 `Sub-agent call …` 结果行。
+- **幂等**：codex 把每个 item 镜像成 `item/started` + `item/completed`,同一子线程还可能换个 call id 再宣告;重复宣告按别名合并,只产生一条轨道、一次父卡片。
+- **父卡片由运行时合成**：变体 B 没有可投影的 collab item,运行时从声明直接发 `tool_started`（工具名 `subagent`,必须留在前端 `isSubAgentToolName` 白名单里;`tool_use_id` = 声明 call id）,输入只带 `agent_path`,**不编造任务文本**。父 turn 不活跃时只声明轨道、不画卡片（没有可归属的 turn）；同理,派生完成的 `tool_finished` 只在卡片确实画出来时才发,不留孤儿结果行。
+- `thread/started` **不会**为协作子线程发出,因此不能作为父子绑定来源（父历史 fork 出来的子线程只有 `SubAgentSource.thread_spawn` 里的 `agent_path`/`agent_nickname`,而当前链路拿不到）。
+- 失败形态对照：变体 B 未支持时,整支静默——父对话没有卡片、轨道事件 0 条、子线程通知全部停在 pending 缓冲;这正是 2026-09-19 排查的现场。
 
 ## Further Notes
 

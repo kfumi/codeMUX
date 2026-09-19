@@ -550,6 +550,349 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   );
 
   it(
+    'declares variant B tracks from subAgentActivity: card, nested grandchild, no orchestration noise',
+    async () => {
+      // Real wire shape (codex 0.146.1, captured 2026-09-19): this variant has
+      // no `spawnAgent` collab item at all — `subAgentActivity` *is* the
+      // declaration — and it mirrors every item as item/started + item/completed.
+      const childDecl = {
+        type: 'subAgentActivity',
+        id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+        kind: 'started',
+        agentThreadId: 'child_1',
+        agentPath: '/root/scan_src',
+      };
+      const grandDecl = {
+        type: 'subAgentActivity',
+        id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+        kind: 'started',
+        agentThreadId: 'grand_1',
+        agentPath: '/root/list_tauri_dirs/scan_src',
+      };
+      const waitItem = {
+        type: 'collabAgentToolCall',
+        id: 'call_00_hgxonyQ5m14XHo6HaGxKh5416',
+        tool: 'wait',
+        status: 'inProgress',
+        receiverThreadIds: [],
+        agentsStates: {},
+      };
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_1' } } },
+              // Child traffic races ahead of the declaration: it must buffer.
+              {
+                delayMs: 2,
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'child_1', itemId: 'cmsg_1', delta: 'child hi' },
+              },
+              { delayMs: 4, method: 'item/started', params: { threadId: 'thread_1', item: childDecl } },
+              { delayMs: 6, method: 'item/completed', params: { threadId: 'thread_1', item: childDecl } },
+              {
+                delayMs: 8,
+                method: 'item/completed',
+                params: { threadId: 'child_1', item: { type: 'agentMessage', id: 'cmsg_1', text: 'child hi' } },
+              },
+              // Orchestration calls render nothing — not even a result row.
+              { delayMs: 10, method: 'item/started', params: { threadId: 'thread_1', item: waitItem } },
+              {
+                delayMs: 12,
+                method: 'item/completed',
+                params: { threadId: 'thread_1', item: { ...waitItem, status: 'completed' } },
+              },
+              // The child declares *its* child, on the child's own thread.
+              { delayMs: 14, method: 'item/started', params: { threadId: 'child_1', item: grandDecl } },
+              {
+                delayMs: 16,
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'grand_1', itemId: 'gmsg_1', delta: 'grand hi' },
+              },
+              {
+                delayMs: 18,
+                method: 'item/completed',
+                params: { threadId: 'grand_1', item: { type: 'agentMessage', id: 'gmsg_1', text: 'grand hi' } },
+              },
+              {
+                delayMs: 20,
+                method: 'turn/completed',
+                params: { threadId: 'child_1', turn: { status: 'completed' } },
+              },
+              {
+                delayMs: 22,
+                method: 'turn/completed',
+                params: { threadId: 'grand_1', turn: { status: 'completed' } },
+              },
+              {
+                delayMs: 24,
+                method: 'turn/completed',
+                params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } },
+              },
+            ],
+          },
+        },
+      };
+      const { runtime, events, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+        await runtime.sendInput('delegate with named agents');
+
+        // One track per declared child, from the declaration id, with the
+        // agent path as name/subtitle; the wait call produces nothing at all.
+        const upserts = events.filter((event) => event.type === 'subagent_upsert');
+        expect(upserts).toEqual([
+          expect.objectContaining({
+            subagent_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+            tool_call_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+            provider: 'codex',
+            status: 'running',
+            title: 'scan_src',
+            subtitle: '/root/scan_src',
+          }),
+          expect.objectContaining({
+            subagent_id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+            title: 'scan_src',
+            subtitle: '/root/list_tauri_dirs/scan_src',
+            status: 'running',
+          }),
+          expect.objectContaining({
+            subagent_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+            status: 'completed',
+          }),
+          expect.objectContaining({
+            subagent_id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+            status: 'completed',
+          }),
+        ]);
+
+        // The parent timeline gets exactly one delegation card and no orphan
+        // `Sub-agent call …` result row from the wait call.
+        const cards = events.filter((event) => event.type === 'tool_started');
+        expect(cards).toEqual([
+          expect.objectContaining({
+            name: 'subagent',
+            tool_use_id: 'call_00_KapLrhSWlODQdZDkANYI1759',
+            input: { agent_path: '/root/scan_src' },
+          }),
+        ]);
+        expect(events.filter((event) => event.type === 'tool_finished')).toEqual([]);
+
+        // Child content lands on its own track, in arrival order (buffered
+        // delta first), and the grandchild streams into its own track.
+        const timelineByTrack = new Map<string, string[]>();
+        for (const event of events.filter((candidate) => candidate.type === 'subagent_timeline')) {
+          const id = String(event.subagent_id);
+          const types = timelineByTrack.get(id) ?? [];
+          types.push(String((event.event as Record<string, unknown>).type));
+          timelineByTrack.set(id, types);
+        }
+        expect(timelineByTrack.get('call_00_KapLrhSWlODQdZDkANYI1759')).toEqual([
+          'content_started',
+          'text_delta',
+          'content_finished',
+          'assistant_message',
+        ]);
+        expect(timelineByTrack.get('call_00_A3wWiqSPMRmchObp9eKT2275')).toEqual([
+          'content_started',
+          'text_delta',
+          'content_finished',
+          'assistant_message',
+        ]);
+        // No child traffic leaks into the parent timeline as a plain message.
+        expect(events.filter((event) => event.type === 'assistant_message')).toEqual([]);
+        expect(eventTypes(events)).toContain('turn_finished');
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'renders no collab result row for a card that was never rendered, and no card outside a turn',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_1' } } },
+              {
+                // A spawn completion whose declaration never arrived: the
+                // adapter must not invent a card (and therefore no result row).
+                delayMs: 3,
+                method: 'item/completed',
+                params: {
+                  threadId: 'thread_1',
+                  item: {
+                    type: 'collabAgentToolCall',
+                    id: 'call_00_orphanCompletion',
+                    tool: 'spawnAgent',
+                    status: 'completed',
+                    prompt: 'never declared',
+                    receiverThreadIds: ['child_orphan'],
+                    agentsStates: { child_orphan: { status: 'completed' } },
+                  },
+                },
+              },
+              {
+                delayMs: 6,
+                method: 'turn/completed',
+                params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } },
+              },
+              {
+                // Declaration arriving after the parent turn settled: the track
+                // is still declared (its content streams into the panel), but
+                // there is no turn to draw a card into.
+                delayMs: 9,
+                method: 'item/started',
+                params: {
+                  threadId: 'thread_1',
+                  item: {
+                    type: 'subAgentActivity',
+                    id: 'call_00_lateDeclaration',
+                    kind: 'started',
+                    agentThreadId: 'child_late',
+                    agentPath: '/root/late',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      };
+      const { runtime, events, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+        await runtime.sendInput('spawn something');
+        await vi.waitFor(() => {
+          expect(events.some((event) => event.subagent_id === 'call_00_lateDeclaration')).toBe(true);
+        }, { timeout: 5_000, interval: 20 });
+
+        expect(events.filter((event) => event.type === 'tool_started')).toEqual([]);
+        expect(events.filter((event) => event.type === 'tool_finished')).toEqual([]);
+        // The late declaration still declares its track.
+        expect(events.filter((event) => event.type === 'subagent_upsert')).toEqual([
+          expect.objectContaining({
+            subagent_id: 'call_00_lateDeclaration',
+            status: 'running',
+            title: 'late',
+            subtitle: '/root/late',
+          }),
+        ]);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'declares a grandchild whose declaration arrives on a thread nothing has claimed yet',
+    async () => {
+      // The pending queue trims oldest-first, so a declaration must never land
+      // in it. Here the nested declaration arrives before the parent declared
+      // its own intermediate child, i.e. on a route the runtime still calls
+      // pending.
+      const grandDecl = {
+        type: 'subAgentActivity',
+        id: 'call_00_A3wWiqSPMRmchObp9eKT2275',
+        kind: 'started',
+        agentThreadId: 'grand_1',
+        agentPath: '/root/list_tauri_dirs/scan_src',
+      };
+      const childDecl = {
+        type: 'subAgentActivity',
+        id: 'call_00_ve8rk9zc7gFaheNbTy8f6403',
+        kind: 'started',
+        agentThreadId: 'child_1',
+        agentPath: '/root/list_tauri_dirs',
+      };
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_1' } } },
+              { delayMs: 2, method: 'item/started', params: { threadId: 'child_1', item: grandDecl } },
+              {
+                delayMs: 4,
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'grand_1', itemId: 'gmsg_1', delta: 'grand hi' },
+              },
+              {
+                delayMs: 6,
+                method: 'item/completed',
+                params: { threadId: 'grand_1', item: { type: 'agentMessage', id: 'gmsg_1', text: 'grand hi' } },
+              },
+              {
+                delayMs: 8,
+                method: 'turn/completed',
+                params: { threadId: 'grand_1', turn: { status: 'completed' } },
+              },
+              { delayMs: 10, method: 'item/started', params: { threadId: 'thread_1', item: childDecl } },
+              {
+                delayMs: 12,
+                method: 'turn/completed',
+                params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } },
+              },
+            ],
+          },
+        },
+      };
+      const { runtime, events, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+        await runtime.sendInput('delegate twice over');
+
+        // The grandchild is declared the moment its declaration arrives, i.e.
+        // before its declaring thread is claimed, hence first in the stream.
+        const upserts = events.filter((event) => event.type === 'subagent_upsert');
+        expect(upserts.map((event) => event.subagent_id)).toEqual([
+          'call_00_A3wWiqSPMRmchObp9eKT2275',
+          'call_00_A3wWiqSPMRmchObp9eKT2275',
+          'call_00_ve8rk9zc7gFaheNbTy8f6403',
+        ]);
+        expect(upserts[0]).toMatchObject({
+          status: 'running',
+          title: 'scan_src',
+          subtitle: '/root/list_tauri_dirs/scan_src',
+        });
+        expect(upserts[2]).toMatchObject({ status: 'running', title: 'list_tauri_dirs' });
+
+        // Its own content also raced the declaration and lands on its track.
+        const grandTimeline = events
+          .filter((event) => event.type === 'subagent_timeline')
+          .filter((event) => event.subagent_id === 'call_00_A3wWiqSPMRmchObp9eKT2275');
+        expect(grandTimeline.map((event) => (event.event as Record<string, unknown>).type)).toEqual([
+          'content_started',
+          'text_delta',
+          'content_finished',
+          'assistant_message',
+        ]);
+        // Only the direct child gets a card; tracks stay flat.
+        expect(events.filter((event) => event.type === 'tool_started')).toEqual([
+          expect.objectContaining({
+            name: 'subagent',
+            tool_use_id: 'call_00_ve8rk9zc7gFaheNbTy8f6403',
+          }),
+        ]);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
     'maps the codex permission snapshot onto turn/start approval/sandbox params',
     async () => {
       const { runtime, events, readLog, ensureCommand, cwd } = await createHarness(DEFAULT_SCENARIO);

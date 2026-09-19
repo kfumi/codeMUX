@@ -15,6 +15,8 @@ export type SubagentObservation =
       toolUseIds: string[];
       title?: string;
       description?: string;
+      /** Secondary line (e.g. the codex agent path); never the task text. */
+      subtitle?: string;
       /** First timeline entry content (workflow uses description). */
       prompt?: string;
       isWorkflow: boolean;
