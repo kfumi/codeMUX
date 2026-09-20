@@ -1,4 +1,4 @@
-// src-tauri/sidecar/src/codexStreamTransform.ts
+// apps/sidecar/src/codexStreamTransform.ts
 // Converts upstream Chat Completions SSE streams into Responses API SSE events.
 // Includes a state machine for detecting inline <think> tags embedded in delta.content
 // by models like Qwen that don't use the separate reasoning_content field.

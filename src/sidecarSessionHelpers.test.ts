@@ -7,8 +7,8 @@ import {
   buildMcpInstructions,
   getProviderMode,
   shouldUseCodexChatCompatProxy,
-} from '../src-tauri/sidecar/src/sessionRuntimeHelpers';
-import { getRuntimeFlavor } from '../src-tauri/sidecar/src/runtimeEvents';
+} from '../apps/sidecar/src/sessionRuntimeHelpers';
+import { getRuntimeFlavor } from '../apps/sidecar/src/runtimeEvents';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -111,7 +111,7 @@ describe('getRuntimeFlavor', () => {
 
 describe('legacy Claude context display channel', () => {
   it('does not keep legacy Claude context display probes in sidecar runtime', () => {
-    const sidecarDir = join(process.cwd(), 'src-tauri', 'sidecar', 'src');
+    const sidecarDir = join(process.cwd(), 'apps', 'sidecar', 'src');
     const index = readFileSync(join(sidecarDir, 'index.ts'), 'utf8');
     const runtimeEvents = readFileSync(join(sidecarDir, 'runtimeEvents.ts'), 'utf8');
 

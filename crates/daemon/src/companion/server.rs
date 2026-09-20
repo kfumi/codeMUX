@@ -453,7 +453,7 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
         // 单独挂载,吃 ServeDir 自己的 not_found:缺文件时给出真实 404,而不是被下面的
         // SPA 回退变成 200 + index.html —— 后者会让 AMD loader 拿入口页当脚本执行,
         // 报出的语法错误与「少了一个文件」这个真因完全脱节。
-        // 同一判定在桌面壳侧:desktop-electron/src/main.ts 的 isVendorAssetPath。
+        // 同一判定在桌面壳侧:apps/desktop/src/main.ts 的 isVendorAssetPath。
         router = router.nest_service("/vs", ServeDir::new(static_dir.join("vs")));
         // SPA 回退用 fallback 而非 not_found_service:后者会把回退响应状态强制
         // 改写为 404,深链刷新时前端拿到的入口页会带 404 状态。

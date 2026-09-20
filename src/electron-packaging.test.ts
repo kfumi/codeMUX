@@ -7,29 +7,29 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 /**
  * Electron 壳打包契约(工单 09:Tauri 壳退役后,打包守护对象从
- * src-tauri/tauri.conf.json 迁到 desktop-electron/electron-builder.yml)。
+ * src-tauri/tauri.conf.json 迁到 apps/desktop/electron-builder.yml)。
  * 以文本断言保持零依赖(不引入 yaml 解析器)。
  */
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILDER_YML = readFileSync(
-  join(REPO_ROOT, 'desktop-electron', 'electron-builder.yml'),
+  join(REPO_ROOT, 'apps', 'desktop', 'electron-builder.yml'),
   'utf8',
 );
-const COPY_SIDECAR_SCRIPT = join(REPO_ROOT, 'desktop-electron', 'scripts', 'copy-sidecar-dist.mjs');
+const COPY_SIDECAR_SCRIPT = join(REPO_ROOT, 'apps', 'desktop', 'scripts', 'copy-sidecar-dist.mjs');
 const DESKTOP_PACKAGE_JSON = JSON.parse(
-  readFileSync(join(REPO_ROOT, 'desktop-electron', 'package.json'), 'utf8'),
+  readFileSync(join(REPO_ROOT, 'apps', 'desktop', 'package.json'), 'utf8'),
 ) as { scripts: Record<string, string> };
 const ROOT_PACKAGE_JSON = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
   scripts: Record<string, string>;
 };
 
 /** daemon 侧常量是 sidecar 资源路径的唯一真相,断言两边一致而非各自硬编码。 */
-const AGENT_MOD_RS = readFileSync(join(REPO_ROOT, 'src-tauri', 'src', 'agent', 'mod.rs'), 'utf8');
+const AGENT_MOD_RS = readFileSync(join(REPO_ROOT, 'crates', 'daemon', 'src', 'agent', 'mod.rs'), 'utf8');
 
 function rustConst(name: string): string {
   const match = AGENT_MOD_RS.match(new RegExp(`const ${name}: &str = "([^"]+)"`));
   if (!match) {
-    throw new Error(`src-tauri/src/agent/mod.rs 缺少常量 ${name}`);
+    throw new Error(`crates/daemon/src/agent/mod.rs 缺少常量 ${name}`);
   }
   return match[1];
 }
@@ -44,12 +44,12 @@ describe('electron bundle resources', () => {
   it('bundles the supervisor daemon binary into the resource daemon/ directory', () => {
     // supervisor 在 release 下从资源根 daemon/ 解析 codemux-daemon.exe。
     expect(BUILDER_YML).toMatch(
-      /from:\s*\.\.\/src-tauri\/target\/release\/codemux-daemon\.exe\s*\n\s*to:\s*daemon\/codemux-daemon\.exe/,
+      /from:\s*\.\.\/\.\.\/crates\/daemon\/target\/release\/codemux-daemon\.exe\s*\n\s*to:\s*daemon\/codemux-daemon\.exe/,
     );
   });
 
   it('bundles the tray/app icon', () => {
-    expect(BUILDER_YML).toMatch(/from:\s*\.\.\/src-tauri\/icons\/icon\.ico\s*\n\s*to:\s*icons\/icon\.ico/);
+    expect(BUILDER_YML).toMatch(/from:\s*build\/icons\/icon\.ico\s*\n\s*to:\s*icons\/icon\.ico/);
   });
 
   it('publishes to the GitHub Releases feed used by electron-updater', () => {
@@ -70,7 +70,7 @@ describe('electron bundle resources', () => {
 
     expect(sidecarDir).toBe('sidecar');
     expect(entrypoint).toBe('dist/index.js');
-    // extraResources: desktop-electron/sidecar-dist → <resources>/sidecar
+    // extraResources: apps/desktop/sidecar-dist → <resources>/sidecar
     expect(BUILDER_YML).toMatch(
       new RegExp(`from:\\s*sidecar-dist\\s*\\n\\s*to:\\s*${sidecarDir}\\s*(\\n|$)`),
     );
@@ -100,7 +100,7 @@ describe('copy-sidecar-dist script', () => {
     const root = mkdtempSync(join(tmpdir(), 'codemux-sidecar-dist-'));
     fixtures.push(root);
 
-    const sidecarDir = join(root, 'src-tauri', 'sidecar');
+    const sidecarDir = join(root, 'apps', 'sidecar');
     mkdirSync(join(sidecarDir, 'src'), { recursive: true });
     mkdirSync(join(sidecarDir, 'dist'), { recursive: true });
     writeFileSync(join(sidecarDir, 'src', 'index.ts'), 'export const x = 1;\n');
@@ -120,7 +120,7 @@ describe('copy-sidecar-dist script', () => {
       )}\n`,
     );
 
-    const scriptsDir = join(root, 'desktop-electron', 'scripts');
+    const scriptsDir = join(root, 'apps', 'desktop', 'scripts');
     mkdirSync(scriptsDir, { recursive: true });
     cpSync(COPY_SIDECAR_SCRIPT, join(scriptsDir, 'copy-sidecar-dist.mjs'));
 
@@ -130,7 +130,7 @@ describe('copy-sidecar-dist script', () => {
   }
 
   function runScript(root: string): string {
-    return execFileSync(process.execPath, [join(root, 'desktop-electron', 'scripts', 'copy-sidecar-dist.mjs')], {
+    return execFileSync(process.execPath, [join(root, 'apps', 'desktop', 'scripts', 'copy-sidecar-dist.mjs')], {
       encoding: 'utf8',
       env: { ...process.env, CODEMUX_ALLOW_STALE_SIDECAR: '' },
     });
@@ -140,7 +140,7 @@ describe('copy-sidecar-dist script', () => {
     const root = makeFixture();
     runScript(root);
 
-    const outDir = join(root, 'desktop-electron', 'sidecar-dist');
+    const outDir = join(root, 'apps', 'desktop', 'sidecar-dist');
     const manifest = JSON.parse(readFileSync(join(outDir, 'package.json'), 'utf8'));
 
     expect(readFileSync(join(outDir, 'dist', 'index.js'), 'utf8')).toContain('export {};');
@@ -154,7 +154,7 @@ describe('copy-sidecar-dist script', () => {
 
   it('refuses to bundle a dist/ older than the sidecar source', () => {
     const root = makeFixture();
-    const srcEntry = join(root, 'src-tauri', 'sidecar', 'src', 'index.ts');
+    const srcEntry = join(root, 'apps', 'sidecar', 'src', 'index.ts');
     utimesSync(srcEntry, new Date(Date.now() + 10_000), new Date(Date.now() + 10_000));
 
     let failure: { status?: number; stderr?: string } | null = null;

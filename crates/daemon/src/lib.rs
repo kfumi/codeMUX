@@ -1,7 +1,7 @@
 //! CodeMUX daemon 库:权威进程(SQLite、Session、Agent、Sidecar、MCP、
 //! skills、定时任务、companion HTTP/WS 服务)的全部核心逻辑。
 //!
-//! 桌面壳已切换为 Electron(`desktop-electron/`),Rust 侧不再包含任何
+//! 桌面壳已切换为 Electron(`apps/desktop/`),Rust 侧不再包含任何
 //! 窗口/托盘/通知/更新器代码;壳以 supervisor 身份拉起 `codemux-daemon`
 //! 二进制并经 HTTP/WS 消费其能力。
 //!

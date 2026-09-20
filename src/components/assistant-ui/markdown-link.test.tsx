@@ -245,7 +245,7 @@ describe('CodeMuxMarkdownLink', () => {
         rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
         linkSafety={{ enabled: false }}
       >
-        {'已修复 D:/project/ai-code/codeMUX/src/App.tsx:20，请查看 D:/project/ai-code/codeMUX/CodeMuxThread.tsx (line 1007)，入口在 `src-tauri/src/main.rs`。'}
+        {'已修复 D:/project/ai-code/codeMUX/src/App.tsx:20，请查看 D:/project/ai-code/codeMUX/CodeMuxThread.tsx (line 1007)，入口在 `crates/daemon/src/main.rs`。'}
       </Streamdown>,
     );
 

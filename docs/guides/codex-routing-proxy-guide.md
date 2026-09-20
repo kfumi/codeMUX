@@ -807,31 +807,31 @@ Step 7: 添加错误分类 + 媒体整流 + SSE 容错
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/proxy/providers/transform_codex_chat.rs` | **协议转换核心**：`CodexToolContext`, `responses_to_chat_completions_with_reasoning()`, 4 种工具类型处理 |
-| `src-tauri/src/proxy/providers/streaming_codex_chat.rs` | **流式转换核心**：`ChatToResponsesState` 状态机（含 `tool_context`），custom tool 事件 |
-| `src-tauri/src/proxy/providers/codex.rs` | **路由判断 + 推理配置**：`should_convert_codex_responses_to_chat()`, `infer_codex_chat_reasoning_config()`（含 StepFun） |
-| `src-tauri/src/proxy/providers/codex_chat_history.rs` | **历史缓存**：扩展支持 function_call/custom_tool_call/tool_search_call |
-| `src-tauri/src/proxy/providers/codex_chat_common.rs` | 公共工具函数：reasoning 解析、think 标签拆分 |
+| `crates/daemon/src/proxy/providers/transform_codex_chat.rs` | **协议转换核心**：`CodexToolContext`, `responses_to_chat_completions_with_reasoning()`, 4 种工具类型处理 |
+| `crates/daemon/src/proxy/providers/streaming_codex_chat.rs` | **流式转换核心**：`ChatToResponsesState` 状态机（含 `tool_context`），custom tool 事件 |
+| `crates/daemon/src/proxy/providers/codex.rs` | **路由判断 + 推理配置**：`should_convert_codex_responses_to_chat()`, `infer_codex_chat_reasoning_config()`（含 StepFun） |
+| `crates/daemon/src/proxy/providers/codex_chat_history.rs` | **历史缓存**：扩展支持 function_call/custom_tool_call/tool_search_call |
+| `crates/daemon/src/proxy/providers/codex_chat_common.rs` | 公共工具函数：reasoning 解析、think 标签拆分 |
 
 **转发与路由：**
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/proxy/forwarder.rs` | 请求转发 + 故障转移 + `ActiveConnectionGuard` + 媒体整流 + 错误分类 |
-| `src-tauri/src/proxy/handlers.rs` | 请求处理器：`handle_responses()`, `handle_responses_compact()`, SSE 聚合回退 |
-| `src-tauri/src/proxy/server.rs` | 代理服务器 + `build_router()` 路由注册 |
-| `src-tauri/src/proxy/provider_router.rs` | Provider 路由选择 + 熔断器 |
-| `src-tauri/src/proxy/circuit_breaker.rs` | 熔断器实现（Closed→Open→HalfOpen） |
+| `crates/daemon/src/proxy/forwarder.rs` | 请求转发 + 故障转移 + `ActiveConnectionGuard` + 媒体整流 + 错误分类 |
+| `crates/daemon/src/proxy/handlers.rs` | 请求处理器：`handle_responses()`, `handle_responses_compact()`, SSE 聚合回退 |
+| `crates/daemon/src/proxy/server.rs` | 代理服务器 + `build_router()` 路由注册 |
+| `crates/daemon/src/proxy/provider_router.rs` | Provider 路由选择 + 熔断器 |
+| `crates/daemon/src/proxy/circuit_breaker.rs` | 熔断器实现（Closed→Open→HalfOpen） |
 
 **认证与模型：**
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/proxy/providers/auth.rs` | `AuthInfo`, `AuthStrategy` 枚举 |
-| `src-tauri/src/proxy/providers/adapter.rs` | `ProviderAdapter` trait |
-| `src-tauri/src/proxy/providers/codex_oauth_auth.rs` | Codex OAuth 认证流程 ★新增 |
-| `src-tauri/src/proxy/providers/copilot_auth.rs` | GitHub Copilot 认证 ★新增 |
-| `src-tauri/src/proxy/model_mapper.rs` | 模型映射（haiku/sonnet/opus） |
+| `crates/daemon/src/proxy/providers/auth.rs` | `AuthInfo`, `AuthStrategy` 枚举 |
+| `crates/daemon/src/proxy/providers/adapter.rs` | `ProviderAdapter` trait |
+| `crates/daemon/src/proxy/providers/codex_oauth_auth.rs` | Codex OAuth 认证流程 ★新增 |
+| `crates/daemon/src/proxy/providers/copilot_auth.rs` | GitHub Copilot 认证 ★新增 |
+| `crates/daemon/src/proxy/model_mapper.rs` | 模型映射（haiku/sonnet/opus） |
 
 **文档与配置：**
 

@@ -1,6 +1,6 @@
 // CodeMUX 托管 SDK Runtime 领域契约（sidecar 共享类型）。
 //
-// 本文件镜像 Rust `src-tauri/src/runtime` 模块的核心契约，供 sidecar 的 Runtime loader
+// 本文件镜像 Rust `crates/daemon/src/runtime` 模块的核心契约，供 sidecar 的 Runtime loader
 // （Ticket 04）和未来的检测逻辑共享同一命名。来自 Rust 的 ensure_session 命令会携带
 // Provider Runtime 路径，sidecar 据此动态加载 SDK。
 

@@ -77,9 +77,9 @@ run("node", prepareArgs);
 run("git", [
   "add",
   "package.json",
-  "desktop-electron/package.json",
-  "src-tauri/Cargo.toml",
-  "src-tauri/Cargo.lock",
+  "apps/desktop/package.json",
+  "crates/daemon/Cargo.toml",
+  "crates/daemon/Cargo.lock",
 ]);
 run("git", ["commit", "-m", `chore(release): 发布 ${tagName}`]);
 run("git", ["tag", tagName]);

@@ -56,7 +56,7 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
 
 const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-review', 'full-access'];
 
-// Shared defaults — keep in sync with src-tauri/sidecar/src/agentPermissions.ts.
+// Shared defaults — keep in sync with apps/sidecar/src/agentPermissions.ts.
 // Default tier mirrors the official ChatGPT Codex App's conservative
 // 「请求批准」selector entry (workspace-write + on-request).
 const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {

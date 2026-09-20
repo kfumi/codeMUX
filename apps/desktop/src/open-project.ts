@@ -1,5 +1,5 @@
 //! 「打开资源管理器 / 用编辑器或终端打开路径」的纯 Node 实现件。
-//! TS 复刻 src-tauri/src/commands/file.rs 的最小面(open_in_explorer +
+//! TS 复刻 crates/daemon/src/commands/file.rs 的最小面(open_in_explorer +
 //! open_project_path),Windows 优先;命令序列与 Rust 版对齐。
 
 import { spawn } from 'node:child_process';

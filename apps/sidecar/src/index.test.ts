@@ -55,7 +55,7 @@ describe('sidecar command dispatcher', () => {
       // load DOS-device (\\?\) entry paths — the CJS loader reduces the path to
       // a bare drive letter and realpathSync throws "EISDIR: lstat 'X:'".
       // The Rust host strips the prefix before spawning Node (see
-      // strip_windows_long_path_prefix in src-tauri), so skip on affected Node
+      // strip_windows_long_path_prefix in crates/daemon), so skip on affected Node
       // builds instead of failing; the real assertion still runs on fixed Nodes.
       if (/EISDIR[^\n]*lstat '[A-Za-z]:'/.test(stderr)) {
         console.warn(

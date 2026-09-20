@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="120" alt="CodeMUX Logo">
+  <img src="crates/daemon/icons/128x128@2x.png" width="120" alt="CodeMUX Logo">
 </p>
 
 <h1 align="center">CodeMUX</h1>
@@ -69,7 +69,7 @@
 - 业务权威是独立的 Rust 进程 `codemux-daemon`：拥有 SQLite、会话、Agent 编排、Sidecar、MCP、Skills与定时任务，壳崩溃不影响权威
 - Electron 壳只做窗口、托盘、单实例、通知、自动更新与 Browser Host，并作为 supervisor 拉起/守护 daemon（版本配对仲裁）
 - 桌面 UI、浏览器/手机网页端与 CLI 都是 Daemon Client，统一走回环 Companion REST/WS + CodeMUX Event 协议，本机连接使用 Local Daemon Token
-- 前端只有一套产物：`npm run build:web` 产出 `dist-web/`，由 daemon 直接服务；同机浏览器走简化配对（壳内确认一次），手机/远程浏览器扫码配对后即可查看与驱动桌面会话；`src-cli` 提供本机命令行客户端
+- 前端只有一套产物：`npm run build:web` 产出 `dist-web/`，由 daemon 直接服务；同机浏览器走简化配对（壳内确认一次），手机/远程浏览器扫码配对后即可查看与驱动桌面会话；`apps/cli` 提供本机命令行客户端
 
 ### 面向真实编码流程，而不是单纯聊天
 
@@ -199,7 +199,7 @@ Windows 通常还需要：
 ```bash
 npm ci
 
-cd src-tauri/sidecar
+cd apps/sidecar
 npm ci
 npm run build
 cd ../..
@@ -229,7 +229,7 @@ npm run dev
 npm run build:electron-installer
 ```
 
-产物（NSIS 安装包 + `latest.yml`）输出到 `desktop-electron/release/`，详见[桌面端发版指南](docs/guides/desktop-release-guide.md)。
+产物（NSIS 安装包 + `latest.yml`）输出到 `apps/desktop/release/`，详见[桌面端发版指南](docs/guides/desktop-release-guide.md)。
 
 ### 常用检查命令
 
@@ -238,15 +238,15 @@ npm run build:electron-installer
 npx vitest run
 
 # sidecar 测试
-cd src-tauri/sidecar
+cd apps/sidecar
 npx vitest run
 
 # Electron 壳类型检查
-cd desktop-electron
+cd apps/desktop
 npm run typecheck
 
 # Rust（daemon crate）检查
-cd src-tauri
+cd crates/daemon
 cargo check --all-targets --all-features
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
@@ -451,19 +451,22 @@ codeMUX/
 │  ├─ components/workspace/ # Review / Terminal / Plan 等侧边面板
 │  ├─ stores/               # Zustand 状态（agent / session / mcp / skill 等）
 │  └─ lib/                  # 工具函数（通知、权限、模型、上下文计算等）
-├─ desktop-electron/        # Electron 壳（main / preload / supervisor / Browser Host / updater）
-├─ src-tauri/               # Rust daemon crate（目录名保留，Tauri 壳已移除）
-│  ├─ src/bin/              # codemux-daemon 入口
-│  ├─ src/daemon/           # daemon 装配与生命周期
-│  ├─ src/companion/        # Companion Server（REST/WS、鉴权、配对、浏览器自动化接缝）
-│  ├─ src/agent/            # 会话生命周期、历史导入、Timeline 持久化
-│  ├─ src/agent_runtime/    # Claude / Codex / OpenCode / pi 运行时抽象
-│  ├─ src/mcp/ src/skills/  # MCP / Skills 各 Agent 适配器
-│  ├─ src/model_providers/  # Model Provider 服务
-│  └─ src/scheduled_tasks/  # 定时任务
-├─ src-tauri/sidecar/src/   # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
-├─ src-cli/                 # 本机命令行 Daemon Client
+├─ apps/
+│  ├─ desktop/              # Electron 壳（main / preload / supervisor / Browser Host / updater）
+│  ├─ sidecar/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
+│  └─ cli/                  # 本机命令行 Daemon Client
+├─ crates/
+│  └─ daemon/               # Rust daemon crate（Tauri 壳已移除，目录由 src-tauri/ 改名）
+│     ├─ src/bin/           # codemux-daemon 入口
+│     ├─ src/daemon/        # daemon 装配与生命周期
+│     ├─ src/companion/     # Companion Server（REST/WS、鉴权、配对、浏览器自动化接缝）
+│     ├─ src/agent/         # 会话生命周期、历史导入、Timeline 持久化
+│     ├─ src/agent_runtime/ # Claude / Codex / OpenCode / pi 运行时抽象
+│     ├─ src/mcp/ src/skills/  # MCP / Skills 各 Agent 适配器
+│     ├─ src/model_providers/  # Model Provider 服务
+│     └─ src/scheduled_tasks/  # 定时任务
 ├─ public/                  # 静态资源与截图
+├─ scripts/                 # 开发 / 发布 / e2e / relay 脚本
 ├─ docs/                    # 设计文档、ADR 与实现说明
 └─ README.md
 ```
@@ -490,7 +493,7 @@ codeMUX/
 
 ## 当前状态
 
-- 架构：Electron 桌面壳 + 独立 Rust daemon（`codemux-daemon`），Tauri 壳已移除（`src-tauri/` 目录名保留，内容为 daemon crate）
+- 架构：Electron 桌面壳 + 独立 Rust daemon（`codemux-daemon`），Tauri 壳已移除（daemon crate 位于 `crates/daemon/`，目录由 `src-tauri/` 改名）
 - `Claude Code`：主力运行时，支持最完整
 - `Codex`：已集成并可用，包含本地代理兼容链路
 - `OpenCode`：已集成并可用，基于官方 `@opencode-ai/sdk`，从托管 Runtime 目录启动独立 Server

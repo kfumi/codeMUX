@@ -17,9 +17,9 @@ public/vs
 dist-electron
 # Electron 打包产物(工单 06):renderer-dist 由 scripts/copy-renderer-dist.mjs
 # 在打包前从根 dist/ 拷入;release/ 为 electron-builder 输出。
-desktop-electron/renderer-dist
-desktop-electron/sidecar-dist
-desktop-electron/release
+apps/desktop/renderer-dist
+apps/desktop/sidecar-dist
+apps/desktop/release
 dist-ssr
 .worktrees/
 *.local
@@ -35,12 +35,15 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target/
-src-tauri/config.json
+# Rust daemon
+crates/daemon/target/
+crates/daemon/config.json
 
 # custom
 out/
 .superpowers/
 log/
 *.zip
+
+# TypeScript 增量构建产物
+*.tsbuildinfo

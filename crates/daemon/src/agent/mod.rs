@@ -105,7 +105,10 @@ fn resolve_sidecar_script_path(
     let sidecar_rel = sidecar_relative_path();
 
     if environment == BuildEnvironment::Development {
-        return Ok(manifest_dir.join(sidecar_rel));
+        // Dev 布局:sidecar 是仓库根下与 daemon crate 平级的独立包
+        // (crates/daemon ↔ apps/sidecar);manifest_dir 的父目录即仓库根。
+        let repo_root = manifest_dir.parent().unwrap_or(manifest_dir);
+        return Ok(repo_root.join("apps").join(sidecar_rel));
     }
 
     if let Some(resource_dir) = resource_dir {
@@ -354,7 +357,7 @@ mod tests {
         let path = resolve_sidecar_script_path(None, manifest_dir, BuildEnvironment::Development)
             .expect("dev builds should fall back to the source tree");
 
-        assert!(path.ends_with("sidecar/dist/index.js"));
+        assert!(path.ends_with("apps/sidecar/dist/index.js"));
     }
 
     #[test]
@@ -368,10 +371,14 @@ mod tests {
         )
         .expect("dev builds should always use the source tree sidecar");
 
-        assert_eq!(
-            path,
-            manifest_dir.join("sidecar").join("dist").join("index.js")
-        );
+        let expected = manifest_dir
+            .parent()
+            .unwrap_or(manifest_dir)
+            .join("apps")
+            .join("sidecar")
+            .join("dist")
+            .join("index.js");
+        assert_eq!(path, expected);
     }
 
     #[test]

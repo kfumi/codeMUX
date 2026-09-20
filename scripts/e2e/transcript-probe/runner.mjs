@@ -64,9 +64,9 @@ function failInfra(message, extra = {}) {
 
 function resolveElectronExe() {
   const candidates = process.platform === 'win32'
-    ? [path.join(rootDir, 'desktop-electron', 'node_modules', 'electron', 'dist', 'electron.exe')]
+    ? [path.join(rootDir, 'apps', 'desktop', 'node_modules', 'electron', 'dist', 'electron.exe')]
     : [
-      path.join(rootDir, 'desktop-electron', 'node_modules', 'electron', 'dist', 'Electron'),
+      path.join(rootDir, 'apps', 'desktop', 'node_modules', 'electron', 'dist', 'Electron'),
       path.join(rootDir, 'node_modules', 'electron', 'dist', 'electron'),
     ];
   const found = candidates.find((candidate) => fs.existsSync(candidate));

@@ -18,7 +18,7 @@
 
 ### 1.2 权限模式与执行策略映射
 
-后端通过 `resolve_execution_policy` 函数（`src-tauri/src/shared/codex_core.rs:86`）实现模式到策略的映射：
+后端通过 `resolve_execution_policy` 函数（`crates/daemon/src/shared/codex_core.rs:86`）实现模式到策略的映射：
 
 ```rust
 fn resolve_execution_policy(
@@ -79,7 +79,7 @@ fn resolve_execution_policy(
 ┌───────────▼────────────────────────────────────────────────────────┐
 │                     后端 (Rust Tauri)                              │
 │  ┌───────────────────────────────────────────────────────────────┐│
-│  │ src-tauri/src/engine/claude/approval.rs                       ││
+│  │ crates/daemon/src/engine/claude/approval.rs                       ││
 │  │ ┌─────────────────────────────────────────────────────────┐   ││
 │  │ │ 权限拒绝识别                                              │   ││
 │  │ │ - looks_like_claude_permission_denial_message()          │   ││
@@ -122,7 +122,7 @@ export type ApprovalRequest = {
 };
 ```
 
-**ClaudeModeBlockedKind**（`src-tauri/src/engine/claude/approval.rs:22`）：
+**ClaudeModeBlockedKind**（`crates/daemon/src/engine/claude/approval.rs:22`）：
 
 ```rust
 enum ClaudeModeBlockedKind {
@@ -136,7 +136,7 @@ enum ClaudeModeBlockedKind {
 
 #### 步骤 1：权限拒绝识别
 
-后端通过 `looks_like_claude_permission_denial_message()` 函数（`src-tauri/src/engine/claude/approval.rs:131`）检测 Claude CLI 输出中的权限拒绝消息：
+后端通过 `looks_like_claude_permission_denial_message()` 函数（`crates/daemon/src/engine/claude/approval.rs:131`）检测 Claude CLI 输出中的权限拒绝消息：
 
 ```rust
 fn looks_like_claude_permission_denial_message(message: &str) -> bool {
@@ -153,7 +153,7 @@ fn looks_like_claude_permission_denial_message(message: &str) -> bool {
 
 #### 步骤 2：工具分类
 
-通过 `classify_claude_mode_blocked_tool()` 函数（`src-tauri/src/engine/claude/approval.rs:156`）识别被阻塞的工具类型：
+通过 `classify_claude_mode_blocked_tool()` 函数（`crates/daemon/src/engine/claude/approval.rs:156`）识别被阻塞的工具类型：
 
 ```rust
 fn classify_claude_mode_blocked_tool(tool_name: &str) -> Option<ClaudeModeBlockedKind> {
@@ -205,7 +205,7 @@ EngineEvent::ApprovalRequest {
 
 #### 步骤 5：本地文件变更应用
 
-用户批准后，后端通过 `respond_to_approval_request()` 函数（`src-tauri/src/engine/claude/approval.rs:1029`）处理审批结果：
+用户批准后，后端通过 `respond_to_approval_request()` 函数（`crates/daemon/src/engine/claude/approval.rs:1029`）处理审批结果：
 
 ```rust
 pub async fn respond_to_approval_request(
@@ -262,7 +262,7 @@ pub(super) fn format_synthetic_approval_resume_message(
 
 ### 3.2 安全单路径命令
 
-通过 `command_can_apply_as_local_file_action()` 函数（`src-tauri/src/engine/claude/approval.rs:348`）识别可安全执行的命令：
+通过 `command_can_apply_as_local_file_action()` 函数（`crates/daemon/src/engine/claude/approval.rs:348`）识别可安全执行的命令：
 
 ```rust
 fn parse_single_path_file_command(command: &str) -> Option<LocalClaudeFileCommand> {
@@ -284,7 +284,7 @@ fn parse_single_path_file_command(command: &str) -> Option<LocalClaudeFileComman
 
 ### 4.1 工作空间边界检查
 
-所有文件操作必须在工作空间根目录内进行（`src-tauri/src/engine/claude/approval.rs:457`）：
+所有文件操作必须在工作空间根目录内进行（`crates/daemon/src/engine/claude/approval.rs:457`）：
 
 ```rust
 fn ensure_workspace_path_within_root(
@@ -327,7 +327,7 @@ pub(super) fn normalize_claude_workspace_relative_path(path: &Path) -> Result<St
 
 ### 4.3 符号链接防护
 
-不允许修改符号链接指向的目标文件（`src-tauri/src/engine/claude/approval.rs:473`）：
+不允许修改符号链接指向的目标文件（`crates/daemon/src/engine/claude/approval.rs:473`）：
 
 ```rust
 if metadata.file_type().is_symlink() {
@@ -337,7 +337,7 @@ if metadata.file_type().is_symlink() {
 
 ### 4.4 `.git` 目录保护
 
-禁止写入 `.git` 目录（`src-tauri/src/engine/claude/approval.rs:446`）：
+禁止写入 `.git` 目录（`crates/daemon/src/engine/claude/approval.rs:446`）：
 
 ```rust
 if normalized == ".git"
@@ -351,7 +351,7 @@ if normalized == ".git"
 
 ### 4.5 文件大小限制
 
-单文件最大 400KB（`src-tauri/src/engine/claude/approval.rs:6`）：
+单文件最大 400KB（`crates/daemon/src/engine/claude/approval.rs:6`）：
 
 ```rust
 const MAX_CLAUDE_APPROVAL_FILE_BYTES: usize = 400_000;
@@ -397,7 +397,7 @@ const handleApprovalBatchAccept = useCallback(
 
 ### 5.2 Turn Finalization 策略
 
-后端只在同一 turn 的所有审批请求都完成后才 finalize turn（`src-tauri/src/engine/claude/approval.rs:1091`）：
+后端只在同一 turn 的所有审批请求都完成后才 finalize turn（`crates/daemon/src/engine/claude/approval.rs:1091`）：
 
 ```rust
 if self.pending_approval_request_count_for_turn(&turn_id) == 0 {
@@ -535,8 +535,8 @@ export type CollaborationModeBlockedParams = {
 
 | 层级 | 文件路径 | 职责 |
 |------|----------|------|
-| 后端 | `src-tauri/src/engine/claude/approval.rs` | Claude 审批核心逻辑 |
-| 后端 | `src-tauri/src/shared/codex_core.rs` | Codex 权限策略 |
+| 后端 | `crates/daemon/src/engine/claude/approval.rs` | Claude 审批核心逻辑 |
+| 后端 | `crates/daemon/src/shared/codex_core.rs` | Codex 权限策略 |
 | 前端 | `src/features/threads/hooks/useThreadApprovals.ts` | 审批状态管理 |
 | 前端 | `src/features/app/components/ApprovalToasts.tsx` | 审批 UI 组件 |
 | 前端 | `src/utils/approvalRules.ts` | 命令解析和匹配 |
@@ -627,7 +627,7 @@ Codex 的权限审批机制与 Claude Code 有显著不同，它通过 SDK 原�
 
 ### 10.2 核心数据结构
 
-**CodexCollaborationPolicy**（`src-tauri/src/codex/collaboration_policy.rs:13`）：
+**CodexCollaborationPolicy**（`crates/daemon/src/codex/collaboration_policy.rs:13`）：
 
 ```rust
 pub struct CodexCollaborationPolicy {
@@ -670,7 +670,7 @@ export type CollaborationModeBlockedParams = {
 
 ### 10.3 策略计算层
 
-Codex 通过 `resolve_execution_policy()` 函数（`src-tauri/src/shared/codex_core.rs:86`）计算执行策略：
+Codex 通过 `resolve_execution_policy()` 函数（`crates/daemon/src/shared/codex_core.rs:86`）计算执行策略：
 
 ```rust
 fn resolve_execution_policy(
@@ -723,7 +723,7 @@ fn resolve_execution_policy(
 
 ### 10.4 协作策略注入
 
-通过 `apply_policy_to_collaboration_mode()` 函数（`src-tauri/src/codex/collaboration_policy.rs:67`）将策略注入到 turn payload：
+通过 `apply_policy_to_collaboration_mode()` 函数（`crates/daemon/src/codex/collaboration_policy.rs:67`）将策略注入到 turn payload：
 
 ```rust
 pub(crate) fn apply_policy_to_collaboration_mode(
@@ -780,11 +780,11 @@ pub(crate) fn apply_policy_to_collaboration_mode(
 
 ### 10.6 后端事件拦截
 
-通过 `src-tauri/src/backend/app_server_plan_enforcement.rs` 实现事件拦截：
+通过 `crates/daemon/src/backend/app_server_plan_enforcement.rs` 实现事件拦截：
 
 #### 10.6.1 RequestUserInput 拦截
 
-`intercept_request_user_input_if_needed()` 函数（`src-tauri/src/backend/app_server_plan_enforcement.rs:89`）：
+`intercept_request_user_input_if_needed()` 函数（`crates/daemon/src/backend/app_server_plan_enforcement.rs:89`）：
 
 ```rust
 pub(super) async fn intercept_request_user_input_if_needed(
@@ -845,7 +845,7 @@ fn should_block_request_user_input(
 
 #### 10.6.2 Plan 模式仓库变更阻断
 
-`intercept_plan_repo_mutation_if_needed()` 函数（`src-tauri/src/backend/app_server_plan_enforcement.rs:169`）：
+`intercept_plan_repo_mutation_if_needed()` 函数（`crates/daemon/src/backend/app_server_plan_enforcement.rs:169`）：
 
 ```rust
 pub(super) async fn intercept_plan_repo_mutation_if_needed(
@@ -1178,10 +1178,10 @@ interface ApprovalState {
 
 | 层级 | 文件路径 | 职责 |
 |------|----------|------|
-| 后端 | `src-tauri/src/engine/claude/approval.rs` | Claude 审批核心逻辑 |
-| 后端 | `src-tauri/src/shared/codex_core.rs` | Codex 权限策略计算 |
-| 后端 | `src-tauri/src/codex/collaboration_policy.rs` | Codex 协作策略注入 |
-| 后端 | `src-tauri/src/backend/app_server_plan_enforcement.rs` | Plan 模式强制执行 |
+| 后端 | `crates/daemon/src/engine/claude/approval.rs` | Claude 审批核心逻辑 |
+| 后端 | `crates/daemon/src/shared/codex_core.rs` | Codex 权限策略计算 |
+| 后端 | `crates/daemon/src/codex/collaboration_policy.rs` | Codex 协作策略注入 |
+| 后端 | `crates/daemon/src/backend/app_server_plan_enforcement.rs` | Plan 模式强制执行 |
 | 前端 | `src/features/threads/hooks/useThreadApprovals.ts` | Claude 审批状态管理 |
 | 前端 | `src/features/threads/hooks/useThreadUserInputEvents.ts` | Codex 用户输入事件 |
 | 前端 | `src/features/app/hooks/useAppServerEvents.ts` | 事件路由分发 |
@@ -1196,7 +1196,7 @@ interface ApprovalState {
 
 ### 13.1 单元测试覆盖
 
-参考 `src-tauri/src/engine/claude/tests_path_approval.rs`：
+参考 `crates/daemon/src/engine/claude/tests_path_approval.rs`：
 
 - 路径规范化测试
 - 工作空间边界测试

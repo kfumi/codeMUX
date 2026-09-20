@@ -1170,30 +1170,30 @@ Step 4: 前端适配
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/app_config.rs` | 数据模型：`McpServer`, `McpApps`, `AppType`, `McpRoot` + 迁移逻辑 |
-| `src-tauri/src/services/mcp.rs` | **同步服务层**：upsert/delete/toggle/syncAllEnabled 核心调度 |
-| `src-tauri/src/database/dao/mcp.rs` | DAO 层：SQLite CRUD 操作 |
-| `src-tauri/src/mcp/validation.rs` | 通用校验：`validate_server_spec()`, `extract_server_spec()` |
+| `crates/daemon/src/app_config.rs` | 数据模型：`McpServer`, `McpApps`, `AppType`, `McpRoot` + 迁移逻辑 |
+| `crates/daemon/src/services/mcp.rs` | **同步服务层**：upsert/delete/toggle/syncAllEnabled 核心调度 |
+| `crates/daemon/src/database/dao/mcp.rs` | DAO 层：SQLite CRUD 操作 |
+| `crates/daemon/src/mcp/validation.rs` | 通用校验：`validate_server_spec()`, `extract_server_spec()` |
 
 **各工具适配器：**
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/mcp/claude.rs` | Claude 同步/导入/移除（最简单的适配器） |
-| `src-tauri/src/mcp/codex.rs` | Codex 同步/导入/移除 + **JSON↔TOML 转换**（最复杂） |
-| `src-tauri/src/mcp/gemini.rs` | Gemini 同步/导入/移除 |
-| `src-tauri/src/mcp/opencode.rs` | OpenCode 同步/导入/移除 + `local/remote` 类型转换 |
-| `src-tauri/src/mcp/hermes.rs` | Hermes 同步/导入/移除 + **合并写入策略** + 写锁 |
+| `crates/daemon/src/mcp/claude.rs` | Claude 同步/导入/移除（最简单的适配器） |
+| `crates/daemon/src/mcp/codex.rs` | Codex 同步/导入/移除 + **JSON↔TOML 转换**（最复杂） |
+| `crates/daemon/src/mcp/gemini.rs` | Gemini 同步/导入/移除 |
+| `crates/daemon/src/mcp/opencode.rs` | OpenCode 同步/导入/移除 + `local/remote` 类型转换 |
+| `crates/daemon/src/mcp/hermes.rs` | Hermes 同步/导入/移除 + **合并写入策略** + 写锁 |
 
 **工具原生配置读写：**
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/claude_mcp.rs` | Claude `~/.claude.json` 读写 + **Windows cmd /c 包装** |
-| `src-tauri/src/gemini_mcp.rs` | Gemini `~/.gemini/settings.json` 读写 + **httpUrl↔url 转换** |
-| `src-tauri/src/codex_config.rs` | Codex `~/.codex/config.toml` 路径解析 |
-| `src-tauri/src/hermes_config.rs` | Hermes `~/.hermes/config.yaml` 路径解析 |
-| `src-tauri/src/opencode_config.rs` | OpenCode 配置路径解析 |
+| `crates/daemon/src/claude_mcp.rs` | Claude `~/.claude.json` 读写 + **Windows cmd /c 包装** |
+| `crates/daemon/src/gemini_mcp.rs` | Gemini `~/.gemini/settings.json` 读写 + **httpUrl↔url 转换** |
+| `crates/daemon/src/codex_config.rs` | Codex `~/.codex/config.toml` 路径解析 |
+| `crates/daemon/src/hermes_config.rs` | Hermes `~/.hermes/config.yaml` 路径解析 |
+| `crates/daemon/src/opencode_config.rs` | OpenCode 配置路径解析 |
 
 **前端：**
 
@@ -1212,13 +1212,13 @@ Step 4: 前端适配
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/database/schema.rs` (L64-70) | 建表 SQL |
-| `src-tauri/src/database/schema.rs` (L480-495) | 迁移：添加 description/homepage/docs/tags 列 |
-| `src-tauri/src/database/schema.rs` (L966-984) | 迁移：v3→v4 添加 enabled_opencode |
-| `src-tauri/src/database/schema.rs` (L1182-1200) | 迁移：v9→v10 添加 enabled_hermes |
+| `crates/daemon/src/database/schema.rs` (L64-70) | 建表 SQL |
+| `crates/daemon/src/database/schema.rs` (L480-495) | 迁移：添加 description/homepage/docs/tags 列 |
+| `crates/daemon/src/database/schema.rs` (L966-984) | 迁移：v3→v4 添加 enabled_opencode |
+| `crates/daemon/src/database/schema.rs` (L1182-1200) | 迁移：v9→v10 添加 enabled_hermes |
 
 **Proxy MCP 保护：**
 
 | 文件 | 说明 |
 |------|------|
-| `src-tauri/src/services/proxy.rs` (L1879) | `preserve_codex_mcp_servers_in_backup()` 接管时保护 MCP |
+| `crates/daemon/src/services/proxy.rs` (L1879) | `preserve_codex_mcp_servers_in_backup()` 接管时保护 MCP |

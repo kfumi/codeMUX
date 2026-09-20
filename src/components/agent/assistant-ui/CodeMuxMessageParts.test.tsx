@@ -479,7 +479,7 @@ describe('CodeMuxDataMessagePart', () => {
             kind: 'error',
             data: {
               type: 'sidecar_error',
-              error: 'Query timed out: no message received for 300s (after msg #412)\nError: Query timed out: no message received for 300s (after msg #412)\n    at Timeout._onTimeout (file:///D:/project/ai-code/codeMUX/src-tauri/sidecar/dist/index.js:692:32)',
+              error: 'Query timed out: no message received for 300s (after msg #412)\nError: Query timed out: no message received for 300s (after msg #412)\n    at Timeout._onTimeout (file:///D:/project/ai-code/codeMUX/apps/sidecar/dist/index.js:692:32)',
             },
           },
         }}

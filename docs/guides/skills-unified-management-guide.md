@@ -538,7 +538,7 @@ pub fn compute_dir_hash(dir: &Path) -> Result<String> {
 
 ## 九、Deep Link 仓库导入
 
-通过 `ccswitch://` 协议快速添加仓库源，参考 [src-tauri/src/deeplink/skill.rs](file:///d:/project/cc-switch/src-tauri/src/deeplink/skill.rs)：
+通过 `ccswitch://` 协议快速添加仓库源，参考 [crates/daemon/src/deeplink/skill.rs](file:///d:/project/cc-switch/crates/daemon/src/deeplink/skill.rs)：
 
 ```
 ccswitch://import?type=skill&repo=owner/name&branch=main&enabled=true
@@ -611,14 +611,14 @@ ccswitch://import?type=skill&repo=owner/name&branch=main&enabled=true
 
 | 文件                                                                                                        | 职责                                      |
 | --------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| [src-tauri/src/services/skill.rs](file:///d:/project/cc-switch/src-tauri/src/services/skill.rs)           | SkillService 主体：发现、安装、卸载、同步、更新、导入、迁移    |
-| [src-tauri/src/commands/skill.rs](file:///d:/project/cc-switch/src-tauri/src/commands/skill.rs)           | Tauri 命令层，桥接前端调用                        |
-| [src-tauri/src/database/dao/skills.rs](file:///d:/project/cc-switch/src-tauri/src/database/dao/skills.rs) | 数据库 CRUD                                |
-| [src-tauri/src/database/schema.rs](file:///d:/project/cc-switch/src-tauri/src/database/schema.rs)         | 表结构与迁移                                  |
-| [src-tauri/src/app\_config.rs](file:///d:/project/cc-switch/src-tauri/src/app_config.rs)                  | AppType / SkillApps / InstalledSkill 定义 |
-| [src-tauri/src/deeplink/skill.rs](file:///d:/project/cc-switch/src-tauri/src/deeplink/skill.rs)           | Deep Link 仓库导入                          |
-| [src-tauri/src/settings.rs](file:///d:/project/cc-switch/src-tauri/src/settings.rs)                       | 同步方式、存储位置等设置读写                          |
-| [src-tauri/src/lib.rs](file:///d:/project/cc-switch/src-tauri/src/lib.rs)                                 | 启动时初始化默认仓库 + 自动迁移                       |
+| [crates/daemon/src/services/skill.rs](file:///d:/project/cc-switch/crates/daemon/src/services/skill.rs)           | SkillService 主体：发现、安装、卸载、同步、更新、导入、迁移    |
+| [crates/daemon/src/commands/skill.rs](file:///d:/project/cc-switch/crates/daemon/src/commands/skill.rs)           | Tauri 命令层，桥接前端调用                        |
+| [crates/daemon/src/database/dao/skills.rs](file:///d:/project/cc-switch/crates/daemon/src/database/dao/skills.rs) | 数据库 CRUD                                |
+| [crates/daemon/src/database/schema.rs](file:///d:/project/cc-switch/crates/daemon/src/database/schema.rs)         | 表结构与迁移                                  |
+| [crates/daemon/src/app\_config.rs](file:///d:/project/cc-switch/crates/daemon/src/app_config.rs)                  | AppType / SkillApps / InstalledSkill 定义 |
+| [crates/daemon/src/deeplink/skill.rs](file:///d:/project/cc-switch/crates/daemon/src/deeplink/skill.rs)           | Deep Link 仓库导入                          |
+| [crates/daemon/src/settings.rs](file:///d:/project/cc-switch/crates/daemon/src/settings.rs)                       | 同步方式、存储位置等设置读写                          |
+| [crates/daemon/src/lib.rs](file:///d:/project/cc-switch/crates/daemon/src/lib.rs)                                 | 启动时初始化默认仓库 + 自动迁移                       |
 
 ### 前端（React / TypeScript）
 

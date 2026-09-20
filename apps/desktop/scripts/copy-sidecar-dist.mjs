@@ -1,7 +1,7 @@
-// 打包前把 agent sidecar 的编译产物拷入 desktop-electron/sidecar-dist,
+// 打包前把 agent sidecar 的编译产物拷入 apps/desktop/sidecar-dist,
 // 经 electron-builder `extraResources`(from: sidecar-dist → to: sidecar)落到资源根,
 // 对齐 daemon 的期望路径 <resource_dir>/sidecar/dist/index.js
-// (src-tauri/src/agent/mod.rs 的 SIDECAR_RELATIVE_DIR/SIDECAR_ENTRYPOINT)。
+// (crates/daemon/src/agent/mod.rs 的 SIDECAR_RELATIVE_DIR/SIDECAR_ENTRYPOINT)。
 //
 // 为什么还要写 package.json:sidecar 是 ESM("type": "module"),打包态 dist/ 的
 // 最近父级若无 package.json,Node 会把 index.js 当 CJS 解析并抛
@@ -14,8 +14,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = path.resolve(packageDir, '..');
-const sidecarDir = path.join(repoRoot, 'src-tauri', 'sidecar');
+const repoRoot = path.resolve(packageDir, '..', '..');
+const sidecarDir = path.join(repoRoot, 'apps', 'sidecar');
 const source = path.join(sidecarDir, 'dist');
 const sourceEntry = path.join(source, 'index.js');
 const target = path.join(packageDir, 'sidecar-dist');
@@ -26,7 +26,7 @@ if (!existsSync(sourceEntry)) {
 }
 
 // dist/ 比源码旧 = 忘了编 sidecar,安装包会带着旧 sidecar 发出去(dev 态直接跑
-// src-tauri/sidecar/dist,同样察觉不到)。确实要拷旧产物时用
+// apps/sidecar/dist,同样察觉不到)。确实要拷旧产物时用
 // CODEMUX_ALLOW_STALE_SIDECAR=1 跳过。
 if (!process.env.CODEMUX_ALLOW_STALE_SIDECAR) {
   const newestSourceMtime = newestMtime([path.join(sidecarDir, 'src'), path.join(sidecarDir, 'tsconfig.json')]);

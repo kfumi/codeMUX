@@ -25,14 +25,14 @@ if (isWin) {
 }
 
 /**
- * sidecar 构建产物(src-tauri/sidecar/dist)的陈旧检测。
+ * sidecar 构建产物(apps/sidecar/dist)的陈旧检测。
  *
  * 守护进程按会话惰性加载 `sidecar/dist/index.js`,而 `dev:desktop` 自己不构建它:
  * 改了 sidecar 源码却没重建时,dev 会静默跑旧产物(实测踩过:sidecar 新加的 `model`
  * 字段一直不生效,查到最后才发现 dist 落后了三天)。全量 tsc 实测 3~5s,不该每次
  * 启动都付;所以先比 mtime —— 平时一次递归 stat 约几十毫秒,只有源码更新才构建。
  */
-const SIDECAR_DIR = path.join(rootDir, 'src-tauri', 'sidecar');
+const SIDECAR_DIR = path.join(rootDir, 'apps', 'sidecar');
 const SIDECAR_DIST_ENTRY = path.join(SIDECAR_DIR, 'dist', 'index.js');
 const SIDECAR_INPUTS = [
   path.join(SIDECAR_DIR, 'src'),
@@ -172,8 +172,8 @@ if (await isServerUp(DEV_SERVER_URL)) {
 
 await sidecarReady;
 
-// 3. daemon + Electron 壳(desktop-electron/scripts/dev.mjs,内部 supervisor 保证 daemon)
-const electron = spawn(process.execPath, [path.join(rootDir, 'desktop-electron', 'scripts', 'dev.mjs')], {
+// 3. daemon + Electron 壳(apps/desktop/scripts/dev.mjs,内部 supervisor 保证 daemon)
+const electron = spawn(process.execPath, [path.join(rootDir, 'apps', 'desktop', 'scripts', 'dev.mjs')], {
   cwd: rootDir,
   stdio: 'inherit',
   detached: !isWin,

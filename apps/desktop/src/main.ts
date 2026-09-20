@@ -36,9 +36,9 @@ const MAIN_WINDOW_HEIGHT = 820;
 
 /** 编译产物目录(dist-electron)。 */
 const moduleDir = __dirname;
-/** 仓库根(dev 态 = desktop-electron/ 的上一级;打包态由 app.getAppPath() 决定)。 */
+/** 仓库根(dev 态 = apps/desktop/ 的上两级;打包态由 app.getAppPath() 决定)。 */
 const appRoot = path.resolve(moduleDir, '..');
-const repoRoot = path.resolve(appRoot, '..');
+const repoRoot = path.resolve(appRoot, '..', '..');
 
 // ---------------------------------------------------------------------------
 // 路径解析
@@ -67,19 +67,19 @@ function resolveDaemonExe(): string {
   if (app.isPackaged && process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'daemon', binaryName));
   }
-  candidates.push(path.join(repoRoot, 'src-tauri', 'target', 'debug', binaryName));
-  candidates.push(path.join(repoRoot, 'src-tauri', 'target', 'release', binaryName));
+  candidates.push(path.join(repoRoot, 'crates', 'daemon', 'target', 'debug', binaryName));
+  candidates.push(path.join(repoRoot, 'crates', 'daemon', 'target', 'release', binaryName));
   const found = candidates.find((candidate) => existsSync(candidate));
   return found ?? binaryName;
 }
 
-/** 托盘图标:打包资源 icons/icon.ico → 仓库 src-tauri/icons/icon.ico。 */
+/** 托盘图标:打包资源 icons/icon.ico → 仓库 apps/desktop/build/icons/icon.ico。 */
 function resolveTrayIcon(): string | null {
   const candidates: string[] = [];
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'icons', 'icon.ico'));
   }
-  candidates.push(path.join(repoRoot, 'src-tauri', 'icons', 'icon.ico'));
+  candidates.push(path.join(appRoot, 'build', 'icons', 'icon.ico'));
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
@@ -89,7 +89,7 @@ function resolveNotificationIcon(): string | null {
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'icons', 'Square150x150Logo.png'));
   }
-  candidates.push(path.join(repoRoot, 'src-tauri', 'icons', 'Square150x150Logo.png'));
+  candidates.push(path.join(appRoot, 'build', 'icons', 'Square150x150Logo.png'));
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
@@ -121,7 +121,7 @@ const CONTENT_TYPES: Record<string, string> = {
 /**
  * 生产渲染层目录:dev 态指向仓库根 dist/(`npm run build` 产物);
  * 打包态指向随安装包分发的 renderer-dist/(构建脚本在打包前把仓库根 dist/
- * 拷入 desktop-electron/renderer-dist,见 scripts/copy-renderer-dist.mjs)。
+ * 拷入 apps/desktop/renderer-dist,见 scripts/copy-renderer-dist.mjs)。
  */
 function resolveRendererDist(): string {
   if (app.isPackaged) {
@@ -143,7 +143,7 @@ function registerAppProtocol(): void {
       // vendor 资源(Monaco 的 /vs/**)不参与 SPA 回退。回退会把它变成
       // 200 + index.html,Monaco 的 AMD loader 于是拿入口页当脚本执行,报出的
       // 语法错误与「少了一个文件」这个真因完全脱节。真实 404 才能直接定位。
-      // 同一判定在 daemon 侧:src-tauri/src/companion/server.rs。
+      // 同一判定在 daemon 侧:crates/daemon/src/companion/server.rs。
       if (isVendorAssetPath(relative)) {
         return new Response(`vendor asset not found: ${relative}`, { status: 404 });
       }
@@ -385,7 +385,7 @@ function startSupervisor(): void {
     resourceDir: app.isPackaged && process.resourcesPath ? process.resourcesPath : null,
     managedBy: 'desktop',
     // 版本配对:壳期望的 daemon 版本默认 = 壳自身版本(发版流程把 package.json
-    // / desktop-electron/package.json / Cargo.toml 同步到同一版本,见
+    // / apps/desktop/package.json / Cargo.toml 同步到同一版本,见
     // scripts/prepare-release.mjs)。env 显式覆盖,便于本地调试旧 daemon。
     expectedDaemonVersion: process.env.CODEMUX_EXPECTED_DAEMON_VERSION ?? app.getVersion(),
     onEvent: forwardLifecycle,

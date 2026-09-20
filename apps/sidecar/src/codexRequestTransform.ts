@@ -1,4 +1,4 @@
-// src-tauri/sidecar/src/codexRequestTransform.ts
+// apps/sidecar/src/codexRequestTransform.ts
 // Converts OpenAI Responses API requests to Chat Completions format.
 
 import { applyReasoningOptions } from './codexReasoning.js';

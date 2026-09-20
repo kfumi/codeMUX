@@ -25,7 +25,7 @@ import { createLogger, serializeError } from '../logger';
 
 const logger = createLogger('electronBrowserHost');
 
-/** 内置浏览专用独立会话 partition(desktop-electron/src/browser-host.ts 同值)。 */
+/** 内置浏览专用独立会话 partition(apps/desktop/src/browser-host.ts 同值)。 */
 export const BROWSER_PARTITION = 'persist:cmx-browser';
 
 /** 与 Rust normalize_browser_url / manager.rs 的拦截文案一致。 */

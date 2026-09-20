@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveClaudeExecutable } from '../src-tauri/sidecar/src/claudeExecutable';
+import { resolveClaudeExecutable } from '../apps/sidecar/src/claudeExecutable';
 
 describe('resolveClaudeExecutable', () => {
   it('only resolves the native Claude binary from the managed Runtime', () => {

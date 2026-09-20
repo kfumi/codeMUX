@@ -14,10 +14,10 @@ export default defineConfig({
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       'scripts/**/*.test.mjs',
-      // Electron 壳 supervisor 契约测试(工单 05;desktop-electron 不装独立 vitest)
-      'desktop-electron/test/**/*.test.ts',
+      // Electron 壳 supervisor 契约测试(工单 05;apps/desktop 不装独立 vitest)
+      'apps/desktop/test/**/*.test.ts',
     ],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/src-tauri/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/crates/**', '**/apps/**'],
     testTimeout: 15_000,
     hookTimeout: 15_000,
   },

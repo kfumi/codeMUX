@@ -1,6 +1,6 @@
 //! 桌面 UI 事件接缝(工单 09)main 进程侧解析:daemon 广播 → 渲染层事件。
 //!
-//! daemon 的 [`UiEventSink`](src-tauri/src/daemon/mod.rs) 把桌面 UI 事件以
+//! daemon 的 [`UiEventSink`](crates/daemon/src/daemon/mod.rs) 把桌面 UI 事件以
 //! `ui-event` 信封、空 session_id 发进 companion 广播通道;控制面 WS
 //! (`/api/ws` 无 session_id)以 `{"type":"event","sessionId":"","event":...}`
 //! 帧转发给壳。本模块从帧里解析出 `{name, payload}`,main 进程据此

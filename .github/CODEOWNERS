@@ -5,10 +5,10 @@
 * @kfumi
 
 # Rust 后端
-src-tauri/src/ @kfumi
+crates/daemon/src/ @kfumi
 
 # Sidecar
-src-tauri/sidecar/ @kfumi
+apps/sidecar/ @kfumi
 
 # 前端组件
 src/components/ @kfumi

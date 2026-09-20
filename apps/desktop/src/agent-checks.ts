@@ -15,7 +15,7 @@ import path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // 壳载荷契约:与 src/lib/desktop-bridge.ts(唯一归属)同形。壳侧有意不 import
-// 渲染层模块 —— desktop-electron 是独立包,双份定义是包边界的一部分。
+// 渲染层模块 —— apps/desktop 是独立包,双份定义是包边界的一部分。
 // ---------------------------------------------------------------------------
 
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';

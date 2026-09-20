@@ -5,12 +5,12 @@
 CodeMUX is a local-first desktop app: an Electron shell (supervisor), a standalone Rust daemon (`codemux-daemon`), one React/Vite unified frontend, a Node/TypeScript agent sidecar, and a local CLI. The daemon is the authority (SQLite, sessions, agents, sidecar, MCP, skills, scheduled tasks); the shell only owns windows, tray, notifications, updates, and the Browser Host. Clients (desktop renderer, PC browser, mobile browser, CLI) talk to the daemon exclusively via the loopback Companion REST/WS protocol (`docs/adr/0011-daemon-authority-local-token.md`, `docs/adr/0012-daemon-process-electron-shell.md`).
 
 - `src/` contains frontend (renderer) components, stores, utilities, types, hooks, styles, and tests.
-- `desktop-electron/` contains the Electron shell (`src/`: main, preload, supervisor, browser host, updater; `scripts/`: dev and packaging helpers).
-- `src-tauri/` is the Rust **daemon crate** (directory name kept for history; the Tauri shell has been removed): `src/bin/codemux-daemon.rs` entry, `src/daemon/` assembly, `src/companion/` HTTP/WS server, `src/agent/` session lifecycle and history, `src/agent_runtime/` Claude/Codex/OpenCode/pi runtimes, plus config, db, mcp, skills, model_providers, scheduled_tasks.
-- `src-tauri/sidecar/` contains the Node/TypeScript agent sidecar.
+- `apps/desktop/` contains the Electron shell (`src/`: main, preload, supervisor, browser host, updater; `scripts/`: dev and packaging helpers; `build/icons/`: installer & tray icons).
+- `crates/daemon/` is the Rust **daemon crate** (the Tauri shell has been removed; the directory was renamed from `src-tauri/` in 2026-09): `src/bin/codemux-daemon.rs` entry, `src/daemon/` assembly, `src/companion/` HTTP/WS server, `src/agent/` session lifecycle and history, `src/agent_runtime/` Claude/Codex/OpenCode/pi runtimes, plus config, db, mcp, skills, model_providers, scheduled_tasks.
+- `apps/sidecar/` contains the Node/TypeScript agent sidecar (moved out of the daemon crate — it is an independent package).
 - There is no separate mobile frontend: `src/` is the single frontend for all three hosts (Electron shell, PC browser, mobile browser). `npm run build:web` emits `dist-web/`, which the desktop app ships and the daemon serves to browser clients.
-- `src-cli/` contains the local CLI daemon client.
-- `public/` and `src-tauri/icons/` hold static web and app assets.
+- `apps/cli/` contains the local CLI daemon client.
+- `public/` holds static web assets; `apps/desktop/build/icons/` holds installer and tray icons.
 - `docs/` is the single home for all project documentation (see next section).
 
 ## Documentation Layout
@@ -35,34 +35,34 @@ All project documents live under `docs/`. Whatever agent you are (pi, trae, zcod
 ## Build, Test, and Development Commands
 
 - `npm ci` installs root dependencies.
-- `cd src-tauri/sidecar && npm ci` installs sidecar dependencies.
+- `cd apps/sidecar && npm ci` installs sidecar dependencies.
 - `npm run dev` starts the Vite renderer on port 1420.
 - `npm run dev:desktop` runs the desktop app in development mode: waits for Vite to be ready, then launches the Electron shell; the daemon is spawned by the shell's supervisor. Exit cleans up all child processes.
 - `npm run dev:electron` launches only the Electron shell (renderer must already be up on 1420).
 - `npm run build` type-checks `src/` and builds the Vite app.
 - `npm run build:daemon` (and `build:daemon:release`) builds the `codemux-daemon` binary.
-- `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `desktop-electron/release/` (see `docs/guides/desktop-release-guide.md`).
+- `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `apps/desktop/release/` (see `docs/guides/desktop-release-guide.md`).
 - `npm run build:web` builds the unified frontend into `dist-web/`; the daemon serves that directory to browser clients and the installer bundles it.
-- `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime. `npm run dev:desktop` does not build unconditionally: it compares the newest `src-tauri/sidecar/src/**` mtime against `dist/index.js` and runs `build:sidecar` only when the source is newer (~60 ms when fresh, 3–5 s when it has to build); `npm run build:electron-installer` always builds it. When you launch Electron another way (`npm run dev:electron` against an already-running daemon), run `npm run build:sidecar` yourself or the app silently runs stale code.
-- `cd desktop-electron && npm run typecheck` type-checks the shell's main/preload TypeScript.
-- `cd src-tauri && cargo fmt --all -- --check` verifies Rust formatting.
-- `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` runs Rust lints.
-- `cd src-tauri && cargo check --all-targets --all-features` checks Rust compilation.
-- `npx vitest run` runs root TypeScript/React tests; run the same command in `src-tauri/sidecar/` for sidecar tests.
+- `cd apps/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime. `npm run dev:desktop` does not build unconditionally: it compares the newest `apps/sidecar/src/**` mtime against `dist/index.js` and runs `build:sidecar` only when the source is newer (~60 ms when fresh, 3–5 s when it has to build); `npm run build:electron-installer` always builds it. When you launch Electron another way (`npm run dev:electron` against an already-running daemon), run `npm run build:sidecar` yourself or the app silently runs stale code.
+- `cd apps/desktop && npm run typecheck` type-checks the shell's main/preload TypeScript.
+- `cd crates/daemon && cargo fmt --all -- --check` verifies Rust formatting.
+- `cd crates/daemon && cargo clippy --all-targets --all-features -- -D warnings` runs Rust lints.
+- `cd crates/daemon && cargo check --all-targets --all-features` checks Rust compilation.
+- `npx vitest run` runs root TypeScript/React tests; run the same command in `apps/sidecar/` for sidecar tests.
 
 ### Rust daemon changes — always rebuild
 
-After any change under `src-tauri/` (Rust source or `Cargo.toml`), run `npm run build:daemon` as the finishing step of the change — do not leave it to the user.
+After any change under `crates/daemon/` (Rust source or `Cargo.toml`), run `npm run build:daemon` as the finishing step of the change — do not leave it to the user.
 
-- The dev shell spawns the daemon from `src-tauri/target/debug/codemux-daemon(.exe)` (see `resolveDaemonExe` in `desktop-electron/src/main.ts`); the running daemon is never hot-reloaded, so a stale binary silently serves old behavior in `dev:desktop`.
+- The dev shell spawns the daemon from `crates/daemon/target/debug/codemux-daemon(.exe)` (see `resolveDaemonExe` in `apps/desktop/src/main.ts`); the running daemon is never hot-reloaded, so a stale binary silently serves old behavior in `dev:desktop`.
 - After rebuilding, the daemon must be restarted to pick up the new binary: restart `npm run dev:desktop`, or stop the daemon and let the shell's supervisor respawn it.
 - If release behavior matters (packaging, installer), verify with `npm run build:daemon:release`.
 
 ### Sidecar packaging
 
-Sidecar uses plain `tsc`; the installer ships **only** `sidecar/dist/`, not `node_modules` (see `desktop-electron/electron-builder.yml`).
+Sidecar uses plain `tsc`; the installer ships **only** `sidecar/dist/`, not `node_modules` (see `apps/desktop/electron-builder.yml`).
 
-- Do **not** add runtime packages to `src-tauri/sidecar/package.json` `dependencies` — dev works, release fails with `ERR_MODULE_NOT_FOUND`.
+- Do **not** add runtime packages to `apps/sidecar/package.json` `dependencies` — dev works, release fails with `ERR_MODULE_NOT_FOUND`.
 - Reuse frontend logic by inlining in sidecar; do not import from `src/`. Provider SDKs load from managed Runtime (`%LOCALAPPDATA%/CodeMUX/runtimes/`), not sidecar deps.
 - Need a real npm dep? Bundle it (e.g. esbuild) and update packaging config — or verify with a release build; `dev:desktop` won't catch this.
 
@@ -116,7 +116,7 @@ Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and
 
 - After each code change, run the *affected* tests rather than the full suite (147 test files; a full run takes minutes). The affected set is the colocated test of each changed file plus the tests of any module that (transitively) imports the changed module. Pass vitest file filters, e.g. `npx vitest run src/lib/modelProviders`, or use `npx vitest` watch mode, which reruns only tests related to saved changes.
 - Do not rely solely on a changed file's own test: cross-module regressions (e.g. changing a store breaks component tests elsewhere) are caught only by including dependent tests or the full suite.
-- Run the full suite before committing or opening a PR: `npx vitest run` at the repo root and `npx vitest run` in `src-tauri/sidecar/`. A full-suite pass is the finishing gate, not the per-iteration default.
+- Run the full suite before committing or opening a PR: `npx vitest run` at the repo root and `npx vitest run` in `apps/sidecar/`. A full-suite pass is the finishing gate, not the per-iteration default.
 - The browser/mobile hosts load `dist-web/`, which is only refreshed by `npm run build:web`. Browser-visible renderer changes do not take effect in the daemon-served page until you rebuild it.
 
 ## Commit & Pull Request Guidelines

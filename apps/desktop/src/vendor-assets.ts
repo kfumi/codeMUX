@@ -5,7 +5,7 @@
  *
  * 这个模块只负责「哪些请求属于 vendor 资源」这一个判定,抽出来是为了让壳的
  * app:// 协议处理器可以单独测 —— main.ts 会拉起 Electron 主进程模块,不适合在
- * 单测里 import。daemon 侧的对应实现见 src-tauri/src/companion/server.rs。
+ * 单测里 import。daemon 侧的对应实现见 crates/daemon/src/companion/server.rs。
  */
 
 /** 构建产物里 vendor 资源的路径前缀。 */

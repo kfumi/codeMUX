@@ -38,7 +38,7 @@
 4. **安装依赖**：
    ```bash
    npm ci
-   cd src-tauri/sidecar && npm ci && npm run build && cd ../..
+   cd apps/sidecar && npm ci && npm run build && cd ../..
    ```
 5. **开发与测试**：
    ```bash
@@ -134,22 +134,23 @@ src/                        # React 渲染层（桌面 UI）
   lib/                      # 工具函数（通知、权限、模型、上下文计算等）
   hooks/                    # 自定义 Hooks（agent models / notifications / theme）
 
-desktop-electron/           # Electron 桌面壳（窗口 / 托盘 / supervisor / Browser Host / updater）
-  src/                      # main、preload、supervisor、browser-host、daemon-token 等
+apps/
+  desktop/                # Electron 桌面壳（窗口 / 托盘 / supervisor / Browser Host / updater）
+    src/                  # main、preload、supervisor、browser-host、daemon-token 等
+  sidecar/                # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
+  cli/                    # 本机命令行 Daemon Client
 
-src-tauri/                  # Rust daemon crate（目录名保留，Tauri 壳已移除）
-  src/bin/                  # codemux-daemon 入口（权威进程）
-  src/daemon/               # daemon 装配与生命周期
-  src/companion/            # Companion Server（REST/WS、鉴权、配对、自动化接缝）
-  src/agent/                # 会话生命周期、历史导入、Timeline 持久化
-  src/agent_runtime/        # Claude / Codex / OpenCode / pi 运行时抽象
-  src/mcp/adapters/         # MCP 各 Agent 适配器（claude / codex / gemini / opencode）
-  src/skills/adapters/      # Skills 各 Agent 适配器
-  src/model_providers/      # Model Provider 服务
-  src/scheduled_tasks/      # 定时任务
-  sidecar/src/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
-
-src-cli/                    # 本机命令行 Daemon Client
+crates/
+  daemon/                 # Rust daemon crate（Tauri 壳已移除，目录由 src-tauri/ 改名）
+    src/bin/              # codemux-daemon 入口（权威进程）
+    src/daemon/           # daemon 装配与生命周期
+    src/companion/        # Companion Server（REST/WS、鉴权、自动化接缝）
+    src/agent/            # 会话生命周期、历史导入、Timeline 持久化
+    src/agent_runtime/    # Claude / Codex / OpenCode / pi 运行时抽象
+    src/mcp/adapters/     # MCP 各 Agent 适配器（claude / codex / gemini / opencode）
+    src/skills/adapters/  # Skills 各 Agent 适配器
+    src/model_providers/  # Model Provider 服务
+    src/scheduled_tasks/  # 定时任务
 ```
 
 架构背景（daemon 权威、Electron 壳 supervisor、Companion 协议）见 ADR：`docs/adr/0011-daemon-authority-local-token.md`、`docs/adr/0012-daemon-process-electron-shell.md`。
@@ -182,7 +183,7 @@ src-cli/                    # 本机命令行 Daemon Client
 提交 PR 前请确认：
 
 - [ ] 代码已通过 `cargo fmt` 和 `cargo clippy`（Rust 部分）
-- [ ] 代码已通过 TypeScript 类型检查（`npm run build`，壳改动另跑 `cd desktop-electron && npm run typecheck`）
+- [ ] 代码已通过 TypeScript 类型检查（`npm run build`，壳改动另跑 `cd apps/desktop && npm run typecheck`）
 - [ ] 功能在开发模式下测试通过（`npm run dev:desktop`）
 - [ ] 新功能已更新相关文档
 - [ ] Commit 消息符合 Conventional Commits 规范

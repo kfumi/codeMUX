@@ -1,4 +1,4 @@
-// 工单 06:打包前把仓库根渲染层 dist/ 拷入 desktop-electron/renderer-dist,
+// 工单 06:打包前把仓库根渲染层 dist/ 拷入 apps/desktop/renderer-dist,
 // 经 electron-builder `files: renderer-dist/**` 随安装包分发(main.ts 打包态
 // 经 app:// 从 app.getAppPath()/renderer-dist 读取)。正式资源根布局由工单 09 收口。
 import { cpSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = path.resolve(packageDir, '..');
+const repoRoot = path.resolve(packageDir, '..', '..');
 const source = path.resolve(repoRoot, 'dist');
 const target = path.join(packageDir, 'renderer-dist');
 

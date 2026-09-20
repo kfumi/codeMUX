@@ -6,7 +6,7 @@
  * - `isElectronDesktop()`:平台分流判据。
  * - browser.*:工单 07 起页面由渲染层 `<webview>` 托管(见
  *   src/lib/browser/electronBrowserHost.ts);桥面仅保留清资料 / guest 登记,
- *   几何与导航通道为契约占位(见 desktop-electron/src/shell-bridge.ts)。
+ *   几何与导航通道为契约占位(见 apps/desktop/src/shell-bridge.ts)。
  * - 本文件同时是壳载荷类型的唯一归属(工单 09:Tauri 壳退役后,
  *   原 src/lib/tauri.ts 的日志/环境/agent 运行时检测契约迁入,消除双份定义)。
  */
@@ -14,7 +14,7 @@ import type { BrowserDataScope, BrowserPageBounds } from './browserHost';
 import type { OpenTarget } from './openTargets';
 
 // ---------------------------------------------------------------------------
-// 壳命令载荷契约(与 desktop-electron/src/agent-checks.ts、shell-bridge.ts 对齐)。
+// 壳命令载荷契约(与 apps/desktop/src/agent-checks.ts、shell-bridge.ts 对齐)。
 // ---------------------------------------------------------------------------
 
 export interface LogFileInfo {
@@ -152,7 +152,7 @@ export interface DesktopSaveDialogOptions {
 }
 
 // ---------------------------------------------------------------------------
-// 更新器(工单 06):electron-updater 桥;事件契约与 desktop-electron/src/updater.ts 对齐。
+// 更新器(工单 06):electron-updater 桥;事件契约与 apps/desktop/src/updater.ts 对齐。
 // ---------------------------------------------------------------------------
 
 export type DesktopUpdaterEvent =
@@ -181,7 +181,7 @@ export interface DesktopBrowserNewWindowPayload {
 /** window-maximize-changed 事件载荷(main 窗口 maximize/unmaximize 转发)。 */
 export type DesktopWindowMaximizePayload = boolean;
 
-/** window.codemuxDesktop 的完整方法面(与 desktop-electron/src/preload.ts 对齐)。 */
+/** window.codemuxDesktop 的完整方法面(与 apps/desktop/src/preload.ts 对齐)。 */
 export interface CodemuxDesktopBridge {
   // token / 目录 / 日志
   getLocalDaemonToken(): Promise<string>;

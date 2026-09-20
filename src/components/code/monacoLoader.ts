@@ -9,8 +9,8 @@ import { loader } from '@monaco-editor/react';
  * `public/`,三条加载链路都由已有静态服务直接吐文件:
  *
  * - dev:Vite 把 public/ 挂在根路径
- * - 桌面壳生产:app:// 协议处理器(desktop-electron/src/main.ts)
- * - 浏览器/移动形态:daemon 的 dist-web 静态服务(src-tauri/src/companion/server.rs)
+ * - 桌面壳生产:app:// 协议处理器(apps/desktop/src/main.ts)
+ * - 浏览器/移动形态:daemon 的 dist-web 静态服务(crates/daemon/src/companion/server.rs)
  *
  * 用根相对路径(而不是完整 URL),三种 origin 下都能解析到各自服务的 /vs。
  */

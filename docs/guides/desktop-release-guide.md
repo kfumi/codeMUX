@@ -4,17 +4,17 @@
 
 ## 当前发布链路
 
-- 桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**（Tauri 壳已从仓库移除；`src-tauri/` 目录名保留，内容为 daemon crate 与其 bin 目标）。
-- 出包：`npm run build:electron-installer`（详见下文「构建安装包」），产物输出到 `desktop-electron/release/`。
+- 桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**（Tauri 壳已从仓库移除；daemon crate 位于 `crates/daemon/`，目录已由 `src-tauri/` 改名）。
+- 出包：`npm run build:electron-installer`（详见下文「构建安装包」），产物输出到 `apps/desktop/release/`。
 - 发布：把安装包（NSIS exe）与 `latest.yml` 上传到 [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)，现有安装版经 electron-updater 检测到更新。
 - CI 发版流水线待迁移：`.github/workflows/release.yml` 目前只负责推标签时创建 GitHub Release 记录（`publish-tauri` 任务已随 Tauri 壳移除），**不产出也不上传安装包**；正式标签发版请本地出包后手动上传附件，或先完成 workflow 迁移。
 
 ## 版本号同步（daemon 版本配对依赖）
 
-壳与 daemon 构成 supervisor 版本配对：daemon 的 `DAEMON_VERSION` 来自 `src-tauri/Cargo.toml`，壳的期望版本默认取自身 `app.getVersion()`（即 `desktop-electron/package.json`）。**三者必须同版本**，否则壳启动时会判定版本不匹配而强杀重起 daemon。
+壳与 daemon 构成 supervisor 版本配对：daemon 的 `DAEMON_VERSION` 来自 `crates/daemon/Cargo.toml`，壳的期望版本默认取自身 `app.getVersion()`（即 `apps/desktop/package.json`）。**三者必须同版本**，否则壳启动时会判定版本不匹配而强杀重起 daemon。
 
 ```bash
-npm run release:prepare -- 0.0.7   # 同步 package.json / desktop-electron/package.json / Cargo.toml / Cargo.lock
+npm run release:prepare -- 0.0.7   # 同步 package.json / apps/desktop/package.json / Cargo.toml / Cargo.lock
 ```
 
 `npm run release:ship -- 0.0.7` 在 `master`、工作区干净的前提下自动完成同步 → 提交 → 打 tag → 推送（`--dry-run` 可预演）。
@@ -27,25 +27,25 @@ npm run release:prepare -- 0.0.7   # 同步 package.json / desktop-electron/pack
 npm run build:electron-installer
 ```
 
-`build:electron-installer` 依次执行:`src-tauri/sidecar` tsc(sidecar dist/)→
+`build:electron-installer` 依次执行:`apps/sidecar` tsc(sidecar dist/)→
 daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查门禁独立跑
-`npx tsc --noEmit`)→ `desktop-electron` tsc(main/preload)→
-`scripts/copy-renderer-dist.mjs` 把 `../dist` 拷入 `desktop-electron/renderer-dist`
-→ `scripts/copy-sidecar-dist.mjs` 把 `../src-tauri/sidecar/dist` 拷入
-`desktop-electron/sidecar-dist` → `electron-builder --win nsis`。
-产物输出到 `desktop-electron/release/`。
+`npx tsc --noEmit`)→ `apps/desktop` tsc(main/preload)→
+`scripts/copy-renderer-dist.mjs` 把仓库根 `dist/` 拷入 `apps/desktop/renderer-dist`
+→ `scripts/copy-sidecar-dist.mjs` 把 `apps/sidecar/dist` 拷入
+`apps/desktop/sidecar-dist` → `electron-builder --win nsis`。
+产物输出到 `apps/desktop/release/`。
 
-打包工具链的 `electron-builder` 在 `desktop-electron/package.json` 里固定精确版本（不写 `^`）：26 起 Windows 的 PE 资源写入由 rcedit 换成纯 JS 的 `resedit`，产物元数据与压缩工具随之变化，出包工具链需要可复现。
+打包工具链的 `electron-builder` 在 `apps/desktop/package.json` 里固定精确版本（不写 `^`）：26 起 Windows 的 PE 资源写入由 rcedit 换成纯 JS 的 `resedit`，产物元数据与压缩工具随之变化，出包工具链需要可复现。
 
 资源根布局(daemon 按这些相对路径找资源,`--resource-dir` = 打包态的
 `process.resourcesPath`):
 
 | 路径 | 来源 | 缺失后果 |
 | --- | --- | --- |
-| `daemon/codemux-daemon.exe` | `extraResources` ← `src-tauri/target/release/` | 壳拉不起 daemon |
-| `sidecar/dist/index.js` + `sidecar/package.json` | `extraResources` ← `desktop-electron/sidecar-dist/`(脚本生成) | 发消息报 `Bundled sidecar was not found at sidecar\dist/index.js` |
+| `daemon/codemux-daemon.exe` | `extraResources` ← `crates/daemon/target/release/` | 壳拉不起 daemon |
+| `sidecar/dist/index.js` + `sidecar/package.json` | `extraResources` ← `apps/desktop/sidecar-dist/`(脚本生成) | 发消息报 `Bundled sidecar was not found at sidecar\dist/index.js` |
 | `dist-web/` | `extraResources` ← 仓库根 `dist-web/` | 浏览器/移动形态无页面 |
-| `icons/icon.ico` | `extraResources` ← `src-tauri/icons/` | 托盘无图标 |
+| `icons/icon.ico` | `extraResources` ← `crates/daemon/icons/` | 托盘无图标 |
 | `app.asar` 内 `renderer-dist/` | `files` ← 脚本从根 `dist/` 拷入 | 桌面窗口白屏 |
 
 `sidecar/package.json` 只标记 ESM(`"type": "module"`);`node_modules` 不随包
@@ -65,7 +65,7 @@ electron-builder 首次打包会下载 `nsis`、`nsis-resources`、`7zip` 等工
    ```
 
 2. **签名时 winCodeSign 解压报符号链接权限错误**（`Cannot create symbolic link ... darwin/10.12/lib/libcrypto.dylib`）：只影响配置了 `CSC_LINK` 的签名出包。未签名出包改 PE 资源用的是纯 JS 的 `resedit`（electron-builder 26 起取代 rcedit），根本不下载 `winCodeSign`；签名路径需要 signtool，而 `toolsets.winCodeSign` 默认值 `0.0.0` 指向那个内含两个 macOS 软链的 legacy 包，Windows 解压需管理员权限或开发者模式。两种免管理员规避方式（择一）：
-   - 在 `desktop-electron/electron-builder.yml` 设 `toolsets.winCodeSign: "1.1.0"`，改下 Windows 专用的 `windows-kits-bundle-*.zip`（约 8 MB，不含软链）；
+   - 在 `apps/desktop/electron-builder.yml` 设 `toolsets.winCodeSign: "1.1.0"`，改下 Windows 专用的 `windows-kits-bundle-*.zip`（约 8 MB，不含软链）；
    - 或设 `SIGNTOOL_PATH` 指向系统已装的 signtool。
 
 ## 安装包签名(应用 + daemon 同一签名链)
@@ -95,11 +95,11 @@ npm run build:electron-installer
 
 ## 更新通道(GitHub Releases)
 
-- [`desktop-electron/electron-builder.yml`](/D:/project/my-project/codeMUX/desktop-electron/electron-builder.yml:1)
+- [`apps/desktop/electron-builder.yml`](/D:/project/my-project/codeMUX/apps/desktop/electron-builder.yml:1)
   的 `publish`(provider: github,owner/repo = `kfumi/codeMUX`)在打包时生成
   `resources/app-update.yml`;electron-updater 运行时自动读取,代码不硬编码 feed。
 - 应用内更新流:渲染层「检查更新」(AboutSettings / 标题栏 UpdateEntry)→
-  preload 桥 → main `autoUpdater`(见 `desktop-electron/src/updater.ts`);
+  preload 桥 → main `autoUpdater`(见 `apps/desktop/src/updater.ts`);
   `autoDownload=false`(用户确认后下载)、`autoInstallOnAppQuit=true`(下载后
   即使不立即重启,退出时也会安装)。
 - 开发/未打包环境(`app.isPackaged === false`)更新器自动禁用,check 返回

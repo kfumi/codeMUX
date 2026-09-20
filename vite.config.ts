@@ -11,7 +11,7 @@ import { publicVendorDir, vendorMonaco } from "./scripts/vendor-monaco.mjs";
  * 三处静态服务都把这个前缀排除在 SPA 回退之外:缺失的 vendor 资源返回真实 404,
  * 而不是被回退成 200 + index.html —— 后者会让 AMD loader 拿入口页当脚本执行,
  * 报出的语法错误与「少了一个文件」这个真因完全脱节。
- * 另外两处:desktop-electron/src/main.ts 与 src-tauri/src/companion/server.rs。
+   * 另外两处:apps/desktop/src/main.ts 与 crates/daemon/src/companion/server.rs。
  */
 function isVendorAssetPath(pathname: string): boolean {
   return pathname === "/vs" || pathname.startsWith("/vs/");
@@ -89,7 +89,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ["**/src-tauri/**", "**/.worktrees/**"],
+      ignored: ["**/crates/**", "**/apps/**", "**/.worktrees/**"],
     },
   },
 }));
