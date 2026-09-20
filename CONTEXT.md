@@ -303,7 +303,7 @@ _Avoid_: 让出厂默认绕开保留表；把保留表当成平台 API 查询
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
 - 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。Daemon 权威、回环 Companion Server 与 Local Daemon Token 见 [ADR 0011](docs/adr/0011-daemon-authority-local-token.md)；Daemon 独立进程（`codemux-daemon`）与 Electron 桌面壳见 [ADR 0012](docs/adr/0012-daemon-process-electron-shell.md)，Tauri 壳已移除，ADR 0008「服务仅随移动同步开启」的表述已被 ADR 0011 修订。
 - Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
-- 定时任务决策见 [docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md](docs/superpowers/specs/2026-08-27-scheduled-tasks-design.md)。
+- 定时任务决策见 [docs/specs/2026-08-27-scheduled-tasks.md](docs/specs/2026-08-27-scheduled-tasks.md)。
 - 快捷键决策见 [ADR 0013](docs/adr/0013-user-configurable-keyboard-shortcuts.md)：可改键、键位覆盖三态、按物理键匹配、无修饰键的键位不得被占用。
 
 ## Out of Scope (for this feature's first cut)

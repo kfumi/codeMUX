@@ -11,7 +11,26 @@ CodeMUX is a local-first desktop app: an Electron shell (supervisor), a standalo
 - There is no separate mobile frontend: `src/` is the single frontend for all three hosts (Electron shell, PC browser, mobile browser). `npm run build:web` emits `dist-web/`, which the desktop app ships and the daemon serves to browser clients.
 - `src-cli/` contains the local CLI daemon client.
 - `public/` and `src-tauri/icons/` hold static web and app assets.
-- `docs/` contains architecture specs, ADRs, and plans.
+- `docs/` is the single home for all project documentation (see next section).
+
+## Documentation Layout
+
+All project documents live under `docs/`. Whatever agent you are (pi, trae, zcode, claude, codex, opencode), write documents to the authoritative paths below — **these override any global skill defaults** (e.g. the global `brainstorming`/`writing-plans` skills default to `docs/superpowers/`, which is retired).
+
+| Directory | Purpose | Naming |
+|---|---|---|
+| `docs/adr/` | Architecture decision records | `NNNN-slug.md`, sequential (highest existing +1) |
+| `docs/specs/` | Design docs / requirement specs (what & why) | `YYYY-MM-DD-<slug>.md` |
+| `docs/plans/` | Implementation plans (how, step by step) | `YYYY-MM-DD-<slug>.md` |
+| `docs/tickets/` | Work tickets, grouped per feature | `tickets/<feature-slug>/<NN>-<slug>.md`, NN from 01 |
+| `docs/research/` | Research notes, root-cause investigations | `YYYY-MM-DD-<slug>.md` |
+| `docs/guides/` | Long-lived usage / operations guides | `<topic>-guide.md`, kebab-case |
+
+- `<slug>` is English kebab-case; the Chinese title goes in the document H1.
+- Use the same `<slug>` for a feature's spec / plan / tickets.
+- Authoritative write-paths: brainstorming → `docs/specs/`; writing-plans → `docs/plans/`; to-tickets & wayfinder tickets → `docs/tickets/<feature-slug>/`; wayfinder maps → `docs/plans/YYYY-MM-DD-<effort>-map.md`; research → `docs/research/`.
+- Retired paths — never write or reference them again: `docs/superpowers/`, `.scratch/`, `.pi/plan/`, `.zcode/plans/`, `.trae/specs/`, `.trae/documents/`.
+- When adding or moving a document, update the index in `docs/README.md` in the same change.
 
 ## Build, Test, and Development Commands
 
@@ -22,7 +41,7 @@ CodeMUX is a local-first desktop app: an Electron shell (supervisor), a standalo
 - `npm run dev:electron` launches only the Electron shell (renderer must already be up on 1420).
 - `npm run build` type-checks `src/` and builds the Vite app.
 - `npm run build:daemon` (and `build:daemon:release`) builds the `codemux-daemon` binary.
-- `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `desktop-electron/release/` (see `docs/desktop-release-guide.md`).
+- `npm run build:electron-installer` builds the renderer + shell and packs the NSIS installer into `desktop-electron/release/` (see `docs/guides/desktop-release-guide.md`).
 - `npm run build:web` builds the unified frontend into `dist-web/`; the daemon serves that directory to browser clients and the installer bundles it.
 - `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript. The desktop app loads `sidecar/dist/` at runtime. `npm run dev:desktop` does not build unconditionally: it compares the newest `src-tauri/sidecar/src/**` mtime against `dist/index.js` and runs `build:sidecar` only when the source is newer (~60 ms when fresh, 3–5 s when it has to build); `npm run build:electron-installer` always builds it. When you launch Electron another way (`npm run dev:electron` against an already-running daemon), run `npm run build:sidecar` yourself or the app silently runs stale code.
 - `cd desktop-electron && npm run typecheck` type-checks the shell's main/preload TypeScript.

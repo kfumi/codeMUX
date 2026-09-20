@@ -156,26 +156,26 @@ src-cli/                    # 本机命令行 Daemon Client
 
 ## 设计文档
 
-项目的详细设计文档位于 `docs/superpowers/specs/` 目录，架构决策记录（ADR）位于 `docs/adr/`，阅读这些文档有助于理解架构决策：
+项目的详细设计文档位于 `docs/specs/` 目录，架构决策记录（ADR）位于 `docs/adr/`，阅读这些文档有助于理解架构决策：
 
-- `2026-05-27-ai-codeMUX-design.md` — 项目整体设计
-- `2026-05-28-claude-agent-sdk-integration-design.md` — Claude Agent SDK 集成设计
-- `2026-06-08-assistant-ui-runtime-adapter-design.md` — assistant-ui 运行时适配设计
-- `2026-06-10-multi-agent-codex-integration-design.md` — Codex 多 Agent 集成设计
-- `2026-06-13-mcp-management-refactor-design.md` — MCP 管理重构设计
-- `2026-06-29-agent-permission-approval-alignment-design.md` — Agent 权限审批对齐设计
-- `2026-07-01-updater-mechanism-design.md` — 自动更新机制设计
-- `2026-07-03-agent-system-notifications-design.md` — Agent 系统通知设计
-- `2026-07-03-git-branch-management-design.md` — Git 分支管理设计
-- `2026-07-12-opencode-sdk-agent-design.md` — OpenCode SDK Agent 接入设计
-- `2026-07-14-agent-provider-profile-refactor-design.md` — Provider Profile 重构设计
-- `2026-07-23-dev-performance-diagnostics-design.md` — 开发性能诊断设计
-- `2026-08-27-scheduled-tasks-design.md` — 定时任务设计
+- `2026-05-27-ai-codeMUX.md` — 项目整体设计
+- `2026-05-28-claude-agent-sdk-integration.md` — Claude Agent SDK 集成设计
+- `2026-06-08-assistant-ui-runtime-adapter.md` — assistant-ui 运行时适配设计
+- `2026-06-10-multi-agent-codex-integration.md` — Codex 多 Agent 集成设计
+- `2026-06-13-mcp-management-refactor.md` — MCP 管理重构设计
+- `2026-06-29-agent-permission-approval-alignment.md` — Agent 权限审批对齐设计
+- `2026-07-01-updater-mechanism.md` — 自动更新机制设计
+- `2026-07-03-agent-system-notifications.md` — Agent 系统通知设计
+- `2026-07-03-git-branch-management.md` — Git 分支管理设计
+- `2026-07-12-opencode-sdk-agent.md` — OpenCode SDK Agent 接入设计
+- `2026-07-14-agent-provider-profile-refactor.md` — Provider Profile 重构设计
+- `2026-07-23-dev-performance-diagnostics.md` — 开发性能诊断设计
+- `2026-08-27-scheduled-tasks.md` — 定时任务设计
 - `2026-09-01-shared-transcript-message-renderer.md` — 共享消息渲染器设计
 - `docs/adr/0011-daemon-authority-local-token.md` — Daemon 权威与 Local Daemon Token
 - `docs/adr/0012-daemon-process-electron-shell.md` — Daemon 独立进程与 Electron 桌面壳
 
-此外 `docs/` 下还有面向使用者的指南：`agent-provider-profiles-guide.md`、`codex-routing-proxy-guide.md`、`mcp-unified-management-guide.md`、`skills-unified-management-guide.md`、`ai-agent-permission-approval-guide.md`、`desktop-release-guide.md`。
+此外 `docs/guides/` 下还有面向使用者的指南：`agent-provider-profiles-guide.md`、`codex-routing-proxy-guide.md`、`mcp-unified-management-guide.md`、`skills-unified-management-guide.md`、`ai-agent-permission-approval-guide.md`、`desktop-release-guide.md`。完整文档索引与写作规范见 [docs/README.md](docs/README.md)。
 
 ## Pull Request 检查清单
 

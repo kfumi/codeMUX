@@ -92,5 +92,5 @@ if (dryRun) {
 } else {
   console.log("注意:当前 GitHub Actions 发版流水线仍是 Tauri 时代配置,Electron 安装包");
   console.log("请用 `npm run build:electron-installer` 本地出包后上传到 GitHub Releases");
-  console.log("(见 docs/desktop-release-guide.md;CI 迁移为待办)。");
+  console.log("(见 docs/guides/desktop-release-guide.md;CI 迁移为待办)。");
 }

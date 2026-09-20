@@ -229,7 +229,7 @@ npm run dev
 npm run build:electron-installer
 ```
 
-产物（NSIS 安装包 + `latest.yml`）输出到 `desktop-electron/release/`，详见[桌面端发版指南](docs/desktop-release-guide.md)。
+产物（NSIS 安装包 + `latest.yml`）输出到 `desktop-electron/release/`，详见[桌面端发版指南](docs/guides/desktop-release-guide.md)。
 
 ### 常用检查命令
 
@@ -382,7 +382,7 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 | UI | Tailwind CSS v4, Radix UI, lucide-react, shadcn/ui |
 | 状态管理 | Zustand |
 | 对话渲染 | `@assistant-ui/react`, `react-markdown`, `streamdown` |
-| 代码 / Diff | CodeMirror, `diff`, `parse-diff`, highlight.js |
+| 代码 / Diff | Monaco (`@monaco-editor/react`), `diff`, `parse-diff`, highlight.js |
 | 终端 | `@xterm/xterm`, `@xterm/addon-fit` |
 | 桌面壳 | Electron 33（窗口、托盘、单实例、通知、electron-updater、Browser Host） |
 | 后端 | Rust 2021 daemon（`codemux-daemon`）: Tokio, Reqwest, Rusqlite，内嵌 Companion Server（回环 REST/WS） |
@@ -476,13 +476,13 @@ codeMUX/
 
 - [贡献指南](CONTRIBUTING.md)
 - [更新日志](CHANGELOG.md)
-- [桌面端发版指南](docs/desktop-release-guide.md)
-- [智能体供应商使用说明](docs/agent-provider-profiles-guide.md)
-- [Codex 路由代理说明](docs/codex-routing-proxy-guide.md)
-- [MCP 统一管理说明](docs/mcp-unified-management-guide.md)
-- [Skills 统一管理说明](docs/skills-unified-management-guide.md)
-- [AI Agent 权限审批说明](docs/ai-agent-permission-approval-guide.md)
-- [OpenCode SDK Agent 接入设计](docs/superpowers/specs/2026-07-12-opencode-sdk-agent-design.md)
+- [桌面端发版指南](docs/guides/desktop-release-guide.md)
+- [智能体供应商使用说明](docs/guides/agent-provider-profiles-guide.md)
+- [Codex 路由代理说明](docs/guides/codex-routing-proxy-guide.md)
+- [MCP 统一管理说明](docs/guides/mcp-unified-management-guide.md)
+- [Skills 统一管理说明](docs/guides/skills-unified-management-guide.md)
+- [AI Agent 权限审批说明](docs/guides/ai-agent-permission-approval-guide.md)
+- [OpenCode SDK Agent 接入设计](docs/specs/2026-07-12-opencode-sdk-agent.md)
 - [ADR 0011 — Daemon 权威与 Local Daemon Token](docs/adr/0011-daemon-authority-local-token.md)
 - [ADR 0012 — Daemon 独立进程与 Electron 桌面壳](docs/adr/0012-daemon-process-electron-shell.md)
 

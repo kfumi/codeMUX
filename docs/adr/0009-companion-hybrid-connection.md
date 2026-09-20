@@ -58,4 +58,4 @@ ADR 0008 确立了 Mobile Companion 作为 thin client、Companion Server 在 Ru
 ## Related
 
 - ADR 0008 — Mobile Companion 初版架构
-- `.scratch/companion-pairing-evolution/spec.md` — 全阶段需求与工单
+- `docs/specs/2026-08-16-companion-pairing-evolution.md` — 全阶段需求与工单
