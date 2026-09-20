@@ -113,6 +113,7 @@
 | [2026-09-13-unified-frontend.md](specs/2026-09-13-unified-frontend.md) | 统一前端——桌面 / 网页 / 移动共用一套渲染层连 daemon |
 | [2026-09-18-long-session-render-scale.md](specs/2026-09-18-long-session-render-scale.md) | 长会话渲染规模:让开销只与"正在看的那一段"成正比 |
 | [2026-09-20-codex-collab-subagent-parity.md](specs/2026-09-20-codex-collab-subagent-parity.md) | Codex 协作子智能体:两种 spawn 变体的声明与轨道对等 |
+| [2026-09-21-agent-task-board.md](specs/2026-09-21-agent-task-board.md) | 工作任务看板(Work Task):agent 驱动的委派与验收 |
 
 ### plans
 
@@ -158,6 +159,7 @@
 | Feature | 工单数 | 对应 spec |
 |---|---|---|
 | [add-usage-statistics](tickets/add-usage-statistics/) | 2 | [2026-07-23](specs/2026-07-23-add-usage-statistics.md) |
+| [agent-task-board](tickets/agent-task-board/) | 4 | [2026-09-21](specs/2026-09-21-agent-task-board.md) |
 | [codemux-managed-sdk-runtime](tickets/codemux-managed-sdk-runtime/) | 7 | [2026-08-05](specs/2026-08-05-codemux-managed-sdk-runtime.md) |
 | [codex-app-server-migration](tickets/codex-app-server-migration/) | 13 | [2026-08-22](specs/2026-08-22-codex-app-server-migration.md) |
 | [codex-collab-subagent-parity](tickets/codex-collab-subagent-parity/) | 3 | [2026-09-20](specs/2026-09-20-codex-collab-subagent-parity.md) |

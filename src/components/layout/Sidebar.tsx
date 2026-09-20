@@ -1,4 +1,4 @@
-import { MessageSquarePlus, Search, Settings, Timer } from 'lucide-react';
+import { ListTodo, MessageSquarePlus, Search, Settings, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { openDialog } from '../../lib/desktopDialogs';
@@ -7,6 +7,7 @@ import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useSho
 import { useChatSearchStore } from '../../stores/chatSearchStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { selectAttentionCount, useWorkTaskStore } from '../../stores/workTaskStore';
 import type { Project } from '../../types/project';
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '../ui/tooltip';
 import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
@@ -22,6 +23,7 @@ interface SidebarProps {
   onSelectSession: (sessionId: string, projectId: string | null) => void;
   onOpenSettings: () => void;
   onOpenAutomation: () => void;
+  onOpenTodoBoard: () => void;
 }
 
 export function Sidebar({
@@ -30,9 +32,11 @@ export function Sidebar({
   onSelectSession,
   onOpenSettings,
   onOpenAutomation,
+  onOpenTodoBoard,
 }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
+  const attentionCount = useWorkTaskStore((state) => selectAttentionCount(state.tasks));
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const chatSearchOpen = useChatSearchStore((state) => state.isOpen);
@@ -53,6 +57,11 @@ export function Sidebar({
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  // 侧边栏徽章数据：挂载时拉一次待办任务，之后靠事件桥/看板轮询刷新。
+  useEffect(() => {
+    void useWorkTaskStore.getState().fetchTasks();
+  }, []);
 
   const handleAddProject = async () => {
     try {
@@ -120,6 +129,19 @@ export function Sidebar({
         >
           <Timer className="h-4 w-4" />
           <span className="flex-1 text-left">自动化</span>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTodoBoard}
+          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+        >
+          <ListTodo className="h-4 w-4" />
+          <span className="flex-1 text-left">待办</span>
+          {attentionCount > 0 && (
+            <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-destructive px-1 text-destructive-foreground text-ui-caption font-medium">
+              {attentionCount > 99 ? '99+' : attentionCount}
+            </span>
+          )}
         </button>
       </div>
 

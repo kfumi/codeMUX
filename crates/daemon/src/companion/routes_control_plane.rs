@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 
 use crate::companion::server::{authorize, ApiError, ServerContext};
 use crate::services::scheduled_tasks::ScheduledTaskInput;
+use crate::work_tasks::{WorkTaskInput, WorkTaskPatch};
 
 pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerContext> {
     router
@@ -52,6 +53,24 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
             "/scheduled-tasks/runs/{run_id}",
             delete(delete_scheduled_run),
         )
+        // Work tasks（静态 reorder 先于 /{id} 注册，axum 0.8 静态优先但显式更稳）
+        .route("/work-tasks", get(list_work_tasks).post(create_work_task))
+        .route("/work-tasks/reorder", post(reorder_work_tasks_route))
+        .route(
+            "/work-tasks/{task_id}",
+            get(get_work_task)
+                .patch(update_work_task)
+                .delete(delete_work_task),
+        )
+        .route("/work-tasks/{task_id}/archive", post(archive_work_task))
+        .route("/work-tasks/{task_id}/unarchive", post(unarchive_work_task))
+        .route("/work-tasks/{task_id}/events", get(list_work_task_events))
+        .route("/work-tasks/{task_id}/start", post(start_work_task))
+        .route("/work-tasks/{task_id}/cancel", post(cancel_work_task))
+        .route("/work-tasks/{task_id}/retry", post(retry_work_task))
+        .route("/work-tasks/{task_id}/restart", post(restart_work_task))
+        .route("/work-tasks/{task_id}/merge", post(merge_work_task))
+        .route("/work-tasks/{task_id}/complete", post(complete_work_task))
         // Workspace files
         .route("/workspace/files/read", post(read_workspace_file))
         .route("/workspace/files/write", post(write_workspace_file))
@@ -523,6 +542,232 @@ async fn get_scheduled_timezone(
     authorize(&ctx, &headers, Some(peer))?;
     let timezone = crate::services::scheduled_tasks::get_scheduled_task_timezone();
     Ok(Json(serde_json::json!({ "timezone": timezone })))
+}
+
+// --- Work tasks --------------------------------------------------------------
+
+async fn list_work_tasks(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let tasks =
+        crate::services::work_tasks::list_work_tasks_impl(&state).map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!(tasks)))
+}
+
+async fn get_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let task = crate::services::work_tasks::get_work_task_impl(&state, task_id)
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!(task)))
+}
+
+async fn create_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(input): Json<WorkTaskInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let task = crate::services::work_tasks::create_work_task_impl(&state, input)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!(task)))
+}
+
+async fn update_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+    Json(patch): Json<WorkTaskPatch>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let task = crate::services::work_tasks::update_work_task_impl(&state, task_id, patch)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!(task)))
+}
+
+async fn delete_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    crate::services::work_tasks::delete_work_task_impl(&state, task_id)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn archive_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let task = crate::services::work_tasks::archive_work_task_impl(&state, task_id, true)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!(task)))
+}
+
+async fn unarchive_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let task = crate::services::work_tasks::archive_work_task_impl(&state, task_id, false)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!(task)))
+}
+
+async fn list_work_task_events(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    let events = crate::services::work_tasks::list_work_task_events_impl(&state, task_id)
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!(events)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderWorkTasksRequest {
+    project_id: String,
+    ids: Vec<String>,
+}
+
+async fn reorder_work_tasks_route(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ReorderWorkTasksRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let state = ctx.daemon.app.clone();
+    crate::services::work_tasks::reorder_work_tasks_impl(&state, body.project_id, body.ids)
+        .map_err(ApiError::bad_request)?;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "mutate");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// 票 02/03 执行面动作：POST /work-tasks/{id}/{start|cancel|retry|restart|merge|complete}。
+/// 成功返回任务 JSON；成功或业务失败都广播 work-tasks-changed 让看板刷新。
+async fn start_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let result = crate::work_tasks::start_work_task(&ctx.daemon, &task_id).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "start");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
+}
+
+async fn cancel_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let result = crate::work_tasks::cancel_work_task(&ctx.daemon, &task_id).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "cancel");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
+}
+
+async fn retry_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let result = crate::work_tasks::retry_work_task(&ctx.daemon, &task_id).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "retry");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
+}
+
+async fn restart_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let result = crate::work_tasks::restart_work_task(&ctx.daemon, &task_id).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "restart");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeWorkTaskBody {
+    message: Option<String>,
+}
+
+async fn merge_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+    body: Option<Json<MergeWorkTaskBody>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let message = body.and_then(|Json(body)| body.message);
+    let result = crate::work_tasks::merge_work_task(&ctx.daemon, &task_id, message).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "merge");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
+}
+
+async fn complete_work_task(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let result = crate::work_tasks::complete_work_task(&ctx.daemon, &task_id).await;
+    crate::work_tasks::emit_work_tasks_changed(&ctx.daemon, "complete");
+    result
+        .map(|task| Json(serde_json::json!(task)))
+        .map_err(ApiError::bad_request)
 }
 
 // --- Workspace files ---------------------------------------------------------

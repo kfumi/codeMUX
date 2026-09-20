@@ -13,3 +13,4 @@ pub mod runtime;
 pub mod scheduled_tasks;
 pub mod session;
 pub mod usage;
+pub mod work_tasks;

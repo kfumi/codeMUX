@@ -34,6 +34,7 @@ import { useSkillStore } from './stores/skillStore';
 import { useNavigationStore, type NavigationLocation, type SidePanelNavigationState } from './stores/navigationStore';
 import { useScheduledTaskStore } from './stores/scheduledTaskStore';
 import { UpdaterProvider } from './features/update/UpdaterProvider';
+import { useWorkTaskStore } from './stores/workTaskStore';
 import { UpdateEntry } from './features/update/components/UpdateEntry';
 import type { TodoItem } from './types/agent';
 import type { SettingsTab } from './components/settings/SettingsDialog';
@@ -42,6 +43,7 @@ const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
 const AutomationPanel = lazy(async () => ({ default: (await import('./components/automation/AutomationPanel')).AutomationPanel }));
+const WorkTaskBoard = lazy(async () => ({ default: (await import('./components/worktask/WorkTaskBoard')).WorkTaskBoard }));
 const SettingsSidebar = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsSidebar }));
 const SettingsContent = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsContent }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
@@ -123,7 +125,13 @@ function App() {
 
   useEffect(() => {
     if (activeView !== 'automation') return;
+    if (activeView !== 'automation') return;
     void useScheduledTaskStore.getState().fetchTasks();
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== 'todo') return;
+    void useWorkTaskStore.getState().fetchTasks();
   }, [activeView]);
 
   const applyNavigationLocation = useCallback((location: NavigationLocation) => {
@@ -185,6 +193,19 @@ function App() {
       activeProjectId: null,
       draftProjectId: null,
       isDraftOpen: false,
+      sidePanel: getSidePanelNavigation('home'),
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleOpenTodoBoard = useCallback(() => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'todo',
+      activeSessionId: null,
+      activeProjectId: null,
+      draftProjectId: null,
+      isDraftOpen: false,
+      automationTaskId: null,
       sidePanel: getSidePanelNavigation('home'),
     });
   }, [commitNavigation, navigationLocation]);
@@ -443,6 +464,7 @@ function App() {
               onSelectSession={handleSelectSession}
               onOpenSettings={handleOpenSettings}
               onOpenAutomation={handleOpenAutomation}
+              onOpenTodoBoard={handleOpenTodoBoard}
             />
           )}
           sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
@@ -475,6 +497,10 @@ function App() {
                   onTaskIdChange={handleAutomationTaskChange}
                   onOpenSession={handleOpenScheduledSession}
                 />
+              </Suspense>
+            ) : activeView === 'todo' ? (
+              <Suspense fallback={panelFallback}>
+                <WorkTaskBoard onOpenSession={handleOpenScheduledSession} />
               </Suspense>
             ) : activeSessionId ? (
               <Suspense fallback={panelFallback}>

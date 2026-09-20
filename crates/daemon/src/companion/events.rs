@@ -29,6 +29,11 @@ pub fn handle_sidecar_event_for_companion(
             .unwrap_or("")
             .to_string();
         track_subagent_flow_state(companion_state, &session_id, &event);
+        // 工作任务状态回写（票 02）：turn_finished/error/user_input_requested 等
+        // 会话事件驱动任务状态机，状态实际变化才广播 work-tasks-changed。
+        if !session_id.is_empty() {
+            crate::work_tasks::handle_session_event(companion_state, &session_id, &event, app);
+        }
         maybe_finish_turn_and_drain_queue(
             app,
             agent_state,

@@ -206,12 +206,67 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(next_run_at);
         CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task ON scheduled_task_runs(task_id);
+
+        CREATE TABLE IF NOT EXISTS work_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            instruction TEXT NOT NULL,
+            agent_kind TEXT NOT NULL,
+            provider_id TEXT,
+            model TEXT,
+            use_worktree INTEGER NOT NULL DEFAULT 1,
+            base_branch TEXT,
+            worktree_path TEXT,
+            work_branch TEXT,
+            status TEXT NOT NULL DEFAULT 'todo',
+            failure_reason TEXT,
+            last_error TEXT,
+            run_seq INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            session_id TEXT,
+            result_summary TEXT,
+            files_changed INTEGER,
+            additions INTEGER,
+            deletions INTEGER,
+            merge_commit TEXT,
+            completion_kind TEXT,
+            archived_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            settled_at TEXT,
+            finished_at TEXT,
+            base_sha TEXT,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS work_task_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            detail TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES work_tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_tasks_project ON work_tasks(project_id);
+        CREATE INDEX IF NOT EXISTS idx_work_tasks_status ON work_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_work_task_events_task ON work_task_events(task_id);
         ",
     )?;
 
     let has_scheduled_task_weekly_weekdays: bool = conn
         .prepare("SELECT weekly_weekdays FROM scheduled_tasks LIMIT 0")
         .is_ok();
+    // Migration: add work_tasks.base_sha column if missing (合并前的 base 前进保护)
+    let has_work_task_base_sha: bool = conn
+        .prepare("SELECT base_sha FROM work_tasks LIMIT 0")
+        .is_ok();
+    if !has_work_task_base_sha {
+        let _ = conn.execute("ALTER TABLE work_tasks ADD COLUMN base_sha TEXT", []);
+    }
+
     if !has_scheduled_task_weekly_weekdays {
         let _ = conn.execute(
             "ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT",

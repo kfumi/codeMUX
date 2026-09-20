@@ -31,6 +31,8 @@ mod services;
 mod skills;
 mod terminal;
 
+pub mod work_tasks;
+
 use std::sync::Mutex;
 
 /// daemon 进程内共享状态:数据库连接、配置、数据目录与 Runtime 解析器。

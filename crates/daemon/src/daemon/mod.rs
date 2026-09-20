@@ -174,6 +174,7 @@ pub async fn run_daemon_standalone(
     let daemon_for_tick = daemon.clone();
     let tick_task = tokio::spawn(async move {
         loop {
+            crate::work_tasks::tick(&daemon_for_tick).await;
             crate::scheduled_tasks::tick_async(&daemon_for_tick, chrono::Utc::now()).await;
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }

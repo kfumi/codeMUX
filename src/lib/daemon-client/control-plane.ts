@@ -352,6 +352,41 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
         { method: 'DELETE' },
       );
     },
+    // Work tasks（待办看板）
+    workTaskList: () => fetch<unknown[]>(config, '/work-tasks'),
+    workTaskGet: (taskId: string) => fetch<unknown | null>(config, `/work-tasks/${taskId}`),
+    workTaskCreate: (input: unknown) =>
+      fetch(config, '/work-tasks', { method: 'POST', body: JSON.stringify(input) }),
+    workTaskUpdate: (taskId: string, input: unknown) =>
+      fetch(config, `/work-tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    workTaskDelete: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}`, { method: 'DELETE' }),
+    workTaskArchive: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/archive`, { method: 'POST' }),
+    workTaskUnarchive: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/unarchive`, { method: 'POST' }),
+    workTaskReorder: (projectId: string, ids: string[]) =>
+      fetch(config, '/work-tasks/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ projectId, ids }),
+      }),
+    workTaskStart: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/start`, { method: 'POST' }),
+    workTaskCancel: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/cancel`, { method: 'POST' }),
+    workTaskRetry: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/retry`, { method: 'POST' }),
+    workTaskRestart: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/restart`, { method: 'POST' }),
+    workTaskMerge: (taskId: string, message?: string) =>
+      fetch(config, `/work-tasks/${taskId}/merge`, {
+        method: 'POST',
+        body: JSON.stringify({ message: message ?? null }),
+      }),
+    workTaskComplete: (taskId: string) =>
+      fetch(config, `/work-tasks/${taskId}/complete`, { method: 'POST' }),
+    workTaskListEvents: (taskId: string) =>
+      fetch<unknown[]>(config, `/work-tasks/${taskId}/events`),
   };
 }
 

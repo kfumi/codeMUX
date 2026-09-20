@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { SettingsTab } from '../components/settings/SettingsDialog';
 
 export interface NavigationLocation {
-  view: 'app' | 'settings' | 'automation';
+  view: 'app' | 'settings' | 'automation' | 'todo';
   settingsTab: SettingsTab;
   activeSessionId: string | null;
   activeProjectId: string | null;
