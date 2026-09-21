@@ -136,7 +136,7 @@ export function Sidebar({
           className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <ListTodo className="h-4 w-4" />
-          <span className="flex-1 text-left">待办</span>
+          <span className="flex-1 text-left">待办任务</span>
           {attentionCount > 0 && (
             <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-destructive px-1 text-destructive-foreground text-ui-caption font-medium">
               {attentionCount > 99 ? '99+' : attentionCount}

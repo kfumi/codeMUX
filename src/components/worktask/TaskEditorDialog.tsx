@@ -167,7 +167,11 @@ export function TaskEditorDialog({
     ? `默认：项目当前分支（${currentBranch}）`
     : '默认：项目当前分支';
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // modal={false}:对话框里有 Radix 下拉/浮层(智能体、模型、思考强度)。模态
+    // Dialog 会把 body 设成 pointer-events:none 并抢占焦点,portal 到 body 的弹层
+    // 继承该屏蔽后点不动(表现为「点开没选项」)。非模态不产生这些副作用,弹层
+    // 行为与页面上下文一致;点外部/Esc 关闭语义仍由 Radix 保留。
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑任务' : '新建待办任务'}</DialogTitle>
@@ -200,7 +204,7 @@ export function TaskEditorDialog({
               onChange={(event) => setDraft((current) => ({ ...current, instruction: event.target.value }))}
               placeholder="描述要完成的工作、目标文件或验收标准……"
               rows={5}
-              className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-ui-body text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+              className="w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-ui-body text-foreground ring-offset-background transition-[background-color,border-color,color,box-shadow] duration-150 placeholder:text-muted-foreground hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0"
             />
           </div>
 
