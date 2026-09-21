@@ -187,8 +187,8 @@ export function TaskEditorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
-          <div className="space-y-2.5">
+        <div className="space-y-6">
+          <div className="space-y-4">
             <label htmlFor="work-task-title" className="text-ui-body font-medium text-foreground">
               标题 <span className="text-destructive">*</span>
             </label>
@@ -201,7 +201,7 @@ export function TaskEditorDialog({
             />
           </div>
 
-          <div className="space-y-2.5">
+          <div className="space-y-4">
             <label htmlFor="work-task-instruction" className="text-ui-body font-medium text-foreground">
               任务指令
             </label>
@@ -215,7 +215,7 @@ export function TaskEditorDialog({
             />
           </div>
 
-          <div className="space-y-2.5">
+          <div className="space-y-4">
             <span className="text-ui-body font-medium text-foreground">项目</span>
             <AutomationProjectPicker
               projects={projects}
@@ -227,7 +227,7 @@ export function TaskEditorDialog({
             )}
           </div>
 
-          <div className="space-y-2.5">
+          <div className="space-y-4">
             <label className="flex items-center gap-2 text-ui-body text-foreground">
               <input
                 type="checkbox"
@@ -241,7 +241,7 @@ export function TaskEditorDialog({
               在独立 worktree 中执行
             </label>
             {draft.useWorktree && (
-              <div className="space-y-2.5">
+              <div className="space-y-4">
                 <label
                   htmlFor="work-task-base-branch"
                   className="text-ui-body font-medium text-foreground"
