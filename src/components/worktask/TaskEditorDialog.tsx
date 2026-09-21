@@ -3,6 +3,10 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { daemonFacade } from '../../lib/facades/daemon-facade';
+import {
+  getConfiguredAgentModelIds,
+  getDefaultAgentKindFromConfig,
+} from '../../lib/scheduledTaskDefaults';
 import { AgentSelector } from '../agent/AgentSelector';
 import { AgentModelSelector } from '../agent/AgentModelSelector';
 import { AutomationProjectPicker } from '../automation/AutomationProjectPicker';
@@ -70,16 +74,21 @@ export function TaskEditorDialog({
   const createTask = useWorkTaskStore((state) => state.createTask);
   const updateTask = useWorkTaskStore((state) => state.updateTask);
 
-  const [draft, setDraft] = useState<EditorDraft>({
+  // 新任务的默认值 = 设置 → 智能体运行时里的默认配置：默认智能体种类
+  // (agent_defaults.default_agent_kind)，以及该种类自己的默认供应商/模型
+  // (agent_configs[kind].default_provider_id / default_model，缺省回落 active_provider)。
+  const defaultsForAgent = (agentKind: WorkTaskInput['agentKind']) => ({
+    agentKind,
+    ...getConfiguredAgentModelIds(agentKind, config),
+  });
+  const [draft, setDraft] = useState<EditorDraft>(() => ({
     title: '',
     instruction: '',
     projectId: defaultProjectId,
-    agentKind: 'claude_code',
-    providerId: null,
-    model: null,
+    ...defaultsForAgent(getDefaultAgentKindFromConfig(config)),
     useWorktree: true,
     baseBranch: '',
-  });
+  }));
   // WorkTaskInput 不含 reasoning effort；选择器需要该 prop，本地暂存不落库。
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,9 +107,7 @@ export function TaskEditorDialog({
         title: '',
         instruction: '',
         projectId: defaultProjectId,
-        agentKind: 'claude_code',
-        providerId: config?.active_provider_id ?? null,
-        model: null,
+        ...defaultsForAgent(getDefaultAgentKindFromConfig(config)),
         useWorktree: true,
         baseBranch: '',
       });
@@ -180,8 +187,8 @@ export function TaskEditorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
+        <div className="space-y-5">
+          <div className="space-y-2.5">
             <label htmlFor="work-task-title" className="text-ui-body font-medium text-foreground">
               标题 <span className="text-destructive">*</span>
             </label>
@@ -194,7 +201,7 @@ export function TaskEditorDialog({
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-2.5">
             <label htmlFor="work-task-instruction" className="text-ui-body font-medium text-foreground">
               任务指令
             </label>
@@ -208,7 +215,7 @@ export function TaskEditorDialog({
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-2.5">
             <span className="text-ui-body font-medium text-foreground">项目</span>
             <AutomationProjectPicker
               projects={projects}
@@ -220,7 +227,7 @@ export function TaskEditorDialog({
             )}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <label className="flex items-center gap-2 text-ui-body text-foreground">
               <input
                 type="checkbox"
@@ -234,7 +241,7 @@ export function TaskEditorDialog({
               在独立 worktree 中执行
             </label>
             {draft.useWorktree && (
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 <label
                   htmlFor="work-task-base-branch"
                   className="text-ui-body font-medium text-foreground"
@@ -254,10 +261,12 @@ export function TaskEditorDialog({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <AgentSelector
               value={draft.agentKind}
-              onChange={(agentKind) => setDraft((current) => ({ ...current, agentKind }))}
+              // 换种类时把供应商/模型一并换成该种类在「智能体运行时」里配的默认,
+              // 否则会带着上一个种类的模型提交(例如 Claude 的默认模型配到 Codex 上)。
+              onChange={(agentKind) => setDraft((current) => ({ ...current, ...defaultsForAgent(agentKind) }))}
             />
             <AgentModelSelector
               agentKind={draft.agentKind}
