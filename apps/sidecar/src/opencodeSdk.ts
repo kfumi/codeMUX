@@ -58,6 +58,14 @@ export interface OpenCodeClientPort {
   prompt(input: OpenCodePromptInput): Promise<void>;
   compactSession?(input: OpenCodeCompactInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
+  /** 会话内回退:opencode 在 session 记录上打 revert 标记(从 messageID 起隐藏)。 */
+  revertSession(input: { sessionId: string; messageId: string }): Promise<void>;
+  /**
+   * opencode server 侧的会话运行状态:'busy' 表示仍有 runner 在跑(或收尾中),
+   * 'idle'/'unknown' 表示可以安全做 rewind 之类的 runner-affecting 操作。
+   * 空闲会话不会出现在 status 表里,查不到即视为 idle。
+   */
+  sessionStatus?(input: { sessionId: string }): Promise<'busy' | 'idle'>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
   respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
@@ -705,6 +713,30 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               'OpenCode session interrupt',
               await client.session.abort({ path: { id: sessionId }, query: { directory: cwd } }),
             );
+          },
+          async revertSession({ sessionId, messageId }) {
+            return readResponse(
+              'OpenCode session revert',
+              await client.session.revert({
+                path: { id: sessionId },
+                query: { directory: cwd },
+                body: { messageID: messageId },
+              }),
+            );
+          },
+          async sessionStatus({ sessionId }) {
+            try {
+              const response = await client.session.status({ query: { directory: cwd } });
+              const statuses = (response.data ?? {}) as Record<string, { type?: unknown }>;
+              const entry = statuses[sessionId];
+              const statusType =
+                entry && typeof entry === 'object' ? String((entry as { type?: unknown }).type ?? '') : '';
+              return statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
+            } catch {
+              // 状态查询失败不作为 busy 证据(可能 server 正在重启);让调用方
+              // 的后续操作自己面对真实错误。
+              return 'idle';
+            }
           },
           async respondToPermission({ sessionId, requestId, response }) {
             return readResponse(

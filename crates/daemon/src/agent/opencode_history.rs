@@ -1226,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn rewinds_opencode_messages_from_target_message_id() {
+    fn resolves_opencode_rewind_boundary_from_target_message_id() {
         let connection = rewind_fixture_connection();
         let target = super::super::rewind::RewindTarget {
             provider_message_id: Some("user-2".to_string()),
@@ -1236,32 +1236,38 @@ mod tests {
             text_fingerprint: None,
             turn_ordinal: None,
         };
+        let ordered_rows = load_opencode_ordered_message_roles(&connection, "session-1").unwrap();
 
-        let truncated_to_empty =
-            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target))
+        let boundary = resolve_opencode_rewind_boundary(
+            &connection,
+            &ordered_rows,
+            "session-1",
+            Some(&target),
+        )
+        .unwrap();
+
+        // 原生 rewind 只解析边界,不动任何存储行。
+        assert_eq!(boundary.as_deref(), Some("user-2"));
+        assert_eq!(count_messages(&connection), 4);
+    }
+
+    #[test]
+    fn resolves_opencode_rewind_boundary_to_latest_turn_without_target() {
+        let connection = rewind_fixture_connection();
+        let ordered_rows = load_opencode_ordered_message_roles(&connection, "session-1").unwrap();
+
+        let boundary =
+            resolve_opencode_rewind_boundary(&connection, &ordered_rows, "session-1", None)
                 .unwrap();
 
-        assert!(!truncated_to_empty);
-        assert_eq!(count_messages(&connection), 2);
-        let remaining_parts: i64 = connection
-            .query_row("SELECT COUNT(*) FROM part", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(remaining_parts, 2);
+        assert_eq!(boundary.as_deref(), Some("user-2"));
+        assert_eq!(count_messages(&connection), 4);
     }
 
     #[test]
-    fn rewinds_opencode_to_latest_turn_without_target() {
-        let connection = rewind_fixture_connection();
-
-        let truncated_to_empty =
-            rewind_opencode_events_from_connection(&connection, "session-1", None).unwrap();
-
-        assert!(!truncated_to_empty);
-        assert_eq!(count_messages(&connection), 2);
-    }
-
-    #[test]
-    fn rewinds_opencode_target_by_ordinal_and_fingerprint_truncates_to_empty() {
+    fn resolves_opencode_rewind_target_by_ordinal_and_fingerprint() {
+        // 回退第一条用户消息:原生 revert(user-1) 直接得到空视图,会话与
+        // binding 保持不变 —— 边界就是 user-1,不需要走清空路径。
         let connection = rewind_fixture_connection();
         let target = super::super::rewind::RewindTarget {
             provider_message_id: None,
@@ -1271,13 +1277,18 @@ mod tests {
             text_fingerprint: Some("first question".to_string()),
             turn_ordinal: Some(1),
         };
+        let ordered_rows = load_opencode_ordered_message_roles(&connection, "session-1").unwrap();
 
-        let truncated_to_empty =
-            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target))
-                .unwrap();
+        let boundary = resolve_opencode_rewind_boundary(
+            &connection,
+            &ordered_rows,
+            "session-1",
+            Some(&target),
+        )
+        .unwrap();
 
-        assert!(truncated_to_empty);
-        assert_eq!(count_messages(&connection), 0);
+        assert_eq!(boundary.as_deref(), Some("user-1"));
+        assert_eq!(count_messages(&connection), 4);
     }
 
     #[test]
@@ -1291,9 +1302,14 @@ mod tests {
             text_fingerprint: None,
             turn_ordinal: None,
         };
+        let ordered_rows = load_opencode_ordered_message_roles(&connection, "session-1").unwrap();
 
-        let result =
-            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target));
+        let result = resolve_opencode_rewind_boundary(
+            &connection,
+            &ordered_rows,
+            "session-1",
+            Some(&target),
+        );
 
         assert!(result.is_err());
         assert_eq!(count_messages(&connection), 4);
@@ -1314,9 +1330,15 @@ mod tests {
             text_fingerprint: None,
             turn_ordinal: None,
         };
+        let ordered_rows =
+            load_opencode_ordered_message_roles(&connection, "session-empty").unwrap();
 
-        let result =
-            rewind_opencode_events_from_connection(&connection, "session-empty", Some(&target));
+        let result = resolve_opencode_rewind_boundary(
+            &connection,
+            &ordered_rows,
+            "session-empty",
+            Some(&target),
+        );
 
         assert!(result.is_err());
     }
@@ -1332,12 +1354,54 @@ mod tests {
             text_fingerprint: Some("different text".to_string()),
             turn_ordinal: Some(1),
         };
+        let ordered_rows = load_opencode_ordered_message_roles(&connection, "session-1").unwrap();
 
-        let result =
-            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target));
+        let result = resolve_opencode_rewind_boundary(
+            &connection,
+            &ordered_rows,
+            "session-1",
+            Some(&target),
+        );
 
         assert!(result.is_err());
         assert_eq!(count_messages(&connection), 4);
+    }
+
+    #[test]
+    fn loads_opencode_events_with_revert_marker_applied() {
+        // 原生 rewind 在 session.revert 列打标记:时间线导入必须把边界起的
+        // 消息隐藏,否则被回退的消息会被重新读回时间线。
+        let connection = rewind_fixture_connection();
+        connection
+            .execute_batch("CREATE TABLE session (id TEXT PRIMARY KEY, revert TEXT);")
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO session VALUES ('session-1', ?1)",
+                [r#"{"messageID":"user-2"}"#],
+            )
+            .unwrap();
+
+        let raw = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let normalized = normalize_history_events(raw, "app-session-1");
+        let texts: Vec<String> = normalized
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("user_message"))
+            .filter_map(|event| {
+                let content = event.get("content")?;
+                if let Some(text) = content.as_str() {
+                    return Some(text.to_string());
+                }
+                content.as_array().map(|blocks| {
+                    blocks
+                        .iter()
+                        .filter_map(|block| block.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            })
+            .collect();
+        assert_eq!(texts, vec!["first question".to_string()]);
     }
 }
 
@@ -1364,19 +1428,6 @@ pub fn load_latest_opencode_token_usage(
     let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| format!("Failed to open OpenCode database: {}", error))?;
     load_latest_opencode_token_usage_from_connection(&connection, session_id, freshness)
-}
-
-pub fn rewind_opencode_session(
-    home: &std::path::Path,
-    session_id: &str,
-    target: Option<&super::rewind::RewindTarget>,
-) -> Result<bool, String> {
-    let Some(path) = find_opencode_database(home) else {
-        return Ok(false);
-    };
-    let connection = Connection::open(path)
-        .map_err(|error| format!("Failed to open OpenCode database for rewind: {}", error))?;
-    rewind_opencode_events_from_connection(&connection, session_id, target)
 }
 
 /// Resolve the message ID at which the rewind boundary starts: the boundary
@@ -1485,32 +1536,57 @@ fn load_opencode_user_text(
     Ok(texts.join("\n"))
 }
 
-fn delete_opencode_rows_by_ids(
-    transaction: &rusqlite::Transaction<'_>,
-    table: &str,
-    column: &str,
-    ids: &[String],
-) -> Result<(), String> {
-    for chunk in ids.chunks(500) {
-        let placeholders = vec!["?"; chunk.len()].join(", ");
-        let sql = format!(
-            "DELETE FROM {} WHERE {} IN ({})",
-            table, column, placeholders
-        );
-        let params: Vec<&dyn rusqlite::ToSql> =
-            chunk.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
-        transaction
-            .execute(&sql, params.as_slice())
-            .map_err(|e| format!("Failed to delete OpenCode rows during rewind: {}", e))?;
-    }
-    Ok(())
-}
-
-fn rewind_opencode_events_from_connection(
+/// opencode 原生 revert 标记解析:`session.revert` 列存 `{messageID,partID}`
+/// JSON 文本(无标记为 NULL)。返回边界消息在有序消息列表中的下标(该消息
+/// 及其之后全部隐藏)。
+fn read_opencode_revert_boundary_index(
     connection: &Connection,
     session_id: &str,
+    ordered_rows: &[(String, i64, i64, String)],
+) -> Option<usize> {
+    let revert_json: Option<String> = connection
+        .query_row(
+            "SELECT revert FROM session WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let revert_json = revert_json?.trim().to_string();
+    if revert_json.is_empty() {
+        return None;
+    }
+    let record: Value = serde_json::from_str(&revert_json).ok()?;
+    let boundary_id = record
+        .get("messageID")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    ordered_rows
+        .iter()
+        .position(|(id, _, _, _)| *id == boundary_id)
+}
+
+/// 只读解析 opencode 会话的回退边界消息 id(原生 rewind 用,不删任何行)。
+/// 返回 None 表示没有可回退的用户消息(空回退)。
+pub fn resolve_opencode_rewind_boundary_id(
+    home: &std::path::Path,
+    session_id: &str,
     target: Option<&super::rewind::RewindTarget>,
-) -> Result<bool, String> {
+) -> Result<Option<String>, String> {
+    let Some(path) = find_opencode_database(home) else {
+        return Ok(None);
+    };
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("Failed to open OpenCode database for rewind: {}", error))?;
+    let ordered_rows = load_opencode_ordered_message_roles(&connection, session_id)?;
+    resolve_opencode_rewind_boundary(&connection, &ordered_rows, session_id, target)
+}
+
+fn load_opencode_ordered_message_roles(
+    connection: &Connection,
+    session_id: &str,
+) -> Result<Vec<(String, String)>, String> {
     let mut statement = connection
         .prepare("SELECT id, json_extract(data, '$.role') FROM message WHERE session_id = ?1 ORDER BY time_created ASC, id ASC")
         .map_err(|e| format!("Failed to query OpenCode messages for rewind: {}", e))?;
@@ -1523,48 +1599,7 @@ fn rewind_opencode_events_from_connection(
         .map_err(|e| format!("Failed to query OpenCode messages for rewind: {}", e))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("Failed to read OpenCode messages for rewind: {}", e))?;
-    let Some(boundary_id) =
-        resolve_opencode_rewind_boundary(connection, &ordered_rows, session_id, target)?
-    else {
-        return Ok(true);
-    };
-    let boundary_index = ordered_rows
-        .iter()
-        .position(|(id, _)| id == &boundary_id)
-        .ok_or_else(|| {
-            format!(
-                "Target rewind user message not found in session history {}",
-                session_id
-            )
-        })?;
-    let delete_ids: Vec<String> = ordered_rows[boundary_index..]
-        .iter()
-        .map(|(id, _)| id.clone())
-        .collect();
-    if delete_ids.is_empty() {
-        return Ok(false);
-    }
-
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|e| format!("Failed to begin OpenCode rewind transaction: {}", e))?;
-
-    delete_opencode_rows_by_ids(&transaction, "part", "message_id", &delete_ids)?;
-    delete_opencode_rows_by_ids(&transaction, "message", "id", &delete_ids)?;
-
-    transaction
-        .commit()
-        .map_err(|e| format!("Failed to commit OpenCode rewind: {}", e))?;
-
-    let remaining: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM message WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    Ok(remaining == 0)
+    Ok(ordered_rows)
 }
 
 pub(crate) fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -1587,7 +1622,7 @@ fn load_opencode_events_from_connection(
     let mut message_statement = connection
         .prepare("SELECT id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created ASC, id ASC")
         .map_err(|error| format!("Failed to query OpenCode messages: {}", error))?;
-    let message_rows = message_statement
+    let message_rows: Vec<(String, i64, i64, String)> = message_statement
         .query_map([session_id], |row| {
             let id: String = row.get(0)?;
             let time_created: i64 = row.get(1)?;
@@ -1595,16 +1630,28 @@ fn load_opencode_events_from_connection(
             let data: String = row.get(3)?;
             Ok((id, time_created, time_updated, data))
         })
+        .map_err(|error| format!("Failed to read OpenCode messages: {}", error))?
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Failed to read OpenCode messages: {}", error))?;
+
+    // opencode 原生 rewind 在 session.revert 列记录回退边界({messageID,partID}
+    // 的 JSON 文本):server 视角从该消息起全部隐藏。直接读库的时间线导入必须
+    // 应用同一标记,否则刚被回退的消息会被重新读回时间线。
+    let revert_boundary_index =
+        read_opencode_revert_boundary_index(connection, session_id, &message_rows);
+    let effective_rows = revert_boundary_index
+        .map(|index| &message_rows[..index])
+        .unwrap_or(&message_rows[..]);
 
     let mut events = Vec::new();
     let mut pending_success_result: Option<Value> = None;
     let mut turn_start_time: Option<i64> = None;
 
-    for row in message_rows {
-        let (message_id, time_created, time_updated, data) =
-            row.map_err(|error| format!("Failed to decode OpenCode message row: {}", error))?;
-        let message: Value = serde_json::from_str(&data).map_err(|error| {
+    for (message_id, time_created, time_updated, data) in effective_rows
+        .iter()
+        .map(|(id, created, updated, raw)| (id.as_str(), *created, *updated, raw.as_str()))
+    {
+        let message: Value = serde_json::from_str(data).map_err(|error| {
             format!(
                 "Failed to decode OpenCode message {}: {}",
                 message_id, error
@@ -1626,7 +1673,7 @@ fn load_opencode_events_from_connection(
             continue;
         }
 
-        let mut parts = load_opencode_parts(connection, session_id, &message_id)?;
+        let mut parts = load_opencode_parts(connection, session_id, message_id)?;
         sort_opencode_parts(&mut parts);
         let mut content = Vec::new();
         let mut tool_results = Vec::new();
@@ -1900,7 +1947,7 @@ fn load_opencode_events_from_connection(
             // completed Turn with still-pending tools.
             events.extend(tool_results);
             pending_success_result = build_opencode_success_result_event(
-                &message_id,
+                message_id,
                 session_id,
                 turn_start_time.unwrap_or(time_created),
                 time_updated,

@@ -13,6 +13,13 @@ declare module '@anthropic-ai/claude-agent-sdk' {
   }
   export const query: (...args: any[]) => Query;
   export const startup: (...args: any[]) => Promise<WarmQuery>;
+  /**
+   * 非破坏 fork:按消息 UUID(含)切片复制出新会话。0.3.220+ 的托管 Runtime
+   * 才有该导出;旧 Runtime 上为 undefined,调用方需兜底报错。
+   */
+  export const forkSession:
+    | ((sessionId: string, options?: { upToMessageId?: string; title?: string }) => Promise<{ sessionId: string }>)
+    | undefined;
 }
 
 declare module '@opencode-ai/sdk' {

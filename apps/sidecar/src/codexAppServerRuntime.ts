@@ -852,6 +852,51 @@ export class CodexAppServerRuntime {
     return childThreadId;
   }
 
+  /**
+   * 会话内回退(回退到目标用户回合之前):`thread/fork` 到边界回合并原地
+   * rebind —— 原 thread 文件不动(仍可 `codex resume <old-uuid>` 恢复),
+   * 回退后 warm resend 照常工作,新 thread id 由返回值交给 daemon 更新
+   * mapping。`providerMessageTurnOrdinal` 是目标用户回合的 1-based 序号
+   * (daemon 从 rollout JSONL 解析);边界回合 = 第 (ordinal-1) 个回合。
+   */
+  async rewindConversation(input: { providerMessageTurnOrdinal?: number }): Promise<string> {
+    const config = this.config;
+    const transport = this.transport;
+    if (!config || !transport || !this.threadId) {
+      throw new Error('Codex session not initialized. Call ensure_session first.');
+    }
+    if (this.activeTurn) {
+      throw new Error('Cannot rewind while a Codex turn is active');
+    }
+    const targetOrdinal = input.providerMessageTurnOrdinal;
+    if (!targetOrdinal || targetOrdinal < 1) {
+      throw new Error('Codex rewind requires the 1-based user-turn ordinal of the target');
+    }
+    if (targetOrdinal === 1) {
+      throw new Error('Rewinding the first Codex turn is handled by clearing the session mapping');
+    }
+    const sourceThreadId = this.threadId;
+    // turns/list 是 0-based:第 N 个用户回合的边界(保留到第 N-1 个回合)
+    // 的 lastTurnId 即列表下标 N-2。
+    const boundaryTurnId = await this.resolveProviderTurnId(transport, sourceThreadId, targetOrdinal - 2);
+    const result = await transport.request<{ thread?: { id?: string; sessionId?: string } }>(
+      'thread/fork',
+      { threadId: sourceThreadId, lastTurnId: boundaryTurnId },
+      { timeoutMs: 30_000 },
+    );
+    const forkedThreadId =
+      readStringRecordField(result.thread, 'id') ?? readStringRecordField(result.thread, 'sessionId');
+    if (!forkedThreadId) {
+      throw new Error('Codex app-server fork response did not include a thread ID');
+    }
+    this.threadId = forkedThreadId;
+    config.agentSessionId = forkedThreadId;
+    process.stderr.write(
+      `[codex-app-server] Rewound thread ${sourceThreadId} -> ${forkedThreadId} (before user turn ${targetOrdinal})\n`,
+    );
+    return forkedThreadId;
+  }
+
   private async resolveProviderTurnId(
     transport: AppServerTransport,
     threadId: string,

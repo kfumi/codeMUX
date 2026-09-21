@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::agent::commands::{
     ensure_agent_session_for_companion, interrupt_agent_session_for_companion,
@@ -12,6 +13,12 @@ use crate::config::types::AgentKind;
 use crate::daemon::DaemonState;
 use crate::db::operations;
 use crate::AppState;
+
+/// warm send 派发后等待 sidecar 受理(user_message / 终态事件)的上限。
+/// 正常 warm 路径该事件在毫秒级到达;超时说明命令在 daemon↔sidecar 管道里
+/// 丢失或 sidecar 命令循环已停摆 —— 此刻继续等待只会让会话永久卡在
+/// 「运行中」(2026-09-20 事故),不如落一条 error 终态解堵。
+const SEND_ACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct CompanionSettingsUpdate {
@@ -155,15 +162,34 @@ pub(crate) async fn send_companion_message_owned(
                 return Ok(());
             }
             ActiveSidecarSendDecision::StartTurn => {
-                companion_state.mark_turn_active(session_id);
+                let turn_epoch = companion_state.mark_turn_active(session_id);
                 let mut cmd =
                     OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
                 if let Some(input_payload) = input_payload {
                     cmd["inputPayload"] = input_payload;
                 }
                 let result = send_command_to_session(&agent_state, session_id, cmd).await;
-                if result.is_err() {
-                    let _ = companion_state.finish_turn(session_id);
+                match &result {
+                    Err(_) => {
+                        let _ = companion_state.finish_turn(session_id);
+                    }
+                    Ok(()) => {
+                        // 命令进了 stdin 通道 ≠ sidecar 真正受理。历史上命令
+                        // 会在 daemon↔sidecar 管道里无痕蒸发(2026-09-20 rewind
+                        // 后 warm resend 事故),turn 从此永远 active、后续消息
+                        // 永远入队。这里武装 ack 看门狗:超时仍无 sidecar 的
+                        // user_message/终态事件(代次未变)就合成 error 终态,
+                        // 把 turn 解堵。sidecar 受理时 events.rs 的 user_message
+                        // 分支会再次 mark_turn_active 使代次前移,看门狗自动失效。
+                        spawn_send_ack_watchdog(
+                            app_state.clone(),
+                            agent_state.clone(),
+                            companion_state.clone(),
+                            roots.clone(),
+                            session_id.to_string(),
+                            turn_epoch,
+                        );
+                    }
                 }
                 log::info!(target: "perf", "[perf] warm send dispatched elapsed_ms={} ok={}", perf_started.elapsed().as_millis(), result.is_ok());
                 return result;
@@ -200,6 +226,59 @@ pub(crate) async fn send_companion_message_owned(
         let _ = companion_state.finish_turn(session_id);
     }
     result
+}
+
+/// warm send 的受理看门狗:`SEND_ACK_TIMEOUT` 后若该回合仍是派发时武装的
+/// 同一代次(即 sidecar 从未发出 user_message/终态事件),合成一条 error
+/// 域事件走标准 ingest 路径 —— 落库、finish_turn、广播给客户端,与 sidecar
+/// 自身失败的表现完全一致。
+fn spawn_send_ack_watchdog(
+    app_state: Arc<AppState>,
+    agent_state: Arc<AgentState>,
+    companion_state: Arc<CompanionState>,
+    roots: crate::paths::PathRoots,
+    session_id: String,
+    armed_epoch: u64,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(SEND_ACK_TIMEOUT).await;
+        if !companion_state.is_turn_active(&session_id) {
+            return;
+        }
+        if companion_state.turn_epoch(&session_id) != Some(armed_epoch) {
+            // sidecar 已受理(user_message 使代次前移)或回合已换新 —— 不干预。
+            return;
+        }
+        log::warn!(
+            target: "agent",
+            "Warm send for session_id={} was never acknowledged by the sidecar within {:?}; failing the turn so it cannot stay running forever",
+            session_id,
+            SEND_ACK_TIMEOUT
+        );
+        let raw_event = serde_json::json!({
+            "type": "error",
+            "session_id": session_id,
+            "subtype": "failed",
+            "error": "消息未能送达智能体运行时(命令通道无响应),已自动终止本回合;请重试或重启会话",
+        })
+        .to_string();
+        let broadcast_events = {
+            let state_for_persist = app_state.clone();
+            let raw_event = raw_event.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::agent::timeline_persist::ingest_sidecar_event(&state_for_persist, &raw_event)
+            })
+            .await
+            .unwrap_or_default()
+        };
+        crate::companion::handle_sidecar_event_for_companion(
+            &app_state,
+            &agent_state,
+            &companion_state,
+            &roots,
+            broadcast_events,
+        );
+    });
 }
 
 fn validate_companion_agent_kind(current: AgentKind, requested: AgentKind) -> Result<(), String> {

@@ -658,6 +658,57 @@ export class SessionRuntime {
     }
   }
 
+  /**
+   * 会话内回退(回退到 boundary 消息之后的内容):用 SDK 的非破坏
+   * `forkSession(sessionId, { upToMessageId })` 从原会话切片复制出一个新
+   * 会话并原地 rebind —— 原 transcript 不动,回退后 warm resend 照常工作,
+   * 新 agent session id 由返回值交给 daemon 更新 mapping。
+   * `providerMessageId` 是回退边界「下一条」消息的 uuid:即切片保留到该
+   * 消息之前 daemon 已解析好的 upTo uuid。
+   */
+  async rewindConversation(input: { providerMessageId?: string }): Promise<string> {
+    const config = this.config;
+    if (!config) {
+      throw new Error('Claude session has not been bootstrapped. Call ensure_session first.');
+    }
+    if (this.turnActive) {
+      throw new Error('Cannot rewind while a Claude turn is active');
+    }
+    const sourceSessionId = config.agentSessionId;
+    if (!sourceSessionId) {
+      throw new Error('Claude native session is not ready for rewind');
+    }
+    const upToMessageId = input.providerMessageId?.trim();
+    if (!upToMessageId) {
+      throw new Error('Claude rewind requires the boundary message id');
+    }
+    if (!this.claudeSdk) {
+      throw new Error('Claude SDK not loaded; cannot rewind conversation');
+    }
+    const forkSession = this.claudeSdk.forkSession;
+    if (typeof forkSession !== 'function') {
+      throw new Error(
+        'Installed Claude Code Runtime does not support forkSession; upgrade the Claude Code runtime to rewind conversations',
+      );
+    }
+
+    writeLog(
+      '[claude-task]',
+      `rewindConversation START session=${sourceSessionId} upTo=${upToMessageId}`,
+    );
+    const fork = await forkSession(sourceSessionId, { upToMessageId });
+    const forkedSessionId = fork?.sessionId;
+    if (!forkedSessionId) {
+      throw new Error('Claude SDK forkSession response did not include a session id');
+    }
+    this.config = { ...config, agentSessionId: forkedSessionId };
+    writeLog(
+      '[claude-task]',
+      `rewindConversation OK session=${sourceSessionId} -> ${forkedSessionId}`,
+    );
+    return forkedSessionId;
+  }
+
   async interrupt(): Promise<void> {
     clearClaudeToolResponses(this.config?.sessionId);
     if (!this.queryHandle) {
@@ -1844,6 +1895,18 @@ type SidecarRuntime = {
     sourceProviderMessageId?: string,
   ): Promise<string>;
   rewindFiles?(providerMessageId: string): Promise<string[]>;
+  /**
+   * 会话内回退(回退到目标用户消息之前),provider 原生语义执行:
+   * opencode=revert 标记 / claude=SDK fork / codex=thread fork / pi=树 fork。
+   * 返回(可能 fork 出的)原生会话 id,daemon 据此更新 mapping。
+   * 入参按种类二选一:pi 用 entryId;opencode/claude 用 providerMessageId
+   * (claude 为「保留到它之前」的 upTo uuid);codex 用 1-based 用户回合序号。
+   */
+  rewindConversation?(input: {
+    entryId?: string;
+    providerMessageId?: string;
+    providerMessageTurnOrdinal?: number;
+  }): Promise<string>;
   resetSession(sessionId: string): Promise<void>;
   deleteSession?(agentSessionId: string): Promise<void>;
   interrupt(): Promise<void>;
@@ -1851,8 +1914,6 @@ type SidecarRuntime = {
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
   respondToQuestion?(requestId: string, answers: string[][]): Promise<void>;
   isPendingQuestion?(requestId: string): boolean;
-  /** 会话树 rewind（pi 专属）：fork 到目标用户消息之前，返回新会话文件路径。 */
-  rewindToEntry?(entryId: string): Promise<string>;
 };
 
 type SidecarCommandDispatcherOptions = {
@@ -2166,11 +2227,20 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         await ensureTail;
         try {
           const current = selectedRuntime();
-          const flavor = getRuntimeFlavor(activeAgentKind);
-          if (flavor !== 'pi' || !current?.rewindToEntry) {
-            throw new Error('This provider runtime does not support conversation rewind');
+          if (!current?.rewindConversation) {
+            throw new Error(
+              `${getRuntimeFlavor(activeAgentKind)} runtime does not support conversation rewind`,
+            );
           }
-          const agentSessionId = await current.rewindToEntry(cmd.entryId);
+          const agentSessionId = await current.rewindConversation({
+            entryId: cmd.entryId,
+            providerMessageId: cmd.providerMessageId,
+            providerMessageTurnOrdinal: cmd.providerMessageTurnOrdinal,
+          });
+          writeLog(
+            `[${getRuntimeFlavor(activeAgentKind)}-task]`,
+            `rewind_conversation OK agent_session_id=${agentSessionId}`,
+          );
           options.emit({
             type: 'session_rewind_conversation_result',
             request_id: cmd.requestId,
@@ -2179,6 +2249,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             agent_session_id: agentSessionId,
           });
         } catch (error) {
+          writeLog(
+            `[${getRuntimeFlavor(activeAgentKind)}-task]`,
+            `rewind_conversation FAILED error=${error instanceof Error ? error.message : String(error)}`,
+          );
           options.emit({
             type: 'session_rewind_conversation_result',
             request_id: cmd.requestId,
@@ -2419,6 +2493,8 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
       sourceProviderTurnOrdinal,
       sourceProviderMessageId,
     ),
+    rewindConversation: (input) =>
+      openCodeRuntime.rewindConversation({ providerMessageId: input.providerMessageId ?? '' }),
     resetSession: () => openCodeRuntime.resetSession(),
     deleteSession: (agentSessionId) => openCodeRuntime.deleteSession(agentSessionId),
     interrupt: () => openCodeRuntime.interrupt(),
@@ -2526,7 +2602,12 @@ function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
     respondToQuestion: (requestId, answers) => piRuntime.respondToQuestion(requestId, answers),
     isPendingQuestion: (requestId) => piRuntime.isPendingQuestion(requestId),
     forkSession: (sourceAgentSessionId) => piRuntime.forkSession(sourceAgentSessionId),
-    rewindToEntry: (entryId) => piRuntime.forkToEntry(entryId),
+    rewindConversation: async (input) => {
+      if (!input.entryId) {
+        throw new Error('Pi rewind requires the tree entry id');
+      }
+      return piRuntime.forkToEntry(input.entryId);
+    },
     resetSession: () => piRuntime.resetSession(),
     deleteSession: (agentSessionId) => piRuntime.deleteSession(agentSessionId),
     interrupt: () => piRuntime.interrupt(),

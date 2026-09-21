@@ -599,6 +599,13 @@ async fn ensure_sidecar_for_session(
     let agent_state_task = agent_state.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            // sidecar_error 不在 CodeMUX domain 事件集合里：不落库、不广播、
+            // 也没有任何日志 —— sidecar 报的错就这样消失（含 stdin JSON 解析
+            // 失败这类关键线索）。至少留一行 warn。
+            if event.contains("\"type\":\"sidecar_error\"") {
+                let preview: String = event.chars().take(500).collect();
+                warn!(target: "agent", "Sidecar reported sidecar_error for session_id={}: {}", session_id_clone, preview);
+            }
             if let Some(result) = parse_session_delete_result_event(&event) {
                 if let Some(waiter) = session_delete_waiters
                     .lock()

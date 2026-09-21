@@ -125,6 +125,89 @@ describe('sidecar command dispatcher', () => {
     });
   });
 
+  it('rewinds the conversation through the active runtime and reports the new native session', async () => {
+    const opencode = createRuntime();
+    (opencode as Record<string, unknown>).rewindConversation = vi
+      .fn()
+      .mockResolvedValue('rewound-session');
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'native-session',
+    });
+    await dispatcher.dispatch({
+      type: 'rewind_conversation',
+      sessionId: 'session-1',
+      requestId: 'request-rewind',
+      providerMessageId: 'msg_boundary',
+    });
+
+    expect(opencode.rewindConversation).toHaveBeenCalledWith({
+      entryId: undefined,
+      providerMessageId: 'msg_boundary',
+      providerMessageTurnOrdinal: undefined,
+    });
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_rewind_conversation_result',
+      request_id: 'request-rewind',
+      session_id: 'session-1',
+      ok: true,
+      agent_session_id: 'rewound-session',
+    });
+  });
+
+  it('reports rewind_conversation failures on the result event instead of crashing the loop', async () => {
+    const opencode = createRuntime();
+    (opencode as Record<string, unknown>).rewindConversation = vi
+      .fn()
+      .mockRejectedValue(new Error('OpenCode runtime is not started'));
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'native-session',
+    });
+    await dispatcher.dispatch({
+      type: 'rewind_conversation',
+      sessionId: 'session-1',
+      requestId: 'request-rewind-fail',
+      providerMessageId: 'msg_boundary',
+    });
+
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_rewind_conversation_result',
+      request_id: 'request-rewind-fail',
+      session_id: 'session-1',
+      ok: false,
+      error: 'Error: OpenCode runtime is not started',
+    });
+  });
+
   it('forks through the active Codex runtime at the selected provider turn', async () => {
     const codex = createRuntime();
     const emit = vi.fn();

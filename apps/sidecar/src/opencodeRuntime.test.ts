@@ -83,6 +83,8 @@ function createPort() {
     prompt: vi.fn().mockResolvedValue(undefined),
     compactSession: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
+    revertSession: vi.fn().mockResolvedValue(undefined),
+    sessionStatus: vi.fn().mockResolvedValue('idle' as const),
     respondToPermission: vi.fn().mockResolvedValue(true),
     switchAgent: vi.fn().mockResolvedValue(true),
   };
@@ -107,10 +109,37 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('rewinds the conversation via native revert after the provider goes idle', async () => {
+    const { port, client } = createPort();
+    const statuses: Array<'busy' | 'idle'> = ['busy', 'idle'];
+    client.sessionStatus.mockImplementation(async () => statuses.shift() ?? 'idle');
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    const agentSessionId = await runtime.rewindConversation({ providerMessageId: 'msg_boundary' });
+
+    expect(agentSessionId).toBe('opencode-new');
+    expect(client.sessionStatus).toHaveBeenCalled();
+    expect(client.revertSession).toHaveBeenCalledWith({
+      sessionId: 'opencode-new',
+      messageId: 'msg_boundary',
+    });
+  });
+
+  it('rejects rewindConversation without a boundary message id and never calls revert', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    await expect(runtime.rewindConversation({ providerMessageId: '   ' })).rejects.toThrow(
+      /boundary message id/i,
+    );
+    expect(client.revertSession).not.toHaveBeenCalled();
+  });
+
   it('reuses a started runtime across lifecycle generation updates', async () => {
     const { port } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);
-
     await runtime.start();
 
     expect(runtime.canReuse(createConfig({

@@ -7,6 +7,12 @@ import type { RuntimeLoadResult } from './runtimeLoader.js';
 export interface ClaudeSdkModule {
   query: typeof import('@anthropic-ai/claude-agent-sdk').query;
   startup: typeof import('@anthropic-ai/claude-agent-sdk').startup;
+  /**
+   * 非破坏 fork:`forkSession(sessionId, { upToMessageId })` 按消息 UUID 切片
+   * 复制出一个新会话(原 transcript 不动)。会话回退(rewind)依赖此原语;
+   * 旧版 Runtime 没有该导出,调用方需给出可理解的升级提示。
+   */
+  forkSession?: typeof import('@anthropic-ai/claude-agent-sdk').forkSession;
 }
 
 /** OpenCode SDK client 模块导出。 */
