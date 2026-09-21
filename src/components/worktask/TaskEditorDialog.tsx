@@ -267,6 +267,7 @@ export function TaskEditorDialog({
               }))}
               reasoningEffort={reasoningEffort}
               onReasoningEffortChange={setReasoningEffort}
+              enableModelContextRegistration={false}
             />
           </div>
         </div>

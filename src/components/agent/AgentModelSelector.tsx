@@ -26,6 +26,10 @@ export interface AgentModelSelectorProps {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   disabled?: boolean;
   compact?: boolean;
+  /** 向 assistant-ui 运行时注册模型上下文（供 composer 读取）。仅在
+   *  AuiProvider 内有意义——脱离会话运行时的宿主（如工作任务的编辑对话框）
+   *  必须传 false，否则 register 在 effect 里抛 "requires an AuiProvider"。 */
+  enableModelContextRegistration?: boolean;
 }
 
 type ProviderFilter = {
@@ -59,6 +63,7 @@ export function AgentModelSelector({
   onReasoningEffortChange,
   disabled,
   compact,
+  enableModelContextRegistration = true,
 }: AgentModelSelectorProps) {
   const api = useAui();
   const { models, isLoading } = useAgentModels(agentKind, providers, activeProviderId);
@@ -84,8 +89,10 @@ export function AgentModelSelector({
   )?.efforts;
 
   useEffect(() => {
+    // 脱离 AuiProvider 的宿主不注册（见 props 注释）——modelContext() 会直接抛错。
+    if (!enableModelContextRegistration) return undefined;
     const registeredModel = contextModel ?? effectiveModelId;
-    if (!registeredModel) return;
+    if (!registeredModel) return undefined;
     const config = {
       modelName: registeredModel,
       ...(contextModelSupportsEfforts ? { reasoningEffort } : undefined),
@@ -93,7 +100,7 @@ export function AgentModelSelector({
     return api.modelContext().register({
       getModelContext: () => ({ config }),
     });
-  }, [api, effectiveModelId, contextModel, reasoningEffort, contextModelSupportsEfforts]);
+  }, [api, effectiveModelId, contextModel, reasoningEffort, contextModelSupportsEfforts, enableModelContextRegistration]);
 
   useEffect(() => {
     if (!value && !isLoading && models[0]) {
