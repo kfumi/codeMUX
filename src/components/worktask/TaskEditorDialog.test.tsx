@@ -338,3 +338,34 @@ describe('TaskEditorDialog worktree 区块', () => {
     expect(input.value).toBe('feature/x');
   });
 });
+
+describe('TaskEditorDialog 表单间距', () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    settingsState.config = null;
+  });
+
+  // 防回归：Tailwind v4 的 space-y-* 把外边距加在「前一个兄弟」的 margin-block-end 上
+  // （v3 才是加在后一个兄弟的 margin-top）。label/span 默认 display:inline，行内元素的
+  // 纵向外边距会被浏览器直接忽略 —— 浏览器实测该写法下 label 与输入框间距只有 2px，
+  // 等于没生效。字段容器统一用 flex 列 + gap，间距与子元素的 display 无关。
+  it('字段容器用 flex 列 + gap，不依赖 space-y（行内 label 会让 space-y 失效）', () => {
+    render(<TaskEditorDialog open onOpenChange={noop} />);
+    fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p1' } });
+
+    const controls = [
+      screen.getByLabelText(/标题/),
+      screen.getByLabelText('任务指令'),
+      screen.getByLabelText('项目选择'),
+      screen.getByLabelText('基线分支'),
+    ];
+    for (const control of controls) {
+      const tokens = (control.parentElement as HTMLElement).className.split(/\s+/);
+      expect(tokens).toContain('flex');
+      expect(tokens).toContain('flex-col');
+      expect(tokens.some((token) => token.startsWith('gap-'))).toBe(true);
+      expect(tokens.some((token) => token.startsWith('space-y-'))).toBe(false);
+    }
+  });
+});

@@ -119,4 +119,17 @@ describe('MergeDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(onMerged).not.toHaveBeenCalled();
   });
+
+  // 同 TaskEditorDialog：space-y-* 在「行内 label + 控件」结构下不生效（Tailwind v4 把外边距
+  // 加在前一个兄弟的 margin-block-end，而行内元素纵向外边距被忽略，实测只剩 2px）。
+  it('提交信息字段用 flex 列 + gap，不依赖 space-y', () => {
+    render(<MergeDialog task={makeTask({})} open onOpenChange={vi.fn()} />);
+
+    const tokens = (screen.getByLabelText(/合并提交信息/).parentElement as HTMLElement)
+      .className.split(/\s+/);
+    expect(tokens).toContain('flex');
+    expect(tokens).toContain('flex-col');
+    expect(tokens.some((token) => token.startsWith('gap-'))).toBe(true);
+    expect(tokens.some((token) => token.startsWith('space-y-'))).toBe(false);
+  });
 });

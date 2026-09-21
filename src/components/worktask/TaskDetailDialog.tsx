@@ -186,7 +186,7 @@ export function TaskDetailDialog({
               <InfoRow label="更新时间">{formatRelativeTime(task.updatedAt)}</InfoRow>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-2">
               <span className="text-ui-body font-medium text-foreground">时间线</span>
               {eventsFailed || (events !== null && timeline.length === 0) ? (
                 <p className="text-ui-caption text-muted-foreground">暂无时间线</p>

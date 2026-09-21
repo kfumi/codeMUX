@@ -68,7 +68,7 @@ export function MergeDialog({ task, open, onOpenChange, onMerged }: MergeDialogP
             。
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-1.5">
+        <div className="flex flex-col gap-2">
           <label
             htmlFor="merge-message"
             className="text-ui-caption text-muted-foreground"
