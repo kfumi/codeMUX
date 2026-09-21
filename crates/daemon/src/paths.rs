@@ -5,7 +5,7 @@
 //! `codemux-daemon` 二进制从启动参数/环境变量构造;Electron 壳的
 //! supervisor spawn 时显式传入。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct PathRoots {
@@ -45,7 +45,8 @@ impl PathRoots {
             }
         }
         if development {
-            let dev_dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web");
+            let dev_dist =
+                repo_root_from_or_two_up(Path::new(env!("CARGO_MANIFEST_DIR"))).join("dist-web");
             if dev_dist.exists() {
                 return Some(dev_dist);
             }
@@ -54,10 +55,69 @@ impl PathRoots {
     }
 }
 
+/// 开发环境下的仓库根:从 crate 的 manifest 目录逐级向上,找同时含
+/// `crates/` 与 `apps/` 的目录。
+///
+/// 布局重构(crates/daemon ↔ apps/sidecar)之后不能再假设 manifest_dir 的父
+/// 目录就是仓库根——那是 `crates/`,拼出来的 `crates/apps/sidecar` 并不存在。
+/// 认标记目录而不是数层数:测试里传入的假路径(`manifest-root`)找不到标记时
+/// 由调用方回落到 `../..`,真仓库路径则永远命中。
+pub fn repo_root_from(manifest_dir: &Path) -> Option<PathBuf> {
+    let mut current = Some(manifest_dir);
+    while let Some(dir) = current {
+        if dir.join("crates").is_dir() && dir.join("apps").is_dir() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+/// `repo_root_from` 的回落版:`<manifest_dir>/../..`(= `crates/daemon` → 仓库根)。
+pub fn repo_root_from_or_two_up(manifest_dir: &Path) -> PathBuf {
+    repo_root_from(manifest_dir).unwrap_or_else(|| {
+        manifest_dir
+            .parent()
+            .and_then(|parent| parent.parent())
+            .unwrap_or(manifest_dir)
+            .to_path_buf()
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::PathRoots;
-    use std::path::PathBuf;
+    use super::{repo_root_from, repo_root_from_or_two_up, PathRoots};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn repo_root_is_found_by_marker_dirs_not_by_depth() {
+        // 真仓库:crate 在 crates/daemon,仓库根同时含 crates/ 与 apps/。
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = repo_root_from(manifest_dir).expect("real repo layout must carry the markers");
+        assert!(root.join("crates").is_dir());
+        assert!(root.join("apps").is_dir());
+        let sidecar = root
+            .join("apps")
+            .join("sidecar")
+            .join("dist")
+            .join("index.js");
+        assert!(
+            !sidecar.to_string_lossy().contains("crates"),
+            "仓库根解析错位会拼出 crates/apps/…:{}",
+            sidecar.display()
+        );
+    }
+
+    #[test]
+    fn repo_root_falls_back_to_two_levels_up_for_foreign_paths() {
+        // 标记目录找不到时(测试里的假路径/未来布局变化)回落到 ../..,而不是父目录。
+        let fake = Path::new("manifest-root");
+        assert_eq!(repo_root_from(fake), None);
+        assert_eq!(
+            repo_root_from_or_two_up(fake),
+            PathBuf::from("manifest-root")
+        );
+    }
 
     #[test]
     fn derived_paths_live_under_app_data_dir() {
@@ -104,7 +164,8 @@ mod tests {
             app_data_dir: temp.path().join("data"),
             resource_dir: Some(temp.path().to_path_buf()),
         };
-        let dev_dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web");
+        let dev_dist =
+            repo_root_from_or_two_up(Path::new(env!("CARGO_MANIFEST_DIR"))).join("dist-web");
         assert_eq!(
             roots.web_static_dir_for(true),
             dev_dist.exists().then_some(dev_dist),

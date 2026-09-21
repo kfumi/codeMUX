@@ -105,9 +105,10 @@ fn resolve_sidecar_script_path(
     let sidecar_rel = sidecar_relative_path();
 
     if environment == BuildEnvironment::Development {
-        // Dev 布局:sidecar 是仓库根下与 daemon crate 平级的独立包
-        // (crates/daemon ↔ apps/sidecar);manifest_dir 的父目录即仓库根。
-        let repo_root = manifest_dir.parent().unwrap_or(manifest_dir);
+        // Dev 布局:sidecar 是仓库根下的独立包(apps/sidecar),daemon crate 在
+        // crates/daemon。仓库根按标记目录解析——布局重构后 manifest_dir 的父
+        // 目录只是 `crates/`,拼出来的 crates/apps/sidecar 并不存在。
+        let repo_root = crate::paths::repo_root_from_or_two_up(manifest_dir);
         return Ok(repo_root.join("apps").join(sidecar_rel));
     }
 
@@ -353,16 +354,31 @@ mod tests {
 
     #[test]
     fn development_build_falls_back_to_source_sidecar() {
-        let manifest_dir = Path::new("manifest-root");
+        // 按真仓库布局断言(crates/daemon → 仓库根/apps/sidecar),而不是拿假路径
+        // 数层数:布局重构把 crate 挪进 crates/ 后,旧的「父目录即仓库根」会拼出
+        // 并不存在的 crates/apps/sidecar。
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let path = resolve_sidecar_script_path(None, manifest_dir, BuildEnvironment::Development)
             .expect("dev builds should fall back to the source tree");
 
+        let repo_root = crate::paths::repo_root_from_or_two_up(manifest_dir);
+        let expected = repo_root
+            .join("apps")
+            .join("sidecar")
+            .join("dist")
+            .join("index.js");
+        assert_eq!(path, expected);
         assert!(path.ends_with("apps/sidecar/dist/index.js"));
+        assert!(
+            !path.to_string_lossy().contains("crates"),
+            "dev sidecar path must not be resolved under crates/: {}",
+            path.display()
+        );
     }
 
     #[test]
     fn development_build_prefers_source_sidecar_over_bundled_resource_copy() {
-        let manifest_dir = Path::new("manifest-root");
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let resource_dir = Path::new("resource-root");
         let path = resolve_sidecar_script_path(
             Some(resource_dir),
@@ -371,14 +387,7 @@ mod tests {
         )
         .expect("dev builds should always use the source tree sidecar");
 
-        let expected = manifest_dir
-            .parent()
-            .unwrap_or(manifest_dir)
-            .join("apps")
-            .join("sidecar")
-            .join("dist")
-            .join("index.js");
-        assert_eq!(path, expected);
+        assert!(path.ends_with("apps/sidecar/dist/index.js"));
     }
 
     #[test]
