@@ -216,13 +216,42 @@ pub async fn spawn_sidecar(
         use tokio::io::AsyncWriteExt;
         let mut stdin = stdin;
         while let Some(msg) = stdin_rx.recv().await {
+            // 命令管道曾是全静默路径：write/flush 失败只会悄悄 break，之后所有
+            // 命令 ok=true 入队却永远不被消费（2026-09-20 opencode rewind 后
+            // warm resend 蒸发事故的观测盲区）。这里必须把失败与成功都留下痕迹。
+            let command_type = serde_json::from_str::<serde_json::Value>(&msg)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("type")
+                        .and_then(|item| item.as_str())
+                        .map(ToOwned::to_owned)
+                })
+                .unwrap_or_else(|| "unknown".to_string());
             let line = format!("{}\n", msg);
-            if stdin.write_all(line.as_bytes()).await.is_err() {
+            if let Err(error) = stdin.write_all(line.as_bytes()).await {
+                warn!(
+                    target: "agent",
+                    "Sidecar stdin write FAILED command_type={} error={} — all later commands will be lost until the sidecar restarts",
+                    command_type,
+                    error
+                );
                 break;
             }
-            if stdin.flush().await.is_err() {
+            if let Err(error) = stdin.flush().await {
+                warn!(
+                    target: "agent",
+                    "Sidecar stdin flush FAILED command_type={} error={} — all later commands will be lost until the sidecar restarts",
+                    command_type,
+                    error
+                );
                 break;
             }
+            debug!(
+                target: "agent",
+                "Sidecar stdin command written command_type={}",
+                command_type
+            );
         }
     });
 

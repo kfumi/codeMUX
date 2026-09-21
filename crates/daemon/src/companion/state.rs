@@ -42,6 +42,10 @@ pub struct CompanionInner {
     /// 退出的旧任务会把新监听器的状态抹成「未运行」。
     pub server_generation: AtomicU64,
     pub turn_active: Mutex<HashSet<String>>,
+    /// 每会话回合代次:`mark_turn_active` 自增并返回,供「派发 ack 看门狗」
+    /// 区分自己武装的那一轮与之后的新回合。只增不清(否则清零后新回合的
+    /// 代次会撞上旧看门狗武装的代次)。
+    pub turn_epoch: Mutex<HashMap<String, u64>>,
     pub message_queues: Mutex<HashMap<String, VecDeque<QueuedCompanionMessage>>>,
     /// Subagent ids currently believed running per session, maintained from
     /// `subagent_upsert` broadcasts. Only used to arm the continuation wait.
@@ -74,6 +78,7 @@ impl CompanionInner {
             lan_exposed: AtomicBool::new(false),
             server_generation: AtomicU64::new(0),
             turn_active: Mutex::new(HashSet::new()),
+            turn_epoch: Mutex::new(HashMap::new()),
             message_queues: Mutex::new(HashMap::new()),
             running_subagents: Mutex::new(HashMap::new()),
             continuation_pending: Mutex::new(HashMap::new()),
@@ -213,12 +218,26 @@ impl CompanionState {
         self.inner.e2ee_public_key_b64.read().await.clone()
     }
 
-    pub fn mark_turn_active(&self, session_id: &str) {
+    pub fn mark_turn_active(&self, session_id: &str) -> u64 {
         self.inner
             .turn_active
             .lock()
             .unwrap()
             .insert(session_id.to_string());
+        let mut epochs = self.inner.turn_epoch.lock().unwrap();
+        let epoch = epochs.entry(session_id.to_string()).or_insert(0);
+        *epoch += 1;
+        *epoch
+    }
+
+    /// 当前回合代次;回合从未开始过(或本会话从未 mark)时为 None。
+    pub fn turn_epoch(&self, session_id: &str) -> Option<u64> {
+        self.inner
+            .turn_epoch
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .copied()
     }
 
     pub fn is_turn_active(&self, session_id: &str) -> bool {

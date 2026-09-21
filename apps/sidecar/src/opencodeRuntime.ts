@@ -502,6 +502,74 @@ export class OpenCodeRuntime {
     return child.id;
   }
 
+  /**
+   * 会话内回退(回退到 boundary 消息起及其后的全部内容):调 opencode 原生
+   * `session.revert`,由 server 在会话记录上打 revert 标记 —— 不删存储、
+   * 会话 id 与本运行时的绑定都保持不变,回退后的 warm resend 天然可用。
+   * 下一次 prompt 会触发 opencode 的 cleanup 永久丢弃被回退的消息。
+   */
+  rewindConversation(input: { providerMessageId: string }): Promise<string> {
+    return this.enqueueLifecycle(async () => {
+      const client = this.client;
+      const sessionId = this.agentSessionId;
+      if (this.shutdownPromise || this.state === 'disposing' || this.state === 'cleanup_failed') {
+        throw new Error('OpenCode runtime is shutting down');
+      }
+      if (this.state !== 'started' || !client || !sessionId) {
+        throw new Error('OpenCode runtime is not started');
+      }
+      if (this.activeTask) {
+        throw new Error('Cannot rewind while an OpenCode turn is active');
+      }
+      const boundaryMessageId = input.providerMessageId?.trim();
+      if (!boundaryMessageId) {
+        throw new Error('OpenCode rewind requires the boundary message id');
+      }
+
+      // 中断后 opencode server 可能仍在收尾上一个 runner(abort API 返回 ≠
+      // runner 停止)。revert 属于 runner-affecting 操作,先等 status 复核为
+      // idle 再动手(参考 paseo awaitRunnerQuiescence)。
+      await this.waitForProviderIdle(client, sessionId);
+
+      setLogCtx({ sessionId: this.config.sessionId });
+      writeLog(
+        '[opencode-task]',
+        `rewindConversation START sessionId=${sessionId} boundary=${boundaryMessageId}`,
+      );
+      const revertStartedAt = Date.now();
+      await client.revertSession({ sessionId, messageId: boundaryMessageId });
+      writeLog(
+        '[opencode-task]',
+        `[perf] opencode rewindConversation elapsed_ms=${Date.now() - revertStartedAt}`,
+      );
+      return sessionId;
+    });
+  }
+
+  private async waitForProviderIdle(client: OpenCodeClientPort, sessionId: string): Promise<void> {
+    if (!client.sessionStatus) {
+      return;
+    }
+    const idleTimeoutMs = 15_000;
+    const deadline = Date.now() + idleTimeoutMs;
+    let delayMs = 100;
+    for (;;) {
+      const status = await client.sessionStatus({ sessionId });
+      if (status !== 'busy') {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        writeLog(
+          '[opencode-task]',
+          `rewindConversation provider still busy after ${idleTimeoutMs}ms; proceeding with revert`,
+        );
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs = Math.min(delayMs * 2, 1_000);
+    }
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;

@@ -2452,6 +2452,47 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
     },
     60_000,
   );
+
+  it(
+    'rewinds the conversation by forking before the target user turn and rebinds the thread',
+    async () => {
+      // 目标第 2 用户回合 → 边界回合 = turns[0](0-based);fork 后 runtime
+      // 自身 threadId 必须切到新 thread,后续 turn/start 走新 id。
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'thread/turns/list': {
+            result: { data: [{ id: 'turn_a' }, { id: 'turn_b' }, { id: 'turn_c' }] },
+          },
+          'thread/fork': { result: { thread: { id: 'thread_rewound' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      };
+      const { runtime, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+
+        const rewoundThreadId = await runtime.rewindConversation({
+          providerMessageTurnOrdinal: 2,
+        });
+        expect(rewoundThreadId).toBe('thread_rewound');
+
+        const forks = receivedRequests(readLog(), 'thread/fork');
+        expect(forks[0]?.params).toMatchObject({ threadId: 'thread_1', lastTurnId: 'turn_a' });
+
+        await runtime.sendInput('after rewind');
+        expect(receivedRequests(readLog(), 'turn/start')[0]?.params).toMatchObject({
+          threadId: 'thread_rewound',
+        });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
 });
 
 describe('buildAppServerConfigOverrides', () => {
