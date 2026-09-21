@@ -55,7 +55,7 @@ export function PairingScreen() {
           />
         ) : (
           <div className="space-y-4">
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               <label className="text-ui-caption text-muted-foreground" htmlFor="pairing-code">
                 配对码
               </label>
@@ -69,7 +69,7 @@ export function PairingScreen() {
                 className="font-mono text-code tracking-[0.3em]"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               <label className="text-ui-caption text-muted-foreground" htmlFor="pairing-address">
                 桌面端地址（可选）
               </label>

@@ -53,7 +53,7 @@ export function GeneralSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">显示偏好</label>
         <SettingsRow
           surface
@@ -72,7 +72,7 @@ export function GeneralSettings() {
         />
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">对话</label>
         <SettingsRow
           surface
@@ -99,7 +99,7 @@ export function GeneralSettings() {
         />
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">项目打开</label>
         <SettingsRow
           surface
@@ -148,7 +148,7 @@ export function GeneralSettings() {
 
       {/* Config file section:仅桌面壳(本机路径 + 资源管理器) */}
       {showConfigFile && (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           <label className="text-ui-compact font-medium text-muted-foreground">配置文件</label>
           <div className="rounded-xl settings-tile p-4 space-y-3">
             <p className="text-xs text-muted-foreground">

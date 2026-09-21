@@ -78,7 +78,7 @@ export function ScheduleConfigurator({ value, timezone, onChange }: ScheduleConf
 
   if (!value) {
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <span className="text-ui-body text-muted-foreground">调度</span>
         <Popover open={addOpen} onOpenChange={setAddOpen}>
           <PopoverTrigger asChild>
@@ -144,7 +144,7 @@ export function ScheduleConfigurator({ value, timezone, onChange }: ScheduleConf
     ?? value.scheduleKind;
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <span className="text-ui-body text-muted-foreground">调度</span>
       <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">

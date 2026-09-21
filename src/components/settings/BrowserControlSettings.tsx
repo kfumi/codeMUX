@@ -56,7 +56,7 @@ export function BrowserControlSettings() {
         />
       </section>
 
-      <section className="space-y-3">
+      <section className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">安全</label>
         <SettingsRow
           surface
@@ -74,7 +74,7 @@ export function BrowserControlSettings() {
       </section>
 
       {canClearHostData && (
-        <section className="space-y-3">
+        <section className="flex flex-col gap-3">
           <label className="text-ui-compact font-medium text-muted-foreground">浏览器数据</label>
           <div className="space-y-3 rounded-xl settings-tile p-4">
             <SettingsRow

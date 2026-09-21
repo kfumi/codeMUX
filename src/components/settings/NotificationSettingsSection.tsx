@@ -50,7 +50,7 @@ export function NotificationSettingsSection() {
   const settings = normalizeNotificationSettings(config.notifications);
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <label className="text-ui-compact font-medium text-muted-foreground">通知</label>
       <div className="space-y-3 rounded-xl settings-tile p-4">
         {presentation.systemNotifications ? (

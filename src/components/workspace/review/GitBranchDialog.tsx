@@ -36,7 +36,7 @@ export function GitBranchDialog({
           <DialogTitle>新建分支</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <label className="block space-y-2 text-sm">
+          <label className="flex flex-col gap-2 text-sm">
             <span className="text-muted-foreground">分支名</span>
             <Input
               aria-label="分支名"

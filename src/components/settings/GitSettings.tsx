@@ -68,7 +68,7 @@ export function GitSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">生成模型</label>
         <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">
@@ -84,7 +84,7 @@ export function GitSettings() {
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">提交说明</label>
         <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
@@ -106,7 +106,7 @@ export function GitSettings() {
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">拉取请求指令</label>
         <div className="space-y-2 rounded-xl settings-tile p-4">
           <div className="min-w-0">
@@ -128,7 +128,7 @@ export function GitSettings() {
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">Gitee 凭据</label>
         <div className="space-y-3 rounded-xl settings-tile p-4">
           <div className="min-w-0">

@@ -566,7 +566,7 @@ export function McpSettingsPanel() {
 
           {editing && (
             <div className="space-y-4">
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">名称（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={editing.name}
@@ -575,7 +575,7 @@ export function McpSettingsPanel() {
                 />
               </div>
 
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">描述</label>
                 <Input
                   value={editing.description}
@@ -585,7 +585,7 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <div className="space-y-0.5">
+                <div className="flex flex-col gap-0.5">
                   <label className="text-sm font-medium">启用到工具</label>
                   <p className="text-xs text-muted-foreground">
                     选择哪些工具使用此 MCP server
@@ -759,7 +759,7 @@ export function McpSettingsPanel() {
 
           {editing && (
             <div className="space-y-4">
-              <div className="space-y-3">
+              <div className="flex flex-col gap-3">
                 <label className="text-sm font-medium">类型 <span className="text-destructive">*</span></label>
                 <RadioGroup
                   value={wizType}
@@ -777,7 +777,7 @@ export function McpSettingsPanel() {
                 </RadioGroup>
               </div>
 
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">名称（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={wizName}
@@ -788,7 +788,7 @@ export function McpSettingsPanel() {
 
               {wizType === 'stdio' ? (
                 <>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">命令 <span className="text-destructive">*</span></label>
                     <Input
                       value={wizCommand}
@@ -796,7 +796,7 @@ export function McpSettingsPanel() {
                       placeholder="npx 或 uvx"
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">参数（每行一个）</label>
                     <textarea
                       className={textareaClass}
@@ -806,7 +806,7 @@ export function McpSettingsPanel() {
                       rows={4}
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">环境变量（KEY=VALUE，每行一个）</label>
                     <textarea
                       className={textareaClass}
@@ -819,7 +819,7 @@ export function McpSettingsPanel() {
                 </>
               ) : (
                 <>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">URL <span className="text-destructive">*</span></label>
                     <Input
                       value={wizUrl}
@@ -827,7 +827,7 @@ export function McpSettingsPanel() {
                       placeholder="https://example.com/mcp"
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Headers（KEY=VALUE，每行一个）</label>
                     <textarea
                       className={textareaClass}
@@ -840,7 +840,7 @@ export function McpSettingsPanel() {
                 </>
               )}
 
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">配置预览</label>
                 <div className="rounded-lg border bg-muted p-3 overflow-x-auto">
                   <pre className="text-code font-mono text-muted-foreground whitespace-pre-wrap break-all">

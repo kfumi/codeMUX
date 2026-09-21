@@ -74,7 +74,7 @@ export function AboutSettings() {
       </div>
 
       {/* Environment info */}
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">运行环境</label>
         <div className="rounded-xl settings-tile px-4 divide-y divide-border/40">
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
@@ -92,7 +92,7 @@ export function AboutSettings() {
       </div>
 
       {/* Links */}
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">链接</label>
         <div className="flex gap-2">
           {canUpdate && (

@@ -318,7 +318,7 @@ export function AutomationEditor({
             </div>
           )}
 
-          <label className="block space-y-2">
+          <label className="flex flex-col gap-2">
             <span className="text-ui-body text-muted-foreground">任务标题</span>
             <Input
               value={draft.title}
@@ -334,7 +334,7 @@ export function AutomationEditor({
             onChange={setScheduleValue}
           />
 
-          <label className="block space-y-2">
+          <label className="flex flex-col gap-2">
             <span className="text-ui-body text-muted-foreground">指令</span>
             <div className="rounded-lg border border-border/70 bg-muted/10">
               <textarea
