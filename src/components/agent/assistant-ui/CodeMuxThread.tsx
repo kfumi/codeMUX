@@ -17,17 +17,12 @@ import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
-import {
-  ActivityRunHeader,
-  ActivityRunSteps,
-  ActivityStepThinking,
-} from '@/components/assistant-ui/activity-run';
+import { ActivityStepThinking } from '@/components/assistant-ui/activity-run';
 import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
 import {
   EMPTY_ACTIVITY_RUNS,
   buildActivityRuns,
   isActivityRunPart,
-  rowRunContinues,
   type ActivityRunPlacement,
   type ActivityRuns,
 } from '@/lib/activityRuns';
@@ -37,7 +32,6 @@ import {
 } from '@/lib/subagentActivity';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
-import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { isSubagentToolName } from '@/lib/subagentTools';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { useStreamingTextReveal } from './useStreamingTextReveal';
@@ -109,7 +103,7 @@ type CodeMuxThreadRenderContextValue = {
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
-  /** 处理段（连续思考+工具）的分段与计时。 */
+  /** 处理段投影（连续思考+工具）：分组头已移除，仅用于锚定委派卡片。 */
   activityRuns: ActivityRuns;
   expandedRunKeys: Set<string>;
   claimedRunKeys: Set<string>;
@@ -141,22 +135,17 @@ const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
  * `[data-long-thread] [data-message-row]` rule in globals.css.
  */
 const LONG_THREAD_EVENT_THRESHOLD = 120;
-const GROUP_BY_PART_INNER = groupPartByType({
-  // 思考与工具指向同一个组 key：`buildGroupTree` 是相邻合并，于是「连续的思考+工具」
-  // 自动成为一段（处理段）；文本与 data 部分天然打断分段并保持源码顺序。
+/**
+ * 分组头已移除：「处理段」组节点只作为渲染管线的**稳定边界**保留——组把连续的
+ * 思考/工具收成一个 key 稳定的子树，流式更新（事件追加、part 状态变化）时工具卡等
+ * 部分级组件的实例状态（如展开的工具详情）不会被打掉重挂。渲染层对组**直接透传
+ * children**：视觉上完全平铺，没有组头、没有缩进、没有段级开合。
+ */
+const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-activity-run'],
   'tool-call': ['group-activity-run'],
   'standalone-tool-call': [],
 });
-const GROUP_BY_PART = (
-  part: Parameters<typeof GROUP_BY_PART_INNER>[0],
-  context?: Parameters<typeof GROUP_BY_PART_INNER>[1],
-) => {
-  if (part.type === 'tool-call' && isAskUserQuestionToolName(part.toolName)) {
-    return [];
-  }
-  return GROUP_BY_PART_INNER(part, context);
-};
 const CodeMuxThreadRenderContext = createContext<CodeMuxThreadRenderContextValue | null>(null);
 
 /** Turn layout signature: everything message rows derive from a turn
@@ -206,21 +195,9 @@ export function assistantMessageBottomSpacing(input: {
   isLastRow: boolean;
   isToggleMessage: boolean;
   shouldRenderFooter: boolean;
-  /**
-   * 同一个处理段在本行之后还有步骤：这一段跨了多个消息行，行距必须压到与段内步距
-   * （3px）一致，否则每跨一行就多出一段空隙——竖线也会跟着断掉。
-   */
-  continuesRun?: boolean;
 }): string {
   if (input.isLastRow) {
     return 'mb-2';
-  }
-  // 同一个处理段跨行时，行距要压到与段内步距一致（3px），否则每跨一行都会多出空隙、竖线断开。
-  // 「本轮处理」开关行同时是它自己那一段的组头（「已处理 … 个步骤」）时，段头下面紧接着的
-  // 就是这一段的第一行：两边给同一个 4px —— 与段头和自己的步骤行同处一行时的 space-y-1
-  // 一致，跨行与否都不会错层；不能沿用标题的 8px，否则跨过去那一步看起来比段内步距松。
-  if (input.continuesRun) {
-    return input.isToggleMessage ? 'mb-1' : 'mb-[3px]';
   }
   // 「已处理」整轮开关是它所领起的那块内容的标题：标题下留 8px 加一条分隔线
   // （见 AssistantCollapseToggle），展开与收起两种状态用同一个值，避免内容跳动。
@@ -533,7 +510,9 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           && prev.turnKey === info.turnKey
           && prev.isToggleMessage === info.isToggleMessage
           && prev.durationMs === info.durationMs
-          && prev.hideReasoningOnly === info.hideReasoningOnly;
+          && prev.hideReasoningOnly === info.hideReasoningOnly
+          && prev.stepCount === info.stepCount
+          && prev.hasError === info.hasError;
       })
     ) {
       collapseCacheRef.current = { events, timestamps: eventTimestamps, flags, map: cache.map };
@@ -563,14 +542,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     }),
     [activityRuns, events, sessionSubagents],
   );
-  const tailRun = activityRuns.runs[activityRuns.runs.length - 1];
-  // 仍在运行的尾段如果已经展开，实时思考就画在它里面（缩进、不再重复一个组头）。
-  const liveRunHostKey = tailRun?.live
-    && (claimedRunKeys.has(tailRun.runKey)
-      ? expandedRunKeys.has(tailRun.runKey)
-      : tailRun.live)
-    ? tailRun.runKey
-    : undefined;
 
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
@@ -638,7 +609,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
                 <CodeMuxThreadMessages />
               </CodeMuxThreadRenderContext.Provider>
               {stopped ? <InterruptBanner /> : null}
-              <StreamingContent sessionId={sessionId} events={events} liveRunKey={liveRunHostKey} />
+              <StreamingContent sessionId={sessionId} events={events} />
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
                 className="sticky bottom-0 mt-auto z-10 flex flex-col gap-2 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-1 pb-3"
@@ -1761,13 +1732,13 @@ function AssistantLikeMessage({
   const isLastRow = useIsLastMessage(message) && !isRunning;
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
 
-  // 这一行属于哪个处理段（连续思考 + 工具）：段首画组头，段内其余行只画缩进的步骤行。
+  // 这一行属于哪个处理段（连续思考 + 工具）：分组头已移除，run 只用于定位委派卡片。
   const sourceEventIndex = getSourceEventIndex(message);
   const runPlacement: ActivityRunPlacement | undefined = sourceEventIndex != null
     ? activityRuns.placementByEventIndex.get(sourceEventIndex)
     : undefined;
   const run = runPlacement ? activityRuns.runByKey.get(runPlacement.runKey) : undefined;
-  // 整轮折叠（「已处理」开关）负责整轮的显隐；段自己的折叠在整轮展开后照常工作。
+  // 整轮折叠（「已处理」开关）负责整轮的显隐。
   const compactToggle = collapseInfo?.isToggleMessage === true;
   if (message.content.length === 0 && !compactToggle) {
     return null;
@@ -1775,39 +1746,24 @@ function AssistantLikeMessage({
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
   const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
   const shouldHideCollapsedReasoning = collapseInfo?.hideReasoningOnly && !isCollapseExpanded;
-  // 委派（Task/Agent）段：段头改画委派卡片，段内的委派工具行不再单独渲染。
+  // 委派（Task/Agent）：卡片锚定在委派段首行，段内的委派工具行不再单独渲染。
   const subagentActivity = run ? subagentRunActivity.get(run.runKey) : undefined;
   const delegationRunning = subagentActivity != null && subagentActivity.summary.running > 0;
-  // 未被用户点过的段跟随 live 自动开合：运行中展开、结束后收起；用户点过之后由用户接管。
-  // 含委派的段还要看子智能体：父段本身可能早就「结束」了，而子智能体还在跑。
+  // 卡片开合状态：未被用户点过的跟随 live 自动开合（运行中展开、结束后收起）；
+  // 用户点过之后由用户接管。还要看子智能体：父段可能早就「结束」了，而子智能体还在跑。
   const runOpen = run
     ? (claimedRunKeys.has(run.runKey)
       ? expandedRunKeys.has(run.runKey)
       : run.live || delegationRunning)
     : true;
-  // 每个处理段都画自己的段组头：段首行即使正好是「本轮处理」开关所在行也照画，
-  // 否则首段会退化成一堆没有开合入口、也没有缩进归属的裸步骤行。
-  const runHeaderVisible = run != null
-    && runPlacement?.isHead === true
-    && (collapseInfo == null || isCollapseExpanded);
-  // 段收起时不渲染步骤行；同行里的正文等独立部分由 hasIndependentPart 兜底保持可见。
-  const runRowsVisible = run == null || runOpen;
-  // 与处理段无关、必须始终可见的部分（正文 / 数据卡片 / 问询卡片）：段收起时它们照常渲染。
-  const hasIndependentPart = message.content.some((part) => (
-    part.type === 'text'
-    || part.type === 'data'
-    || (part.type === 'tool-call' && isAskUserQuestionToolName(part.toolName))
-  ));
-  const partsVisible = !shouldHideCollapsedContent && (runRowsVisible || hasIndependentPart);
-  // 同一个处理段可能跨多个消息行（一边说一边调工具时，每个事件各成一行）：这一行之后若还有
-  // 本段的步骤，行距压到与段内步距一致、竖线向下多探 3px 接上下一行，整段读起来是一条线。
-  // 只有步骤真的画出来时才算「连续」——段收起时后面的行会整行消失，行距要照旧。
-  const continuesRun = runRowsVisible
-    && rowRunContinues(activityRuns.placementByEventIndex, run, getSourceEventIndices(message));
-  // 含委派的段不再画「已处理 N 个步骤」组头，改由卡片承担（收起态也能开合）。
-  const delegationCardVisible = runHeaderVisible
+  // 委派卡片：只锚定在委派段首行（整轮收起时随整块隐藏），收起态也能开合。
+  const delegationCardVisible = runPlacement?.isHead === true
+    && (collapseInfo == null || isCollapseExpanded)
     && subagentActivity != null
     && subagentActivity.nodes.length > 0;
+  // 普通步骤行恒可见；只有委派段的非锚点行在卡片收起时让位（步骤归属卡片）。
+  const partsVisible = !shouldHideCollapsedContent
+    && (subagentActivity == null || delegationCardVisible || runOpen);
 
   const sourceTimestamp = getSourceTimestamp(message);
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
@@ -1827,8 +1783,8 @@ function AssistantLikeMessage({
     pendingTurnId,
   });
   const footerVisible = !shouldHideCollapsedContent && shouldRenderFooter;
-  // 整行都没有可见内容时直接不渲染：整轮「已处理」收起、段收起、且不是段首时即如此。
-  if (!compactToggle && !runHeaderVisible && !partsVisible && !footerVisible) {
+  // 整行都没有可见内容时直接不渲染：整轮收起（且不是开关行）、没有委派卡片、没有正文与页脚。
+  if (!compactToggle && !delegationCardVisible && !partsVisible && !footerVisible) {
     return null;
   }
   const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
@@ -1859,14 +1815,9 @@ function AssistantLikeMessage({
     isLastRow,
     isToggleMessage: compactToggle,
     shouldRenderFooter,
-    continuesRun,
   });
-  const runDurationMs = run && run.startedAt != null
-    ? (run.live ? Date.now() : (run.endedAt ?? run.startedAt)) - run.startedAt
-    : undefined;
   /**
-   * 段内单个过程步骤（思考 / 工具）的渲染。处理段里的步骤有两个落点：普通段的
-   * `ActivityRunSteps`，以及含委派段的卡片主体——两处共用这一个开关。
+   * 段内单个过程步骤（思考 / 工具）的渲染。委派卡片主体与平铺列表共用这一个开关。
    */
   const renderLeafPart = (part: PartState): ReactNode => {
     switch (part.type) {
@@ -1909,10 +1860,8 @@ function AssistantLikeMessage({
   };
 
   return (
-    <MessagePrimitive.Root
-      data-message-row
-      data-activity-run={run?.runKey}
-      data-activity-run-head={runHeaderVisible ? '' : undefined}
+     <MessagePrimitive.Root
+       data-message-row
       className={cn('group/message-row flex w-full justify-start', messageBottomSpacing)}
     >
       <div
@@ -1925,6 +1874,8 @@ function AssistantLikeMessage({
           <AssistantCollapseToggle
             expanded={isCollapseExpanded}
             durationMs={collapseInfo.durationMs}
+            stepCount={collapseInfo.stepCount}
+            hasError={collapseInfo.hasError}
             onClick={() => onToggleExpandedTurn(collapseInfo.turnKey)}
           />
         ) : null}
@@ -1943,39 +1894,27 @@ function AssistantLikeMessage({
               ) : null
             ))}
           </SubagentActivityCard>
-        ) : runHeaderVisible && run ? (
-          <ActivityRunHeader
-            open={runOpen}
-            onToggle={() => onToggleRun(run.runKey, runOpen)}
-            live={run.live}
-            onlyThinking={run.onlyThinking}
-            durationMs={runDurationMs}
-            stepCount={run.stepCount}
-            tail={run.tail}
-          />
         ) : null}
         {partsVisible ? (
           <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
             {({ part, children }) => {
               switch (part.type) {
                 case 'group-activity-run':
-                  // 含委派的段：过程步骤已经画进段头的委派卡片（拓扑在前、步骤在后）。
+                  // 分组头已移除：组节点只作为稳定边界，步骤按源码顺序直接透传（平铺）。
+                  // 委派卡片所在行是例外：卡片已画出过程步骤，这里只透传正文等非过程部分。
                   if (delegationCardVisible) {
                     return null;
                   }
-                  // 段收起时只收起过程步骤行：同一行里的正文（「思考 + 最终答复」同一个事件时
-                  // 它们同属一段）必须始终可见，否则最终答复会随段一起消失。
-                  if (!runRowsVisible) {
-                    return null;
-                  }
-                  // 段内步骤缩进 + 段头图标中线上的竖线，视觉上归属上面的组头。
-                  return <ActivityRunSteps extendsIntoGap={continuesRun}>{children}</ActivityRunSteps>;
-                case 'indicator':
-                  return null;
+                  return children;
                 case 'text':
                 case 'reasoning':
                 case 'tool-call':
                 case 'data':
+                  // 委派卡片所在行：卡片已画出过程步骤（思考 + 普通工具），
+                  // 这里只补卡片外的部分（正文 / 数据 / 问询卡片）。
+                  if (delegationCardVisible && isActivityRunPart(part)) {
+                    return null;
+                  }
                   return renderLeafPart(part);
                 default:
                   return null;
@@ -2030,15 +1969,10 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
 function StreamingContent({
   sessionId,
   events,
-  liveRunKey,
 }: {
   sessionId: string;
   events: AgentMessage[];
-  /** 仍在运行的尾段 key：实时思考行归属这个段，画在它里面，不再重复一个组头。 */
-  liveRunKey?: string;
 }) {
-  // 实时思考在没有可归属的尾段（上一段已被文本打断或不存在）时自带一个可折叠组头。
-  const [liveRunOpen, setLiveRunOpen] = useState(true);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
@@ -2110,24 +2044,9 @@ function StreamingContent({
   return (
     <div className="mb-2 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-1 text-ui-body leading-relaxed">
-        {isThinking && (liveRunKey != null || liveRunOpen) ? (
+        {isThinking ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
-            {liveRunKey == null ? (
-              <ActivityRunHeader
-                open={liveRunOpen}
-                onToggle={() => setLiveRunOpen((value) => !value)}
-                live
-                onlyThinking
-                durationMs={queryStartTime != null ? Date.now() - queryStartTime : undefined}
-                stepCount={1}
-              />
-            ) : null}
-            {liveRunKey == null ? (
-              liveThinkingStep
-            ) : (
-              // 这个实时思考行归属仍在运行的尾段：与已提交的步骤行共用缩进与竖线。
-              <ActivityRunSteps className="w-full min-w-0" extendsUpward>{liveThinkingStep}</ActivityRunSteps>
-            )}
+            {liveThinkingStep}
           </div>
         ) : null}
 

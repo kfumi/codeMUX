@@ -3,14 +3,11 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 
 import {
-  ActivityRunHeader,
-  ActivityRunSteps,
   ActivityStepThinking,
 } from '@/components/assistant-ui/activity-run';
 import { MessageFooter, type MessageFooterStats, type MessageFooterVariant } from '@/components/assistant-ui/message-footer';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
-import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
 import { isActivityRunPart, type ActivityRun, type ActivityRunPlacement } from '@/lib/activityRuns';
 import { buildSubagentActivity } from '@/lib/subagentActivity';
@@ -43,30 +40,17 @@ export type TranscriptMessageRenderInput = {
   collapseInfo?: AssistantCollapseInfo;
   collapseExpanded?: boolean;
   onToggleCollapse?: () => void;
-  /** 这一行所属的处理段（连续思考 + 工具）。 */
+  /** 这一行所属的处理段（连续思考 + 工具）：分组头已移除，仅用于锚定委派卡片。 */
   run?: ActivityRun;
   runPlacement?: ActivityRunPlacement;
-  /** 段当前是否展开。 */
+  /** 委派卡片当前是否展开。 */
   runOpen?: boolean;
   onToggleRun?: () => void;
-  /** 这一行之后同一个处理段还有步骤：行距压到段内步距，竖线接上下一行。 */
-  runContinuesAfterRow?: boolean;
 };
 
 const TRANSCRIPT_COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 
 type ToolCallPart = Extract<CodeMuxAssistantPart, { type: 'tool-call' }>;
-type ReasoningPart = Extract<CodeMuxAssistantPart, { type: 'reasoning' }>;
-
-/** 处理段内的一个步骤行。 */
-export type TranscriptActivityItem =
-  | { kind: 'reasoning'; part: ReasoningPart }
-  | { kind: 'tool-call'; part: ToolCallPart };
-
-/** 一段连续过程（activity）或一个打断分段的独立部分。 */
-export type TranscriptPartGroup =
-  | { kind: 'activity'; items: TranscriptActivityItem[] }
-  | { kind: 'part'; part: CodeMuxAssistantPart };
 
 export function shouldShowTranscriptFooter(input: {
   role: 'user' | 'assistant' | 'system';
@@ -89,38 +73,9 @@ export function isLongTranscriptUserMessage(text: string): boolean {
 }
 
 /**
- * 只读副本的分段规则与主线程一致：连续的思考/工具合成一段（处理段），
- * 文本与问询卡片打断分段。渲染侧只有段首画组头，段内平铺缩进的步骤行。
+ * 只读副本的消息行：思考 / 工具 / 正文按源码顺序平铺（分组头已移除，
+ * 整轮折叠由「已处理」开关负责）；含委派的行把过程步骤画进委派卡片。
  */
-export function groupTranscriptParts(parts: CodeMuxAssistantPart[]): TranscriptPartGroup[] {
-  const groups: TranscriptPartGroup[] = [];
-  let activity: TranscriptActivityItem[] = [];
-
-  const flushActivity = () => {
-    if (activity.length === 0) {
-      return;
-    }
-    groups.push({ kind: 'activity', items: activity });
-    activity = [];
-  };
-
-  for (const part of parts) {
-    if (part.type === 'reasoning') {
-      activity.push({ kind: 'reasoning', part });
-      continue;
-    }
-    if (part.type === 'tool-call' && !isAskUserQuestionToolName(part.toolName)) {
-      activity.push({ kind: 'tool-call', part });
-      continue;
-    }
-    flushActivity();
-    groups.push({ kind: 'part', part });
-  }
-
-  flushActivity();
-  return groups;
-}
-
 export function CodeMuxTranscriptMessage({
   message,
   sessionId,
@@ -139,12 +94,11 @@ export function CodeMuxTranscriptMessage({
   run,
   runPlacement,
   runOpen = true,
-  runContinuesAfterRow = false,
   onToggleRun,
 }: TranscriptMessageRenderInput) {
   const subagentSession = useSubagentStore((state) => state.sessions[sessionId]);
   const openSubagentInSidePanel = useSubagentStore((state) => state.openInSidePanel);
-  // 委派（Task/Agent）段：段头改画委派卡片。只读副本没有整段的事件下标，所以按
+  // 委派（Task/Agent）：只读副本没有整段的事件下标，所以按
   // 「本条消息里能按 toolCallId 找到描述符的委派工具调用」判定。
   const subagentActivity = useMemo(() => {
     if (!subagentSession) return undefined;
@@ -162,33 +116,23 @@ export function CodeMuxTranscriptMessage({
     return buildSubagentActivity({ order: subagentIds, descriptors, events });
   }, [message.content, subagentSession]);
   const text = transcriptMessageText(message);
+  // 整轮折叠（「已处理」开关）负责整轮的显隐。
   const shouldHideCollapsedContent = Boolean(
     collapseInfo && !collapseExpanded && !collapseInfo.hideReasoningOnly,
   );
   const shouldHideCollapsedReasoning = Boolean(
     collapseInfo?.hideReasoningOnly && !collapseExpanded,
   );
-  // 整轮折叠（「已处理」开关）负责整轮的显隐；段自己的折叠在整轮展开后照常工作。
   const compactToggle = collapseInfo?.isToggleMessage === true;
-  // 每个处理段都画自己的段组头（段首行正好是整轮开关行时也照画）；整轮收起时随整块隐藏。
-  const runHeaderVisible = run != null
+  // 委派卡片：只锚定在委派段首行（整轮收起时随整块隐藏），收起态也能开合。
+  const delegationCardVisible = run != null
     && runPlacement?.isHead === true
-    && (collapseInfo == null || collapseExpanded);
-  // 与处理段无关、必须始终可见的部分（正文 / 数据卡片 / 问询卡片）。
-  const hasIndependentPart = message.content.some((part) => (
-    part.type === 'text'
-    || part.type === 'data-codemux-event'
-    || (part.type === 'tool-call' && isAskUserQuestionToolName(part.toolName))
-  ));
-  // 段收起时不渲染步骤行；同行里的正文等独立部分由 hasIndependentPart 兜底保持可见。
-  const runRowsVisible = !run || runOpen;
-  const partsVisible = !shouldHideCollapsedContent && (runRowsVisible || hasIndependentPart);
+    && (collapseInfo == null || collapseExpanded)
+    && subagentActivity != null;
+  // 普通步骤行恒可见；只有委派卡片所在的行在卡片收起时让位（步骤归属卡片）。
+  const partsVisible = !shouldHideCollapsedContent
+    && (subagentActivity == null || delegationCardVisible || runOpen !== false);
   const footerVisible = showFooter && !shouldHideCollapsedContent;
-  const runDurationMs = run && run.startedAt != null
-    ? (run.live ? Date.now() : (run.endedAt ?? run.startedAt)) - run.startedAt
-    : undefined;
-  // 含委派的段不再画「已处理 N 个步骤」组头，改由卡片承担（收起态也能开合）。
-  const delegationCardVisible = runHeaderVisible && run != null && subagentActivity != null;
 
   const footer = footerVisible ? (
     <MessageFooter
@@ -212,7 +156,7 @@ export function CodeMuxTranscriptMessage({
     return null;
   }
 
-  if (!compactToggle && !runHeaderVisible && !partsVisible && !footer) {
+  if (!compactToggle && !delegationCardVisible && !partsVisible && !footer) {
     return null;
   }
 
@@ -238,6 +182,8 @@ export function CodeMuxTranscriptMessage({
         <AssistantCollapseToggle
           expanded={collapseExpanded}
           durationMs={collapseInfo.durationMs}
+          stepCount={collapseInfo.stepCount}
+          hasError={collapseInfo.hasError}
           onClick={onToggleCollapse}
         />
       ) : null}
@@ -262,48 +208,14 @@ export function CodeMuxTranscriptMessage({
             return null;
           })}
         </SubagentActivityCard>
-      ) : runHeaderVisible && run ? (
-        <ActivityRunHeader
-          open={runOpen}
-          onToggle={() => onToggleRun?.()}
-          live={run.live}
-          onlyThinking={run.onlyThinking}
-          durationMs={runDurationMs}
-          stepCount={run.stepCount}
-          tail={run.tail}
-        />
       ) : null}
       {partsVisible ? (
         <div className="space-y-0.5">
-          {groupTranscriptParts(message.content).map((group, index) => {
-            if (group.kind === 'activity') {
-              // 含委派的段：过程步骤已经画进段头的委派卡片（拓扑在前、步骤在后）。
-              if (delegationCardVisible) {
-                return null;
-              }
-              // 段收起只收起过程步骤行：同一行里的正文必须始终可见。
-              if (!runRowsVisible) {
-                return null;
-              }
-              return (
-                <ActivityRunSteps key={index} extendsIntoGap={runContinuesAfterRow}>
-                  {group.items.map((item) =>
-                    item.kind === 'reasoning' ? (
-                      shouldHideCollapsedReasoning ? null : (
-                        <ActivityStepThinking
-                          key={`thinking-${index}-${item.part.text.slice(0, 24)}`}
-                          text={item.part.text}
-                        />
-                      )
-                    ) : (
-                      renderToolCall(item.part, `tool-${index}-${item.part.toolCallId}`)
-                    ),
-                  )}
-                </ActivityRunSteps>
-              );
+          {message.content.map((part, index) => {
+            // 委派卡片所在行：卡片已画出过程步骤，这里只补卡片外的部分（正文 / 问询卡片）。
+            if (delegationCardVisible && isActivityRunPart(part)) {
+              return null;
             }
-
-            const part = group.part;
             if (part.type === 'text') {
               return (
                 <div key={index} className="pl-1">

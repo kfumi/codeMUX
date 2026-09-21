@@ -699,7 +699,7 @@ function getBooleanValue(record: Record<string, unknown>, key: string): boolean 
   return record[key] === true;
 }
 
-function hasExplicitFailureSignal(value: unknown): boolean {
+export function hasExplicitFailureSignal(value: unknown): boolean {
   if (value == null) {
     return false;
   }

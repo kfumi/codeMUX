@@ -20,7 +20,7 @@ import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
-import { EMPTY_ACTIVITY_RUNS, buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
+ import { EMPTY_ACTIVITY_RUNS, buildActivityRuns } from '@/lib/activityRuns';
 import { buildConversationTurns } from '@/lib/conversationTurns';
 import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
@@ -271,12 +271,6 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
               const runOpen = run
                 ? (claimedRunKeys.has(run.runKey) ? expandedRunKeys.has(run.runKey) : run.live)
                 : true;
-              // 同一个处理段跨了多个消息行时，让这一行的竖线接上下一行（预览面板行距 8px）。
-              const runContinuesAfterRow = rowRunContinues(
-                activityRuns.placementByEventIndex,
-                run,
-                message.metadata.sourceEventIndices,
-              );
 
               return (
                 <CodeMuxTranscriptMessage
@@ -295,7 +289,6 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                   runPlacement={runPlacement}
                   runOpen={runOpen}
                   onToggleRun={run ? () => toggleRun(run.runKey, runOpen) : undefined}
-                  runContinuesAfterRow={runContinuesAfterRow}
                   collapseInfo={collapseInfo}
                   collapseExpanded={collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false}
                   onToggleCollapse={collapseInfo

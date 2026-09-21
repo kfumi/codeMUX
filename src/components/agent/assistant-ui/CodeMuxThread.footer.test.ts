@@ -100,29 +100,4 @@ describe('assistantMessageBottomSpacing', () => {
     })).toBe('mb-2');
   });
 
-  it('同一个处理段跨行时行距压到段内步距（3px），开关行兼作段头时用 4px', () => {
-    // 段内的步距是 gap-[3px]：跨行的行距必须与它一致，否则每跨一行都会多出空隙、竖线断开。
-    expect(assistantMessageBottomSpacing({
-      isLastRow: false,
-      isToggleMessage: false,
-      shouldRenderFooter: false,
-      continuesRun: true,
-    })).toBe('mb-[3px]');
-    // 「本轮处理」开关行同时是它自己那一段的段头（「已处理 … 个步骤」）时，段头下面紧接着的
-    // 就是这一段的第一行：留 4px —— 与「段头 → 自己的步骤行」同处一行时的 space-y-1 一致，
-    // 跨行与否都不会显得比段内步距松。
-    expect(assistantMessageBottomSpacing({
-      isLastRow: false,
-      isToggleMessage: true,
-      shouldRenderFooter: false,
-      continuesRun: true,
-    })).toBe('mb-1');
-    // 段收起时不压行距（后面那几行整行不渲染，行距要照旧）。
-    expect(assistantMessageBottomSpacing({
-      isLastRow: false,
-      isToggleMessage: false,
-      shouldRenderFooter: false,
-      continuesRun: false,
-    })).toBe('mb-2');
-  });
 });

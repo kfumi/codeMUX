@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ACTIVITY_RUN_STEP_INDENT } from '@/components/assistant-ui/activity-run';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -19,17 +18,6 @@ function renderPanel(sessionId = 'session-1', subagentId = 'toolu_1') {
   );
 }
 
-/** 段内步骤行的缩进容器：段头让位给整轮「已处理」开关的段不缩进，其余段带 `ACTIVITY_RUN_STEP_INDENT`。 */
-function stepIndentContainer(element: Element): HTMLElement | null {
-  let node: HTMLElement | null = element.parentElement;
-  while (node && !node.className.includes('group/message-row')) {
-    if (node.className.includes('gap-[3px]')) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return null;
-}
 
 function seedStore(options: {
   status: 'running' | 'completed';
@@ -297,16 +285,10 @@ describe('SubagentPreviewPanel', () => {
 
     const { container } = renderPanel();
 
-    // 思考是一个只有 1 步的处理段：段头先渲染，步骤行收起时不渲染。
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
-    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
-    expect(runTrigger).toBeTruthy();
-    expect(runTrigger.getAttribute('aria-label')).toMatch(/^已思考/);
-
-    fireEvent.click(runTrigger);
-
+    // 思考按顺序平铺成一行收起的单行摘要（没有段组头），点开后才是正文。
     const reasoningTrigger = container.querySelector('[data-slot="reasoning-trigger"]') as HTMLElement;
     expect(reasoningTrigger).toBeTruthy();
+    expect(reasoningTrigger.getAttribute('aria-expanded')).toBe('false');
     expect(reasoningTrigger.textContent).toContain('思考');
     // 收起时只显示单行摘要，思考正文不当作普通文本铺开。
     expect(reasoningTrigger.textContent).toContain('先看目录结构');
@@ -412,15 +394,12 @@ describe('SubagentPreviewPanel', () => {
 
     const { container } = renderPanel();
 
-    // 段收起时工具行不渲染：先展开段头（工具卡仍是主会话那一套）。
-    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
-    expect(runTrigger).toBeTruthy();
-    fireEvent.click(runTrigger);
-
+    // 没有段组头：工具卡按顺序直接平铺（工具卡仍是主会话那一套）。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
     expect(screen.getByRole('button', { name: /搜索文本/ })).toBeTruthy();
   });
 
-  it('连续工具调用收进同一处理段，展开后才看到各工具卡片', () => {
+  it('连续工具调用按源码顺序平铺成各工具卡片', () => {
     seedStore({
       status: 'completed',
       events: [
@@ -467,13 +446,8 @@ describe('SubagentPreviewPanel', () => {
 
     const { container } = renderPanel();
 
-    // 两个连续的工具调用合成一段：段头只有一条，步骤行收起时不渲染。
-    const runTriggers = container.querySelectorAll('[data-slot="activity-run-trigger"]');
-    expect(runTriggers).toHaveLength(1);
-    expect(runTriggers[0]!.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
-
-    fireEvent.click(runTriggers[0]!);
+    // 没有段组头：两个工具卡片按源码顺序直接平铺。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
 
     const toolTriggers = Array.from(container.querySelectorAll('[data-slot="tool-fallback-trigger"]'));
     expect(toolTriggers).toHaveLength(2);
@@ -596,7 +570,7 @@ describe('SubagentPreviewPanel', () => {
     expect(list.className).toContain('pb-14');
   });
 
-  it('紧凑输出开启时中间过程收成已处理，展开后才看到过程', () => {
+  it('紧凑输出开启时中间过程收成已处理，展开后按顺序平铺', () => {
     useSettingsStore.setState({ config: compactConfig(true) });
     seedStore({
       status: 'completed',
@@ -608,28 +582,20 @@ describe('SubagentPreviewPanel', () => {
     expect(screen.getByText('最终汇总')).toBeTruthy();
     expect(screen.queryByText('中间过程说明')).toBeNull();
     expect(screen.queryByRole('button', { name: /搜索文本/ })).toBeNull();
-    // 整轮收起：工具段的段头与步骤行都不渲染。
+    // 整轮收起：过程行都不渲染，也没有段组头。
     expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
 
     const toggle = screen.getByRole('button', { name: '展开AI过程' });
-    expect(toggle.textContent).toContain('本轮处理');
+    expect(toggle.textContent).toContain('已处理');
+    expect(toggle.textContent).toContain('1 个步骤');
     expect(toggle.textContent).toContain('6s');
 
     fireEvent.click(toggle);
 
+    // 展开后过程按源码顺序平铺：中间说明与工具卡直接可见，没有段组头。
     expect(screen.getByText('中间过程说明')).toBeTruthy();
-    // 工具段自己有段头、且已经结束：整轮展开后它照常默认收起，点段头后才渲染工具步骤行。
-    const runTrigger = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
-    expect(runTrigger).toBeTruthy();
-    expect(runTrigger.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('button', { name: /搜索文本/ })).toBeNull();
-
-    fireEvent.click(runTrigger);
-
-    expect(runTrigger.getAttribute('aria-expanded')).toBe('true');
-    const toolStep = screen.getByRole('button', { name: /搜索文本/ });
-    // 有可见段头的段：步骤行缩进到组头下面。
-    expect(stepIndentContainer(toolStep)?.className).toContain(ACTIVITY_RUN_STEP_INDENT);
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /搜索文本/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: '收起AI过程' })).toBeTruthy();
   });
 

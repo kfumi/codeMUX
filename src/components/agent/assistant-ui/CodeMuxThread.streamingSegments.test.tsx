@@ -3,7 +3,7 @@
 // thinking → assistant_message → text → assistant_message repeatedly within
 // one turn). Guards the StreamingContent visibility rules in CodeMuxThread.
 
-import { cleanup, render, act, fireEvent } from '@testing-library/react';
+import { cleanup, render, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../../stores/agentStore';
@@ -242,17 +242,11 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('ANSWER-1 final answer');
     expect(text).toContain('ANSWER-2 second answer');
-    // 两段过程被两条文本打断，各占一个组头；收起态下不铺开步骤行。
-    const runTriggers = Array.from(
-      container.querySelectorAll('[data-slot="activity-run-trigger"]'),
-    ) as HTMLElement[];
-    expect(runTriggers).toHaveLength(2);
-    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
-
-    runTriggers.forEach((trigger) => fireEvent.click(trigger));
-
-    // 展开后两段各自的那条思考步骤行才出现。
+    // 无段组头：过程按源码顺序平铺，两条已提交的思考各是一行收起的单行摘要。
+    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
     const triggers = container.querySelectorAll('[data-slot="reasoning-trigger"]');
-    expect(triggers.length).toBe(2);
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0]?.getAttribute('aria-expanded')).toBe('false');
+    expect(triggers[1]?.getAttribute('aria-expanded')).toBe('false');
   }, 30000);
 });

@@ -20,6 +20,13 @@ describe('formatElapsed', () => {
     expect(formatElapsed(4_810_000)).toBe('1h 20m');
   });
 
+  it('can widen to three units so the turn header keeps the seconds', () => {
+    // 整轮「已处理 2h 32m 14s」标题要看得见秒：默认两档会把秒截掉。
+    expect(formatElapsed(9_134_000, { maxParts: 3 })).toBe('2h 32m 14s');
+    expect(formatElapsed(1_172_000, { maxParts: 3 })).toBe('19m 32s');
+    expect(formatElapsed(123_010_000, { maxParts: 3 })).toBe('1d 10h 10m');
+  });
+
   it('formats the two largest units when over a day', () => {
     expect(formatElapsed(123_010_000)).toBe('1d 10h');
   });
