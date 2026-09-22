@@ -2312,9 +2312,8 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
  * 流式页脚的"正在执行"状态行。
  *
  * 单独抽成 `memo` 组件，是为了让它彻底脱离分帧绘制的重渲染路径：
- * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的两处动效都是
- * **绘制类**动画（`DotMatrix` 的 SVG `opacity` 闪烁、`RunningElapsedTimer` 的
- * `.shimmer` 用 `background-clip: text`），无法卸载到合成线程。让它们跟着每帧
+ * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的 `DotMatrix`
+ * 是**绘制类**动画（SVG `opacity` 闪烁），无法卸载到合成线程。让它跟着每帧
  * 重渲染既无意义，也会把主线程预算浪费在重算这一小段 DOM 上。
  * 它的 props 只有 `startTime`，在整个回合内稳定。
  */

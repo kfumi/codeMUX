@@ -63,3 +63,28 @@ describe('ReasoningRoot', () => {
     expect(content?.className).toContain('max-h-[min(36vh,24rem)]');
   });
 });
+
+describe('ReasoningTrigger active 状态', () => {
+  it('active 时图标带呼吸脉冲，文字保持单份（无 shimmer 叠层）', () => {
+    const { container } = render(
+      <ReasoningRoot>
+        <ReasoningTrigger active />
+      </ReasoningRoot>,
+    );
+
+    const icon = container.querySelector('[data-slot="reasoning-trigger-icon"]');
+    expect(icon?.getAttribute('class')).toContain('animate-pulse-soft');
+    expect(container.querySelector('[data-slot="reasoning-trigger-shimmer"]')).toBeNull();
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger-label"] > span')).toHaveLength(1);
+  });
+
+  it('非 active 时图标不带脉冲', () => {
+    const { container } = render(
+      <ReasoningRoot>
+        <ReasoningTrigger />
+      </ReasoningRoot>,
+    );
+
+    expect(container.querySelector('[data-slot="reasoning-trigger-icon"]')?.getAttribute('class')).not.toContain('animate-pulse-soft');
+  });
+});

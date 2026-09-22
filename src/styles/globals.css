@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "tw-shimmer";
 @plugin "@tailwindcss/typography";
 
 @source "../../node_modules/streamdown/dist/*.js";
@@ -463,15 +462,6 @@ html.cmx-panel-resizing webview {
   background: transparent;
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 @keyframes pulse-soft {
   0%,
   100% {
@@ -498,15 +488,6 @@ html.cmx-panel-resizing webview {
 
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
-}
-
-.shimmer {
-  color: transparent;
-  background: linear-gradient(90deg, currentColor 0%, hsl(var(--foreground) / 0.94) 50%, currentColor 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: shimmer 2.5s linear infinite;
 }
 
 @keyframes fade-in-up {
@@ -646,7 +627,7 @@ html.cmx-panel-resizing webview {
  *
  * 起因是一个实测到的真实故障：本机 `prefers-reduced-motion: reduce` 为真时，下面
  * 这条通配规则会把**整个应用**的动画压成 0.01ms 且只播一次 —— DotMatrix 点阵、
- * `.shimmer` 流光、各处 `animate-spin` 加载图标、会话列表的运行中标记**全部一起
+ * 各处 `animate-spin` 加载图标、会话列表的运行中标记**全部一起
  * 静止**，看上去就像"动效坏了"。
  *
  * 但 CodeMUX 的核心场景是"agent 跑几分钟、用户切去别的窗口"，此时这些动效承载的是
@@ -672,7 +653,6 @@ html.cmx-panel-resizing webview {
   html .animate-pulse,
   html .animate-pulse-soft,
   html .animate-glow-pulse,
-  html .shimmer,
   html [data-motion-status],
   html [data-motion-status] * {
     animation-duration: 2.4s !important;
@@ -680,15 +660,10 @@ html.cmx-panel-resizing webview {
   }
 
   /*
-   * 这两处还各自带 Tailwind 的 `motion-reduce:` 守卫，**把动画名也清掉了**
-   * （`.motion-reduce\:animate-none{animation:none}`、
-   *  `.motion-reduce\:\[animation-name\:none\]{animation-name:none}`）。
+   * DotMatrix 自带 Tailwind 的 `motion-reduce:` 守卫，**把动画名也清掉了**
+   * （`.motion-reduce\:\[animation-name\:none\]{animation-name:none}`）。
    * 只恢复时长是不够的 —— 名字为 none 时一秒都不会动，所以这里要把名字写回去。
    */
-  html .shimmer {
-    animation-name: shimmer !important;
-  }
-
   html [data-slot='dot-matrix'] * {
     animation-name: aui-dot-matrix-blink !important;
     animation-duration: 2.4s !important;

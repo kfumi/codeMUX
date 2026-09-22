@@ -69,9 +69,9 @@ export function PerfOverlay() {
   // 流式平滑度。单独一行是因为 FPS 与长任务都看不出"手感"：一个完全停顿的流
   // 是完美平滑的（变异系数为 0），所以必须同时显示"推进帧占比"与"更新间隔 p95"。
   const [smoothness, setSmoothness] = useState<SmoothnessSnapshot | null>(null);
-  // 系统级"减少动效"会让 `DotMatrix`（`motion-reduce:[animation-name:none]`）与
-  // `RunningElapsedTimer` 的 `.shimmer`（`motion-reduce:animate-none`）被**显式**
-  // 关掉，表现为"所有 loading 动效一起失效"。把它显出来，这类症状就不必再靠猜。
+  // 系统级"减少动效"会让 `DotMatrix`（`motion-reduce:[animation-name:none]`）被
+  // **显式**关掉，表现为"loading 动效失效"。把它显出来，这类症状就不必再靠猜。
+  // （状态类动画如 `animate-pulse-soft` 由全局 reduce 规则降速保留，不会中招。）
   const [reduceMotion, setReduceMotion] = useState(false);
   // 布局闪动诊断：装上即**常驻**记录（只在数值变化时记账），这样"滚动条占位
   // 10→0 的那一瞬"不会因为采样起点在点击之后而被漏掉；再点一次即导出并停止。

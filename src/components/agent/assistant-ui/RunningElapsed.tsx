@@ -30,7 +30,7 @@ type RunningElapsedTimerProps = {
   label?: string;
   /** If provided, computes elapsed from this epoch ms instead of mount time. */
   startTime?: number;
-  /** Show left-to-right shimmer overlay on the text. Defaults to true. */
+  /** Show a small breathing status marker next to the label. Defaults to true. */
   active?: boolean;
 };
 
@@ -64,16 +64,17 @@ export function RunningElapsedTimer({
   const text = label ? `${label} · ${formatElapsed(elapsed)}` : formatElapsed(elapsed);
 
   return (
-    <span className="relative inline-block leading-none">
-      <span>{text}</span>
+    // 文字保持静态可读（对比度不随动画变化）；"还在跑"由小呼吸点表达
+    // （animate-pulse-soft 只动 opacity，可上合成线程；reduce 下由全局规则降速保留）。
+    <span className="relative inline-flex items-center gap-1.5 leading-none">
       {active ? (
         <span
           aria-hidden
-          className="shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
-        >
-          {text}
-        </span>
+          data-slot="running-elapsed-marker"
+          className="size-1.5 shrink-0 rounded-full bg-[hsl(var(--warning))] animate-pulse-soft"
+        />
       ) : null}
+      <span>{text}</span>
     </span>
   );
 }

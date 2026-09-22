@@ -168,22 +168,18 @@ function ReasoningTrigger({
     >
       <BrainIcon
         data-slot="reasoning-trigger-icon"
-        className="aui-reasoning-trigger-icon size-4 shrink-0"
+        className={cn(
+          'aui-reasoning-trigger-icon size-4 shrink-0',
+          // active 时图标做柔和的 opacity 呼吸（可上合成线程；reduce 下由全局规则
+          // 降速保留），替代旧的文字 shimmer 流光——文字本身保持静态可读。
+          active && 'animate-pulse-soft',
+        )}
       />
       <span
         data-slot="reasoning-trigger-label"
         className="aui-reasoning-trigger-label-wrapper relative inline-block leading-none font-normal tabular-nums"
       >
         <span>思考{durationText}</span>
-        {active ? (
-          <span
-            aria-hidden
-            data-slot="reasoning-trigger-shimmer"
-            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
-          >
-            思考{durationText}
-          </span>
-        ) : null}
       </span>
       <ChevronDownIcon
         data-slot="reasoning-trigger-chevron"

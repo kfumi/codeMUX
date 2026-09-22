@@ -20,10 +20,9 @@ import { DEFAULT_REVEAL_HORIZON_MS, resolveRevealedLength } from './streamTextRe
  * `Streamdown` 对累积正文重新分块，并对尾部未闭合代码块重跑 Shiki 分词。
  * 按 60Hz 提交等于每秒 60 次 Markdown 解析 + 语法高亮。
  *
- * 后果不只是这一处变慢 —— `DotMatrix` 的 SVG `opacity` 闪烁与
- * `RunningElapsedTimer` 的 `.shimmer`（`background-clip: text`）都是**绘制类**
- * 动画，无法卸载到合成线程；主线程被占满时它们会**全应用一起冻住**（表现为
- * "所有 loading 动效失效"）。Paseo 可以在 60Hz 做分帧绘制，是因为它的每帧渲染
+ * 后果不只是这一处变慢 —— `DotMatrix` 的 SVG `opacity` 闪烁这类**绘制类**
+ * 动画无法卸载到合成线程；主线程被占满时它们会**全应用一起冻住**（表现为
+ * "loading 动效失效"）。Paseo 可以在 60Hz 做分帧绘制，是因为它的每帧渲染
  * 只是一个纯文本 `<Text>`，没有解析成本 —— 这个前提在 CodeMUX 不成立。
  *
  * 因此这里按 `minRenderIntervalMs`（默认 40ms ≈ 25Hz）节流**提交**，这个频率

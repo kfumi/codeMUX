@@ -9,8 +9,8 @@ import { resetRevealHorizonCache, useStreamingTextReveal } from './useStreamingT
  *
  * 为什么值得单独测：分帧绘制把"释放多少字符"算得很便宜，但把它**画上去**要重跑
  * Markdown 分块与 Shiki 分词。若按 rAF 的 60Hz 无节制提交，主线程会被占满，
- * 而 `DotMatrix` 的 SVG `opacity` 与 `.shimmer` 的 `background-clip: text` 都是
- * 绘制类动画、无法卸载到合成线程 —— 结果是**全应用的 loading 动效一起冻住**。
+ * 而 `DotMatrix` 的 SVG `opacity` 是绘制类动画、无法卸载到合成线程 —— 结果是
+ * **全应用的 loading 动效一起冻住**。
  */
 
 const MIN_FRAME_KEY = 'codemux:textRevealMinFrameMs';

@@ -69,4 +69,23 @@ describe('RunningElapsedTimer', () => {
     expect(screen.getByText('1m 30s')).toBeTruthy();
     expect(screen.queryByText(/·/)).toBeNull();
   });
+
+  it('active 时文字只渲染一份（无 shimmer 叠层），并带呼吸点标记', () => {
+    const { container } = render(<RunningElapsedTimer />);
+
+    // 旧实现会把同一段文字叠一层 shimmer 副本；现在文字必须只有一份、对比度恒定。
+    expect(screen.getAllByText('正在执行 · 0s')).toHaveLength(1);
+    expect(container.querySelector('.shimmer')).toBeNull();
+
+    const marker = container.querySelector('[data-slot="running-elapsed-marker"]');
+    expect(marker).not.toBeNull();
+    expect(marker?.className).toContain('animate-pulse-soft');
+  });
+
+  it('active=false 时不渲染呼吸点', () => {
+    const { container } = render(<RunningElapsedTimer active={false} />);
+
+    expect(screen.getByText('正在执行 · 0s')).toBeTruthy();
+    expect(container.querySelector('[data-slot="running-elapsed-marker"]')).toBeNull();
+  });
 });
