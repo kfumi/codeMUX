@@ -63,6 +63,7 @@
 | [2026-09-16-stream-performance-round4-fixes.md](research/2026-09-16-stream-performance-round4-fixes.md) | 流式性能第四轮:按 Paseo 五道边界实施修复 |
 | [2026-09-16-streaming-animation-freeze-fix.md](research/2026-09-16-streaming-animation-freeze-fix.md) | 加载动效大面积失效:真实根因与修复 |
 | [2026-09-18-inter-opentype-features-best-practice.md](research/2026-09-18-inter-opentype-features-best-practice.md) | 调研:桌面应用 UI 内置 Inter 的 OpenType 特性(font-feature-settings)最佳实践 |
+| [2026-09-21-pi-desktop-performance-cross-reference.md](research/2026-09-21-pi-desktop-performance-cross-reference.md) | 参照 PI-Desktop 的性能改造清单:流式掉帧与空闲卡顿 |
 
 ### specs
 
