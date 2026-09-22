@@ -130,6 +130,24 @@ describe('buildSubagentActivity', () => {
     expect(activity.nodes[0]?.stepCount).toBe(2);
   });
 
+  it('同一 tool_use_id 的重复帧是输入刷新，只算一步', () => {
+    const activity = buildSubagentActivity({
+      order: ['a'],
+      descriptors: { a: descriptor({ subagentId: 'a', status: 'completed' }) },
+      events: {
+        a: [
+          { type: 'tool_started', tool_use_id: 'c1', name: 'read', input: {}, event_id: 'e1', timestamp: '2026-08-29T05:47:21.000Z' },
+          { type: 'tool_started', tool_use_id: 'c1', name: 'read', input: { filePath: 'a.ts' }, event_id: 'e2', timestamp: '2026-08-29T05:47:22.000Z' },
+          { type: 'tool_finished', tool_use_id: 'c1', event_id: 'e3', timestamp: '2026-08-29T05:47:23.000Z' },
+        ],
+      },
+    });
+
+    // OpenCode 先发 pending（input 空）、再发 running（补全 input）：渲染层视为同一次调用的
+    // 参数刷新，所以卡片上的步骤数只算 1（不去重就会算成 2）。
+    expect(activity.nodes[0]?.stepCount).toBe(1);
+  });
+
   it('状态文案：运行中 / 已完成 / 失败 / 已取消', () => {
     const activity = buildSubagentActivity({
       order: ['a', 'b', 'c', 'd'],

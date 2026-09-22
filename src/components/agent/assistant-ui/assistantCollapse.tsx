@@ -378,6 +378,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * - `error` 有错误文本、且前面还有没拿到结果的工具调用时会被折进那张工具卡（一行都不画），
  *   这时不算步骤，并且要把它所贴上的那个工具调用从「欠着结果」的计数里销掉；
  * - 助手已经发过同一个 `tool_use_id` 的问询工具调用时，问询事件不再单独建行，不算步。
+ * - 同一个 `tool_use_id` 的重复投影是**同一次工具调用的输入刷新**（OpenCode 先发
+ *   `input: {}` 的 pending 帧、再发补全 input 的 running 帧，各自新 `event_id`）：渲染层命中
+ *   已有卡片就刷新参数、不再多画一行（`convertAgentEvents` 的 `resolveExistingToolCallPart`），
+ *   所以这里也只算一步，且不重复计「欠着结果」的调用。
  */
 function countCollapsibleSteps(events: AgentMessage[], collapsibleEventIndices: number[]): number {
   const firstIndex = collapsibleEventIndices[0];
@@ -390,6 +394,8 @@ function countCollapsibleSteps(events: AgentMessage[], collapsibleEventIndices: 
   let stepCount = 0;
   let pendingToolCalls = 0;
   let previousWasApiRetry = false;
+  // 已计过步的工具身份：重复投影（输入刷新）不再计步，也不再算成「欠着结果」的一次调用。
+  const seenToolUseIds = new Set<string>();
 
   for (let index = firstIndex; index <= lastIndex; index += 1) {
     const event = events[index];
@@ -433,6 +439,13 @@ function countCollapsibleSteps(events: AgentMessage[], collapsibleEventIndices: 
     previousWasApiRetry = false;
     for (const block of content) {
       if (block?.type === 'tool_use') {
+        const toolUseId = typeof block.id === 'string' ? block.id : '';
+        if (toolUseId.length > 0) {
+          if (seenToolUseIds.has(toolUseId)) {
+            continue;
+          }
+          seenToolUseIds.add(toolUseId);
+        }
         stepCount += 1;
         pendingToolCalls += 1;
         continue;

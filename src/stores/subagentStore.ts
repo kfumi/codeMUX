@@ -59,6 +59,55 @@ export function subagentTabTitle(descriptor: SubagentDescriptor | undefined): st
 function isTerminalSubagentStatus(status: SubagentStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'canceled';
 }
+/** 工具帧的 `tool_use_id`（缺失或非字符串记空串）。 */
+function toolUseIdOf(event: Record<string, unknown> | undefined): string {
+  const value = event?.tool_use_id;
+  return typeof value === 'string' && value.length > 0 ? value : '';
+}
+
+/**
+ * 同一个 `tool_use_id` 的重复工具帧是**输入刷新**，不是新的一步。
+ *
+ * OpenCode 对同一个 tool part 先发 `input: {}` 的 pending 帧、再发补全 input 的 running 帧
+ * （各自新 `event_id`），渲染层据此刷新已有卡片的参数而不是多画一张卡
+ * （`convertAgentEvents` 的 `resolveExistingToolCallPart`）。时间线若把两帧都留下，
+ * 卡片上的步骤数就会翻倍，所以这里就地刷新、不追加。
+ *
+ * 只认 `tool_started`：`tool_finished` 一次调用只来一条，重复到达由 `event_id` 去重兜住。
+ */
+function findToolRefreshIndex(
+  timeline: Record<string, unknown>[],
+  event: Record<string, unknown>,
+): number {
+  if (event.type !== 'tool_started') return -1;
+  const toolUseId = toolUseIdOf(event);
+  if (toolUseId.length === 0) return -1;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index];
+    if (entry?.type === 'tool_started' && toolUseIdOf(entry) === toolUseId) return index;
+  }
+  return -1;
+}
+
+/** 就地刷新：保住原位置与原 `event_id`（一次调用一个身份），工具参数按新帧合并。 */
+function mergeToolRefresh(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const existingInput = existing.input;
+  const incomingInput = incoming.input;
+  const isMergeable = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+  );
+  return {
+    ...existing,
+    ...incoming,
+    input: isMergeable(existingInput) && isMergeable(incomingInput)
+      ? { ...existingInput, ...incomingInput }
+      : incoming.input,
+    event_id: existing.event_id ?? incoming.event_id,
+  };
+}
 
 export const useSubagentStore = create<SubagentState>((set, get) => ({
   sessions: {},
@@ -136,6 +185,12 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
       }
       const nextSeen = new Set(seen);
       if (dedupeId) nextSeen.add(dedupeId);
+      // 同一 `tool_use_id` 的重复帧是输入刷新：就地刷新已有那一帧，不追加新的一帧。
+      const timeline = current.events[subagentId] ?? [];
+      const refreshIndex = findToolRefreshIndex(timeline, event);
+      const nextTimeline = refreshIndex >= 0
+        ? timeline.map((entry, index) => (index === refreshIndex ? mergeToolRefresh(entry, event) : entry))
+        : [...timeline, event];
       return {
         sessions: {
           ...state.sessions,
@@ -143,7 +198,7 @@ export const useSubagentStore = create<SubagentState>((set, get) => ({
             ...current,
             events: {
               ...current.events,
-              [subagentId]: [...(current.events[subagentId] ?? []), event],
+              [subagentId]: nextTimeline,
             },
             seenEventIds: { ...current.seenEventIds, [subagentId]: nextSeen },
           },

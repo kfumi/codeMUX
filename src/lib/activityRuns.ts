@@ -23,7 +23,10 @@ export type ActivityRun = {
   eventIndices: number[];
   /** 与 eventIndices 等长：每个事件的过程类型（含工具的按工具算）。 */
   kinds: ActivityStepKind[];
-  /** 段内实际会渲染出来的步骤数（一个事件可能含思考+工具两个步骤）。 */
+  /**
+   * 段内实际会渲染出来的步骤数（一个事件可能含思考 + 工具两个步骤）：同一个
+   * `tool_use_id` 的重复投影只算一步，与渲染出来的行数一一对应。
+   */
   stepCount: number;
   startedAt?: number;
   endedAt?: number;
@@ -62,7 +65,10 @@ export const EMPTY_ACTIVITY_RUNS: ActivityRuns = {
 
 type EventSteps = {
   kind: ActivityStepKind;
-  stepCount: number;
+  /** 该事件每个 `tool_use` 块的 id（缺失记 `''`）：段级计数据此按身份去重。 */
+  toolUseIds: string[];
+  /** 非空 thinking 块数：每块一步，与渲染出来的思考行一一对应。 */
+  thinkingBlocks: number;
   /**
    * 该事件同时含非空文本：文本**结束**这一段——分段循环在这里 flush，段后面的事件开新一段。
    * 参考实现里同一个消息的文本会被推成独立的文本气泡（`assistant-turns.ts` 的 `appendMessage`），
@@ -107,6 +113,8 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
   let toolName: string | undefined;
   let toolArgs: Record<string, unknown> | undefined;
   let thinkingText: string | undefined;
+  const toolUseIds: string[] = [];
+  let thinkingBlocks = 0;
 
   for (const block of content) {
     if (!block) {
@@ -123,6 +131,7 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
     if (block.type === 'thinking') {
       if (typeof block.thinking === 'string' && block.thinking.length > 0) {
         stepCount += 1;
+        thinkingBlocks += 1;
         thinkingText = block.thinking;
       }
       continue;
@@ -130,6 +139,7 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
 
     if (block.type === 'tool_use') {
       stepCount += 1;
+      toolUseIds.push(typeof block.id === 'string' ? block.id : '');
       hasTool = true;
       if (typeof block.name === 'string' && isSubagentToolName(block.name)) {
         delegates = true;
@@ -148,12 +158,13 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
 
   return {
     kind: hasTool ? 'tool' : 'thinking',
-    stepCount,
     delegates,
     endsRun: hasText,
     toolName,
     toolArgs,
     thinkingText,
+    toolUseIds,
+    thinkingBlocks,
   };
 }
 
@@ -301,6 +312,38 @@ function stepsTailText(steps: EventSteps): string {
   return steps.thinkingText ? thinkingTailLine(steps.thinkingText) : '';
 }
 
+/**
+ * 段内实际会渲染出来的步骤数。
+ *
+ * 渲染层把「同一个 `tool_use_id` 的重复投影」认成同一次工具调用的**输入刷新**：
+ * `convertAgentEventsToAssistantMessages` 的 `resolveExistingToolCallPart` 命中已有卡片就
+ * 刷新参数、不再多画一行。OpenCode 的 `tool_started` 正是这样一对帧（侧车先发
+ * `input: {}` 的 pending 帧、再发补全 input 的 running 帧，各自新 `event_id`），所以计数
+ * 必须同一口径：同一个 `tool_use_id` 只算一步（计入首见的那一段），否则段头 / 卡片的数字
+ * 会比行数大一倍。缺 id 的块无法辨认同一次调用，按块各算一步。
+ *
+ * `countedToolUseIds` 由调用方按**回合**持有并在段之间复用：同一对帧被文本切开、落进两段时，
+ * 段仍按「首见」计一次，与渲染层在全量消息里找已有卡片的行为一致。
+ */
+function countRunSteps(runSteps: EventSteps[], countedToolUseIds: Set<string>): number {
+  let stepCount = 0;
+  for (const steps of runSteps) {
+    for (const toolUseId of steps.toolUseIds) {
+      if (toolUseId.length === 0) {
+        stepCount += 1;
+        continue;
+      }
+      if (countedToolUseIds.has(toolUseId)) {
+        continue;
+      }
+      countedToolUseIds.add(toolUseId);
+      stepCount += 1;
+    }
+    stepCount += steps.thinkingBlocks;
+  }
+  return stepCount;
+}
+
 export function buildActivityRuns(
   events: AgentMessage[],
   turns: ConversationTurn<AgentMessage>[],
@@ -320,6 +363,10 @@ export function buildActivityRuns(
     }
     // 每个位置的事件会不会画出一行（含 `error` 被工具卡吸收这类与流状态相关的判定）。
     const noRow = computeNoRowFlags(turnEventIndices, events);
+
+    // 本回合已经计过步的 `tool_use` 身份：同一身份的后续事件是输入刷新，渲染层不再多画
+    // 一行，计数也必须只算一步。id 由提供方按调用生成，不跨回合复用，所以逐回合重置。
+    const countedToolUseIds = new Set<string>();
 
     // 段末的结束时间取「段后第一个事件」的时间戳——那才是这一步真正做完的时刻；
     // 段后没有事件时，未结束的尾段保持开放式计时，其余用回合末事件兜底。
@@ -366,7 +413,7 @@ export function buildActivityRuns(
         turnId: turn.id,
         eventIndices: runEventIndices,
         kinds: runSteps.map((steps) => steps.kind),
-        stepCount: runSteps.reduce((total, steps) => total + steps.stepCount, 0),
+        stepCount: countRunSteps(runSteps, countedToolUseIds),
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(endedAt !== undefined ? { endedAt } : {}),
         live,

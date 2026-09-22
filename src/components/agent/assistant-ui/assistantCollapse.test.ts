@@ -297,4 +297,21 @@ describe('buildAssistantCollapseInfoMap 的步骤数口径', () => {
     expect(info?.stepCount).toBe(1);
     expect(info?.hasError).toBe(true);
   });
+
+  it('同一个 tool_use_id 的重复投影（输入刷新）只算一步', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      toolAssistant('call-1', 'read', {}),
+      toolAssistant('call-1', 'read', { filePath: 'D:/demo/package.json' }),
+      toolAssistant('call-2', 'bash', { command: 'pwd' }),
+      textAssistant('final answer'),
+      { kind: 'result', data: { type: 'result', duration_ms: 100 } },
+    ] as unknown as AgentMessage[];
+    const timestamps = events.map((_, index) => index * 1000);
+
+    const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
+
+    // 渲染层把第二帧当成第一张卡的参数刷新（不再多画一行），标题数字也只能算两步。
+    expect(info?.stepCount).toBe(2);
+  });
 });

@@ -130,6 +130,19 @@ describe('subagentStore', () => {
     expect(events[1]).toMatchObject({ type: 'tool_finished' });
   });
 
+  it('appendEvent 把同一个 tool_use_id 的重复帧当输入刷新：就地刷新，不追加一帧', () => {
+    const store = useSubagentStore.getState();
+    store.appendEvent('session-1', 'toolu_1', { type: 'tool_started', tool_use_id: 'c1', name: 'read', input: {}, event_id: 'e1' }, 'e1');
+    store.appendEvent('session-1', 'toolu_1', { type: 'tool_started', tool_use_id: 'c1', name: 'read', input: { filePath: 'a.ts' }, event_id: 'e2' }, 'e2');
+    store.appendEvent('session-1', 'toolu_1', { type: 'tool_started', tool_use_id: 'c2', name: 'bash', input: {}, event_id: 'e3' }, 'e3');
+
+    const events = useSubagentStore.getState().sessions['session-1']?.events['toolu_1'] ?? [];
+    // 同一次调用的两帧合成一帧（参数刷新、身份保留第一帧的 event_id），另一种调用各占一帧。
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ tool_use_id: 'c1', input: { filePath: 'a.ts' }, event_id: 'e1' });
+    expect(events[1]).toMatchObject({ tool_use_id: 'c2' });
+  });
+
   it('replaceSession hydrates descriptors and timelines', () => {
     useSubagentStore.getState().replaceSession('session-1', {
       subagents: [

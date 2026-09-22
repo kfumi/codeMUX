@@ -563,4 +563,37 @@ describe('delegation runs', () => {
     expect(runs[1]!.onlyThinking).toBe(false);
     expect(placementByEventIndex.get(2)).toMatchObject({ runKey: runs[1]!.runKey, isHead: true });
   });
+
+  it('同一个 tool_use_id 的重复投影（输入刷新）只算一步', () => {
+    const events = [
+      user('go'),
+      tool('call-1', 'Read', {}),
+      tool('call-1', 'Read', { file_path: 'a.ts' }),
+      tool('call-2', 'Bash', { command: 'pwd' }),
+      text('最终答复'),
+      result(),
+    ];
+
+    const { runs } = runsFor(events);
+
+    // OpenCode 的 tool_started 是一对帧（pending 空 input → running 补全 input，各自新
+    // event_id）：渲染层命中已有卡片就刷新参数、不再多画一行，所以段内只能算 2 步。
+    expect(runs[0]!.stepCount).toBe(2);
+    expect(runs[0]!.eventIndices).toEqual([1, 2, 3]);
+  });
+
+  it('重复帧被文本切开落进两段时，整段仍只算一步', () => {
+    const events = [
+      user('go'),
+      tool('call-1', 'Read', {}),
+      text('先说明一句'),
+      tool('call-1', 'Read', { file_path: 'a.ts' }),
+    ];
+
+    const { runs } = runsFor(events);
+
+    // 首见的那一段计这一步；后一段那一帧在渲染层不画行（同一次调用的参数刷新），计 0。
+    expect(runs.map((run) => run.stepCount)).toEqual([1, 0]);
+    expect(runs.map((run) => run.eventIndices)).toEqual([[1], [3]]);
+  });
 });
