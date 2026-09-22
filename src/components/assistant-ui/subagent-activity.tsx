@@ -2,6 +2,7 @@ import { Bot, ChevronRight, Target, Workflow } from 'lucide-react';
 import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
+import { useRefreshOnVisible } from '@/hooks/useRefreshOnVisible';
 import { cn } from '@/lib/utils';
 import {
   subagentActivityLabel,
@@ -286,6 +287,10 @@ function useLiveNow(live: boolean): number {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [live]);
+
+  // 与 RunningElapsedTimer 同理：节流只推迟刷新时机，值一直按 Date.now() 算，
+  // 恢复可见时补一次就够，不必为了这个关掉整窗节流。
+  useRefreshOnVisible(() => setNow(Date.now()));
 
   return now;
 }

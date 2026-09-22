@@ -51,6 +51,8 @@ vi.mock('streamdown', () => ({
   Streamdown: ({ children, className }: { children?: ReactNode; className?: string }) => (
     <div className={className}>{toPlainMarkdownBlocks(children)}</div>
   ),
+  /** 生产代码用它做增量分块；mock 只返回单块，增量缓存自然退化为整体解析。 */
+  parseMarkdownIntoBlocks: (markdown: string) => [markdown],
 }));
 
 vi.mock('@assistant-ui/react-streamdown', async () => {

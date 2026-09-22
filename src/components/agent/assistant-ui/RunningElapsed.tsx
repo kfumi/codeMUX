@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useRefreshOnVisible } from '@/hooks/useRefreshOnVisible';
+
 export function formatElapsed(ms: number, options?: { maxParts?: number }): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const seconds = totalSeconds % 60;
@@ -50,6 +52,13 @@ export function RunningElapsedTimer({
       window.clearInterval(timer);
     };
   }, [base]);
+
+  // 窗口被遮挡时 Chromium 会节流定时器（Electron 默认行为，我们刻意保留）。
+  // 显示的值一直按绝对时间算，所以只需要在恢复可见的那一帧补一次刷新，
+  // 避免用户切回来时看到一两秒前的旧数字，误以为「计时器卡住了」。
+  useRefreshOnVisible(() => {
+    setElapsed(Date.now() - base);
+  });
 
   // 空 label：只要时长（状态由旁边的状态胶囊表达），别留下「 · 」这种孤立分隔符。
   const text = label ? `${label} · ${formatElapsed(elapsed)}` : formatElapsed(elapsed);

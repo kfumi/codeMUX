@@ -14,6 +14,7 @@ import { resetRevealHorizonCache, useStreamingTextReveal } from './useStreamingT
  */
 
 const MIN_FRAME_KEY = 'codemux:textRevealMinFrameMs';
+const HORIZON_KEY = 'codemux:textRevealHorizonMs';
 
 let clock = 0;
 let frameQueue: Array<{ id: number; callback: FrameRequestCallback }> = [];
@@ -144,6 +145,30 @@ describe('useStreamingTextReveal commit throttling', () => {
     const text = 'x'.repeat(800);
     const { getByTestId } = render(<Probe text={text} streaming />);
 
+    expect(getByTestId('revealed').textContent).toBe(String(text.length));
+  });
+
+  it('renders arrival-driven in full when the horizon is disabled', () => {
+    // 关闭分帧绘制必须真的等于「到达即绘制」。
+    //
+    // 这条用例锁的是一个真实缺陷：旧实现里 `revealedRef` 只由帧循环推进，而帧循环在
+    // horizon <= 0 时根本不会启动，于是它停在挂载时的初始值上——整个流式期间一屏空白，
+    // 直到 `streaming` 翻转让 effect 重跑才一次性全部出现。
+    // 真实引擎探针（`test:e2e:stream-reveal-probe` 的 `horizon-zero` 臂）实测到
+    // 「流式结束时 store 正文 9468 字 / 屏上 0 字」。
+    window.localStorage.setItem(HORIZON_KEY, '0');
+    resetRevealHorizonCache();
+
+    let text = 'x'.repeat(50);
+    const { rerender, getByTestId } = render(<Probe text={text} streaming />);
+    expect(getByTestId('revealed').textContent).toBe('50');
+
+    text += 'x'.repeat(400);
+    act(() => {
+      rerender(<Probe text={text} streaming />);
+    });
+
+    // 关键：**一帧都不推进**。到达即上屏，不允许攒着等帧循环。
     expect(getByTestId('revealed').textContent).toBe(String(text.length));
   });
 });

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -106,7 +108,7 @@ describe('MainLayout', () => {
     expect(onForward).not.toHaveBeenCalled();
   });
 
-  it('renders the sidebar as a distinct translucent surface without a straight right divider', () => {
+  it('renders the sidebar as a translucent solid surface without backdrop blur', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -115,9 +117,39 @@ describe('MainLayout', () => {
 
     const sidebar = document.querySelector('aside');
 
+    // 这是不变量，不是「少写了一个类」：桌面形态下侧栏是 `relative shrink-0`（MainLayout.tsx:226），
+    // 背后只有 .app-shell 的 bg-background（MainLayout.tsx:196）与 body 的平整纯色
+    // （globals.css:107 --color-background: hsl(var(--background))，--background 是不透明常量
+    // 0 0% 100% / 0 0% 9.4%；globals.css:251-263 body background-image: none；
+    // globals.css:318-321 .app-shell isolation: isolate）。backdrop-filter 作用在纯色上是恒等变换，
+    // 侧栏上挂 blur 只有开销没有观感收益 —— 与 PI-Desktop 一致，本仓库把「**常驻布局表面**
+    // （尤其大面积）不得使用 backdrop-filter」当作不变量；一次性短命浮层、以及滚动容器上的
+    // sticky 头仍可保留（源码契约里列出了唯一豁免）。
     expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
-    expect(sidebar?.className).toContain('backdrop-blur-xl');
+    expect(sidebar?.className).not.toContain('backdrop-blur');
     expect(sidebar?.className).not.toContain('border-r');
+  });
+
+  // 有意的源码级契约：className 断言只覆盖渲染出来的那个值，只有钉住源码文本才能在评审前拦住
+  // 「往常驻布局表面加回 backdrop-blur-*」。口径与 PI-Desktop 一致 —— 常驻大面积表面一律用
+  // 不透明/半透明底色表达层次，禁止 backdrop-filter。
+  // 唯一豁免：窄屏抽屉打开时的遮罩层那 1px 模糊（MainLayout.tsx:209，一次性短命浮层，不在本次范围）。
+  it('keeps backdrop-blur off the resident surfaces in the MainLayout source', () => {
+    // jsdom 下 import.meta.url 不是 file 地址（见 CodeMuxThread.navActiveSource.test.ts 的说明），
+    // 测试根即仓库根，所以按 cwd 拼相对路径读源码，不引入新依赖。
+    const source = readFileSync(
+      join(process.cwd(), 'src', 'components', 'layout', 'MainLayout.tsx'),
+      'utf8',
+    );
+    // 注释行不算违规（说明文字里允许提到这个 token）。豁免项用「先摘掉 token 再检查」，
+    // 而不是「含它就整行免检」—— 否则把 `backdrop-blur-xl` 追加到同一个 className 上，
+    // 这条契约就被绕过去了。
+    const residentBlurLines = source
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('//'))
+      .filter((line) => line.split('backdrop-blur-[1px]').join('').includes('backdrop-blur'));
+
+    expect(residentBlurLines).toEqual([]);
   });
 
   it('keeps the workspace notch while the desktop shell is windowed', () => {

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useReducer, useRef } from 'react';
 
+import { isDevDiagnosticsEnabled } from '@/lib/dev/devDiagnostics';
 import { recordRevealFrame } from '@/lib/streamSmoothness';
 import { DEFAULT_REVEAL_HORIZON_MS, resolveRevealedLength } from './streamTextReveal';
 
@@ -189,7 +190,11 @@ export function useStreamingTextReveal(text: string, streaming: boolean): string
       }
 
       // 平滑度采样：统计的是**可见更新**，被节流跳过的帧传 0。
-      recordRevealFrame(committed, now);
+      // 纯诊断（读者只有 dev 性能浮层与 longSessionBenchmark）：生产构建下
+      // `import.meta.env.DEV` 会被折成 false，整段采样连同调用一起不进产物。
+      if (isDevDiagnosticsEnabled()) {
+        recordRevealFrame(committed, now);
+      }
 
       // 常驻排帧：追平后不应停掉循环，否则下一批文字到达时无人推动释放。
       frame = requestAnimationFrame(step);
@@ -204,6 +209,13 @@ export function useStreamingTextReveal(text: string, streaming: boolean): string
     };
   }, [streaming]);
 
-  const revealed = revealedRef.current;
+  // 关闭分帧绘制（horizon <= 0）时必须真的"到达即绘制"：直接渲染全文。
+  //
+  // 不能依赖 `revealedRef`：它只由帧循环推进，而帧循环在 horizon <= 0 时**根本不会启动**
+  // （上面那个 `[streaming]` 为依赖的 effect 一进门就 return），于是它会停在挂载时的初始值上——整个流式期间
+  // 一屏空白，直到回合结束、`streaming` 翻转让 effect 重跑，才一次性全部出现。
+  // 实测（`npm run test:e2e:stream-reveal-probe` 的 `horizon-zero` 臂）：流式结束时
+  // store 正文 9468 字，屏上 0 字。
+  const revealed = readHorizonMs() <= 0 ? text.length : revealedRef.current;
   return revealed >= text.length ? text : text.slice(0, revealed);
 }

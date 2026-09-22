@@ -144,6 +144,27 @@ vi.mock('../lib/facades/daemon-facade', () => ({
   resetDaemonClient: vi.fn(),
 }));
 
+const { agentLoggerSpies } = vi.hoisted(() => ({
+  agentLoggerSpies: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+// `agentStore` 的 logger 是模块私有的（`const logger = createLogger('agentStore')`），
+// 只能在模块工厂这一层换成 spy，才能对"一次流式突发发出几条"做计数断言。
+// 其余导出（`serializeError` / `setMinLogLevel` …）保持真实实现。
+vi.mock('../lib/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/logger')>();
+  return {
+    ...actual,
+    createLogger: () => agentLoggerSpies,
+  };
+});
+
 describe('agent store Codex history loading', () => {
   async function primeSession(agentKind: Session['agent_kind']) {
 
@@ -531,6 +552,33 @@ describe('agent store Codex history loading', () => {
       expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
     });
     expect(sessionHandlers.has(session.id)).toBe(true);
+  });
+
+  it('后台回合的完成探测由事件驱动，不用等被节流的兜底节拍', async () => {
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+
+    // 附着到进行中的回合（这会注册 WS 事件处理器），再把它标记成"后台回合"。
+    expect(await useAgentStore.getState().attachLiveSession(session.id)).toBe(true);
+    useAgentStore.setState((state) => ({
+      backgroundLive: { ...state.backgroundLive, [session.id]: true },
+    }));
+
+    const probesBefore = vi.mocked(daemonFacade.isSessionTurnActive).mock.calls.length;
+
+    // 普通事件到达：不该等 1s 兜底节拍（窗口隐藏时它还会被浏览器压到分钟级），
+    // 防抖 250ms 之后就应当去探测一次。
+    sessionHandlers.get(session.id)?.(JSON.stringify({
+      type: 'assistant',
+      session_id: session.id,
+      message: { role: 'assistant', content: [{ type: 'text', text: '还在跑' }] },
+    }));
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(daemonFacade.isSessionTurnActive).mock.calls.length)
+        .toBeGreaterThan(probesBefore);
+    }, { timeout: 900, interval: 25 });
   });
 
   it('proxy_status updates the settings indicator without entering the timeline', async () => {
@@ -4526,6 +4574,102 @@ describe('agent store Codex history loading', () => {
     expect(useSessionStore.getState().sessions[0].title).toBe('Generated native title');
     // 不进时间线：没有 raw 事件被追加
     expect(useAgentStore.getState().events[session.id]?.some((entry) => entry.kind === 'raw')).toBe(false);
+  });
+
+  /**
+   * 常开诊断（打包态也在跑的遥测/日志）必须收在构建期 DEV 门控里。
+   *
+   * 全部是**调用次数**断言：同一段假时钟流式突发在 DEV 与非 DEV 两臂下比较
+   * 日志条数，不涉及毫秒。
+   */
+  describe('dev diagnostics gating', () => {
+    const FLUSH_TELEMETRY = 'Streaming flush telemetry';
+    const MODEL_TRACE_START_QUERY = 'MODEL_TRACE startQuery dispatching via Daemon Client';
+    const MODEL_TRACE_FIRST_DELTA = 'MODEL_TRACE first streaming delta';
+
+    const loggedMessages = (spy: typeof agentLoggerSpies.debug) =>
+      spy.mock.calls.map(([message]) => message as string);
+    const flushTelemetryCount = () =>
+      loggedMessages(agentLoggerSpies.debug).filter((message) => message === FLUSH_TELEMETRY).length;
+
+    /**
+     * 1 秒流式突发（两个内容块、共 20 × 50ms 的 delta）：
+     * 5 个 thinking delta + 一次 thinking block 收尾，15 个 text delta + 一次 text block 收尾。
+     * 事件从 `registerDaemonSessionHandler` 注册的 handler 走，与真实流式同一条路径。
+     */
+    async function runOneSecondStreamingBurst() {
+      const session = await primeSession('claude_code');
+      // 默认的合成回放会在回合结束时清空流式状态，本用例自己喂事件。
+      startSessionMock.mockImplementationOnce(async () => {});
+
+      await useAgentStore.getState().startQuery(session.id, 'stream', 'D:/workspace');
+
+      const send = (event: Record<string, unknown>) => {
+        sessionHandlers.get(session.id)?.(JSON.stringify({ session_id: session.id, ...event }));
+      };
+
+      const sendBlock = async (index: number, kind: 'thinking' | 'text', ticks: number) => {
+        const blockType = kind === 'thinking' ? 'thinking' : 'text';
+        send({ type: 'stream_event', event: { type: 'content_block_start', index, content_block: { type: blockType } } });
+        for (let tick = 0; tick < ticks; tick += 1) {
+          const delta = kind === 'thinking'
+            ? { type: 'thinking_delta', thinking: `think-${tick};` }
+            : { type: 'text_delta', text: `chunk-${tick};` };
+          send({ type: 'stream_event', event: { type: 'content_block_delta', index, delta } });
+          await vi.advanceTimersByTimeAsync(50);
+        }
+        send({ type: 'stream_event', event: { type: 'content_block_stop', index, content_block: { type: blockType } } });
+      };
+
+      await sendBlock(0, 'thinking', 5);
+      await sendBlock(1, 'text', 15);
+
+      return session;
+    }
+
+    it('DEV 下：1 秒流式突发（thinking + text 两块）= 2 条 Streaming flush telemetry', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('DEV', true);
+      agentLoggerSpies.debug.mockClear();
+      agentLoggerSpies.info.mockClear();
+
+      try {
+        await runOneSecondStreamingBurst();
+
+        // 实测口径：这条 telemetry 挂在"内容块收尾"上 —— `content_block_stop`
+        // （agentStore.ts:2160 附近）与 `clearPendingStreaming`（agentStore.ts:508 附近），
+        // **不是每次 flush（这里约 20 次）一条**。
+        expect(flushTelemetryCount()).toBe(2);
+        expect(flushTelemetryCount()).toBeLessThan(20);
+        expect(loggedMessages(agentLoggerSpies.info)).toContain(MODEL_TRACE_START_QUERY);
+        expect(loggedMessages(agentLoggerSpies.info)).toContain(MODEL_TRACE_FIRST_DELTA);
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('非 DEV 下：同一突发零诊断（telemetry 与两条 MODEL_TRACE 都不发）', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('DEV', false);
+      agentLoggerSpies.debug.mockClear();
+      agentLoggerSpies.info.mockClear();
+
+      try {
+        const session = await runOneSecondStreamingBurst();
+
+        expect(flushTelemetryCount()).toBe(0);
+        expect(loggedMessages(agentLoggerSpies.info)).not.toContain(MODEL_TRACE_START_QUERY);
+        expect(loggedMessages(agentLoggerSpies.info)).not.toContain(MODEL_TRACE_FIRST_DELTA);
+        // 门控只砍诊断：流式本身照旧逐段推进到 store（thinking 缓冲区在 text 块
+        // 开始时按既有逻辑清空，所以这里只看正文）。
+        expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('chunk-0;');
+        expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('chunk-14;');
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      }
+    });
   });
 });
 

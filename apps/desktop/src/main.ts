@@ -236,23 +236,28 @@ function createMainWindow(): BrowserWindow {
       spellcheck: false,
       // Browser Host(工单 07):内置浏览由渲染层 <webview> 标签托管。
       webviewTag: true,
-      // Electron defaults this to true, which makes Chromium treat the window
-      // as a background page whenever it is occluded or unfocused: timers get
-      // aligned to 1s and then throttled hard, and requestAnimationFrame drops
-      // to a handful of frames per second.
+      // 这里**刻意不设置** `backgroundThrottling`，也就是保留 Electron 的默认值
+      // `true`：窗口被遮挡或失焦时，Chromium 把渲染进程当成后台页面处理——
+      // rAF 暂停，定时器先对齐到 1s、长时间后台后进一步降频。
       //
-      // That is exactly wrong for CodeMUX. The whole point of an agent turn is
-      // that it runs for minutes while the user works in another window, and
-      // the transcript has to keep painting plus the elapsed counter has to
-      // keep ticking so the run is legible at a glance. With throttling on, the
-      // dev perf overlay reports single-digit FPS and "正在执行 · 12s" freezes
-      // for long stretches — both are the throttle, not a slow renderer, and
-      // they made the real streaming cost much harder to measure.
+      // 这正是我们要的：agent 跑几分钟、用户切去别处时，不该继续全速合成、跑
+      // 那些 1s/10s/15s 的轮询与所有常驻动画。
       //
-      // Trade-off: the renderer keeps compositing while occluded, so it uses
-      // somewhat more CPU/battery in the background. Accepted, because a frozen
-      // agent UI is a correctness problem for this product.
-      backgroundThrottling: false,
+      // 曾经这里写的是 `backgroundThrottling: false`，理由是"计时器冻结"。复核后
+      // 确认那个理由站不住：`RunningElapsedTimer` / `useLiveNow` 的显示值一直按
+      // `Date.now() - base` 绝对时间算，节流只推迟**刷新时机**，不会算错。为了一个
+      // 显示时机问题而关掉整窗节流，等于把遮挡期间的全部合成与轮询恢复全速，
+      // 代价远超收益。改法是把补刷做在恢复可见的那一帧
+      // （`src/hooks/useRefreshOnVisible.ts`），节流保持默认。
+      //
+      // 注意：dev 性能浮层在窗口被遮挡时会读出个位数 FPS、长任务为 0——那是节流，
+      // 不是渲染慢。要做性能对照，必须让窗口保持前台上屏。
+      //
+      // 一个已知取舍：`agentStore` 的 `backgroundPolls`（1s）是"没有实时流的会话何时跑完"
+      // 的**唯一**通道，也是原生"跑完了"通知的触发源。窗口长时间在后台时，intensive
+      // throttling 最坏会把它压到分钟级，那条通知因此可能被推迟。是否真会被压，取决于
+      // Chromium 对"持有 WebSocket 的页面"的豁免规则——需要用真实壳实测确认，再决定是
+      // 保留默认节流，还是只给这条轮询单独开豁免。
     },
   });
 

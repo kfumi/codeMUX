@@ -16,6 +16,7 @@ import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
 import { initLogging } from "./lib/logger";
+import { primeCodeHighlighting } from "./lib/codeHighlightWarmup";
 import "./stores/appearanceStore";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
@@ -29,6 +30,10 @@ initDaemonLifecycleBridge();
 initBrowserHostBridge();
 initBrowserVisibilitySync();
 void initializeOpenCodeFreeModels();
+// Shiki 高亮器预热：把"第一次遇到代码块"造成的 380–420ms 主线程阻塞（集中在流式开始后
+// 0.6–1.0 秒）挪到应用空闲期。实测依据、反面做法与取舍见 src/lib/codeHighlightWarmup.ts
+// 顶部注释与研究文档 5.12 / 5.13 节。
+primeCodeHighlighting();
 
 // In production, block the native browser context menu (refresh, save-as, print, inspect, etc.)
 // Custom React onContextMenu handlers (SessionItem, PreviewPanel, TitleBar) still work —

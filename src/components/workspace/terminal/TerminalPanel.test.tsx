@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     startMock: vi.fn(() => Promise.resolve('terminal-a')),
-    attachMock: vi.fn(() => Promise.resolve()),
+    attachMock: vi.fn((_terminalId?: string, _cols?: number, _rows?: number, _handler?: unknown) => Promise.resolve()),
     detachMock: vi.fn(() => Promise.resolve()),
     closeMock: vi.fn(() => Promise.resolve()),
     writeMock: vi.fn(() => Promise.resolve()),
@@ -27,6 +27,11 @@ const mocks = vi.hoisted(() => {
     terminalWrites: [] as string[],
     terminalBlurs: 0,
     terminalRefreshes: 0,
+    fitCalls: 0,
+    /** 测试可控的代码字号（`useAppearanceStore` 的 mock 读它）。 */
+    codeFontSize: 14,
+    /** xterm 实例表：用来断言"没有新建 xterm"以及字号确实写进了视图选项。 */
+    terminalInstances: [] as Array<{ options: Record<string, unknown> }>,
     terminalViewport: null as HTMLElement | null,
     parentMouseDowns: 0,
     resizeObserverCallback: null as (() => void) | null,
@@ -51,7 +56,7 @@ vi.mock('../../../stores/sidePanelStore', () => ({
 }));
 
 vi.mock('../../../stores/appearanceStore', () => ({
-  useAppearanceStore: (selector: (state: unknown) => unknown) => selector({ prefs: { codeFontSize: 14 } }),
+  useAppearanceStore: (selector: (state: unknown) => unknown) => selector({ prefs: { codeFontSize: mocks.codeFontSize } }),
 }));
 
 vi.mock('../../../stores/settingsStore', () => ({
@@ -62,7 +67,12 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 100;
     rows = 30;
-    options = {};
+    options: Record<string, unknown>;
+
+    constructor(options?: Record<string, unknown>) {
+      this.options = { ...(options ?? {}) };
+      mocks.terminalInstances.push(this);
+    }
 
     loadAddon() {}
       open(container: HTMLElement) {
@@ -113,7 +123,9 @@ vi.mock('@xterm/xterm', () => ({
 
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
-    fit() {}
+    fit() {
+      mocks.fitCalls += 1;
+    }
   },
 }));
 
@@ -166,6 +178,7 @@ describe('TerminalPanel lifecycle', () => {
     mocks.terminalWrites.length = 0;
     mocks.terminalBlurs = 0;
     mocks.terminalRefreshes = 0;
+    mocks.fitCalls = 0;
     mocks.terminalViewport = null;
     mocks.parentMouseDowns = 0;
     mocks.resizeObserverCallback = null;
@@ -361,5 +374,253 @@ describe('TerminalPanel lifecycle', () => {
 
     view.unmount();
     expect(mocks.detachMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 后台标签的终端不解析输出。
+   *
+   * SidePanel 让所有终端标签常驻挂载（只靠 invisible 隐藏，SidePanel.tsx:304-323），
+   * 而 xterm 的 write 是同步解析的——一个跑着 dev server 的后台标签会持续占用主线程。
+   * 这里锁的是**计数**（后台期间一次 write 都没有、切回前台只 write 一次），不是毫秒。
+   */
+  it('buffers output while the tab is in the background and flushes it once on activation', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      code?: number | null;
+    }) => void;
+
+    handleEvent({ type: 'output', data: 'aaa' });
+    handleEvent({ type: 'output', data: 'bbb' });
+
+    expect(mocks.terminalWrites).toEqual([]);
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    expect(mocks.terminalWrites).toEqual(['aaabbb']);
+  });
+
+  it('writes output straight to xterm while the tab is in the foreground', async () => {
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      code?: number | null;
+    }) => void;
+
+    handleEvent({ type: 'output', data: 'live' });
+    handleEvent({ type: 'exit', code: 0 });
+
+    expect(mocks.terminalWrites).toEqual(['live', '\r\n[进程已退出: 0]\r\n']);
+  });
+
+  it('keeps only the tail of the buffered output when a hidden tab floods', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      code?: number | null;
+    }) => void;
+
+    // 每块 1000 字符、带换行，共 200 块 = 200k > 128KiB 上限。
+    for (let index = 0; index < 200; index += 1) {
+      handleEvent({ type: 'output', data: `${index}:${'x'.repeat(997)}\n` });
+    }
+
+    expect(mocks.terminalWrites).toEqual([]);
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    expect(mocks.terminalWrites).toHaveLength(1);
+    const flushed = mocks.terminalWrites[0];
+    const notice = '\r\n[隐藏期间的早期输出已省略]\r\n';
+    expect(flushed.startsWith(notice)).toBe(true);
+    // 保留的是**尾部**：最后一次输出完好，而且截断对齐到了行首，
+    // 所以提示之后就是一整行（行号可以解析出来）——不按行首截会把 ANSI 转义序列切两半。
+    expect(flushed.endsWith(`199:${'x'.repeat(997)}\n`)).toBe(true);
+    const keptBody = flushed.slice(notice.length);
+    expect(Number.parseInt(keptBody, 10)).toBeGreaterThan(0);
+    // 上限加上提示本身。
+    expect(keptBody.length).toBeLessThanOrEqual(128 * 1024);
+  });
+
+  /**
+   * 截断必须落在**行界之后**，而 `\r` 也算行界。
+   * 进度条那种「用 `\r` 覆盖同一行」的输出没有 `\n`：只找 `\n` 就会退化成按字符切，
+   * 而按字符切会把一条 ANSI 转义序列切成两半——终端会把半截转义码当普通文本渲染出来。
+   */
+  it('aligns the truncation to a CR as well as an LF', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      code?: number | null;
+    }) => void;
+
+    for (let index = 0; index < 200; index += 1) {
+      handleEvent({ type: 'output', data: `\u001b[32m${index}:${'x'.repeat(997)}\r` });
+    }
+
+    expect(mocks.terminalWrites).toEqual([]);
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    expect(mocks.terminalWrites).toHaveLength(1);
+    const notice = '\r\n[隐藏期间的早期输出已省略]\r\n';
+    const keptBody = mocks.terminalWrites[0].slice(notice.length);
+    // 行界之后正好是一块的开头：转义序列要么完整地在，要么根本不在，不会出现半截。
+    expect(/^\u001b\[\d+m\d+:/.test(keptBody)).toBe(true);
+    expect(keptBody.endsWith('\r')).toBe(true);
+  });
+
+  it('drops the whole tail rather than cutting an unterminated single line', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      code?: number | null;
+    }) => void;
+
+    // 单块 200k 字符、**一个行界都没有**：这一次调用就会越界，而尾部没有任何行界可供对齐，
+    // 任何字符级截断都可能切坏内容（例如切在一条 ANSI 序列中间）。
+    handleEvent({ type: 'output', data: 'x'.repeat(200_000) });
+
+    expect(mocks.terminalWrites).toEqual([]);
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    // 只剩提示：宁可少显示，也不吐半截转义码/半截内容。
+    expect(mocks.terminalWrites).toEqual(['\r\n[隐藏期间的早期输出已省略]\r\n']);
+  });
+
+  it('re-syncs the terminal size when the tab comes back to the foreground', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.setTerminalIdMock).toHaveBeenCalled());
+    const fitsBefore = mocks.fitCalls;
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    // 后台期间容器尺寸可能已经变过，而 ResizeObserver 那一刻的回调被 isActive 挡掉了——
+    // 切回前台必须主动补跑一次尺寸同步，否则该标签一直用旧 cols/rows 显示。
+    expect(mocks.fitCalls).toBe(fitsBefore + 1);
+  });
+
+  it('改代码字号只更新视图选项，不新建 PTY', async () => {
+    mocks.codeFontSize = 14;
+    const props = {
+      tabId: 'session-a:terminal:D:/project/app',
+      terminalId: 'terminal-a',
+      projectPath: 'D:/project/app',
+      isActive: true,
+    };
+    const view = render(<TerminalPanel {...props} />);
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalledTimes(1));
+    const attachesBefore = mocks.attachMock.mock.calls.length;
+    const instancesBefore = mocks.terminalInstances.length;
+    const fitsBefore = mocks.fitCalls;
+
+    mocks.codeFontSize = 18;
+    // 每次都要新建元素：复用同一个 element 引用时 React 会直接 bail out，effect 根本不会跑。
+    view.rerender(<TerminalPanel {...props} />);
+
+    await waitFor(() =>
+      expect(mocks.terminalInstances[instancesBefore - 1].options.fontSize).toBe(18));
+
+    // 关键不变量：改字号**不新建 xterm、不重新 attach**——那条路径等于换一条 PTY
+    // （旧缓冲丢失、daemon 侧多留一条会话），是这次修掉的缺陷本身。
+    expect(mocks.terminalInstances.length).toBe(instancesBefore);
+    expect(mocks.attachMock.mock.calls.length).toBe(attachesBefore);
+    // 字号变了行列数跟着变，所以必须重新 fit 一次（并把新尺寸同步给 daemon）。
+    expect(mocks.fitCalls).toBe(fitsBefore + 1);
   });
 });

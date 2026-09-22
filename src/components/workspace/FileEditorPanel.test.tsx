@@ -41,6 +41,8 @@ vi.mock('../assistant-ui/markdown-text', () => ({
 
 vi.mock('streamdown', () => ({
   Streamdown: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  /** 生产代码用它做增量分块；mock 只返回单块，增量缓存自然退化为整体解析。 */
+  parseMarkdownIntoBlocks: (markdown: string) => [markdown],
 }));
 
 import { FileEditorPanel } from './FileEditorPanel';

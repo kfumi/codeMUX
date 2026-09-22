@@ -51,6 +51,8 @@ vi.mock('streamdown', () => ({
   Streamdown: ({ children, className }: { children?: ReactNode; className?: string }) => (
     <div className={className}>{toPlainMarkdownBlocks(children)}</div>
   ),
+  /** 生产代码用它做增量分块；mock 只返回单块，增量缓存自然退化为整体解析。 */
+  parseMarkdownIntoBlocks: (markdown: string) => [markdown],
 }));
 
 // 普通文本与思考 part 走 assistant-ui 的 StreamdownTextPrimitive。这个包是外部依赖，

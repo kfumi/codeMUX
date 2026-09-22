@@ -1,7 +1,7 @@
 import type { AgentMessage } from '../../../stores/agentStore';
 import { MarkdownText, CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Streamdown } from 'streamdown';
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   ToolFallbackContent,
   ToolFallbackResult,
@@ -35,7 +35,7 @@ type CodeMuxToolCallPartProps = {
   toolName: string;
   toolCallId?: string;
   sessionId?: string;
-  args: Record<string, unknown>;
+  args: unknown;
   argsText?: string;
   result?: unknown;
   isError?: boolean;
@@ -49,6 +49,19 @@ type CodeMuxDataPartProps = {
   sessionId?: string;
   messageText?: string;
 };
+
+/**
+ * 把工具参数规整成对象。
+ *
+ * 从 `CodeMuxThread.tsx` 的 `asRecord` 搬进来：只有把这次规整放在叶子组件**内部**并用
+ * `useMemo` 记住，传给叶子的 `args` 才可能是同一个引用，`memo` 才有机会判等——在调用方
+ * 每次 render 都新建一个对象会把 memo 直接击穿。
+ */
+function asToolArgs(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 type StreamStatusDisplayInput = Extract<AgentMessage, { kind: 'stream_status' }>['data'];
 
@@ -78,7 +91,7 @@ type AskUserQuestionCardData = {
   }>;
 };
 
-export function CodeMuxTextMessagePart({
+function CodeMuxTextMessagePartImpl({
   text,
   parsePlan = false,
 }: {
@@ -222,17 +235,19 @@ export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamSt
   };
 }
 
-export function CodeMuxToolCallMessagePart({
+function CodeMuxToolCallMessagePartImpl({
   toolName,
   toolCallId,
   sessionId,
-  args,
+  args: rawArgs,
   argsText,
   result,
   isError,
   durationMs,
   status,
 }: CodeMuxToolCallPartProps) {
+  // 参数规整必须在**组件内部**记住，见文件末尾三个 `memo` 导出的说明。
+  const args = useMemo(() => asToolArgs(rawArgs), [rawArgs]);
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
   const headerSummary = getToolHeaderSummary(toolName, args);
   // 委派（Task/Agent）工具行由委派卡片取代：一个段里的委派由卡片表达（组头 + 拓扑 + 步骤），
@@ -385,7 +400,7 @@ function AskUserQuestionPreview() {
   return <div className="px-1 py-1 text-xs text-muted-foreground/65">等待用户回答</div>;
 }
 
-export function CodeMuxDataMessagePart({ name, data, sessionId, messageText }: CodeMuxDataPartProps) {
+function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: CodeMuxDataPartProps) {
   if (name !== 'codemux-event') {
     return null;
   }
@@ -1035,3 +1050,22 @@ function getNumericField(record: Record<string, unknown>, keys: string[]): numbe
 
   return undefined;
 }
+
+/**
+ * 三个叶子组件都包上 `memo`。
+ *
+ * **为什么必须**：`CodeMuxThreadRenderContext` 的值依赖 `activityRuns` / `toolDurations` /
+ * `subagentRunActivity` 这三张**每次事件追加都会换身份**的查找表，所以每次追加都会把每一行的
+ * 子树重新协调一遍。实测（见 `CodeMuxThread.rowRenderCounts.test.tsx`）：
+ * 不加 memo 时，挂载 40 轮后追加**一个**事件会让这三个叶子重渲染 **161** 次；挂载 8 轮时 33 次
+ * ——严格按挂载行数线性增长，也就是"历史行跟着每次追加全部重渲染"。
+ *
+ * **为什么语义安全**：它们只读 props 与自己持有的订阅（`useSubagentStore`、
+ * `useSidePanelStore`、assistant-ui 的 `useMessagePartText`）。React 的 `memo` 只在浅比较
+ * 相等时跳过渲染；那些订阅仍然会独立触发渲染，所以不会出现"数据变了但界面不更新"。
+ * `MarkdownText` 本身早已是 `memo`（`src/components/assistant-ui/markdown-text.tsx:141`），
+ * 这里补的是它外面那一层。
+ */
+export const CodeMuxTextMessagePart = memo(CodeMuxTextMessagePartImpl);
+export const CodeMuxToolCallMessagePart = memo(CodeMuxToolCallMessagePartImpl);
+export const CodeMuxDataMessagePart = memo(CodeMuxDataMessagePartImpl);

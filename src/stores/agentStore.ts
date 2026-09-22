@@ -21,6 +21,7 @@ import {
 import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
 import { supportsCapability } from '../components/agent/agentCapabilities';
 import { createLogger, serializeError } from '../lib/logger';
+import { isDevDiagnosticsEnabled } from '../lib/dev/devDiagnostics';
 import {
   buildSessionTitleFromUserContent,
 } from '../lib/sessionTitle';
@@ -289,6 +290,17 @@ const pendingSessionMessageLoads = new Map<string, Promise<void>>();
 const sessionHistoryEpoch = new Map<string, number>();
 const backgroundPolls = new Map<string, number>();
 
+/** 事件驱动的"后台回合是否结束"探测的防抖句柄（见 `scheduleBackgroundLiveCompletionProbe`）。 */
+const backgroundLiveProbes = new Map<string, number>();
+
+/**
+ * 每条事件到达后多久补一次后台完成探测。
+ *
+ * 取 250ms 是为了把"最后一条事件"与"探测"之间夹一次可能的连续推送合并掉（一轮里事件常常成串到达），
+ * 同时远小于原来那个 1s 定时器节拍，更远小于窗口隐藏时被 Chromium 压到的分钟级。
+ */
+const BACKGROUND_LIVE_PROBE_DEBOUNCE_MS = 250;
+
 /**
  * 后台（scheduled）回合进度重拉的最小间隔。
  *
@@ -307,6 +319,47 @@ function stopBackgroundPoll(sessionId: string) {
   if (timer) window.clearInterval(timer);
   backgroundPolls.delete(sessionId);
   backgroundLiveReloadAt.delete(sessionId);
+  const probe = backgroundLiveProbes.get(sessionId);
+  if (probe !== undefined) window.clearTimeout(probe);
+  backgroundLiveProbes.delete(sessionId);
+}
+
+/**
+ * 事件驱动的后台完成探测。
+ *
+ * **为什么需要**：`backgroundLive` 会话的"回合是否结束"原来只靠一个 1s `setInterval` 探测。
+ * Electron 恢复默认 `backgroundThrottling` 之后，窗口隐藏时浏览器会把定时器节流（Chromium 的
+ * intensive throttling 会把它压到分钟级），于是"跑完了"与原生通知都会跟着晚。
+ * **WS 事件推送不受隐藏节流影响**，所以每条事件到达后防抖补一次探测：延迟从"下一个被节流的节拍"
+ * 变成"最后一条事件之后约 250ms"。原有 1s 轮询保留为兜底（例如 WS 静默、没有事件的情况）。
+ *
+ * 探测本身很廉价（一次 `/state` 只回一个布尔值），重拉另有 3s 节流，见
+ * `BACKGROUND_LIVE_RELOAD_INTERVAL_MS`。
+ */
+function scheduleBackgroundLiveCompletionProbe(sessionId: string, get: () => AgentState): void {
+  if (!get().backgroundLive[sessionId]) return;
+
+  const pending = backgroundLiveProbes.get(sessionId);
+  if (pending !== undefined) window.clearTimeout(pending);
+  backgroundLiveProbes.set(sessionId, window.setTimeout(() => {
+    backgroundLiveProbes.delete(sessionId);
+    void get().completeBackgroundLiveIfIdle(sessionId);
+  }, BACKGROUND_LIVE_PROBE_DEBOUNCE_MS));
+}
+
+/**
+ * 把事件处理器包一层：处理完事件顺带触发一次后台完成探测。
+ * 两个注册点（发消息 / 附着进行中回合）共用它，避免只改一处。
+ */
+function withBackgroundLiveProbe(
+  sessionId: string,
+  handler: (raw: string | Record<string, unknown>) => void,
+  get: () => AgentState,
+): (raw: string | Record<string, unknown>) => void {
+  return (raw) => {
+    handler(raw);
+    scheduleBackgroundLiveCompletionProbe(sessionId, get);
+  };
 }
 
 function bumpSessionHistoryEpoch(sessionId: string): number {
@@ -417,6 +470,7 @@ function recordStreamingTelemetry(sessionId: string, key: keyof { deltas: number
 function logStreamingTelemetry(sessionId: string, reason: string) {
   const stats = streamingTelemetry.get(sessionId);
   if (!stats || stats.deltas === 0) return;
+  if (!isDevDiagnosticsEnabled()) return;
   logger.debug('Streaming flush telemetry', { sessionId, reason, ...stats });
 }
 
@@ -2083,12 +2137,14 @@ function createSessionEventHandler(
             && (delta?.type === 'thinking_delta' || delta?.type === 'text_delta')
           ) {
             firstStreamingDeltaLoggedSessions.add(sessionId);
-            const queryStartedAt = get().queryStartTime[sessionId];
-            logger.info('MODEL_TRACE first streaming delta', {
-              sessionId,
-              kind: delta?.type === 'thinking_delta' ? 'thinking' : 'text',
-              elapsedMs: queryStartedAt ? Date.now() - queryStartedAt : null,
-            });
+            if (isDevDiagnosticsEnabled()) {
+              const queryStartedAt = get().queryStartTime[sessionId];
+              logger.info('MODEL_TRACE first streaming delta', {
+                sessionId,
+                kind: delta?.type === 'thinking_delta' ? 'thinking' : 'text',
+                elapsedMs: queryStartedAt ? Date.now() - queryStartedAt : null,
+              });
+            }
           }
           if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
             const toolId = findToolId(streamEvent.index as number | undefined);
@@ -2802,13 +2858,15 @@ function createSessionEventHandler(
     const droppedImages = attachments.length > 0 && !shouldSendImages && !enrichmentEnabled;
     const userContent = displayContent ?? originalPayload.text;
 
-    logger.info('MODEL_TRACE startQuery dispatching via Daemon Client', {
-      sessionId,
-      cwd,
-      displayModel: modelForVision || 'default',
-      reasoningEffort: reasoningEffort || 'high',
-      promptLength: prompt.length,
-    });
+    if (isDevDiagnosticsEnabled()) {
+      logger.info('MODEL_TRACE startQuery dispatching via Daemon Client', {
+        sessionId,
+        cwd,
+        displayModel: modelForVision || 'default',
+        reasoningEffort: reasoningEffort || 'high',
+        promptLength: prompt.length,
+      });
+    }
     setSessionStreamPhase(sessionId, 'thinking');
     // Auto-update session title from the first user message (skip slash commands)
     const state = get();
@@ -2916,7 +2974,8 @@ function createSessionEventHandler(
       }
 
       const handleEvent = createSessionEventHandler(sessionId, get, set, modelForVision);
-      registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
+      // 包一层：事件到达即防抖触发一次后台完成探测（见 withBackgroundLiveProbe 的注释）。
+      registerDaemonSessionHandler(sessionId, withBackgroundLiveProbe(sessionId, handleEvent, get), (running) => {
         if (!running) return;
         // 已处于 running 时不写 store。原实现在这里返回 `{}`，但 Zustand 仍会
         // 生成新的 state 对象并通知**全部**订阅者做无意义的重算 —— 而 state 帧
@@ -3042,7 +3101,8 @@ function createSessionEventHandler(
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     const handleEvent = createSessionEventHandler(sessionId, get, set, session?.model ?? null);
-    registerDaemonSessionHandler(sessionId, handleEvent, (running) => {
+    // 包一层：事件到达即防抖触发一次后台完成探测（见 withBackgroundLiveProbe 的注释）。
+    registerDaemonSessionHandler(sessionId, withBackgroundLiveProbe(sessionId, handleEvent, get), (running) => {
       if (!running) return;
       // 同前：已 running 时不产生 store 写入，避免空 `set({})` 通知全部订阅者。
       if (get().isRunning[sessionId]) return;

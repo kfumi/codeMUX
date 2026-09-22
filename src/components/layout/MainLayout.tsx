@@ -213,7 +213,12 @@ export function MainLayout({
       {sidebar != null && (
         <aside
           className={cn(
-            'overflow-hidden bg-[hsl(var(--surface-2)/0.88)] backdrop-blur-xl',
+            // 这块常驻侧栏刻意不用 backdrop-blur：桌面形态下它背后只有 .app-shell / body 的平整
+            // 纯色（globals.css:107 --color-background、251-263 body background-image:none、
+            // 318-321 .app-shell），blur 对纯色是恒等变换；而它面积大、桌面形态下常驻，整屏模糊
+            // 只有开销没有观感收益。窄屏抽屉复用同一 className，靠 88% 不透明底色已足够可读。
+            // 不变量见 MainLayout.test.tsx（含源码级契约）。
+            'overflow-hidden bg-[hsl(var(--surface-2)/0.88)]',
             isNarrow
               // 抽屉宽度跟随视口但稍宽于桌面侧栏默认值;触控行高保持与桌面一致,
               // 不再全局强制 44px 按钮高度(会把分组标题、隐藏的 hover 按钮一起撑高)。

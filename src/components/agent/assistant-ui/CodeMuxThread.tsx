@@ -14,7 +14,8 @@ import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'luci
 import { toast } from 'sonner';
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import { Streamdown } from 'streamdown';
+import { Streamdown, parseMarkdownIntoBlocks } from 'streamdown';
+import { createIncrementalBlockParser } from '@/lib/incrementalMarkdownBlocks';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ActivityStepThinking } from '@/components/assistant-ui/activity-run';
@@ -785,6 +786,11 @@ function CodeMuxUserMessage() {
     ? (['conversation', 'files', 'both'] as const).filter((mode) => AGENT_REWIND_CAPABILITIES[agentKind][mode])
     : [];
   const rewindableUser = event != null && isRewindableUserEvent(event);
+
+  // 行的比较器只能看到传进去的值，所以派生一律在这里做完：渲染与比较用的是同一份来源。
+  const text = getMessageText(message);
+  const timestamp = getSourceTimestamp(message);
+  const imageAttachments = getImageAttachmentItems(message);
   const handleRewindToMessage = useCallback(async (mode: RewindMode) => {
     if (sourceEventIndex == null || isRewinding) {
       return;
@@ -808,7 +814,9 @@ function CodeMuxUserMessage() {
   }, [sourceEventIndex, isRewinding, rewindToMessage, sessionId, requestComposerRestore]);
   return (
     <UserMessage
-      message={message}
+      text={text}
+      timestamp={timestamp}
+      imageAttachments={imageAttachments}
       sourceEventIndex={sourceEventIndex}
       canRewind={rewindModes.length > 0 && rewindableUser && !isRunning && !isReadOnly}
       isRewinding={isRewinding}
@@ -825,41 +833,54 @@ function CodeMuxUserEditComposer() {
 
 function CodeMuxAssistantMessage() {
   const message = useAuiState((state) => state.message);
+  const isLastMessage = useIsLastMessage(message);
   const {
     sessionId,
     compactAiOutput,
     isRunning,
     collapseInfoByEventIndex,
     expandedTurnKeys,
-    onToggleExpandedTurn,
-    activityRuns,
     expandedRunKeys,
     claimedRunKeys,
+    onToggleExpandedTurn,
     onToggleRun,
+    activityRuns,
     toolDurations,
     turnByEventIndex,
     turnOrdinalById,
     pendingTurnId,
     subagentRunActivity,
   } = useCodeMuxThreadRenderContext();
+
+  /**
+   * 这一层是**故意**跟着 context 每次更新重渲染的：它很便宜（一次派生 + 一次 memo 子节点的协调），
+   * 真正贵的是行内容。行内容交给下面的 `memo(AssistantLikeMessage)` 按 `bindings` 判断要不要重画——
+   * 必须在这里派生一次再传进去，比较器才有东西可比（见 `deriveAssistantRowBindings` 的注释）。
+   */
+  const bindings = deriveAssistantRowBindings({
+    message,
+    isLastMessage,
+    compactAiOutput,
+    isRunning,
+    collapseInfoByEventIndex,
+    expandedTurnKeys,
+    expandedRunKeys,
+    claimedRunKeys,
+    activityRuns,
+    subagentRunActivity,
+    toolDurations,
+    turnByEventIndex,
+    turnOrdinalById,
+    pendingTurnId,
+  });
+
   return (
     <AssistantLikeMessage
       message={message}
       sessionId={sessionId}
-      compactAiOutput={compactAiOutput}
-      isRunning={isRunning}
-      collapseInfoByEventIndex={collapseInfoByEventIndex}
-      expandedTurnKeys={expandedTurnKeys}
+      bindings={bindings}
       onToggleExpandedTurn={onToggleExpandedTurn}
-      activityRuns={activityRuns}
-      expandedRunKeys={expandedRunKeys}
-      claimedRunKeys={claimedRunKeys}
       onToggleRun={onToggleRun}
-      toolDurations={toolDurations}
-      turnByEventIndex={turnByEventIndex}
-      turnOrdinalById={turnOrdinalById}
-      pendingTurnId={pendingTurnId}
-      subagentRunActivity={subagentRunActivity}
     />
   );
 }
@@ -874,28 +895,40 @@ function InterruptBanner() {
   );
 }
 
-function UserMessage({
-  message,
-  sourceEventIndex,
-  canRewind,
-  isRewinding = false,
-  rewindModes = [],
-  onRewindToMessage,
-}: {
-  message: MessageState;
+type UserRowProps = {
+  /** 正文：由外层派生（与渲染用的是同一份，见 `areUserRowPropsEqual`）。 */
+  text: string;
+  timestamp?: number;
+  imageAttachments: Array<{ id: string; name: string; src: string }>;
   sourceEventIndex?: number;
   canRewind?: boolean;
   isRewinding?: boolean;
   rewindModes?: RewindMode[];
   onRewindToMessage?: (mode: RewindMode) => Promise<void> | void;
-}) {
-  const text = getMessageText(message);
-  const timestamp = getSourceTimestamp(message);
+};
+
+/**
+ * 一行用户消息。
+ *
+ * 它自己只订阅 `{ sessionId, isRunning }`，但 context 的值每次事件追加都会换身份，所以这一行原来
+ * 也会**每来一个事件就重渲染一次**（实测：挂载 120 行时追加一个事件会产生 201 次行渲染）。派生值
+ * 一律由外层算好传进来，这里只按这些值比较——`memo` 的作用就是把"context 变了"与"这一行要重画"
+ * 分开。
+ */
+const UserMessage = memo(function UserMessage({
+  text,
+  timestamp,
+  imageAttachments,
+  sourceEventIndex,
+  canRewind,
+  isRewinding = false,
+  rewindModes = [],
+  onRewindToMessage,
+}: UserRowProps) {
   const [expanded, setExpanded] = useState(false);
   // 窄屏没有 hover:用户消息 footer(时间/复制/回退)常显。
   const isNarrow = useIsNarrowViewport();
   const canCollapse = isLongTranscriptUserMessage(text);
-  const imageAttachments = getImageAttachmentItems(message);
   const rewindTooltip = '回退到此消息';
   const handleRewindSelect = (mode: RewindMode) => {
     if (isRewinding) {
@@ -1000,6 +1033,43 @@ function UserMessage({
       </div>
     </MessagePrimitive.Root>
   );
+}, areUserRowPropsEqual);
+
+/**
+ * 用户行的比较器：逐项比较**渲染真正用到的值**。
+ *
+ * `rewindModes` 与 `imageAttachments` 每次派生都是新数组，所以按元素比**内容**而不是比身份；
+ * 其余都是标量或稳定引用。`message` 本身不参与比较——它的取值等价性已经由 `text` / `timestamp` /
+ * `imageAttachments` 三项完整表达（这也是行体唯一从 message 取的东西）。
+ */
+function areUserRowPropsEqual(prev: UserRowProps, next: UserRowProps): boolean {
+  if (prev.text !== next.text
+    || prev.timestamp !== next.timestamp
+    || prev.sourceEventIndex !== next.sourceEventIndex
+    || prev.canRewind !== next.canRewind
+    || prev.isRewinding !== next.isRewinding
+    || prev.onRewindToMessage !== next.onRewindToMessage) {
+    return false;
+  }
+
+  const modesPrev = prev.rewindModes ?? [];
+  const modesNext = next.rewindModes ?? [];
+  if (modesPrev.length !== modesNext.length) return false;
+  for (let index = 0; index < modesPrev.length; index += 1) {
+    if (modesPrev[index] !== modesNext[index]) return false;
+  }
+
+  const attachmentsPrev = prev.imageAttachments;
+  const attachmentsNext = next.imageAttachments;
+  if (attachmentsPrev.length !== attachmentsNext.length) return false;
+  for (let index = 0; index < attachmentsPrev.length; index += 1) {
+    const before = attachmentsPrev[index];
+    const after = attachmentsNext[index];
+    if (before.id !== after.id || before.name !== after.name || before.src !== after.src) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function UserEditComposer({ message, sourceEventIndex }: { message: MessageState; sourceEventIndex?: number }) {
@@ -1687,123 +1757,418 @@ function MessageNav({
   );
 }
 
-function AssistantLikeMessage({
-  message,
-  sessionId,
-  compactAiOutput,
-  isRunning,
-  collapseInfoByEventIndex,
-  expandedTurnKeys,
-  onToggleExpandedTurn,
-  activityRuns,
-  expandedRunKeys,
-  claimedRunKeys,
-  onToggleRun,
-  toolDurations,
-  turnByEventIndex,
-  turnOrdinalById,
-  pendingTurnId,
-  subagentRunActivity,
-}: {
-  message: MessageState;
+/**
+ * 一行助手消息**渲染输出所依赖的全部值**，压成可以直接比较的形式。
+ *
+ * **为什么需要**：`CodeMuxThreadRenderContext` 的值依赖 `activityRuns` / `toolDurations` /
+ * `subagentRunActivity` 这几张每次事件追加都换身份的查找表，所以每来一个事件，**所有已挂载的历史行
+ * 都会被重新协调**（`memo` 挡不住 context 变化，而 context 又不能不更新）。叶子层的 `memo` 只能省掉
+ * 叶子自身的渲染，省不掉"每行都跑一遍、重算派生值"这件事——实测：全量挂载 24 行时追加一个事件会
+ * 产生 **41** 次行渲染，挂载 120 行时是 **201** 次（叶子层那时已经是 1 次）。
+ *
+ * **单一真源**：行体的每个决定都从 `bindings` 读，比较器也只比较 `bindings`。这样"比较什么"与
+ * "渲染什么"不会各自漂移——漂移的后果是 UI 静默不更新，比多渲染几次严重得多。完备性由
+ * `CodeMuxThread.rowRenderCounts.test.tsx` 里"逐字段翻转"的用例守住。
+ *
+ * **按身份比较的字段**（`args` / `result` / `status` / `data` / 卡片活动对象）：与叶子层 `memo`
+ * 依赖的前提完全一致——UI 现在能正确更新，就说明这些对象是被**替换**而不是被就地改写的。
+ * 卡片活动对象例外地按身份比较是有意的：卡片内容复杂、逐字段比较得不偿失，而这样的行每个委派段
+ * 最多一行。
+ */
+type TextPartState = Extract<PartState, { type: 'text' }>;
+type ReasoningPartState = Extract<PartState, { type: 'reasoning' }>;
+type ToolCallPartState = Extract<PartState, { type: 'tool-call' }>;
+type DataPartState = Extract<PartState, { type: 'data' }>;
+
+/** 一个 part 交给叶子的关键值。渲染与比较共用它，字段与叶子 props 一一对应。 */
+type RowPartKey =
+  | { kind: 'text'; text: TextPartState['text'] }
+  | { kind: 'reasoning'; text: ReasoningPartState['text']; streaming: boolean }
+  | {
+    kind: 'tool-call';
+    toolName: ToolCallPartState['toolName'];
+    toolCallId: ToolCallPartState['toolCallId'];
+    args: ToolCallPartState['args'];
+    argsText: ToolCallPartState['argsText'];
+    result: ToolCallPartState['result'];
+    isError: ToolCallPartState['isError'];
+    status: ToolCallPartState['status'];
+  }
+  | { kind: 'data'; name: DataPartState['name']; data: DataPartState['data'] }
+  | { kind: 'other' };
+
+type RowPartBinding = {
+  key: RowPartKey;
+  /** 委派卡片只画过程步骤（思考 / 普通工具）；这个布尔预先算好，卡片侧不再读 part 本身。 */
+  activityRunPart: boolean;
+};
+
+export type AssistantRowBindings = {
+  /** 整行不渲染的两种原因，或者正常渲染。比较器只需要知道这个结论。 */
+  render: 'empty' | 'hidden' | 'content';
+  compactToggle: boolean;
+  /** 折叠开关按钮上真正画出来的字段。 */
+  collapse: {
+    turnKey: string;
+    durationMs: AssistantCollapseInfo['durationMs'];
+    stepCount: AssistantCollapseInfo['stepCount'];
+    hasError: AssistantCollapseInfo['hasError'];
+  } | undefined;
+  collapseExpanded: boolean;
+  hideCollapsedContent: boolean;
+  hideCollapsedReasoning: boolean;
+  runKey: string | undefined;
+  runLive: boolean;
+  runHead: boolean;
+  runOpen: boolean;
+  hasDelegation: boolean;
+  delegationRunning: boolean;
+  delegationNodeCount: number;
+  delegationCardVisible: boolean;
+  /** 卡片主体（只有"本行是委派段首行且有子智能体"时才非空）。按身份比较，见文件头注释。 */
+  delegationCardActivity: SubagentActivity | undefined;
+  partsVisible: boolean;
+  footerVisible: boolean;
+  shouldRenderFooter: boolean;
+  footerDurationMs: number | undefined;
+  sourceRole: 'system' | 'assistant';
+  sourceUuid: string | undefined;
+  sourceProviderTurnId: string | undefined;
+  sourceProviderTurnOrdinal: number | undefined;
+  isFinal: boolean;
+  sourceTimestamp: number | undefined;
+  isForkable: boolean;
+  isLastRow: boolean;
+  bottomSpacing: string;
+  /** 仅当本行确实有 `data` part 时才是真实值：`getMessageText` 与正文长度同阶，不能无条件算。 */
+  dataMessageText: string;
+  parsePlan: boolean;
+  /** 本行用到的工具耗时（内容指纹），渲染时查的是同一个来源，见 `usedDurations`。 */
+  usedDurationsKey: string;
+  /** 本行用到的工具耗时（由派生一并给出，渲染叶子时按 `toolCallId` 查它；等价性由上方 key 表达）。 */
+  usedDurations: Record<string, number>;
+  parts: readonly RowPartBinding[];
+};
+
+type AssistantRowProps = {
   sessionId: string;
+  bindings: AssistantRowBindings;
+  onToggleExpandedTurn: (turnKey: string) => void;
+  onToggleRun: (runKey: string, currentlyOpen: boolean) => void;
+};
+
+type DeriveAssistantRowInput = {
+  message: MessageState;
+  isLastMessage: boolean;
   compactAiOutput: boolean;
   isRunning: boolean;
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
-  onToggleExpandedTurn: (turnKey: string) => void;
-  activityRuns: ActivityRuns;
   expandedRunKeys: Set<string>;
   claimedRunKeys: Set<string>;
-  onToggleRun: (runKey: string, currentlyOpen: boolean) => void;
+  activityRuns: ActivityRuns;
   subagentRunActivity: Map<string, SubagentActivity>;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   turnOrdinalById: Map<string, number>;
   pendingTurnId?: string;
-}) {
-  const openSubagentInSidePanel = useSubagentStore((state) => state.openInSidePanel);
-  const forkSession = useSessionStore((state) => state.forkSession);
-  const [isForking, setIsForking] = useState(false);
-  // The tight mb-2 tail is only for a row that actually sits above the composer.
-  // The tight mb-2 tail is only for a row that actually sits above the composer.
-  // While a turn is running, the last row is followed by the live streaming block
-  // (StreamingContent) and must keep the normal rhythm.
-  const isLastRow = useIsLastMessage(message) && !isRunning;
-  const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
+};
 
-  // 这一行属于哪个处理段（连续思考 + 工具）：分组头已移除，run 只用于定位委派卡片。
+/** 本行用到的工具耗时：只装本行 part 引用的那些 id，避免把整张表带进比较。 */
+function collectUsedDurations(
+  content: readonly PartState[],
+  toolDurations: Record<string, number>,
+): Record<string, number> {
+  const used: Record<string, number> = {};
+  for (const part of content) {
+    if (part.type !== 'tool-call' || typeof part.toolCallId !== 'string') continue;
+    const duration = toolDurations[part.toolCallId];
+    if (duration !== undefined) used[part.toolCallId] = duration;
+  }
+  return used;
+}
+
+function usedDurationsKey(used: Record<string, number>): string {
+  return Object.keys(used).sort().map((id) => `${id}:${used[id]}`).join('|');
+}
+
+function deriveAssistantRowBindings(input: DeriveAssistantRowInput): AssistantRowBindings {
+  const { message, isRunning } = input;
+  const collapseInfo = input.compactAiOutput
+    ? getMessageCollapseInfo(message, input.collapseInfoByEventIndex)
+    : undefined;
+  const compactToggle = collapseInfo?.isToggleMessage === true;
+  const collapseExpanded = collapseInfo ? input.expandedTurnKeys.has(collapseInfo.turnKey) : false;
+  const hideCollapsedContent = Boolean(collapseInfo && !collapseExpanded && !collapseInfo.hideReasoningOnly);
+  const hideCollapsedReasoning = Boolean(collapseInfo?.hideReasoningOnly && !collapseExpanded);
+
   const sourceEventIndex = getSourceEventIndex(message);
   const runPlacement: ActivityRunPlacement | undefined = sourceEventIndex != null
-    ? activityRuns.placementByEventIndex.get(sourceEventIndex)
+    ? input.activityRuns.placementByEventIndex.get(sourceEventIndex)
     : undefined;
-  const run = runPlacement ? activityRuns.runByKey.get(runPlacement.runKey) : undefined;
-  // 整轮折叠（「已处理」开关）负责整轮的显隐。
-  const compactToggle = collapseInfo?.isToggleMessage === true;
-  if (message.content.length === 0 && !compactToggle) {
-    return null;
-  }
-  const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
-  const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
-  const shouldHideCollapsedReasoning = collapseInfo?.hideReasoningOnly && !isCollapseExpanded;
-  // 委派（Task/Agent）：卡片锚定在委派段首行，段内的委派工具行不再单独渲染。
-  const subagentActivity = run ? subagentRunActivity.get(run.runKey) : undefined;
-  const delegationRunning = subagentActivity != null && subagentActivity.summary.running > 0;
-  // 卡片开合状态：未被用户点过的跟随 live 自动开合（运行中展开、结束后收起）；
-  // 用户点过之后由用户接管。还要看子智能体：父段可能早就「结束」了，而子智能体还在跑。
+  const run = runPlacement ? input.activityRuns.runByKey.get(runPlacement.runKey) : undefined;
+  const activity = run ? input.subagentRunActivity.get(run.runKey) : undefined;
+  const delegationRunning = activity != null && activity.summary.running > 0;
   const runOpen = run
-    ? (claimedRunKeys.has(run.runKey)
-      ? expandedRunKeys.has(run.runKey)
+    ? (input.claimedRunKeys.has(run.runKey)
+      ? input.expandedRunKeys.has(run.runKey)
       : run.live || delegationRunning)
     : true;
-  // 委派卡片：只锚定在委派段首行（整轮收起时随整块隐藏），收起态也能开合。
   const delegationCardVisible = runPlacement?.isHead === true
-    && (collapseInfo == null || isCollapseExpanded)
-    && subagentActivity != null
-    && subagentActivity.nodes.length > 0;
-  // 普通步骤行恒可见；只有委派段的非锚点行在卡片收起时让位（步骤归属卡片）。
-  const partsVisible = !shouldHideCollapsedContent
-    && (subagentActivity == null || delegationCardVisible || runOpen);
+    && (collapseInfo == null || collapseExpanded)
+    && activity != null
+    && activity.nodes.length > 0;
+  const partsVisible = !hideCollapsedContent
+    && (activity == null || delegationCardVisible || runOpen);
 
-  const sourceTimestamp = getSourceTimestamp(message);
-  const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
   const sourceRole = message.metadata.custom?.sourceRole === 'system' ? 'system' : 'assistant';
   const turn = getSourceEventIndices(message)
-    .map((eventIndex) => turnByEventIndex.get(eventIndex))
+    .map((eventIndex) => input.turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
-  const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
-  // Main thread footer rule lives in shouldRenderAssistantFooter; grouping /
-  // plan cards / data parts stay on this runtime path instead of
-  // CodeMuxTranscriptMessage.
+  const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
   const shouldRenderFooter = shouldRenderAssistantFooter({
     role: sourceRole,
     isFinalAssistantMessage: isFinal,
     turnStatus: turn?.status,
     turnId: turn?.id,
-    pendingTurnId,
+    pendingTurnId: input.pendingTurnId,
   });
-  const footerVisible = !shouldHideCollapsedContent && shouldRenderFooter;
-  // 整行都没有可见内容时直接不渲染：整轮收起（且不是开关行）、没有委派卡片、没有正文与页脚。
-  if (!compactToggle && !delegationCardVisible && !partsVisible && !footerVisible) {
+  const footerVisible = !hideCollapsedContent && shouldRenderFooter;
+  const isLastRow = input.isLastMessage && !isRunning;
+  const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
+
+  let dataMessageText = '';
+  // `MessageState['content']` 是"用户/助手 part 的联合"，而这里只关心助手侧的 part 形态：
+  // 与 `MessagePrimitive.GroupedParts` 渲染时用的是同一批对象，所以按助手侧类型读取是安全的。
+  const content = message.content as readonly PartState[];
+  const parts: RowPartBinding[] = [];
+  for (const part of content) {
+    parts.push({
+      key: toRowPartKey(part),
+      activityRunPart: isActivityRunPart(part)
+        && !(part.type === 'tool-call' && isSubagentToolName(part.toolName)),
+    });
+    if (part.type === 'data' && dataMessageText === '') {
+      dataMessageText = getMessageText(message);
+    }
+  }
+  const used = collectUsedDurations(content, input.toolDurations);
+
+  return {
+    render: message.content.length === 0 && !compactToggle
+      ? 'empty'
+      : (compactToggle || delegationCardVisible || partsVisible || footerVisible ? 'content' : 'hidden'),
+    compactToggle,
+    collapse: collapseInfo
+      ? {
+        turnKey: collapseInfo.turnKey,
+        durationMs: collapseInfo.durationMs,
+        stepCount: collapseInfo.stepCount,
+        hasError: collapseInfo.hasError,
+      }
+      : undefined,
+    collapseExpanded,
+    hideCollapsedContent,
+    hideCollapsedReasoning,
+    runKey: run?.runKey,
+    runLive: run?.live === true,
+    runHead: runPlacement?.isHead === true,
+    runOpen,
+    hasDelegation: activity != null,
+    delegationRunning,
+    delegationNodeCount: activity?.nodes.length ?? 0,
+    delegationCardVisible,
+    delegationCardActivity: delegationCardVisible ? activity : undefined,
+    partsVisible,
+    footerVisible,
+    shouldRenderFooter,
+    footerDurationMs: turn ? buildFooterStatsFromTurn(turn)?.durationMs : undefined,
+    sourceRole,
+    sourceUuid,
+    sourceProviderTurnId: message.metadata.custom?.sourceProviderTurnId as string | undefined,
+    sourceProviderTurnOrdinal: turn ? input.turnOrdinalById.get(turn.id) : undefined,
+    isFinal,
+    sourceTimestamp: getSourceTimestamp(message),
+    isForkable: shouldRenderFooter && !isRunning && sourceUuid != null,
+    isLastRow,
+    bottomSpacing: assistantMessageBottomSpacing({
+      isLastRow,
+      isToggleMessage: compactToggle,
+      shouldRenderFooter,
+    }),
+    dataMessageText,
+    parsePlan: isFinal && turn?.status === 'completed',
+    usedDurationsKey: usedDurationsKey(used),
+    usedDurations: used,
+    parts,
+  };
+}
+
+function toRowPartKey(part: PartState): RowPartKey {
+  switch (part.type) {
+    case 'text':
+      return { kind: 'text', text: part.text };
+    case 'reasoning':
+      return { kind: 'reasoning', text: part.text, streaming: part.status?.type === 'running' };
+    case 'tool-call':
+      return {
+        kind: 'tool-call',
+        toolName: part.toolName,
+        toolCallId: part.toolCallId,
+        args: part.args,
+        argsText: part.argsText,
+        result: part.result,
+        isError: part.isError,
+        status: part.status,
+      };
+    case 'data':
+      return { kind: 'data', name: part.name, data: part.data };
+    default:
+      return { kind: 'other' };
+  }
+}
+
+/**
+ * `AssistantLikeMessage` 的 props 比较器。
+ *
+ * 只比两样：几个跨行稳定的 props，以及 `bindings` 的每个字段。**不要**比 `message` 的身份——
+ * assistant-ui 每次线程更新都可能重建 `MessageState`，比身份会让这条优化彻底失效；而"渲染输出
+ * 依赖什么"已经由 `bindings` 完整表达（行体只从 `bindings` 取值）。`usedDurations` 也不比身份：
+ * 它的内容等价性由 `bindings.usedDurationsKey` 表达。
+ */
+function areAssistantRowPropsEqual(prev: AssistantRowProps, next: AssistantRowProps): boolean {
+  return prev.sessionId === next.sessionId
+    && prev.onToggleExpandedTurn === next.onToggleExpandedTurn
+    && prev.onToggleRun === next.onToggleRun
+    && assistantRowBindingsEqual(prev.bindings, next.bindings);
+}
+
+/** 逐字段比较。任何一个字段漏比，都会变成"UI 静默不更新"，所以由用例逐字段翻转守住。 */
+export function assistantRowBindingsEqual(
+  a: AssistantRowBindings,
+  b: AssistantRowBindings,
+): boolean {
+  if (a === b) return true;
+  if (a.render !== b.render
+    || a.compactToggle !== b.compactToggle
+    || a.collapseExpanded !== b.collapseExpanded
+    || a.hideCollapsedContent !== b.hideCollapsedContent
+    || a.hideCollapsedReasoning !== b.hideCollapsedReasoning
+    || a.runKey !== b.runKey
+    || a.runLive !== b.runLive
+    || a.runHead !== b.runHead
+    || a.runOpen !== b.runOpen
+    || a.hasDelegation !== b.hasDelegation
+    || a.delegationRunning !== b.delegationRunning
+    || a.delegationNodeCount !== b.delegationNodeCount
+    || a.delegationCardVisible !== b.delegationCardVisible
+    || a.delegationCardActivity !== b.delegationCardActivity
+    || a.partsVisible !== b.partsVisible
+    || a.footerVisible !== b.footerVisible
+    || a.shouldRenderFooter !== b.shouldRenderFooter
+    || a.footerDurationMs !== b.footerDurationMs
+    || a.sourceRole !== b.sourceRole
+    || a.sourceUuid !== b.sourceUuid
+    || a.sourceProviderTurnId !== b.sourceProviderTurnId
+    || a.sourceProviderTurnOrdinal !== b.sourceProviderTurnOrdinal
+    || a.isFinal !== b.isFinal
+    || a.sourceTimestamp !== b.sourceTimestamp
+    || a.isForkable !== b.isForkable
+    || a.isLastRow !== b.isLastRow
+    || a.bottomSpacing !== b.bottomSpacing
+    || a.dataMessageText !== b.dataMessageText
+    || a.parsePlan !== b.parsePlan
+    || a.usedDurationsKey !== b.usedDurationsKey) {
+    return false;
+  }
+
+  const collapseA = a.collapse;
+  const collapseB = b.collapse;
+  if (collapseA !== collapseB) {
+    if (!collapseA || !collapseB
+      || collapseA.turnKey !== collapseB.turnKey
+      || collapseA.durationMs !== collapseB.durationMs
+      || collapseA.stepCount !== collapseB.stepCount
+      || collapseA.hasError !== collapseB.hasError) {
+      return false;
+    }
+  }
+
+  if (a.parts.length !== b.parts.length) return false;
+  for (let index = 0; index < a.parts.length; index += 1) {
+    if (!rowPartBindingEqual(a.parts[index], b.parts[index])) return false;
+  }
+  return true;
+}
+
+function rowPartBindingEqual(a: RowPartBinding, b: RowPartBinding): boolean {
+  if (a === b) return true;
+  if (a.activityRunPart !== b.activityRunPart) return false;
+
+  const keyA = a.key;
+  const keyB = b.key;
+  if (keyA.kind !== keyB.kind) return false;
+  switch (keyA.kind) {
+    case 'text':
+      return keyA.text === (keyB as typeof keyA).text;
+    case 'reasoning': {
+      const other = keyB as typeof keyA;
+      return keyA.text === other.text && keyA.streaming === other.streaming;
+    }
+    case 'tool-call': {
+      const other = keyB as typeof keyA;
+      return keyA.toolName === other.toolName
+        && keyA.toolCallId === other.toolCallId
+        && keyA.args === other.args
+        && keyA.argsText === other.argsText
+        && keyA.result === other.result
+        && keyA.isError === other.isError
+        && keyA.status === other.status;
+    }
+    case 'data': {
+      const other = keyB as typeof keyA;
+      return keyA.name === other.name && keyA.data === other.data;
+    }
+    default:
+      return true;
+  }
+}
+
+/**
+ * 一行助手消息。
+ *
+ * 它被 `memo` 包住，比较器只认 `bindings`（见 `areAssistantRowPropsEqual` 与文件头那段注释）。
+ * 行体**不再直接读** `activityRuns` / `subagentRunActivity` / `toolDurations` 这几张每次都换身份的
+ * 查找表——它们只出现在 `deriveAssistantRowBindings` 里，这样"比较什么"与"渲染什么"是同一份真源。
+ * `message` 只在委派卡片里取 part 对象用于渲染，其取值等价性由 `bindings.parts` 逐项表达。
+ */
+const AssistantLikeMessage = memo(function AssistantLikeMessage({
+  message,
+  sessionId,
+  bindings,
+  onToggleExpandedTurn,
+  onToggleRun,
+}: AssistantRowProps & { message: MessageState }) {
+  const openSubagentInSidePanel = useSubagentStore((state) => state.openInSidePanel);
+  const forkSession = useSessionStore((state) => state.forkSession);
+  const [isForking, setIsForking] = useState(false);
+
+  if (bindings.render !== 'content') {
     return null;
   }
-  const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
-  const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;
-  const sourceProviderTurnOrdinal = turn ? turnOrdinalById.get(turn.id) : undefined;
-  const messageText = getMessageText(message);
-  const isForkable = shouldRenderFooter
-    && !isRunning
-    && sourceUuid != null;
+
+  const delegateCardActivity = bindings.delegationCardActivity;
+
   const handleFork = async () => {
-    if (!isForkable || !sourceUuid || isForking) return;
+    if (!bindings.isForkable || !bindings.sourceUuid || isForking) return;
     setIsForking(true);
     try {
       await forkSession(
         sessionId,
-        sourceUuid,
-        sourceUuid,
-        sourceProviderTurnId,
-        sourceProviderTurnOrdinal,
+        bindings.sourceUuid,
+        bindings.sourceUuid,
+        bindings.sourceProviderTurnId,
+        bindings.sourceProviderTurnOrdinal,
       );
     } catch {
       // The session store retains the error for the surrounding session UI.
@@ -1811,13 +2176,10 @@ function AssistantLikeMessage({
       setIsForking(false);
     }
   };
-  const messageBottomSpacing = assistantMessageBottomSpacing({
-    isLastRow,
-    isToggleMessage: compactToggle,
-    shouldRenderFooter,
-  });
+
   /**
    * 段内单个过程步骤（思考 / 工具）的渲染。委派卡片主体与平铺列表共用这一个开关。
+   * 视觉决定一律从 `bindings` 取；part 自身只提供"这一部分是什么内容"。
    */
   const renderLeafPart = (part: PartState): ReactNode => {
     switch (part.type) {
@@ -1825,11 +2187,11 @@ function AssistantLikeMessage({
         return (
           <CodeMuxTextMessagePart
             text={part.text}
-            parsePlan={isFinal && turn?.status === 'completed'}
+            parsePlan={bindings.parsePlan}
           />
         );
       case 'reasoning':
-        if (shouldHideCollapsedReasoning) {
+        if (bindings.hideCollapsedReasoning) {
           return null;
         }
         return (
@@ -1844,47 +2206,54 @@ function AssistantLikeMessage({
             toolName={part.toolName}
             toolCallId={part.toolCallId}
             sessionId={sessionId}
-            args={asRecord(part.args)}
+            args={part.args}
             argsText={part.argsText}
             result={part.result}
             isError={part.isError}
             status={part.status}
-            durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
+            durationMs={typeof part.toolCallId === 'string' ? bindings.usedDurations[part.toolCallId] : undefined}
           />
         );
       case 'data':
-        return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} messageText={messageText} />;
+        return (
+          <CodeMuxDataMessagePart
+            name={part.name}
+            data={part.data}
+            sessionId={sessionId}
+            messageText={bindings.dataMessageText}
+          />
+        );
       default:
         return null;
     }
   };
 
   return (
-     <MessagePrimitive.Root
-       data-message-row
-      className={cn('group/message-row flex w-full justify-start', messageBottomSpacing)}
+    <MessagePrimitive.Root
+      data-message-row
+      className={cn('group/message-row flex w-full justify-start', bindings.bottomSpacing)}
     >
       <div
         className={cn(
           'w-full min-w-0 space-y-1 text-ui-body leading-relaxed',
-          message.metadata.custom?.sourceRole === 'system' && 'text-muted-foreground',
+          bindings.sourceRole === 'system' && 'text-muted-foreground',
         )}
       >
-        {compactToggle ? (
+        {bindings.compactToggle && bindings.collapse ? (
           <AssistantCollapseToggle
-            expanded={isCollapseExpanded}
-            durationMs={collapseInfo.durationMs}
-            stepCount={collapseInfo.stepCount}
-            hasError={collapseInfo.hasError}
-            onClick={() => onToggleExpandedTurn(collapseInfo.turnKey)}
+            expanded={bindings.collapseExpanded}
+            durationMs={bindings.collapse.durationMs}
+            stepCount={bindings.collapse.stepCount}
+            hasError={bindings.collapse.hasError}
+            onClick={() => onToggleExpandedTurn(bindings.collapse!.turnKey)}
           />
         ) : null}
-        {delegationCardVisible && run && subagentActivity ? (
+        {bindings.delegationCardVisible && delegateCardActivity && bindings.runKey ? (
           <SubagentActivityCard
-            activity={subagentActivity}
-            live={run.live || subagentActivity.summary.running > 0}
-            open={runOpen}
-            onToggle={() => onToggleRun(run.runKey, runOpen)}
+            activity={delegateCardActivity}
+            live={bindings.runLive || delegateCardActivity.summary.running > 0}
+            open={bindings.runOpen}
+            onToggle={() => onToggleRun(bindings.runKey!, bindings.runOpen)}
             onOpenSubagent={(subagentId) => openSubagentInSidePanel(sessionId, subagentId)}
           >
             {message.content.map((part, index) => (
@@ -1895,14 +2264,14 @@ function AssistantLikeMessage({
             ))}
           </SubagentActivityCard>
         ) : null}
-        {partsVisible ? (
+        {bindings.partsVisible ? (
           <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
             {({ part, children }) => {
               switch (part.type) {
                 case 'group-activity-run':
                   // 分组头已移除：组节点只作为稳定边界，步骤按源码顺序直接透传（平铺）。
                   // 委派卡片所在行是例外：卡片已画出过程步骤，这里只透传正文等非过程部分。
-                  if (delegationCardVisible) {
+                  if (bindings.delegationCardVisible) {
                     return null;
                   }
                   return children;
@@ -1912,7 +2281,7 @@ function AssistantLikeMessage({
                 case 'data':
                   // 委派卡片所在行：卡片已画出过程步骤（思考 + 普通工具），
                   // 这里只补卡片外的部分（正文 / 数据 / 问询卡片）。
-                  if (delegationCardVisible && isActivityRunPart(part)) {
+                  if (bindings.delegationCardVisible && isActivityRunPart(part)) {
                     return null;
                   }
                   return renderLeafPart(part);
@@ -1922,14 +2291,14 @@ function AssistantLikeMessage({
             }}
           </MessagePrimitive.GroupedParts>
         ) : null}
-        {footerVisible ? (
+        {bindings.footerVisible ? (
           <MessageFooter
-            timestamp={sourceTimestamp}
-            stats={footerStats}
+            timestamp={bindings.sourceTimestamp}
+            stats={bindings.footerDurationMs === undefined ? undefined : { durationMs: bindings.footerDurationMs }}
             revealOnHover
             sessionId={sessionId}
-            sourceUuid={sourceUuid}
-            canFork={isForkable}
+            sourceUuid={bindings.sourceUuid}
+            canFork={bindings.isForkable}
             isForking={isForking}
             onFork={handleFork}
           />
@@ -1937,7 +2306,7 @@ function AssistantLikeMessage({
       </div>
     </MessagePrimitive.Root>
   );
-}
+}, areAssistantRowPropsEqual);
 
 /**
  * 流式页脚的"正在执行"状态行。
@@ -2023,6 +2392,18 @@ function StreamingContent({
   const revealedText = useStreamingTextReveal(visibleText, revealActive);
   const revealedThinking = useStreamingTextReveal(visibleThinking, revealActive);
 
+  /**
+   * 增量分块：只重解析尾部那一块，避免每次提交都对累积全文重新分块。
+   * 实测（研究文档 5.14 节）流式提交耗时 694ms → 564ms（−19%）、单次最长 14.1ms → 12.3ms，
+   * 且两轮共 786 次提交的分块结果与上游参考实现逐项一致。
+   *
+   * 每实例一份（它是有状态缓存）。`StreamingContent` 是常驻的（这里的 `return null` 不卸载组件），
+   * 所以实例会跨回合、跨会话继续带缓存：只有当新文本仍以上一次的冻结前缀开头时才复用，否则整体
+   * 重解析（前缀对不上只是白丢收益，结果仍与参考实现一致）。而上游唯一那条"要看全文才决定"的规则
+   * （出现 `[^` 就把全文当成一块）已由 `createIncrementalBlockParser` 保守退让掉，见该文件头注释第 1 条。
+   */
+  const blockParser = useMemo(() => createIncrementalBlockParser(parseMarkdownIntoBlocks), []);
+
   if (stopped || (!isRunning && !thinking && !visibleText)) {
     return null;
   }
@@ -2057,6 +2438,7 @@ function StreamingContent({
           >
             <Streamdown
               {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}
+              parseMarkdownIntoBlocksFn={blockParser}
             >
               {revealedText}
             </Streamdown>
@@ -2163,12 +2545,6 @@ function getSourceEventIndices(message: MessageState): number[] {
 
   const sourceEventIndex = getSourceEventIndex(message);
   return sourceEventIndex != null ? [sourceEventIndex] : [];
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 function getSourceEventIndex(message: MessageState): number | undefined {
