@@ -40,7 +40,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
               <button
                 onClick={() => handleCopy(codeText)}
                 className={cn(
-                  'absolute top-2 right-2 px-2 py-1 text-ui-caption font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md transition-all duration-200 backdrop-blur-sm',
+                  'absolute top-2 right-2 px-2 py-1 text-ui-caption font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md transition-all duration-normal backdrop-blur-sm',
                   isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 )}
               >

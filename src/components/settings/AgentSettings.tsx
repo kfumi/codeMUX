@@ -1161,7 +1161,7 @@ function CodexPermissionSection({
               type="button"
               onClick={() => onChange(option.mode)}
               className={cn(
-                'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200',
+                'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-normal',
                 active
                   ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
                   : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
@@ -1284,7 +1284,7 @@ function ClaudePermissionSection({
               type="button"
               onClick={() => onChange(option.mode)}
               className={cn(
-                'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200',
+                'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-normal',
                 active
                   ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
                   : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',

@@ -79,7 +79,7 @@ function SessionStatusIcon({
         : null;
 
   return (
-    <span className={cn('relative flex h-4 w-4 shrink-0 transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
+    <span className={cn('relative flex h-4 w-4 shrink-0 transition-opacity duration-normal', isActive ? 'opacity-100' : 'opacity-70')}>
       {agentDef ? (
         <AgentBrandIcon agent={agentDef} size="sm" />
       ) : (
@@ -190,7 +190,7 @@ export function SessionItem({
             <HoverCardTrigger asChild>
               <div
                 className={cn(
-                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-150 select-none [-webkit-touch-callout:none]',
+                  'group relative flex items-center gap-2.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast select-none [-webkit-touch-callout:none]',
                   'cursor-pointer text-[hsl(var(--sidebar-fg))]/86',
                   'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
                   'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
@@ -215,7 +215,7 @@ export function SessionItem({
                   />
                 ) : (
                   <>
-                    <span className="flex-1 truncate font-medium transition-colors duration-200">
+                    <span className="flex-1 truncate font-medium transition-colors duration-normal">
                       {session.title || '未命名对话'}
                     </span>
                     {session.is_read_only && (
@@ -223,8 +223,8 @@ export function SessionItem({
                         <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
                       </TooltipHint>
                     )}
-                    <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-150 group-hover:w-12">
-                      <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
+                    <span className="relative flex h-5 shrink-0 items-center justify-end transition-[width] duration-fast group-hover:w-12">
+                      <span className={cn('inline-flex h-full items-center transition-opacity duration-fast', 'group-hover:opacity-0')}>
                         {awaitsConfirmation ? (
                           <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-ui-micro font-medium leading-4 text-white">
                             等待确认
@@ -239,11 +239,11 @@ export function SessionItem({
                       </span>
                       {/* 窄屏没有 hover:按钮簇不渲染,免得 opacity-0 的幽灵触控区拦截点击。 */}
                       {isNarrow ? null : (
-                        <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-fast group-hover:opacity-100">
                           <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
                             <button
                               className={cn(
-                                'rounded-md p-1 transition-colors duration-150',
+                                'rounded-md p-1 transition-colors duration-fast',
                                 session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
                                 'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
                               )}
@@ -259,7 +259,7 @@ export function SessionItem({
                           <TooltipHint content={archiveLabel}>
                             <button
                               className={cn(
-                                'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
+                                'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-fast',
                                 'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
                               )}
                               aria-label={archiveLabel}
@@ -279,7 +279,7 @@ export function SessionItem({
               </div>
             </HoverCardTrigger>
           </ContextMenuTrigger>
-          <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+          <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
             <ContextMenuItem icon={<PinIcon className="h-3.5 w-3.5" />} onClick={handleTogglePinned}>
               {session.is_pinned ? '取消置顶' : '置顶'}
             </ContextMenuItem>

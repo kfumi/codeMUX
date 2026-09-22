@@ -88,7 +88,7 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
       type="button"
       onClick={() => onTabChange(id)}
       className={cn(
-        'relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-ui-compact transition-colors duration-150',
+        'relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-ui-compact transition-colors duration-fast',
         activeTab === id
           ? 'bg-[hsl(var(--foreground)/0.08)] font-medium text-foreground'
           : 'text-muted-foreground hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground',

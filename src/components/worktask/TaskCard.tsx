@@ -67,7 +67,7 @@ export function TaskCard({
         }
       }}
       className={cn(
-        'block w-full rounded-xl border border-border/70 bg-card p-3 text-left shadow-none transition-colors duration-150 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45',
+        'block w-full rounded-xl border border-border/70 bg-card p-3 text-left shadow-none transition-colors duration-fast hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45',
         draggable && 'cursor-grab',
         isDragged && 'opacity-50',
         isDragOver && 'border-primary ring-1 ring-primary/40',

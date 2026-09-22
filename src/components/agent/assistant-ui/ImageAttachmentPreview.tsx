@@ -34,7 +34,7 @@ export function ImageAttachmentPreview({
           <img
             src={src}
             alt={alt}
-            className={cn('h-full w-full object-cover transition-transform duration-200 group-hover/image:scale-[1.03]', imageClassName)}
+            className={cn('h-full w-full object-cover transition-transform duration-normal group-hover/image:scale-[1.03]', imageClassName)}
           />
         </button>
       </TooltipHint>

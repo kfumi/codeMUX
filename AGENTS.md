@@ -104,6 +104,13 @@ The app's appearance is user-configurable at runtime (theme, accent color, UI fo
 
 - Use Tailwind `rounded-sm|md|lg|xl|2xl`, which derive from the user's radius preference via `--radius`. Do not hard-code `border-radius` or `rounded-[Npx]` values.
 
+**Motion — semantic tokens, never literal durations or hand-written curves:**
+
+- Use the motion utilities for every transition/animation: durations `duration-fast` (150ms — hover, color/background changes), `duration-normal` (200ms — expand/collapse, slide-in, toast/dialog), `duration-slow` (300ms — panel switches, large-area reveals); easings `ease-motion-out` (enter/hover, default), `ease-motion-in` (exit), `ease-motion-in-out` (symmetric size/width transitions), `ease-motion-standard` (expand/collapse, Radix/assistant-ui).
+- `animate-in`/`animate-out` (tw-animate-css) read their duration and easing from the same `duration-*` / `ease-motion-*` utilities (`--tw-duration` / `--tw-ease`), so entrance animations use them too — never `animation-duration-[...]` or `[animation-timing-function:...]`.
+- Do not write literal numeric `duration-*` values, arbitrary square-bracket durations, hand-written `cubic-bezier(...)` easing utilities, or keyword easings. All motion stays ≤300ms and there are no decorative/continuous animations.
+- The raw values live in `:root` as `--motion-duration-*` / `--motion-ease-*`; the utilities are mapped in `@theme`. In plain CSS use `var(--motion-duration-fast)` etc. — do not re-declare values. `prefers-reduced-motion` handling is centralized in the `globals.css` media query; do not add per-component `motion-reduce:` guards for status animations.
+
 **When a token is missing:**
 
 - If a new semantic token is genuinely needed, add it to `@theme` plus `:root` and `.dark` in `src/styles/globals.css` and consume the generated utility — do not inline per-component values.

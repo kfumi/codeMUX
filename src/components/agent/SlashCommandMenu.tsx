@@ -96,7 +96,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
                     ref={isSelected ? selectedRef : undefined}
                     onClick={() => onSelect(cmd)}
                     className={cn(
-                      'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-100',
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-fast',
                       isSelected
                         ? 'bg-[hsl(var(--primary)/0.06)] text-foreground'
                         : 'text-foreground/70 hover:bg-muted/40'

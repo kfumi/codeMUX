@@ -192,7 +192,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
         `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
         coversContent ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
         !isVisible && 'pointer-events-none invisible',
-        isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
+        isResizing ? 'transition-none' : 'transition-[width] duration-slow ease-motion-in-out',
       )}
       aria-hidden={!isVisible}
       style={{ width: coversContent ? '100%' : isShown ? panelWidth : 0 }}
@@ -206,7 +206,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
         >
           <div
             className={cn(
-              'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full transition-all duration-200',
+              'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full transition-all duration-normal',
               isResizing ? 'bg-primary/45' : 'bg-transparent group-hover:bg-primary/22',
             )}
           />

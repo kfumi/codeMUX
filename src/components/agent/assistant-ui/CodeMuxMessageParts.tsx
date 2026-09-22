@@ -415,7 +415,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const knownError = getKnownSidecarErrorDisplay(errorMsg);
     if (knownError) {
       return (
-        <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.14)]">
+        <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards duration-slow ease-motion-out text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.14)]">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span className="break-all whitespace-pre-wrap">{knownError}</span>
@@ -428,7 +428,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const label = match ? match[1].trim() : undefined;
     const message = match ? match[2].trim() : errorMsg;
     return (
-      <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+      <div className="text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards duration-slow ease-motion-out text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
         <div className="flex items-start gap-2">
           <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <div className="min-w-0">
@@ -448,7 +448,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const Icon = display.icon === 'error' ? XCircle : AlertTriangle;
 
     return (
-      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${toneClass}`}>
+      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards duration-slow ease-motion-out ${toneClass}`}>
         <div className="flex items-start gap-2">
           <Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${display.pulse ? 'animate-pulse' : ''}`} />
           <span className="break-all whitespace-pre-wrap">{display.text}</span>
@@ -461,7 +461,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const { attempt, max_retries, error_status, error } = data.event.data as any;
     const isLastRetry = attempt >= max_retries;
     return (
-      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${
+      <div className={`text-xs rounded-xl px-3 py-2 my-1 border animate-in fade-in fill-mode-forwards duration-slow ease-motion-out ${
         isLastRetry
           ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
           : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
@@ -475,7 +475,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const metadata = data.event.data.compact_metadata;
     if (metadata?.status === 'compacting') {
       return (
-        <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <div className="text-center py-2 animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
           <span className="text-ui-caption text-muted-foreground tracking-normal font-medium animate-pulse">
             — 正在压缩上下文… —
           </span>
@@ -485,7 +485,7 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     const preTokens = metadata?.pre_tokens;
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
-      <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <div className="text-center py-2 animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
         <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
           — 上下文已压缩{tokenText} —
         </span>
@@ -604,7 +604,7 @@ function isPermissionUpdateDeferredData(value: unknown): value is { eventKind: s
 
 function PermissionUpdateDeferredSeam({ event }: { event: Extract<AgentMessage, { kind: 'permission_update_deferred' }> }) {
   return (
-    <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="text-center py-2 animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
       <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
         — {event.data.content} —
       </span>
@@ -630,7 +630,7 @@ function NativeSessionRebuiltSeam({ event }: { event: Extract<AgentMessage, { ki
 
   return (
     <TooltipHint content={event.data.content}>
-      <div className="text-center py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <div className="text-center py-2 animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
         <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
           {caption}
         </span>
@@ -887,9 +887,9 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
   };
 
   return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
       <button
-        className="group flex w-full items-center gap-3 bg-[hsl(var(--surface-2))]/72 px-3.5 py-2.5 text-left text-sm transition-[background-color,border-color] duration-200 hover:bg-[hsl(var(--surface-3))]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.35)] focus-visible:ring-inset"
+        className="group flex w-full items-center gap-3 bg-[hsl(var(--surface-2))]/72 px-3.5 py-2.5 text-left text-sm transition-[background-color,border-color] duration-normal hover:bg-[hsl(var(--surface-3))]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.35)] focus-visible:ring-inset"
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
@@ -919,7 +919,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
               key={`${diff.file}-${i}`}
               role="button"
               tabIndex={0}
-              className="group/row flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors duration-150 hover:bg-[hsl(var(--surface-2))]/72 focus-visible:bg-[hsl(var(--surface-2))]/72 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.3)] focus-visible:ring-inset"
+              className="group/row flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors duration-fast hover:bg-[hsl(var(--surface-2))]/72 focus-visible:bg-[hsl(var(--surface-2))]/72 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.3)] focus-visible:ring-inset"
               onClick={() => handleFileClick(diff)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {

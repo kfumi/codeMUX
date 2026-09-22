@@ -185,7 +185,7 @@ function ReasoningTrigger({
         data-slot="reasoning-trigger-chevron"
         className={cn(
           "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0",
-          "opacity-0 transition-[transform,opacity] duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+          "opacity-0 transition-[transform,opacity] duration-(--animation-duration) ease-motion-standard motion-reduce:transition-none",
           "group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100",
           "-rotate-90",
           "group-data-open/trigger:rotate-0 group-data-open/trigger:opacity-100",
@@ -208,7 +208,7 @@ function ReasoningContent({
       data-slot="reasoning-content"
       className={cn(
         "aui-reasoning-content text-muted-foreground relative overflow-hidden text-sm outline-none",
-        "group/collapsible-content ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
+        "group/collapsible-content ease-motion-standard motion-reduce:animate-none",
         "data-closed:animate-collapsible-up",
         "data-open:animate-collapsible-down",
         "data-closed:fill-mode-forwards",
@@ -237,7 +237,7 @@ function ReasoningText({
       data-slot="reasoning-text"
       className={cn(
         "aui-reasoning-text relative z-0 ps-5 pt-1 pb-1 leading-relaxed text-pretty",
-        "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)]",
+        "transform-gpu transition-[transform,opacity] ease-motion-standard",
         "motion-reduce:animate-none",
         "group-data-open/collapsible-content:animate-in",
         "group-data-closed/collapsible-content:animate-out",

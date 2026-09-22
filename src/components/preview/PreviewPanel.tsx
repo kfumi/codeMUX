@@ -61,8 +61,8 @@ export function PreviewPanel() {
   return (
     <div
       className={cn(
-        'animate-in fade-in slide-in-from-right-3 fill-mode-both animation-duration-[420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden shadow-[-0.5px_0_0_0_hsl(var(--border)/0.3)]',
-        isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
+        'animate-in fade-in slide-in-from-right-3 fill-mode-both duration-slow ease-motion-out h-full shrink-0 overflow-hidden shadow-[-0.5px_0_0_0_hsl(var(--border)/0.3)]',
+        isResizing ? 'transition-none' : 'transition-[width] duration-slow ease-motion-in-out',
       )}
       style={{ width: isOpen ? panelWidth : 0 }}
     >
@@ -77,7 +77,7 @@ export function PreviewPanel() {
                   onClick={toggleFileTree}
                   aria-label="文件树"
                   className={cn(
-                    'rounded-lg p-1.5 transition-all duration-200',
+                    'rounded-lg p-1.5 transition-all duration-normal',
                     showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
                   )}
                 >
@@ -93,7 +93,7 @@ export function PreviewPanel() {
                 onClick={() => setViewMode('diff')}
                 disabled={!hasOriginal}
                 className={cn(
-                  'rounded-lg px-2.5 py-1 text-xs transition-all duration-200',
+                  'rounded-lg px-2.5 py-1 text-xs transition-all duration-normal',
                   viewMode === 'diff'
                     ? 'bg-background/90 font-medium text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.03)]'
                     : hasOriginal
@@ -108,7 +108,7 @@ export function PreviewPanel() {
             <button
               onClick={() => setViewMode('file')}
               className={cn(
-                'rounded-lg px-2.5 py-1 text-xs transition-all duration-200',
+                'rounded-lg px-2.5 py-1 text-xs transition-all duration-normal',
                 viewMode === 'file'
                   ? 'bg-background/90 font-medium text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.03)]'
                   : 'text-muted-foreground/58 hover:text-foreground/80',
@@ -134,7 +134,7 @@ export function PreviewPanel() {
                 <FileTree />
               </div>
               <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleTreeMouseDown}>
-                <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
+                <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-normal group-hover:bg-primary/12" />
               </div>
             </>
           )}
@@ -152,7 +152,7 @@ export function PreviewPanel() {
                       <ContextMenuTrigger asChild>
                         <div
                           className={cn(
-                            'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-code font-mono whitespace-nowrap transition-all duration-200',
+                            'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-code font-mono whitespace-nowrap transition-all duration-normal',
                             isActive
                               ? 'bg-background/90 text-foreground/84'
                               : 'text-muted-foreground/52 hover:bg-muted/20 hover:text-muted-foreground',
@@ -176,7 +176,7 @@ export function PreviewPanel() {
                           </button>
                         </div>
                       </ContextMenuTrigger>
-                      <ContextMenuContent className="min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--surface-shadow-strong)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+                      <ContextMenuContent className="min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--surface-shadow-strong)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards duration-slow ease-motion-out">
                         <ContextMenuItem onClick={() => closeFile(file.path)}>
                           关闭
                         </ContextMenuItem>

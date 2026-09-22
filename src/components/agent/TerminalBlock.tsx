@@ -13,7 +13,7 @@ export function TerminalBlock({ command, output, isRunning }: TerminalBlockProps
   return (
     <div className="rounded-xl border border-border/30 bg-muted/20 my-2 overflow-hidden">
       <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-foreground/80 hover:bg-muted/30 transition-colors duration-200"
+        className="flex items-center gap-2 w-full px-3 py-2 text-foreground/80 hover:bg-muted/30 transition-colors duration-normal"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -22,7 +22,7 @@ export function TerminalBlock({ command, output, isRunning }: TerminalBlockProps
         {isRunning && <span className="ml-auto text-ui-caption text-[hsl(var(--warning))] animate-pulse-soft">运行中...</span>}
       </button>
       {isExpanded && output && (
-        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-code font-mono leading-relaxed animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-code font-mono leading-relaxed animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
           {output}
         </div>
       )}

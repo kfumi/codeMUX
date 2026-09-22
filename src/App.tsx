@@ -511,7 +511,7 @@ function App() {
                 <NewSessionPanel onSubmit={handleStartNewSession} />
               </Suspense>
             ) : (
-              <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+              <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
                 <div className="max-w-md space-y-5 text-center">
                   <div className="relative inline-flex">
                     <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-border/70 bg-muted/35 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.025)]">

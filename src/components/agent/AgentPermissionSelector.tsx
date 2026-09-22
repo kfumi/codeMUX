@@ -195,7 +195,7 @@ export function AgentPermissionSelector({
                     aria-expanded={open}
                     aria-label={selected.label}
                     className={cn(
-                      'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                      'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-normal outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
                       compact ? 'max-w-9' : 'max-w-none',
                       selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
                     )}
@@ -256,7 +256,7 @@ export function AgentPermissionSelector({
                     aria-pressed={autoApprove}
                     onClick={toggleAutoApprove}
                     className={cn(
-                      'inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                      'inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 transition-all duration-normal outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
                       autoApprove && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
                     )}
                   >

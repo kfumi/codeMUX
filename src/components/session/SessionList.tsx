@@ -77,7 +77,7 @@ function SectionHeader({
         {/* 展开/收起箭头跟在标题右侧,悬停该行才出现;窄屏(触摸)没有 hover,常显。 */}
         <ChevronRight
           className={cn(
-            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/70 transition-all duration-200',
+            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/70 transition-all duration-normal',
             isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
             expanded && 'rotate-90',
           )}
@@ -318,7 +318,7 @@ export function SessionList({
             <button
               type="button"
               onClick={onAddProject}
-              className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+              className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
             >
               <Plus className="h-3.5 w-3.5" />
               添加项目
@@ -331,7 +331,7 @@ export function SessionList({
         <button
           type="button"
           onClick={onAddProject}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-ui-compact text-[hsl(var(--sidebar-fg))]/70 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

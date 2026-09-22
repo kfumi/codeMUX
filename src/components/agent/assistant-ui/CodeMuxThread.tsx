@@ -981,7 +981,7 @@ const UserMessage = memo(function UserMessage({
         ) : null}
         <div
           className={cn(
-            'flex items-center justify-end gap-1 transition-opacity duration-150',
+            'flex items-center justify-end gap-1 transition-opacity duration-fast',
             isNarrow
               ? 'opacity-100'
               : 'opacity-0 group-focus-within/message-row:opacity-100 group-hover/message-row:opacity-100',
@@ -1689,7 +1689,7 @@ function MessageNav({
     >
       <div
         className={cn(
-          'pointer-events-auto relative h-full w-full transition-opacity duration-200',
+          'pointer-events-auto relative h-full w-full transition-opacity duration-normal',
           hovered ? 'opacity-100' : 'opacity-70',
         )}
       >
@@ -1725,7 +1725,7 @@ function MessageNav({
             >
               <span
                 className={cn(
-                  'block origin-left rounded-full transition-[width,background-color,opacity] duration-[180ms] ease-out',
+                  'block origin-left rounded-full transition-[width,background-color,opacity] duration-normal ease-motion-out',
                   previewEventIndex === item.eventIndex
                     ? 'bg-foreground/90'
                     : item.eventIndex === activeIdx
@@ -1739,7 +1739,7 @@ function MessageNav({
               />
             </button>
             {previewEventIndex === item.eventIndex ? (
-              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-80 max-w-[calc(100vw-6rem)] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-80 max-w-[calc(100vw-6rem)] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards duration-normal ease-motion-out">
                 <div className="block w-full min-w-0 truncate whitespace-nowrap text-xs font-semibold leading-5 text-foreground">
                   {item.title}
                 </div>
@@ -2325,7 +2325,7 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
+        'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
       )}
     >
       <DotMatrix state="loading" className="size-4" label="正在执行" />

@@ -96,12 +96,12 @@ export function Sidebar({
           type="button"
           onClick={onNewSession}
           aria-keyshortcuts={newSessionAria ?? undefined}
-          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
           {newSessionHint && (
-            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-visible:opacity-100">
               {newSessionHint}
             </span>
           )}
@@ -111,12 +111,12 @@ export function Sidebar({
           type="button"
           onClick={() => setChatSearchOpen(true)}
           aria-keyshortcuts={searchAria ?? undefined}
-          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="group flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Search className="h-4 w-4" />
           <span className="flex-1 text-left">搜索</span>
           {searchShortcutHint && (
-            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+            <span className="shrink-0 text-ui-caption text-[hsl(var(--sidebar-fg))]/66 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-visible:opacity-100">
               {searchShortcutHint}
             </span>
           )}
@@ -125,7 +125,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onOpenAutomation}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Timer className="h-4 w-4" />
           <span className="flex-1 text-left">自动化</span>
@@ -133,7 +133,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onOpenTodoBoard}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <ListTodo className="h-4 w-4" />
           <span className="flex-1 text-left">待办任务</span>
@@ -175,7 +175,7 @@ export function Sidebar({
             type="button"
             onClick={onOpenSettings}
             aria-keyshortcuts={settingsAria ?? undefined}
-            className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
+            className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
           >
             <Settings className="h-3.5 w-3.5" />
             <span>设置</span>

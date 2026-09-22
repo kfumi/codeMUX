@@ -167,7 +167,7 @@ function ToolFallbackTrigger({
         className={cn(
           'size-3.5 shrink-0 text-muted-foreground',
           'transition-[transform,opacity]',
-          'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+          'duration-(--animation-duration) ease-motion-standard motion-reduce:transition-none',
           isNarrow
             ? 'opacity-100'
             : 'opacity-0 group-hover/trigger:opacity-100 group-hover/tool-row:opacity-100 group-focus-visible/trigger:opacity-100',
@@ -192,7 +192,7 @@ function ToolFallbackContent({
       className={cn(
         'relative overflow-hidden text-sm outline-none',
         'group/collapsible-content',
-        'ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+        'ease-motion-standard motion-reduce:animate-none',
         'data-closed:animate-collapsible-up',
         'data-open:animate-collapsible-down',
         'data-closed:fill-mode-forwards',
@@ -205,7 +205,7 @@ function ToolFallbackContent({
     >
       <div
         className={cn(
-          'mt-0.5 flex flex-col gap-1.5 text-xs scrollbar-gutter-stable ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+          'mt-0.5 flex flex-col gap-1.5 text-xs scrollbar-gutter-stable ease-motion-standard motion-reduce:animate-none',
           'group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1',
           'group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1',
           'group-data-open/collapsible-content:duration-(--animation-duration) group-data-closed/collapsible-content:duration-(--animation-duration)',

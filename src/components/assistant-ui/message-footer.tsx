@@ -51,7 +51,7 @@ export function MessageFooter({
   // 窄屏没有 hover:footer(复制/回退/调试等入口)常显,桌面保持悬停展开。
   const isNarrow = useIsNarrowViewport();
   const revealClass = revealOnHover && !isNarrow
-    ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
+    ? 'opacity-0 transition-opacity duration-fast group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
     : undefined;
   const showDebug = !isMinimal && Boolean(sessionId);
   const showFork = !isMinimal && Boolean(canFork && onFork);

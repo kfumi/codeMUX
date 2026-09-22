@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -43,7 +43,7 @@ export function AgentSelector({ value, onChange, variant = 'inline', disabled = 
           aria-label={current.label}
           disabled={disabled}
           className={cn(
-          'inline-flex items-center text-sm text-foreground/84 transition-all duration-200',
+          'inline-flex items-center text-sm text-foreground/84 transition-all duration-normal',
           disabled && 'cursor-not-allowed opacity-50',
           isFloating
             ? 'group relative justify-center rounded-lg border border-border/60 bg-card p-4 shadow-[0_14px_34px_-26px_hsl(var(--surface-shadow-strong)/0.26)] hover:border-[hsl(var(--primary)/0.28)] hover:shadow-[0_18px_42px_-28px_hsl(var(--surface-shadow-strong)/0.32),0_0_0_3px_hsl(var(--primary)/0.06)]'

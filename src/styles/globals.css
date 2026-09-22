@@ -130,6 +130,18 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 6px);
+
+  /* 动效语义 token：时长三档 + 缓动三种（原始值定义在下方 :root，与外观变量同处）。
+     新代码一律用 duration-fast|normal|slow 与 ease-motion-*，不再写字面量时长或
+     手写 cubic-bezier()。所有动画 ≤300ms；prefers-reduced-motion 下的降速/停用
+     由下方同名媒体查询统一处理。 */
+  --transition-duration-fast: var(--motion-duration-fast); /* 悬停、颜色/背景变化 */
+  --transition-duration-normal: var(--motion-duration-normal); /* 展开折叠、滑入、toast/dialog */
+  --transition-duration-slow: var(--motion-duration-slow); /* 面板切换、大区域让位 */
+  --ease-motion-out: var(--motion-ease-out); /* 进入/悬停（默认） */
+  --ease-motion-in: var(--motion-ease-in); /* 退出 */
+  --ease-motion-in-out: var(--motion-ease-in-out); /* 尺寸/宽度等对称过渡 */
+  --ease-motion-standard: var(--motion-ease-standard); /* 展开/折叠（Radix/aui） */
 }
 
 @layer base {
@@ -137,6 +149,15 @@
     --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
     --ui-font-size: 14px;
     --code-font-size: 13px;
+    /* 动效语义 token（原始值）。@theme 里映射为 duration-fast|normal|slow 与
+       ease-motion-* 工具类；reduced-motion 的降速/停用见本文件同名媒体查询。 */
+    --motion-duration-fast: 150ms;
+    --motion-duration-normal: 200ms;
+    --motion-duration-slow: 300ms;
+    --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
     --background: 0 0% 100%;
     --foreground: 220 7% 11%;
     --card: 0 0% 100%;
@@ -257,8 +278,8 @@
     -moz-osx-font-smoothing: grayscale;
     background-image: none;
     transition:
-      background-color 260ms cubic-bezier(0.16, 1, 0.3, 1),
-      color 220ms ease;
+      background-color var(--motion-duration-slow) var(--motion-ease-out),
+      color var(--motion-duration-normal) var(--motion-ease-out);
   }
 
   code,
@@ -324,9 +345,9 @@ html.cmx-panel-resizing webview {
   background: hsl(var(--surface-1));
   box-shadow: 0 1px 2px hsl(var(--surface-shadow-strong) / 0.05);
   transition:
-    background-color 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease;
+    background-color var(--motion-duration-normal) var(--motion-ease-out),
+    border-color var(--motion-duration-normal) var(--motion-ease-out),
+    box-shadow var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .dark .surface-panel {
@@ -361,7 +382,7 @@ html.cmx-panel-resizing webview {
 }
 
 .settings-tile-hover {
-  transition: background-color 150ms ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .settings-tile-hover:hover {
@@ -483,11 +504,11 @@ html.cmx-panel-resizing webview {
 }
 
 .animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
+  animation: pulse-soft 2s var(--motion-ease-in-out) infinite;
 }
 
 .animate-glow-pulse {
-  animation: glow-pulse 2s ease-in-out infinite;
+  animation: glow-pulse 2s var(--motion-ease-in-out) infinite;
 }
 
 @keyframes fade-in-up {
@@ -502,7 +523,7 @@ html.cmx-panel-resizing webview {
 }
 
 .animate-fade-in-up {
-  animation: fade-in-up 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fade-in-up var(--motion-duration-slow) var(--motion-ease-out);
 }
 
 .stagger-children > * {
@@ -813,7 +834,7 @@ html.cmx-panel-resizing webview {
   align-items: center;
   margin-inline-start: auto;
   color: hsl(var(--muted-foreground));
-  transition: transform 150ms ease;
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .subagent-activity-caret.open {
@@ -825,7 +846,9 @@ html.cmx-panel-resizing webview {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition: grid-template-rows 200ms ease, opacity 120ms ease;
+  transition:
+    grid-template-rows var(--motion-duration-normal) var(--motion-ease-out),
+    opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .subagent-activity-collapse.open {
@@ -984,7 +1007,7 @@ html.cmx-panel-resizing webview {
   padding: 9px;
   color: hsl(var(--foreground));
   text-align: left;
-  transition: background 120ms ease;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .subagent-topology-node-header:hover {

@@ -139,7 +139,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
 
         <div
           className={cn(
-            'composer-glow rounded-2xl border border-border/75 bg-[hsl(var(--card))]/96 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02),0_16px_34px_-26px_hsl(var(--foreground)/0.2)] transition-all duration-240',
+            'composer-glow rounded-2xl border border-border/75 bg-[hsl(var(--card))]/96 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02),0_16px_34px_-26px_hsl(var(--foreground)/0.2)] transition-all duration-normal',
             'focus-within:border-[hsl(var(--primary)/0.3)] focus-within:shadow-[0_1px_0_0_hsl(var(--foreground)/0.02),0_18px_38px_-28px_hsl(var(--primary)/0.28)]',
           )}
         >
@@ -170,7 +170,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     }
                   }}
                   className={cn(
-                      'rounded-full px-2.5 py-1 text-ui-meta font-medium transition-all duration-200',
+                      'rounded-full px-2.5 py-1 text-ui-meta font-medium transition-all duration-normal',
                     'text-muted-foreground/46 hover:bg-muted/55 hover:text-muted-foreground',
                   )}
                   aria-label="斜杠命令"
@@ -197,7 +197,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     onClick={onStop}
                     aria-label="停止"
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal',
                       'bg-[hsl(var(--destructive)/0.10)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.16)]',
                     )}
                   >
@@ -211,7 +211,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     disabled={!hasContent}
                     aria-label="发送"
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal',
                       hasContent
                         ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
                         : 'cursor-not-allowed bg-muted/45 text-muted-foreground/28',

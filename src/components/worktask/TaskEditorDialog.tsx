@@ -211,7 +211,7 @@ export function TaskEditorDialog({
               onChange={(event) => setDraft((current) => ({ ...current, instruction: event.target.value }))}
               placeholder="描述要完成的工作、目标文件或验收标准……"
               rows={5}
-              className="w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-ui-body text-foreground ring-offset-background transition-[background-color,border-color,color,box-shadow] duration-150 placeholder:text-muted-foreground hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0"
+              className="w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-ui-body text-foreground ring-offset-background transition-[background-color,border-color,color,box-shadow] duration-fast placeholder:text-muted-foreground hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0"
             />
           </div>
 

@@ -75,7 +75,7 @@ export function ContextDisplay({
             <div className="px-4 pb-3">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full transition-all duration-300"
+                  className="h-full rounded-full transition-all duration-slow"
                   style={{
                     width: `${Math.max(percentage, 0.5)}%`,
                     backgroundColor: getProgressColor(percentage),

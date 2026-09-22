@@ -40,7 +40,7 @@ export function ToolCallCard({
   const displayableArgs = codeFilePath ? null : getDisplayableArgs(input, headerSummary.consumedKeys);
 
   return (
-    <div className="my-2 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-[0_1px_0_hsl(var(--foreground)/0.018)] transition-colors duration-200 hover:bg-muted/10">
+    <div className="my-2 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-[0_1px_0_hsl(var(--foreground)/0.018)] transition-colors duration-normal hover:bg-muted/10">
       <div
         role="button"
         tabIndex={0}
@@ -86,7 +86,7 @@ export function ToolCallCard({
       </div>
 
       {isExpanded && (
-        <div className="animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] space-y-2.5 border-t border-border/40 px-3.5 py-3">
+        <div className="animate-in fade-in fill-mode-forwards duration-slow ease-motion-out space-y-2.5 border-t border-border/40 px-3.5 py-3">
           {displayableArgs && (
             <div>
               <div className="mb-1.5 text-ui-caption font-medium uppercase tracking-normal text-muted-foreground/60">

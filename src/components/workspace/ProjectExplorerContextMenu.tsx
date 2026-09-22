@@ -69,7 +69,7 @@ export function ProjectExplorerContextMenu({
   };
 
   return (
-    <ContextMenuContent className="surface-panel z-180 min-w-40 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+    <ContextMenuContent className="surface-panel z-180 min-w-40 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
       <ContextMenuItem onClick={onOpen}>打开</ContextMenuItem>
       <ContextMenuSub>
         <ContextMenuSubTrigger>打开方式</ContextMenuSubTrigger>

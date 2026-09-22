@@ -52,7 +52,7 @@ function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: bo
       aria-pressed={active}
       aria-label={THEME_LABELS[theme]}
       className={cn(
-        'group relative flex flex-col gap-3 rounded-xl border p-3 text-left transition-all duration-200',
+        'group relative flex flex-col gap-3 rounded-xl border p-3 text-left transition-all duration-normal',
         active
           ? 'border-primary/55 bg-primary/[0.04] ring-1 ring-primary/35'
           : 'border-transparent settings-tile settings-tile-hover',
@@ -157,7 +157,7 @@ function AccentSwatch({ accent, active, onClick }: { accent: AccentKey; active: 
     >
       <span
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-full transition-transform duration-200',
+          'relative flex h-9 w-9 items-center justify-center rounded-full transition-transform duration-normal',
           !active && 'group-hover:scale-105',
         )}
         style={{
@@ -190,7 +190,7 @@ function OptionCard({ label, active, onClick, preview }: OptionCardProps) {
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'flex flex-col items-center justify-center gap-2 rounded-lg border py-3 transition-all duration-200',
+        'flex flex-col items-center justify-center gap-2 rounded-lg border py-3 transition-all duration-normal',
         active
           ? 'border-primary/55 bg-primary/[0.05] ring-1 ring-primary/30'
           : 'border-transparent settings-tile settings-tile-hover',

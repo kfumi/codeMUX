@@ -201,7 +201,7 @@ export function UsageBarChart({ data }: UsageBarChartProps) {
                   <g
                     key={d.date}
                     className={cn(
-                      'transition-opacity duration-150',
+                      'transition-opacity duration-fast',
                       dimmed && 'opacity-40',
                     )}
                   >

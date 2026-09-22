@@ -150,7 +150,7 @@ export function TitleBar({
                     aria-keyshortcuts={sidePanelAria ?? undefined}
                     onClick={sidePanelOpen ? closeSidePanel : openSidePanel}
                     className={cn(
-                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-35',
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-35',
                     )}
                   >
                     <RoundedPanelIcon side="right" expanded={sidePanelOpen} className="h-4 w-4" />
@@ -171,7 +171,7 @@ export function TitleBar({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md text-foreground transition-all duration-200 hover:bg-muted/58 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.74]"
+                      className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md text-foreground transition-all duration-normal hover:bg-muted/58 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.74]"
                     >
                       <ThemeIcon className="h-3.5 w-3.5" />
                     </button>
@@ -207,19 +207,19 @@ export function TitleBar({
           {presentation.windowControls && desktopBridge && (
             <div className="flex h-full items-stretch self-stretch">
               <button
-                className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground transition-colors duration-150 hover:bg-muted/54 hover:text-foreground"
+                className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground transition-colors duration-fast hover:bg-muted/54 hover:text-foreground"
                 onClick={() => void shellFacade.minimizeWindow().catch(() => {})}
               >
                 <Minus className="h-3.5 w-3.5" strokeWidth={1.5} />
               </button>
               <button
-                className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground transition-colors duration-150 hover:bg-muted/54 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.72]"
+                className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground transition-colors duration-fast hover:bg-muted/54 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.72]"
                 onClick={() => void shellFacade.toggleMaximizeWindow().catch(() => {})}
               >
                 <MaximizeIcon restored={maximized} />
               </button>
               <button
-                className="flex h-full w-12.5 items-center justify-center rounded-none text-foreground transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
+                className="flex h-full w-12.5 items-center justify-center rounded-none text-foreground transition-colors duration-fast hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
                 onClick={() => void shellFacade.closeWindow().catch(() => {})}
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.5} />

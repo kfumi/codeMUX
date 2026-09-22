@@ -734,7 +734,7 @@ function ProgressBar({ progress }: { progress: RuntimeInstallProgress }) {
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
         <div
-          className="h-full rounded-full bg-blue-500 transition-all duration-300"
+          className="h-full rounded-full bg-blue-500 transition-all duration-slow"
           style={{ width: `${Math.max(2, percent)}%` }}
         />
       </div>

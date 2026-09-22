@@ -311,7 +311,7 @@ export function TranscriptUserMessage({
         {footer ? (
           <div
             className={cn(
-              'flex items-center justify-end gap-1 transition-opacity duration-150',
+              'flex items-center justify-end gap-1 transition-opacity duration-fast',
               isNarrow
                 ? 'opacity-100'
                 : 'opacity-0 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100',

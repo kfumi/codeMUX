@@ -104,7 +104,7 @@ export function ActivityStepThinking({
           aria-hidden
           className={cn(
             'size-3.5 shrink-0 self-center',
-            'transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+            'transition-transform duration-normal ease-motion-standard motion-reduce:transition-none',
             isNarrow
               ? 'opacity-100'
               : 'opacity-0 group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',

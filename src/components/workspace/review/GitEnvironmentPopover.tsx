@@ -505,7 +505,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
               type="button"
               data-testid="git-environment-trigger"
               aria-label="切换摘要"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
             </button>

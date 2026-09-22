@@ -43,7 +43,7 @@ export function CompanionSidebarButton() {
             onClick={handleOpen}
             aria-label="移动伴侣"
             className={cn(
-              'flex shrink-0 items-center rounded-md p-2 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78',
+              'flex shrink-0 items-center rounded-md p-2 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/78',
               iconClassForState(visualState),
             )}
           >

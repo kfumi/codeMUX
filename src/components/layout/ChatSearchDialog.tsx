@@ -277,7 +277,7 @@ export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSe
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => selectItem(item)}
                   className={cn(
-                    'grid h-15 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-3 text-left transition-colors duration-120',
+                    'grid h-15 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-3 text-left transition-colors duration-fast',
                     index === selectedIndex
                       ? 'bg-foreground/[0.075] text-foreground dark:bg-foreground/[0.105]'
                       : 'text-foreground/82 hover:bg-foreground/[0.055] hover:text-foreground',
@@ -312,7 +312,7 @@ export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSe
                       onMouseEnter={() => setSelectedIndex(itemIndex)}
                       onClick={() => selectItem(item)}
                       className={cn(
-                        'flex h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-left transition-colors duration-120',
+                        'flex h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-left transition-colors duration-fast',
                         itemIndex === selectedIndex
                           ? 'bg-foreground/[0.075] text-foreground dark:bg-foreground/[0.105]'
                           : 'text-foreground/82 hover:bg-foreground/[0.055] hover:text-foreground',

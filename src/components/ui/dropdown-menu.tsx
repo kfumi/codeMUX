@@ -35,7 +35,7 @@ const DropdownMenuContent = React.forwardRef<
         event.preventDefault()
       }}
       className={cn(
-        'pointer-events-auto surface-panel z-160 min-w-40 rounded-md border bg-popover p-1 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.6)] animate-in fade-in fill-mode-both animation-duration-[160ms] [animation-timing-function:ease-out]',
+        'pointer-events-auto surface-panel z-160 min-w-40 rounded-md border bg-popover p-1 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.6)] animate-in fade-in fill-mode-both duration-fast ease-motion-out',
         className,
       )}
       {...props}
@@ -56,7 +56,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'outline-none flex w-full cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-foreground/82 transition-colors duration-150 hover:bg-muted hover:text-foreground',
+      'outline-none flex w-full cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-foreground/82 transition-colors duration-fast hover:bg-muted hover:text-foreground',
       danger && 'text-destructive hover:bg-[hsl(var(--destructive)/0.1)] hover:text-destructive',
       className,
     )}

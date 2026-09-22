@@ -531,7 +531,7 @@ export function CodeMuxComposer({
         <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
             className={cn(
-              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border border-border/82 bg-[hsl(var(--surface-1))]/94 p-2.5 transition-all duration-200',
+              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border border-border/82 bg-[hsl(var(--surface-1))]/94 p-2.5 transition-all duration-normal',
             )}
           >
             <input
@@ -623,7 +623,7 @@ export function CodeMuxComposer({
                             type="button"
                             disabled={disabled}
                             aria-label="添加附件或功能"
-                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-normal hover:bg-muted/58 hover:text-foreground"
                           >
                             <Plus className="h-4 w-4" />
                           </button>
@@ -670,7 +670,7 @@ export function CodeMuxComposer({
                       onClick={onTogglePlanMode}
                       aria-pressed="true"
                       aria-label="关闭计划模式"
-                      className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-primary/45 bg-primary/10 px-2 text-xs font-medium text-primary transition-all duration-200 outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50"
+                      className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-primary/45 bg-primary/10 px-2 text-xs font-medium text-primary transition-all duration-normal outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <ListTodo className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">计划</span>
@@ -701,7 +701,7 @@ export function CodeMuxComposer({
                       onClick={() => void onStop?.()}
                       aria-label="停止当前任务"
                       aria-keyshortcuts={abortAria ?? undefined}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.18)]"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-fast hover:bg-[hsl(var(--destructive)/0.18)]"
                     >
                       <Square className="h-3.5 w-3.5" fill="currentColor" />
                     </button>
@@ -717,7 +717,7 @@ export function CodeMuxComposer({
                       }}
                       disabled={disabled || loading || !hasInput}
                       className={cn(
-                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal active:scale-95',
                         hasInput && !disabled && !loading
                           ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
                           : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',

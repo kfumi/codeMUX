@@ -91,7 +91,7 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-150',
+          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast',
           'text-[hsl(var(--sidebar-fg))]/86 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
@@ -100,12 +100,12 @@ export function ProjectGroup({
       >
         <ChevronRight
           className={cn(
-            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-200',
+            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-normal',
             expanded && 'rotate-90',
           )}
         />
         <Folder className={cn(
-          'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
+          'h-3.5 w-3.5 shrink-0 transition-colors duration-normal',
           isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
         )} />
         {renaming ? (
@@ -126,7 +126,7 @@ export function ProjectGroup({
         )}
         <div
           className={cn(
-            'flex items-center gap-0.5 transition-opacity duration-200',
+            'flex items-center gap-0.5 transition-opacity duration-normal',
             isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
           )}
           onClick={(event) => event.stopPropagation()}
@@ -180,7 +180,7 @@ export function ProjectGroup({
               <button
                 type="button"
                 aria-label={`打开项目 ${project.name} 的文件`}
-                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onOpenProjectFiles(project)}
               >
                 <FolderTree className="h-3.5 w-3.5" />
@@ -191,7 +191,7 @@ export function ProjectGroup({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onNewSessionInProject(project.id)}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5" />

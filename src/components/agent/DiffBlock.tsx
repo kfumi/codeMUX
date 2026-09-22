@@ -20,7 +20,7 @@ export function DiffBlock({ filePath, oldContent, newContent }: DiffBlockProps) 
   return (
     <div className="rounded-xl border border-border/30 my-2 overflow-hidden">
       <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/20 transition-colors duration-200"
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/20 transition-colors duration-normal"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}

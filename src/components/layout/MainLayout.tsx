@@ -149,7 +149,7 @@ export function MainLayout({
         aria-label={sidebarVisible ? '收起侧栏' : '展开侧栏'}
         aria-keyshortcuts={sidebarToggleAria ?? undefined}
         className={cn(
-          'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
         )}
       >
         <RoundedPanelIcon side="left" expanded={sidebarVisible} className="h-4 w-4" />
@@ -169,7 +169,7 @@ export function MainLayout({
               aria-keyshortcuts={backAria ?? undefined}
               disabled={!titleBarNavigation.canGoBack}
               onClick={titleBarNavigation.onBack}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
@@ -181,7 +181,7 @@ export function MainLayout({
               aria-keyshortcuts={forwardAria ?? undefined}
               disabled={!titleBarNavigation.canGoForward}
               onClick={titleBarNavigation.onForward}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/35 disabled:hover:bg-transparent"
             >
               <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
@@ -224,7 +224,7 @@ export function MainLayout({
               // 不再全局强制 44px 按钮高度(会把分组标题、隐藏的 hover 按钮一起撑高)。
               ? 'fixed inset-y-0 left-0 z-50 w-[92vw] max-w-96 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]'
               : 'relative shrink-0',
-            sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-300 ease-in-out',
+            sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-slow ease-motion-in-out',
           )}
           style={isNarrow
             ? {
@@ -258,7 +258,7 @@ export function MainLayout({
               className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
               onMouseDown={handleSidebarMouseDown}
             >
-              <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+              <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-normal group-hover:bg-primary/22" />
             </div>
           )}
         </aside>
