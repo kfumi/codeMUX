@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 行数预算门禁（借鉴 PI-Desktop 的 `scripts/check-architecture.mjs`）。
  *
@@ -15,6 +14,10 @@
  *   node scripts/check-file-size-budget.mjs                  # 检查（CI / pre-commit 可用）
  *   node scripts/check-file-size-budget.mjs --update-baseline # 重写基线（只在有意收紧/新增豁免时跑）
  *   npm run check:size
+ *
+ * 注意：本文件**故意不带 shebang**。它被 `check-file-size-budget.test.mjs` 直接
+ * import，而 Vitest 的转换不接受 shebang（会报 SyntaxError: Invalid or unexpected
+ * token）；统一经 `node scripts/...` 调用，无需 shebang。
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
