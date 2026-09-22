@@ -5,7 +5,7 @@ use log::warn;
 use crate::agent::session_lifecycle::AgentState;
 use crate::companion::actions::send_companion_message_owned;
 use crate::companion::state::CompanionBroadcastEvent;
-use crate::companion::CompanionState;
+use crate::companion::{stream_coalescer, CompanionState};
 use crate::paths::PathRoots;
 use crate::AppState;
 
@@ -13,6 +13,9 @@ use crate::AppState;
 /// the timeline owner) to companion clients and drive turn lifecycle. This hook
 /// must not persist: the sidecar event loop is the single persistence owner,
 /// and persisting here again wrote every event twice.
+///
+/// 广播前经 `DeltaCoalescer` 把同键连续 delta 合帧(见 stream_coalescer):
+/// 副作用循环保持逐事件交错不变,仅 WS 发射侧合并。
 pub fn handle_sidecar_event_for_companion(
     app: &Arc<AppState>,
     agent_state: &Arc<AgentState>,
@@ -21,6 +24,7 @@ pub fn handle_sidecar_event_for_companion(
     events: Vec<serde_json::Value>,
 ) {
     let companion_enabled = companion_state.inner.is_enabled();
+    let mut coalescer = companion_enabled.then(stream_coalescer::DeltaCoalescer::new);
 
     for event in events {
         let session_id = event
@@ -42,10 +46,28 @@ pub fn handle_sidecar_event_for_companion(
             &session_id,
             &event,
         );
-        if companion_enabled {
-            broadcast_event(companion_state, &session_id, event);
+        if let Some(coalescer) = coalescer.as_mut() {
+            for frame in coalescer.push(event) {
+                broadcast_frame(companion_state, frame);
+            }
         }
     }
+
+    if let Some(coalescer) = coalescer.as_mut() {
+        for frame in coalescer.flush() {
+            broadcast_frame(companion_state, frame);
+        }
+    }
+}
+
+/// 从帧自身提取 session_id(合并 delta 保留首条的 session_id)后广播。
+fn broadcast_frame(companion_state: &CompanionState, event: serde_json::Value) {
+    let session_id = event
+        .get("session_id")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .to_string();
+    broadcast_event(companion_state, &session_id, event);
 }
 
 /// Maintain the async-flow busy state from broadcast events: subagent upserts

@@ -23,6 +23,7 @@ pub mod routes_providers;
 pub mod routes_terminal;
 pub mod server;
 pub mod state;
+pub mod stream_coalescer;
 
 pub use events::handle_sidecar_event_for_companion;
 pub use server::{start_daemon_server, stop_daemon_for_state};
