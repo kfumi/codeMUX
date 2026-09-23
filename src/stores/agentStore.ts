@@ -14,9 +14,9 @@ import {
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import {
-  getLastEventSequence,
+  reconcileHistorySequence,
   registerDaemonSessionHandler,
-  setLastEventSequence,
+  resetLastEventSequence,
 } from '../lib/daemon-session-bridge';
 import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
 import { supportsCapability } from '../components/agent/agentCapabilities';
@@ -246,6 +246,8 @@ interface AgentState {
   completeBackgroundLiveIfIdle: (sessionId: string) => Promise<void>;
   /** Replace cached timeline with the latest CLI provider history and reload UI state */
   resyncSessionFromNative: (sessionId: string) => Promise<number>;
+  /** Re-align the in-memory timeline after the daemon rebuilt it (rewind / resync). */
+  reloadAfterTimelineReset: (sessionId: string) => Promise<void>;
   /** Clear changed files for a session */
   clearChangedFiles: (sessionId: string) => void;
   /** Save composer draft text for a session */
@@ -313,6 +315,16 @@ const BACKGROUND_LIVE_PROBE_DEBOUNCE_MS = 250;
 const BACKGROUND_LIVE_RELOAD_INTERVAL_MS = 3000;
 
 const backgroundLiveReloadAt = new Map<string, number>();
+
+/**
+ * daemon 为某个会话报过 `running === true` 的最近时刻。
+ *
+ * 兜底收尾必须是**边沿触发**:只有先见过 daemon 为**这一回合**报 running=true,
+ * 之后的 `running === false` 才允许用来收尾。只看墙上时间会被传输层的探测周期骗到 ——
+ * 发消息时渲染端乐观置位 `isRunning`,而 daemon 的活跃标记要等 sidecar 回显
+ * user_message 才置位;轮询传输 2.5s 一拍,第一拍拿到的多半还是 `false`。
+ */
+const daemonTurnActiveAt = new Map<string, number>();
 
 function stopBackgroundPoll(sessionId: string) {
   const timer = backgroundPolls.get(sessionId);
@@ -1819,6 +1831,47 @@ export const useAgentStore = create<AgentState>((set, get) => {
     });
   };
 
+  /**
+   * daemon `state` 帧报告会话已空闲时,对「卡住的回合」兜底收尾。
+   *
+   * 原实现只消费 `running === true`(`if (!running) return;`),于是「服务端说回合已
+   * 结束」这个唯一不依赖 in-band 终止帧的信号被当成噪音丢掉。而 `isRunning` 只能由
+   * 终止帧(result/error/done)清掉:一旦那一帧本身丢失(时间线重建导致去重水位线错位、
+   * WS 丢帧),busy 就永远清不掉 —— UI 卡在「正在执行」、输入框一直禁用,连回退与
+   * 「从 CLI 同步历史」都会被 `isRunning` 挡在门外,只能重启渲染进程。
+   *
+   * 收尾条件(全部满足才收尾):本地 `isRunning` 为真、不是后台回合、不是被 interrupt
+   * 收过尾、并且**见过 daemon 为这一回合报 running=true**(边沿触发,见
+   * `daemonTurnActiveAt`)。只看墙上时间不够 —— 传输层探测周期就足以骗过它。
+   */
+  const settleIdleTurnFromState = (sessionId: string, running: boolean): boolean => {
+    if (running || !get().isRunning[sessionId]) return false;
+    // 后台回合(子代理汇总 / scheduled)有自己的事件驱动完成探测,这里不抢跑。
+    if (get().backgroundLive[sessionId]) return false;
+    // interrupt 路径自己会同步收尾(forceStopped + isRunning=false),不替它下结论。
+    if (get().forceStopped[sessionId]) return false;
+    const startedAt = get().queryStartTime[sessionId];
+    if (typeof startedAt !== 'number') return false;
+    // 边沿触发:daemon 必须先为这一回合置过位,否则这只是「标记还没到」的假空闲。
+    if ((daemonTurnActiveAt.get(sessionId) ?? 0) < startedAt) return false;
+
+    clearPendingStreaming(sessionId);
+    clearPendingStreamingToolInputs(sessionId);
+    set((s) => {
+      const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+      return {
+        isRunning: { ...s.isRunning, [sessionId]: false },
+        queryStartTime: rest,
+        streamingText: { ...s.streamingText, [sessionId]: '' },
+        streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+      };
+    });
+    useSessionStore.getState().markSessionUnread(sessionId);
+    logger.warn('Settled stuck turn from daemon state frame', { sessionId });
+    dispatchNextQueuedQuery(sessionId);
+    return true;
+  };
+
   const consumeSteerResultEvent = (
     raw: string | Record<string, unknown>,
     onUnavailable: (sessionId: string, query: QueuedAgentQuery) => void,
@@ -2975,20 +3028,29 @@ function createSessionEventHandler(
 
       const handleEvent = createSessionEventHandler(sessionId, get, set, modelForVision);
       // 包一层：事件到达即防抖触发一次后台完成探测（见 withBackgroundLiveProbe 的注释）。
-      registerDaemonSessionHandler(sessionId, withBackgroundLiveProbe(sessionId, handleEvent, get), (running) => {
-        if (!running) return;
-        // 已处于 running 时不写 store。原实现在这里返回 `{}`，但 Zustand 仍会
-        // 生成新的 state 对象并通知**全部**订阅者做无意义的重算 —— 而 state 帧
-        // 在整个流式期间持续到达，这笔开销被同步放大。
-        if (get().isRunning[sessionId]) return;
-        set((s) => ({
-          isRunning: { ...s.isRunning, [sessionId]: true },
-          queryStartTime: {
-            ...s.queryStartTime,
-            [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
-          },
-        }));
-      });
+      registerDaemonSessionHandler(
+        sessionId,
+        withBackgroundLiveProbe(sessionId, handleEvent, get),
+        (running) => {
+          // daemon 说会话已空闲:正常回合此时已由终止帧收尾,这里是终止帧丢失时的兜底。
+          // 记下 daemon 为这一回合置过活跃标记(兜底收尾的边沿条件)。
+          if (running) daemonTurnActiveAt.set(sessionId, Date.now());
+          if (settleIdleTurnFromState(sessionId, running)) return;
+          if (!running) return;
+          // 已处于 running 时不写 store。原实现在这里返回 `{}`，但 Zustand 仍会
+          // 生成新的 state 对象并通知**全部**订阅者做无意义的重算 —— 而 state 帧
+          // 在整个流式期间持续到达，这笔开销被同步放大。
+          if (get().isRunning[sessionId]) return;
+          set((s) => ({
+            isRunning: { ...s.isRunning, [sessionId]: true },
+            queryStartTime: {
+              ...s.queryStartTime,
+              [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+            },
+          }));
+        },
+        () => void get().reloadAfterTimelineReset(sessionId),
+      );
       await daemonFacade.sendMessageViaDaemon(
         sessionId,
         payloadForModel.text,
@@ -3102,18 +3164,27 @@ function createSessionEventHandler(
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     const handleEvent = createSessionEventHandler(sessionId, get, set, session?.model ?? null);
     // 包一层：事件到达即防抖触发一次后台完成探测（见 withBackgroundLiveProbe 的注释）。
-    registerDaemonSessionHandler(sessionId, withBackgroundLiveProbe(sessionId, handleEvent, get), (running) => {
-      if (!running) return;
-      // 同前：已 running 时不产生 store 写入，避免空 `set({})` 通知全部订阅者。
-      if (get().isRunning[sessionId]) return;
-      set((s) => ({
-        isRunning: { ...s.isRunning, [sessionId]: true },
-        queryStartTime: {
-          ...s.queryStartTime,
-          [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
-        },
-      }));
-    });
+    registerDaemonSessionHandler(
+      sessionId,
+      withBackgroundLiveProbe(sessionId, handleEvent, get),
+      (running) => {
+        // daemon 说会话已空闲:正常回合此时已由终止帧收尾,这里是终止帧丢失时的兜底。
+        // 记下 daemon 为这一回合置过活跃标记(兜底收尾的边沿条件)。
+        if (running) daemonTurnActiveAt.set(sessionId, Date.now());
+        if (settleIdleTurnFromState(sessionId, running)) return;
+        if (!running) return;
+        // 同前：已 running 时不产生 store 写入，避免空 `set({})` 通知全部订阅者。
+        if (get().isRunning[sessionId]) return;
+        set((s) => ({
+          isRunning: { ...s.isRunning, [sessionId]: true },
+          queryStartTime: {
+            ...s.queryStartTime,
+            [sessionId]: s.queryStartTime[sessionId] ?? Date.now(),
+          },
+        }));
+      },
+      () => void get().reloadAfterTimelineReset(sessionId),
+    );
     return true;
   },
 
@@ -3494,10 +3565,9 @@ function createSessionEventHandler(
           limit: 5000,
         });
         const historyMessages = timelinePage.events ?? [];
+        // 水位线不在这里推进:时间线被重建后序号可能整体回退,必须等加载完成后统一对账
+        // (见下方 reconcileHistorySequence),否则会按旧序号空间把实时帧全部挡掉。
         const seqEnd = (timelinePage as { seqEnd?: number }).seqEnd;
-        if (typeof seqEnd === 'number' && seqEnd >= 0) {
-          setLastEventSequence(sessionId, Math.max(seqEnd, getLastEventSequence(sessionId)));
-        }
         if (timelinePage.hasOlder) {
           logger.warn('Session timeline exceeds the defensive load limit; oldest events omitted', {
             sessionId,
@@ -3526,6 +3596,11 @@ function createSessionEventHandler(
               ? state.eventTimestamps
               : { ...state.eventTimestamps, [sessionId]: [] },
           }));
+          // 时间线为空(回退到空、或从原生重同步为空):daemon 的序号空间从 0 重新开始,
+          // 水位线必须跟着回退 —— 否则下一个回合的每一帧都会被去重逻辑丢掉。
+          if ((typeof seqEnd !== 'number' || seqEnd < 0) && !get().isRunning[sessionId]) {
+            resetLastEventSequence(sessionId, -1);
+          }
           return;
         }
 
@@ -3533,6 +3608,8 @@ function createSessionEventHandler(
         // 存量快照里同一条事件可能被写入过多次（历史双写持久化 bug），按
         // event_id 去重，避免刷新后同一消息渲染成两个气泡。
         const seenEventIds = new Set<string>();
+
+        let highestLoadedSequence = -1;
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
@@ -3545,7 +3622,7 @@ function createSessionEventHandler(
           }
           const sequence = typeof rawMsg.sequence === 'number' ? rawMsg.sequence : null;
           if (sequence !== null) {
-            setLastEventSequence(sessionId, Math.max(sequence, getLastEventSequence(sessionId)));
+            highestLoadedSequence = Math.max(highestLoadedSequence, sequence);
           }
           let ts = typeof rawMsg.timestamp === 'string'
             ? new Date(rawMsg.timestamp).getTime() || 0
@@ -3615,6 +3692,14 @@ function createSessionEventHandler(
           return { ...base, ...turnsForCommit(state, sessionId, base) };
         });
 
+        // 加载完成后对账去重水位线:正常情况推进到本页最高序号;若低于当前水位线,
+        // 说明 daemon 重建了时间线并重新编号(回退 / 从原生重同步),必须回退水位线,
+        // 否则此后每一帧都会命中 `sequence <= last` 被静默丢弃,回合永远无法收尾。
+        reconcileHistorySequence(
+          sessionId,
+          Math.max(highestLoadedSequence, typeof seqEnd === 'number' ? seqEnd : -1),
+        );
+
         if (
           rememberedCwd
           && !existingWorkingPath
@@ -3671,6 +3756,9 @@ function createSessionEventHandler(
     }
 
     const result = await daemonFacade.resyncSessionFromNative(sessionId);
+    // daemon 端 `replace_session_timeline` 把整个时间线从 0 重新编号:水位线必须先回退,
+    // 再由下面的重新加载对账,否则重建后的实时帧会被旧水位线全部挡掉。
+    resetLastEventSequence(sessionId, -1);
     get().clearEvents(sessionId);
     await get().loadSessionMessages(sessionId);
     logger.info('Resynced session history from CLI provider file', {
@@ -3678,6 +3766,22 @@ function createSessionEventHandler(
       eventCount: result.eventCount,
     });
     return result.eventCount;
+  },
+
+  /**
+   * daemon 重建了会话时间线(回退 / 从原生重同步 / 导入刷新)后的落地动作:
+   * 去重水位线已由 bridge 按 `timeline_reset` 帧回退,这里把内存里过期的时间线重拉一遍,
+   * 让消息列表与 daemon 的权威时间线重新对齐。
+   */
+  reloadAfterTimelineReset: async (sessionId: string) => {
+    // 在飞的那一页可能是在重建之前读取的(旧序号空间,序号更高):先作废它再重拉,
+    // 否则它落地时会把刚回退的水位线重新抬高,回到原故障。
+    bumpSessionHistoryEpoch(sessionId);
+    if (!get().isRunning[sessionId]) {
+      clearPendingStreaming(sessionId);
+      clearPendingStreamingToolInputs(sessionId);
+    }
+    await get().loadSessionMessages(sessionId, { force: true });
   },
 
   clearChangedFiles: (sessionId: string) => {

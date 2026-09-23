@@ -522,6 +522,22 @@ pub fn clear_session_timeline(conn: &Connection, session_id: &str) -> Result<()>
     Ok(())
 }
 
+/// Highest sequence currently stored for a session timeline, or `-1` when the
+/// timeline is empty.
+///
+/// `append_timeline_events` numbers new rows as `MAX(sequence) + 1`, so after a
+/// timeline rebuild (`replace_session_timeline` renumbers from 0,
+/// `clear_session_timeline` empties it) this value is the ceiling clients must
+/// rewind their de-duplication watermark to.
+pub fn session_timeline_max_sequence(conn: &Connection, session_id: &str) -> Result<i64> {
+    let resolved_session_id = resolve_app_session_id_for_timeline(conn, session_id)?;
+    conn.query_row(
+        "SELECT COALESCE(MAX(sequence), -1) FROM session_event_snapshots WHERE session_id = ?1",
+        [&resolved_session_id],
+        |row| row.get(0),
+    )
+}
+
 /// Sessions whose persisted timeline still carries legacy artifacts: streaming
 /// delta rows saved before deltas stopped being persisted, or event_ids written
 /// more than once by the pre-fix double-persistence hooks. Used by the one-time
@@ -1871,12 +1887,12 @@ mod tests {
         get_all_sessions, get_model_distribution, get_session, get_session_events_after,
         get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
         list_native_sessions_for_cleanup, normalize_session_title, refresh_auto_session_title,
-        rename_session_title, resolve_app_session_id_for_timeline,
-        session_needs_git_branch_capture, sessions_with_legacy_timeline_artifacts,
-        set_session_pinned, set_session_read_only, unarchive_session, update_session_provider,
-        update_session_reasoning_effort, update_session_settings, update_session_working_path,
-        upsert_agent_session_mapping, upsert_session_subagent, GitBranchWrite,
-        ImportedSessionSnapshot,
+        rename_session_title, replace_session_timeline, resolve_app_session_id_for_timeline,
+        session_needs_git_branch_capture, session_timeline_max_sequence,
+        sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
+        unarchive_session, update_session_provider, update_session_reasoning_effort,
+        update_session_settings, update_session_working_path, upsert_agent_session_mapping,
+        upsert_session_subagent, GitBranchWrite, ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -2842,6 +2858,63 @@ mod tests {
         clear_session_timeline(&conn, "session-1").unwrap();
 
         assert!(get_session_timeline(&conn, "session-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn rebuild_renumbers_the_timeline_and_exposes_a_lower_ceiling() {
+        // 契约:时间线重建(replace_session_timeline)后序号从 0 重新编号,因此重建后的
+        // 最高序号可能低于重建前。客户端去重水位线只增不减的话,此后每一帧(含回合
+        // 终止帧)都会被丢掉,UI 卡在「正在执行」—— daemon 必须广播 timeline_reset
+        // 让客户端把水位线一起回退。
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+        append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[
+                serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "a" }),
+                serde_json::json!({ "type": "user_message", "event_id": "e2", "content": "b" }),
+                serde_json::json!({ "type": "user_message", "event_id": "e3", "content": "c" }),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            session_timeline_max_sequence(&conn, "session-1").unwrap(),
+            2
+        );
+
+        replace_session_timeline(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "a" })],
+        )
+        .unwrap();
+
+        assert_eq!(
+            session_timeline_max_sequence(&conn, "session-1").unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn cleared_timeline_reports_an_empty_ceiling() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+        append_timeline_events(
+            &mut conn,
+            "session-1",
+            &[serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "a" })],
+        )
+        .unwrap();
+
+        clear_session_timeline(&conn, "session-1").unwrap();
+
+        assert_eq!(
+            session_timeline_max_sequence(&conn, "session-1").unwrap(),
+            -1
+        );
     }
 
     #[test]

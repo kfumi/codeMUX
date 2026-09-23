@@ -351,7 +351,7 @@ async fn resync_session(
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let result = resync_session_from_native_for_companion(ctx.daemon.app.clone(), session_id)
+    let result = resync_session_from_native_for_companion(&ctx.daemon, session_id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(result)))

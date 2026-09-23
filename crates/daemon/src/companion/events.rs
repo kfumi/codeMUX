@@ -184,3 +184,46 @@ pub fn broadcast_session_title_changed(
         serde_json::json!({ "type": "session_title_changed", "title": title }),
     );
 }
+
+/// 会话时间线被整体重建(回退 / 从原生重同步 / 导入刷新)后的通知帧。
+///
+/// 客户端据此回退去重水位线:daemon 的 `sequence` 由 `MAX(sequence)+1` 分配
+/// (见 `operations::append_timeline_events`),时间线重建后会**从 0 重新编号**,
+/// 而客户端的水位线只增不减 —— 不通知的话,重建之后每一帧(包括回合终止帧)
+/// 都会被客户端按旧序号空间丢掉,UI 永远停在「正在执行」。
+pub fn timeline_reset_frame(session_id: &str, sequence_max: i64) -> serde_json::Value {
+    serde_json::json!({
+        "type": "timeline_reset",
+        "session_id": session_id,
+        "sequence_max": sequence_max,
+    })
+}
+
+/// 把时间线重建通知广播给该会话的 WS 订阅方。
+pub fn broadcast_timeline_reset(
+    companion_state: &Arc<CompanionState>,
+    session_id: &str,
+    sequence_max: i64,
+) {
+    if !companion_state.inner.is_enabled() || session_id.is_empty() {
+        return;
+    }
+    broadcast_event(
+        companion_state,
+        session_id,
+        timeline_reset_frame(session_id, sequence_max),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeline_reset_frame;
+
+    #[test]
+    fn timeline_reset_frame_carries_the_new_sequence_ceiling() {
+        let frame = timeline_reset_frame("session-1", 7);
+        assert_eq!(frame["type"], "timeline_reset");
+        assert_eq!(frame["session_id"], "session-1");
+        assert_eq!(frame["sequence_max"], 7);
+    }
+}

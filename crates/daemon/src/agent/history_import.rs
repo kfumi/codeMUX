@@ -240,10 +240,23 @@ pub async fn resync_session_from_native_impl(
 }
 
 pub async fn resync_session_from_native_for_companion(
-    state: std::sync::Arc<crate::AppState>,
+    daemon: &crate::daemon::DaemonState,
     app_session_id: String,
 ) -> Result<ResyncSessionFromNativeResult, String> {
-    resync_session_from_native_impl(state, app_session_id).await
+    let state = daemon.app.clone();
+    let result = resync_session_from_native_impl(state.clone(), app_session_id.clone()).await?;
+    // `replace_session_timeline` 把时间线从 0 重新编号:必须通知订阅方回退去重水位线,
+    // 否则重建后的每一帧(含回合终止帧)都会被客户端按旧水位线丢掉,回合永远无法收尾。
+    let sequence_max = {
+        let db = state.db.lock().unwrap();
+        operations::session_timeline_max_sequence(&db, &app_session_id).unwrap_or(-1)
+    };
+    crate::companion::events::broadcast_timeline_reset(
+        &daemon.companion,
+        &app_session_id,
+        sequence_max,
+    );
+    Ok(result)
 }
 
 pub(crate) fn can_resync_session_from_native(
@@ -267,6 +280,7 @@ fn has_native_mapping(
 /// after a conversation rewind truncates native JSONL.
 pub(crate) async fn reload_session_timeline_from_native(
     state: std::sync::Arc<crate::AppState>,
+    companion_state: &std::sync::Arc<crate::companion::CompanionState>,
     app_session_id: &str,
     agent_kind: AgentKind,
 ) -> Result<(), String> {
@@ -280,6 +294,15 @@ pub(crate) async fn reload_session_timeline_from_native(
         operations::replace_session_timeline(&mut db, app_session_id, &native_events)
             .map_err(|error| error.to_string())?;
     }
+    // 重建(或清空)后的序号空间从头开始:通知订阅方回退去重水位线,否则回退之后
+    // 这个会话的每一帧都会被客户端按旧水位线丢掉,回合永远无法收尾。
+    let sequence_max = operations::session_timeline_max_sequence(&db, app_session_id).unwrap_or(-1);
+    drop(db);
+    crate::companion::events::broadcast_timeline_reset(
+        companion_state,
+        app_session_id,
+        sequence_max,
+    );
     Ok(())
 }
 

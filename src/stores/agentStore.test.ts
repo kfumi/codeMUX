@@ -30,12 +30,22 @@ const {
   rewindSessionMock,
   respondToAgentPermissionMock,
   sessionHandlers,
+  sessionStateHandlers,
+  sessionTimelineResetHandlers,
+  reconcileHistorySequenceMock,
+  resetLastEventSequenceMock,
   sendMessageViaDaemonMock,
   interruptViaDaemonMock,
   getTimelineMock,
   updateWorkingPathMock,
 } = vi.hoisted(() => {
   const sessionHandlers = new Map<string, (raw: string) => void>();
+  const sessionStateHandlers = new Map<string, (running: boolean) => void>();
+  const sessionTimelineResetHandlers = new Map<string, () => void>();
+  const reconcileHistorySequenceMock = vi.fn<
+    (sessionId: string, highest: number) => 'reset' | 'advanced' | 'unchanged'
+  >();
+  const resetLastEventSequenceMock = vi.fn<(sessionId: string, sequence?: number) => void>();
   const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
   const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
   const loadSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
@@ -70,6 +80,10 @@ const {
   });
   return {
     sessionHandlers,
+    sessionStateHandlers,
+    sessionTimelineResetHandlers,
+    reconcileHistorySequenceMock,
+    resetLastEventSequenceMock,
     startSessionMock,
     enrichAttachmentsMock: vi.fn<
       (attachments: Array<{ type: string; name: string; mediaType: string; dataUrl: string }>) => Promise<{ blocks: Array<{ attachment_name: string; markdown: string; ok: boolean; error?: string }> }>
@@ -100,14 +114,25 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('../lib/daemon-session-bridge', () => ({
-  registerDaemonSessionHandler: vi.fn((sessionId: string, handler: (raw: string) => void) => {
+  registerDaemonSessionHandler: vi.fn((
+    sessionId: string,
+    handler: (raw: string) => void,
+    onState?: (running: boolean) => void,
+    onTimelineReset?: () => void,
+  ) => {
     sessionHandlers.set(sessionId, handler);
+    if (onState) sessionStateHandlers.set(sessionId, onState);
+    if (onTimelineReset) sessionTimelineResetHandlers.set(sessionId, onTimelineReset);
   }),
   unregisterDaemonSessionHandler: vi.fn((sessionId: string) => {
     sessionHandlers.delete(sessionId);
+    sessionStateHandlers.delete(sessionId);
+    sessionTimelineResetHandlers.delete(sessionId);
   }),
   getLastEventSequence: vi.fn(() => -1),
   setLastEventSequence: vi.fn(),
+  resetLastEventSequence: resetLastEventSequenceMock,
+  reconcileHistorySequence: reconcileHistorySequenceMock,
   catchUpTimelineAfterSequence: vi.fn(),
   teardownDaemonSession: vi.fn(),
   resetDaemonSessionBridge: vi.fn(),
@@ -552,6 +577,95 @@ describe('agent store Codex history loading', () => {
       expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
     });
     expect(sessionHandlers.has(session.id)).toBe(true);
+  });
+
+  it('daemon 说会话已空闲时兜底清除卡住的回合(终止帧丢失场景)', async () => {
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    sessionStateHandlers.clear();
+
+    // 回合起跑之后终止帧丢失(时间线重建导致去重水位线错位):isRunning 一直是 true。
+    startSessionMock.mockImplementationOnce(async () => undefined);
+    await useAgentStore.getState().startQuery(session.id, '卡住的回合', 'D:\\workspace');
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+
+    const onState = sessionStateHandlers.get(session.id);
+    expect(typeof onState).toBe('function');
+    // 兜底收尾是边沿触发:daemon 先为这一回合置过活跃标记,之后的空闲才算「回合结束」。
+    onState?.(true);
+    onState?.(false);
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(useAgentStore.getState().queryStartTime[session.id]).toBeUndefined();
+  });
+
+  it('刚发出的回合不会被紧跟而来的 state=false 抢跑', async () => {
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    sessionStateHandlers.clear();
+
+    startSessionMock.mockImplementationOnce(async () => undefined);
+    await useAgentStore.getState().startQuery(session.id, '刚发出', 'D:\\workspace');
+
+    // 从没见过 daemon 为这一回合报 running=true(上一回合的收尾帧、或订阅建立时的
+    // 状态帧可能紧接着到达):这只是「标记还没到」的假空闲,不能收尾。
+    sessionStateHandlers.get(session.id)?.(false);
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+  });
+
+  it('历史加载发现序号回退时用本页最高序号对账水位线', async () => {
+    const session = await primeSession('codex');
+    reconcileHistorySequenceMock.mockClear();
+    getTimelineMock.mockResolvedValueOnce({
+      events: [
+        { type: 'user_message', session_id: session.id, event_id: 'e1', sequence: 0 },
+        { type: 'user_message', session_id: session.id, event_id: 'e2', sequence: 311 },
+      ],
+      hasMore: false,
+    });
+
+    await useAgentStore.getState().loadSessionMessages(session.id, { force: true });
+
+    // daemon 重建时间线后序号从 0 重新编号:必须交给 reconcile 判断回退,
+    // 而不是原来的 `Math.max(水位线, 本页最高序号)`(那样水位线永远降不下来)。
+    expect(reconcileHistorySequenceMock).toHaveBeenCalledWith(session.id, 311);
+  });
+
+  it('从 CLI 同步历史后先回退去重水位线再重新加载', async () => {
+    const session = await primeSession('codex');
+    resetLastEventSequenceMock.mockClear();
+    resyncSessionFromNativeMock.mockResolvedValue({ eventCount: 312 });
+
+    await useAgentStore.getState().resyncSessionFromNative(session.id);
+
+    expect(resetLastEventSequenceMock).toHaveBeenCalledWith(session.id, -1);
+  });
+
+  it('时间线重建后,在飞的旧页不会把水位线重新抬高', async () => {
+    const session = await primeSession('codex');
+    sessionHandlers.clear();
+    sessionTimelineResetHandlers.clear();
+
+    startSessionMock.mockImplementationOnce(async () => undefined);
+    await useAgentStore.getState().startQuery(session.id, '占位', 'D:\\workspace');
+    reconcileHistorySequenceMock.mockClear();
+
+    let releaseStalePage: (() => void) | undefined;
+    getTimelineMock.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseStalePage = () => resolve({
+        events: [{ type: 'user_message', session_id: session.id, event_id: 'stale-1', sequence: 500 }],
+        hasMore: false,
+      });
+    }));
+
+    const staleLoad = useAgentStore.getState().loadSessionMessages(session.id, { force: true });
+    // 重建广播到达:在飞的那一页读的是重建前的序号空间,必须被作废。
+    sessionTimelineResetHandlers.get(session.id)?.();
+    releaseStalePage?.();
+    await staleLoad;
+
+    expect(reconcileHistorySequenceMock).not.toHaveBeenCalledWith(session.id, 500);
   });
 
   it('后台回合的完成探测由事件驱动，不用等被节流的兜底节拍', async () => {

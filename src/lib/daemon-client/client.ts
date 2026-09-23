@@ -348,7 +348,11 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
             if (payload.type === 'event' && payload.event) {
               const sequence = payload.event.sequence;
               if (typeof sequence === 'number') {
-                if (sequence <= lastSequence) return;
+                // 水位线每帧重新取:daemon 重建时间线时上层会把它回退
+                // (`resetLastEventSequence`),沿用连接建立时的快照会把重建后的
+                // 每一帧(含回合终止帧)都按旧序号空间丢掉。
+                const floor = handlers.getInitialSequence?.() ?? lastSequence;
+                if (sequence <= floor) return;
                 lastSequence = sequence;
               }
               handlers.onEvent(payload.event);

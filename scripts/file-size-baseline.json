@@ -7,14 +7,14 @@
     "apps/sidecar/src/opencodeRuntime.ts": 1696,
     "apps/sidecar/src/piRuntime.ts": 1245,
     "crates/daemon/src/agent/codex_history.rs": 2136,
-    "crates/daemon/src/agent/history_import.rs": 1774,
+    "crates/daemon/src/agent/history_import.rs": 1797,
     "crates/daemon/src/agent/opencode_history.rs": 2304,
     "crates/daemon/src/agent/pi_history.rs": 1498,
-    "crates/daemon/src/agent/rewind.rs": 1230,
+    "crates/daemon/src/agent/rewind.rs": 1236,
     "crates/daemon/src/agent/session_lifecycle.rs": 3164,
     "crates/daemon/src/companion/routes_control_plane.rs": 1377,
     "crates/daemon/src/companion/server.rs": 2266,
-    "crates/daemon/src/db/operations.rs": 3453,
+    "crates/daemon/src/db/operations.rs": 3526,
     "crates/daemon/src/runtime/npm.rs": 1320,
     "crates/daemon/src/services/git.rs": 2936,
     "crates/daemon/src/work_tasks/execution.rs": 1868,
@@ -22,7 +22,7 @@
     "src/components/agent/AskUserQuestionCard.tsx": 848,
     "src/components/agent/assistant-ui/CodeMuxComposer.tsx": 1379,
     "src/components/agent/assistant-ui/CodeMuxMessageParts.tsx": 1071,
-    "src/components/agent/assistant-ui/CodeMuxThread.tsx": 2671,
+    "src/components/agent/assistant-ui/CodeMuxThread.tsx": 2670,
     "src/components/agent/assistant-ui/convertAgentEvents.ts": 902,
     "src/components/settings/AgentSettings.tsx": 1337,
     "src/components/settings/McpSettings.tsx": 890,
@@ -30,6 +30,6 @@
     "src/components/settings/RuntimeSettings.tsx": 841,
     "src/lib/dev/longSessionBenchmark.ts": 1128,
     "src/lib/modelRegistry/catalog.ts": 862,
-    "src/stores/agentStore.ts": 3979
+    "src/stores/agentStore.ts": 4083
   }
 }

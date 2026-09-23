@@ -556,6 +556,7 @@ async fn rewind_conversation_via_sidecar(
 async fn rewind_pi_conversation(
     state: std::sync::Arc<crate::AppState>,
     agent_state: std::sync::Arc<AgentState>,
+    companion_state: std::sync::Arc<crate::companion::CompanionState>,
     app_session_id: &str,
     agent_kind: AgentKind,
     agent_session_id: &str,
@@ -601,6 +602,7 @@ async fn rewind_pi_conversation(
     }
     super::history_import::reload_session_timeline_from_native(
         state.clone(),
+        &companion_state,
         app_session_id,
         agent_kind,
     )
@@ -794,6 +796,7 @@ fn resolve_codex_rewind_turn_ordinal(
 pub async fn rewind_agent_session_impl(
     state: std::sync::Arc<crate::AppState>,
     agent_state: std::sync::Arc<AgentState>,
+    companion_state: std::sync::Arc<crate::companion::CompanionState>,
     app_session_id: String,
     agent_kind: String,
     target: Option<RewindTarget>,
@@ -882,6 +885,7 @@ pub async fn rewind_agent_session_impl(
         return rewind_pi_conversation(
             state,
             agent_state,
+            companion_state,
             &app_session_id,
             agent_kind,
             &agent_session_id,
@@ -993,6 +997,7 @@ pub async fn rewind_agent_session_impl(
     }
     super::history_import::reload_session_timeline_from_native(
         state.clone(),
+        &companion_state,
         &app_session_id,
         agent_kind,
     )
@@ -1025,6 +1030,7 @@ pub async fn rewind_agent_session_for_companion(
     rewind_agent_session_impl(
         daemon.app.clone(),
         daemon.agent.clone(),
+        daemon.companion.clone(),
         app_session_id,
         agent_kind,
         target,

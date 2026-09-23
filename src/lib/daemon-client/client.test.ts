@@ -175,3 +175,68 @@ describe('subscribeSessionByPolling', () => {
     unsubscribe();
   });
 });
+
+/**
+ * WS 分支:连接建立之后上层回退水位线(daemon 重建时间线)时,必须**立刻**生效 ——
+ * 沿用连接建立时的快照会把重建后的每一帧(含回合终止帧)都按旧序号空间丢掉。
+ */
+describe('subscribeSession over WebSocket', () => {
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    onmessage: ((message: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    closed = false;
+
+    constructor(readonly url: string) {
+      FakeWebSocket.instances.push(this);
+    }
+
+    close() {
+      this.closed = true;
+    }
+
+    emit(payload: unknown) {
+      this.onmessage?.({ data: JSON.stringify(payload) });
+    }
+  }
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('honours a watermark that is rewound after the socket connected', () => {
+    const config: DaemonConnectionConfig = {
+      baseUrl: 'http://127.0.0.1:9240',
+      token: 'test-token',
+    };
+    let watermark = 1059;
+    const received: unknown[] = [];
+
+    const client = createDaemonClient(config);
+    const unsubscribe = client.subscribeSession('s1', {
+      getInitialSequence: () => watermark,
+      onEvent: (event) => received.push(event),
+    });
+
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit({ type: 'event', event: { type: 'text_delta', sequence: 1060 } });
+    expect(received).toHaveLength(1);
+
+    // daemon 重建时间线后序号从 0 重新编号,上层据此回退水位线。
+    watermark = 311;
+    socket.emit({ type: 'event', event: { type: 'text_delta', sequence: 312 } });
+    expect(received).toHaveLength(2);
+
+    // 旧序号空间里的帧仍然必须被丢掉。
+    socket.emit({ type: 'event', event: { type: 'text_delta', sequence: 100 } });
+    expect(received).toHaveLength(2);
+
+    unsubscribe();
+    expect(socket.closed).toBe(true);
+  });
+});
