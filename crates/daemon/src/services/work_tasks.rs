@@ -43,7 +43,7 @@ pub fn update_work_task_impl(
     update_work_task(&conn, &task_id, &patch)
 }
 
-/// 删除终态任务；带 worktree 的任务在删除前尽力清理 worktree + work 分支
+/// 删除待办或终态任务；带 worktree 的任务在删除前尽力清理 worktree + work 分支
 /// （失败不阻断删除，仅记 warn）。清理必须发生在状态守卫通过之后，
 /// 否则会误删活跃任务的 worktree。
 pub fn delete_work_task_impl(state: &AppState, task_id: String) -> Result<(), String> {
@@ -54,10 +54,12 @@ pub fn delete_work_task_impl(state: &AppState, task_id: String) -> Result<(), St
             .ok_or_else(|| "任务不存在".to_string())?;
         if !matches!(
             task.status,
-            crate::work_tasks::WorkTaskStatus::Done | crate::work_tasks::WorkTaskStatus::Canceled
+            crate::work_tasks::WorkTaskStatus::Todo
+                | crate::work_tasks::WorkTaskStatus::Done
+                | crate::work_tasks::WorkTaskStatus::Canceled
         ) {
             return Err(format!(
-                "任务状态为 {}，仅 done/canceled 可删除",
+                "任务状态为 {}，仅 todo/done/canceled 可删除",
                 task.status.as_str()
             ));
         }

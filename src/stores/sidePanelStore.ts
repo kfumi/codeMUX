@@ -470,11 +470,12 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           ? tabs[Math.min(closedIndex, tabs.length - 1)].id
           : null;
 
-    set({
-      tabs,
-      activeTabId,
-      isOpen: true,
-    });
+    if (tabs.length === 0) {
+      set({ tabs, activeTabId, isOpen: false, isExpanded: false });
+      void useBrowserStore.getState().hideAllBrowserHosts();
+    } else {
+      set({ tabs, activeTabId, isOpen: true });
+    }
     recordNavigation(get());
   },
 
@@ -494,8 +495,10 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set({
       tabs: [],
       activeTabId: null,
-      isOpen: true,
+      isOpen: false,
+      isExpanded: false,
     });
+    void useBrowserStore.getState().hideAllBrowserHosts();
     recordNavigation(get());
   },
 

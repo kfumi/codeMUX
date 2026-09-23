@@ -96,7 +96,7 @@ describe('TaskCard', () => {
     expect(screen.getByText('失败')).toBeTruthy();
     expect(screen.getByText('进程崩溃')).toBeTruthy();
     expect(screen.getByText('重试')).toBeTruthy();
-    expect(screen.getByText('重新开始')).toBeTruthy();
+    expect(screen.getByLabelText('重新开始')).toBeTruthy();
   });
 
   it('shows interrupted badge when failureReason is interrupted', () => {
@@ -118,12 +118,14 @@ describe('TaskCard', () => {
     expect(screen.queryByText('进程崩溃')).toBeNull();
   });
 
-  it('action matrix: todo has start/edit, no cancel', () => {
+  it('action matrix: todo has start/edit/delete, no cancel', () => {
     render(
       <TaskCard task={makeTask({ id: 'a', status: 'todo' })} onOpen={noop} onEdit={noop} onOpenSession={noop} />,
     );
+    // 主动作「开始」保留文字，次要动作为图标圆钮（aria-label）。
     expect(screen.getByText('开始')).toBeTruthy();
-    expect(screen.getByText('编辑')).toBeTruthy();
+    expect(screen.getByLabelText('编辑')).toBeTruthy();
+    expect(screen.getByLabelText('删除')).toBeTruthy();
     expect(screen.queryByText('取消')).toBeNull();
   });
 
@@ -149,7 +151,7 @@ describe('TaskCard', () => {
       <TaskCard task={makeTask({ id: 'a', status: 'done' })} onOpen={noop} onEdit={noop} onOpenSession={noop} />,
     );
     expect(screen.getByText('归档')).toBeTruthy();
-    expect(screen.getByText('删除')).toBeTruthy();
+    expect(screen.getByLabelText('删除')).toBeTruthy();
   });
 
   it('calls onOpen on click', () => {

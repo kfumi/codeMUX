@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -24,6 +24,7 @@ import type { ScheduledTaskDraft, TaskRun } from '../../types/scheduledTask';
 import { AgentPermissionSelector } from '../agent/AgentPermissionSelector';
 import { AgentSelector } from '../agent/AgentSelector';
 import { AgentModelSelector } from '../agent/AgentModelSelector';
+import { InstructionComposer } from '../agent/InstructionComposer';
 import { CodeMuxAssistantRuntimeProvider } from '../agent/assistant-ui/CodeMuxAssistantRuntime';
 import { AutomationProjectPicker } from './AutomationProjectPicker';
 import { AutomationPageHeader } from './AutomationPageHeader';
@@ -336,62 +337,59 @@ export function AutomationEditor({
 
           <label className="flex flex-col gap-2">
             <span className="text-ui-body text-muted-foreground">指令</span>
-            <div className="rounded-lg border border-border/70 bg-muted/10">
-              <textarea
+            <CodeMuxAssistantRuntimeProvider
+              sessionId={AUTOMATION_DRAFT_SESSION_ID}
+              agentKind={draft.agentKind}
+              onSend={async () => {}}
+              onCommand={async () => {}}
+            >
+              <InstructionComposer
                 value={draft.instruction}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft((current) => ({
-                  ...current,
-                  instruction: event.target.value,
-                }))}
+                onChange={(instruction) => setDraft((current) => ({ ...current, instruction }))}
                 placeholder="例如：Review 最近 24 小时的提交，总结可能引入的 bug 和修复建议"
                 rows={8}
-                className="min-h-[160px] w-full resize-none rounded-t-lg border-0 bg-transparent px-3 py-3 text-ui-body outline-none focus:ring-0"
-              />
-              <CodeMuxAssistantRuntimeProvider
-                sessionId={AUTOMATION_DRAFT_SESSION_ID}
-                agentKind={draft.agentKind}
-                onSend={async () => {}}
-                onCommand={async () => {}}
-              >
-                <div className="flex flex-wrap items-center gap-1 border-t border-border/60 px-2 py-1.5">
-                  <AutomationProjectPicker
-                    projects={projects}
-                    value={draft.projectId}
-                    onChange={(projectId) => setDraft((current) => ({ ...current, projectId }))}
-                  />
-                  <AgentSelector
-                    value={draft.agentKind}
-                    onChange={handleAgentKindChange}
-                  />
-                  <AgentPermissionSelector
-                    agentKind={draft.agentKind}
-                    permissionConfig={draft.permissionConfig}
-                    planMode={draft.planMode}
-                    onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
-                      ...current,
-                      permissionConfig,
-                    }))}
-                    onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
-                    onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
-                      ...current,
-                      permissionConfig,
-                      planMode,
-                    }))}
-                  />
-                  <div className="ml-auto flex flex-wrap items-center gap-1">
-                    <AgentModelSelector
-                      agentKind={draft.agentKind}
-                      providers={modelProviders}
-                      activeProviderId={effectiveProviderId}
-                      value={effectiveModel}
-                      onChange={handleModelChange}
-                      reasoningEffort={draft.reasoningEffort}
-                      onReasoningEffortChange={handleReasoningEffortChange}
+                textareaClassName="min-h-[160px]"
+                toolbar={
+                  <>
+                    <AutomationProjectPicker
+                      projects={projects}
+                      value={draft.projectId}
+                      onChange={(projectId) => setDraft((current) => ({ ...current, projectId }))}
                     />
-                  </div>
-                </div>
-              </CodeMuxAssistantRuntimeProvider>
-            </div>
+                    <AgentSelector
+                      value={draft.agentKind}
+                      onChange={handleAgentKindChange}
+                    />
+                    <AgentPermissionSelector
+                      agentKind={draft.agentKind}
+                      permissionConfig={draft.permissionConfig}
+                      planMode={draft.planMode}
+                      onPermissionConfigChange={(permissionConfig) => setDraft((current) => ({
+                        ...current,
+                        permissionConfig,
+                      }))}
+                      onPlanModeChange={(planMode) => setDraft((current) => ({ ...current, planMode }))}
+                      onModeChange={(permissionConfig, planMode) => setDraft((current) => ({
+                        ...current,
+                        permissionConfig,
+                        planMode,
+                      }))}
+                    />
+                  </>
+                }
+                toolbarEnd={
+                  <AgentModelSelector
+                    agentKind={draft.agentKind}
+                    providers={modelProviders}
+                    activeProviderId={effectiveProviderId}
+                    value={effectiveModel}
+                    onChange={handleModelChange}
+                    reasoningEffort={draft.reasoningEffort}
+                    onReasoningEffortChange={handleReasoningEffortChange}
+                  />
+                }
+              />
+            </CodeMuxAssistantRuntimeProvider>
             {!draft.projectId && (
               <p className="text-ui-body text-destructive">请选择一个项目后才能保存</p>
             )}

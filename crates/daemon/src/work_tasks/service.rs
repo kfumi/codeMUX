@@ -18,13 +18,16 @@ fn assert_editable(task: &WorkTask) -> Result<(), String> {
     }
 }
 
-/// 仅 done/canceled 可删除。
+/// 仅 todo/done/canceled 可删除（todo 尚未开始，可直接删除）。
 fn assert_deletable(task: &WorkTask) -> Result<(), String> {
-    if matches!(task.status, WorkTaskStatus::Done | WorkTaskStatus::Canceled) {
+    if matches!(
+        task.status,
+        WorkTaskStatus::Todo | WorkTaskStatus::Done | WorkTaskStatus::Canceled
+    ) {
         Ok(())
     } else {
         Err(format!(
-            "任务状态为 {}，仅 done/canceled 可删除",
+            "任务状态为 {}，仅 todo/done/canceled 可删除",
             task.status.as_str()
         ))
     }
@@ -257,11 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn delete_guard_running_rejected_done_allowed() {
+    fn delete_guard_todo_allowed_running_rejected_done_allowed() {
         let mut conn = test_conn();
         insert_project(&conn, "p1");
+        let todo = create_work_task(&conn, &input("p1")).unwrap();
         let running = create_work_task(&conn, &input("p1")).unwrap();
         let done = create_work_task(&conn, &input("p1")).unwrap();
+
+        // 待办尚未开始，可直接删除。
+        delete_work_task(&conn, &todo.id).unwrap();
+        assert!(db::get_task(&conn, &todo.id).unwrap().is_none());
 
         set_status_cas(
             &mut conn,

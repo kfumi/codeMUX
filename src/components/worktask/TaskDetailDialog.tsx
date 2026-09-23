@@ -37,6 +37,8 @@ const EVENT_KIND_LABELS: Record<string, string> = {
   completed: '完成',
   status_changed: '状态流转',
   updated: '更新',
+  worktree_ready: '准备 worktree',
+  branch_checkout: '迁出分支',
   archived: '归档',
   unarchived: '取消归档',
 };

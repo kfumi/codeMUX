@@ -141,7 +141,7 @@ describe('side panel store', () => {
     expect(useSidePanelStore.getState()).toMatchObject({
       tabs: [],
       activeTabId: null,
-      isOpen: true,
+      isOpen: false,
     });
   });
 
@@ -156,7 +156,7 @@ describe('side panel store', () => {
     expect(state.tabs[0].kind).toBe('review');
   });
 
-  it('keeps the panel open as an empty workspace when the last tab closes', () => {
+  it('auto-closes the panel when the last tab is closed', () => {
     const store = useSidePanelStore.getState();
 
     store.openReviewTab('D:/project/app');
@@ -164,7 +164,7 @@ describe('side panel store', () => {
     store.closeTab(tabId);
 
     expect(useSidePanelStore.getState()).toMatchObject({
-      isOpen: true,
+      isOpen: false,
       tabs: [],
       activeTabId: null,
     });

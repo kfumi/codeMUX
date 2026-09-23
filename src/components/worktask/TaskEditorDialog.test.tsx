@@ -253,59 +253,111 @@ describe('TaskEditorDialog 默认智能体与模型', () => {
   });
 });
 
-describe('TaskEditorDialog worktree 区块', () => {
+describe('TaskEditorDialog 项目 / 基线分支', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    // 重置实现，避免上一个用例的 mockResolvedValue/mockRejectedValue 泄漏到下个用例。
+    getRepositoryState.mockReset();
   });
 
-  it('新建任务默认勾选 worktree 且显示基线分支输入', () => {
+  it('新建任务默认勾选 worktree；未选项目时基线分支选择器禁用', () => {
     render(<TaskEditorDialog open onOpenChange={noop} />);
 
     expect(getWorktreeCheckbox().checked).toBe(true);
-    expect(screen.getByLabelText('基线分支')).toBeTruthy();
+    const branch = screen.getByLabelText('基线分支') as HTMLButtonElement;
+    expect(branch.disabled).toBe(true);
+    expect(branch.textContent).toContain('请先选择项目');
   });
 
-  it('取消勾选隐藏基线分支输入，重新勾选后恢复', () => {
-    render(<TaskEditorDialog open onOpenChange={noop} />);
-
-    fireEvent.click(getWorktreeCheckbox());
-    expect(getWorktreeCheckbox().checked).toBe(false);
-    expect(screen.queryByLabelText('基线分支')).toBeNull();
-
-    fireEvent.click(getWorktreeCheckbox());
-    expect(getWorktreeCheckbox().checked).toBe(true);
-    expect(screen.getByLabelText('基线分支')).toBeTruthy();
-  });
-
-  it('选中项目且勾选 worktree 时预取当前分支作为占位提示', async () => {
-    getRepositoryState.mockResolvedValue({ currentBranch: 'main' });
+  it('选中 Git 项目后基线分支可用；未勾选 worktree 也可选（迁出分支执行）', async () => {
+    getRepositoryState.mockResolvedValue({
+      currentBranch: 'main',
+      branches: [{ name: 'main', current: true }, { name: 'dev', current: false }],
+    });
 
     render(<TaskEditorDialog open onOpenChange={noop} />);
     fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p1' } });
 
+    const branch = () => screen.getByLabelText('基线分支') as HTMLButtonElement;
     await vi.waitFor(() => {
-      expect(getRepositoryState).toHaveBeenCalledWith('C:/repo/one');
-      const input = screen.getByLabelText('基线分支') as HTMLInputElement;
-      expect(input.placeholder).toContain('main');
+      expect(branch().disabled).toBe(false);
     });
+    expect(branch().textContent).toContain('main');
+
+    // 未勾选 worktree 时仍可选择基线分支（启动时会在项目目录迁出该分支）。
+    fireEvent.click(getWorktreeCheckbox());
+    expect(getWorktreeCheckbox().checked).toBe(false);
+    expect(branch().disabled).toBe(false);
   });
 
-  it('预取失败静默：占位文案保持默认', async () => {
-    getRepositoryState.mockRejectedValue(new Error('boom'));
+  it('非 Git 仓库项目禁用基线分支并提示', async () => {
+    getRepositoryState.mockRejectedValue(new Error('not a git repository'));
 
     render(<TaskEditorDialog open onOpenChange={noop} />);
     fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p2' } });
 
     await vi.waitFor(() => {
-      expect(getRepositoryState).toHaveBeenCalled();
-      const input = screen.getByLabelText('基线分支') as HTMLInputElement;
-      expect(input.placeholder).toBe('默认：项目当前分支');
+      const branch = screen.getByLabelText('基线分支') as HTMLButtonElement;
+      expect(branch.disabled).toBe(true);
+      expect(branch.textContent).toContain('该项目不是 Git 仓库');
     });
   });
 
+  it('从列表中筛选并选择已有分支作为基线', async () => {
+    getRepositoryState.mockResolvedValue({
+      currentBranch: 'main',
+      branches: [{ name: 'main', current: true }, { name: 'dev', current: false }],
+    });
+
+    render(<TaskEditorDialog open onOpenChange={noop} />);
+    fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p1' } });
+
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText('基线分支') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    fireEvent.click(screen.getByLabelText('基线分支'));
+    fireEvent.change(await screen.findByPlaceholderText('搜索或输入新分支名'), {
+      target: { value: 'dev' },
+    });
+    fireEvent.click(await screen.findByText('dev'));
+
+    expect((screen.getByLabelText('基线分支') as HTMLButtonElement).textContent).toContain('dev');
+  });
+
+  it('手动输入新分支名并作为基线提交', async () => {
+    getRepositoryState.mockResolvedValue({
+      currentBranch: 'main',
+      branches: [{ name: 'main', current: true }],
+    });
+    createTask.mockResolvedValue(makeTask({ id: 'n2' }));
+
+    render(<TaskEditorDialog open onOpenChange={noop} />);
+    fireEvent.change(screen.getByLabelText(/标题/), { target: { value: '新任务' } });
+    fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p1' } });
+
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText('基线分支') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    fireEvent.click(screen.getByLabelText('基线分支'));
+    fireEvent.change(await screen.findByPlaceholderText('搜索或输入新分支名'), {
+      target: { value: 'feature/new' },
+    });
+    fireEvent.click(screen.getByText(/使用新分支「feature\/new」/));
+
+    expect((screen.getByLabelText('基线分支') as HTMLButtonElement).textContent).toContain(
+      'feature/new',
+    );
+
+    fireEvent.click(screen.getByText('创建'));
+    await vi.waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+    expect(createTask.mock.calls[0][0].baseBranch).toBe('feature/new');
+  });
+
   it('提交时 useWorktree 落库，基线分支空串转 null', async () => {
-    getRepositoryState.mockResolvedValue({ currentBranch: 'dev' });
+    getRepositoryState.mockResolvedValue({ currentBranch: 'dev', branches: [] });
     createTask.mockResolvedValue(makeTask({ id: 'n1' }));
 
     render(<TaskEditorDialog open onOpenChange={noop} />);
@@ -324,7 +376,12 @@ describe('TaskEditorDialog worktree 区块', () => {
     expect(input.baseBranch).toBeNull();
   });
 
-  it('编辑任务沿用任务自身的 useWorktree / baseBranch', () => {
+  it('编辑任务沿用任务自身的 useWorktree / baseBranch', async () => {
+    getRepositoryState.mockResolvedValue({
+      currentBranch: 'main',
+      branches: [{ name: 'main', current: true }],
+    });
+
     render(
       <TaskEditorDialog
         open
@@ -334,8 +391,11 @@ describe('TaskEditorDialog worktree 区块', () => {
     );
 
     expect(getWorktreeCheckbox().checked).toBe(true);
-    const input = screen.getByLabelText('基线分支') as HTMLInputElement;
-    expect(input.value).toBe('feature/x');
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText('基线分支') as HTMLButtonElement).textContent).toContain(
+        'feature/x',
+      );
+    });
   });
 });
 
@@ -354,9 +414,9 @@ describe('TaskEditorDialog 表单间距', () => {
     render(<TaskEditorDialog open onOpenChange={noop} />);
     fireEvent.change(screen.getByLabelText('项目选择'), { target: { value: 'p1' } });
 
+    // 指令改用 InstructionComposer（textarea + 底部工具栏），结构不同，另行断言。
     const controls = [
       screen.getByLabelText(/标题/),
-      screen.getByLabelText('任务指令'),
       screen.getByLabelText('项目选择'),
       screen.getByLabelText('基线分支'),
     ];
@@ -367,5 +427,18 @@ describe('TaskEditorDialog 表单间距', () => {
       expect(tokens.some((token) => token.startsWith('gap-'))).toBe(true);
       expect(tokens.some((token) => token.startsWith('space-y-'))).toBe(false);
     }
+  });
+
+  it('指令使用 composer：智能体 / 模型 / 思考强度在输入框底部工具栏', () => {
+    render(<TaskEditorDialog open onOpenChange={noop} />);
+
+    const instruction = screen.getByLabelText('任务指令');
+    expect(instruction.tagName).toBe('TEXTAREA');
+    // 选择器仍在（位于 composer 底部工具栏内）。
+    expect(screen.getByTestId('agent-selector')).toBeTruthy();
+    expect(screen.getByTestId('agent-model-selector')).toBeTruthy();
+    // composer 容器：textarea 的父级是圆角边框容器。
+    expect(instruction.parentElement?.className).toContain('rounded-lg');
+    expect(instruction.parentElement?.textContent).toContain('切换种类');
   });
 });

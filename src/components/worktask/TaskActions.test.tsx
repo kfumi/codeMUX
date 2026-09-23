@@ -149,11 +149,42 @@ describe('TaskActions 动作矩阵', () => {
     expect(storeActions.mergeTask).not.toHaveBeenCalled();
   });
 
-  it('todo 有开始/编辑，没有取消', () => {
+  it('todo 有开始/编辑/删除，没有取消', () => {
     renderActions(makeTask({ id: 'a', status: 'todo' }));
     expect(screen.getByText('开始')).toBeTruthy();
     expect(screen.getByText('编辑')).toBeTruthy();
+    expect(screen.getByText('删除')).toBeTruthy();
     expect(screen.queryByText('取消')).toBeNull();
+  });
+
+  it('card 布局：主动作图标+文字靠左，次要图标圆钮靠右', () => {
+    const { container } = render(
+      <TaskActions task={makeTask({ id: 'a', status: 'todo' })} onEdit={noop} layout="card" />,
+    );
+    // 主动作「开始」保留文字。
+    expect(screen.getByText('开始')).toBeTruthy();
+    // 次要动作「编辑」「删除」为纯图标按钮：仅 aria-label，无文字。
+    expect(screen.getByLabelText('编辑')).toBeTruthy();
+    expect(screen.getByLabelText('删除')).toBeTruthy();
+    expect(screen.queryByText('编辑')).toBeNull();
+    expect(screen.queryByText('删除')).toBeNull();
+    // 主动作与次要动作分居两侧：两个分组 div，开始在第一组，编辑/删除在第二组。
+    const groups = container.querySelectorAll('.justify-between > div');
+    expect(groups).toHaveLength(2);
+    expect(groups[0].contains(screen.getByLabelText('开始'))).toBe(true);
+    expect(groups[1].contains(screen.getByLabelText('编辑'))).toBe(true);
+    expect(groups[1].contains(screen.getByLabelText('删除'))).toBe(true);
+  });
+
+  it('list 布局：全部为图标圆钮（无文字，仅 aria-label）', () => {
+    render(
+      <TaskActions task={makeTask({ id: 'a', status: 'todo' })} onEdit={noop} layout="list" />,
+    );
+    expect(screen.getByLabelText('开始')).toBeTruthy();
+    expect(screen.getByLabelText('编辑')).toBeTruthy();
+    expect(screen.getByLabelText('删除')).toBeTruthy();
+    expect(screen.queryByText('开始')).toBeNull();
+    expect(screen.queryByText('编辑')).toBeNull();
   });
 
   it('queued/preparing/running 只有取消', () => {

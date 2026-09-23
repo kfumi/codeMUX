@@ -12,6 +12,8 @@ interface AutomationProjectPickerProps {
   value: string | null;
   onChange: (projectId: string | null) => void;
   className?: string;
+  /** 表单字段用法：占满整行、描边样式，与 Input 等高（默认是工具栏紧凑幽灵按钮）。 */
+  fullWidth?: boolean;
 }
 
 export function AutomationProjectPicker({
@@ -19,6 +21,7 @@ export function AutomationProjectPicker({
   value,
   onChange,
   className,
+  fullWidth = false,
 }: AutomationProjectPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -42,16 +45,18 @@ export function AutomationProjectPicker({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
+          variant={fullWidth ? 'outline' : 'ghost'}
+          size={fullWidth ? 'default' : 'sm'}
           className={cn(
-            'h-8 max-w-[200px] gap-1.5 px-2 text-ui-body font-normal hover:bg-muted/60',
+            fullWidth
+              ? 'h-10 w-full justify-between gap-2 px-3 text-ui-body font-normal'
+              : 'h-8 max-w-[200px] gap-1.5 px-2 text-ui-body font-normal hover:bg-muted/60',
             !selected && 'text-muted-foreground',
             className,
           )}
         >
           <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          <span className="truncate">{selected?.name ?? '选择项目'}</span>
+          <span className="min-w-0 flex-1 truncate text-left">{selected?.name ?? '选择项目'}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </Button>
       </PopoverTrigger>

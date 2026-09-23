@@ -17,7 +17,7 @@ use crate::companion::actions::{interrupt_companion_session, send_companion_mess
 use crate::companion::CompanionState;
 use crate::daemon::DaemonState;
 use crate::db::operations;
-use crate::services::git::create_git_worktree_in_project;
+use crate::services::git::{checkout_git_branch_in_project, create_git_worktree_in_project};
 
 use super::db::{self, StatusExtras};
 use super::git_ops::{self, MergeError};
@@ -210,6 +210,16 @@ async fn launch(daemon: DaemonState, task_id: String) -> Result<(), String> {
             return Err(error);
         }
     };
+
+    // 未使用 worktree 但指定了基线分支：在项目目录迁出该分支后再运行。
+    if let Err(error) = prepare_branch_checkout(&daemon, &task).await {
+        {
+            let mut conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
+            fail_preparing(&mut conn, &task_id, &error);
+        }
+        super::emit_work_tasks_changed(&daemon, "fail");
+        return Err(error);
+    }
 
     let session_id = match prepare_session(&daemon, &task, worktree.as_ref()) {
         Ok(session_id) => session_id,
@@ -415,6 +425,49 @@ async fn prepare_worktree(
         path,
         branch: work_branch,
     }))
+}
+
+/// 非 worktree 任务需要迁出的分支；worktree 任务（独立目录建分支）或空分支返回 None。
+fn checkout_target(task: &WorkTask) -> Option<&str> {
+    if task.use_worktree {
+        return None;
+    }
+    task.base_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// 非 worktree 任务：若指定了基线分支，则在项目目录迁出该分支后再运行。
+/// 与 worktree 互斥（worktree 任务在独立目录里建工作分支）。空分支保持现状
+/// （在项目当前已迁出分支上运行）。工作区有未提交改动时迁出失败 → 任务失败。
+async fn prepare_branch_checkout(daemon: &DaemonState, task: &WorkTask) -> Result<(), String> {
+    let Some(base) = checkout_target(task).map(str::to_string) else {
+        return Ok(());
+    };
+    let project_path = {
+        let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
+        db::get_project_path(&conn, &task.project_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "项目不存在".to_string())?
+    };
+    let project_path = PathBuf::from(project_path);
+    let checkout_base = base.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        checkout_git_branch_in_project(&project_path, &checkout_base)
+    })
+    .await
+    .map_err(|error| format!("分支迁出线程失败: {error}"))??;
+
+    let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
+    db::insert_event(
+        &conn,
+        &task.id,
+        "branch_checkout",
+        Some(&format!("已在项目目录迁出分支 {base}")),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// 建会话并写入 origin / working_path（worktree cwd）/ provider。
@@ -1386,6 +1439,31 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn checkout_target_only_for_non_worktree_with_base() {
+        let conn = test_conn();
+        insert_project(&conn, "p1");
+
+        // 非 worktree + 有基线分支 → 需要迁出。
+        let mut with_base = input("p1");
+        with_base.base_branch = Some("release".to_string());
+        let task = super::super::service::create_work_task(&conn, &with_base).unwrap();
+        assert_eq!(checkout_target(&task), Some("release"));
+
+        // 非 worktree + 空/空白分支 → 无迁出动作（沿用当前分支）。
+        let mut blank = input("p1");
+        blank.base_branch = Some("  ".to_string());
+        let task = super::super::service::create_work_task(&conn, &blank).unwrap();
+        assert_eq!(checkout_target(&task), None);
+
+        // worktree 任务即使有基线分支也不在项目目录迁出（走独立 worktree）。
+        let mut worktree = input("p1");
+        worktree.use_worktree = true;
+        worktree.base_branch = Some("release".to_string());
+        let task = super::super::service::create_work_task(&conn, &worktree).unwrap();
+        assert_eq!(checkout_target(&task), None);
     }
 
     #[test]

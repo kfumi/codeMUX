@@ -69,6 +69,7 @@ export function TaskListView({
             task={task}
             onEdit={onEdit}
             onOpenSession={onOpenSession}
+            layout="list"
           />
         </div>
       ))}

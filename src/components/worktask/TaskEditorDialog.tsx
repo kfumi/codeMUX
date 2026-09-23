@@ -9,7 +9,9 @@ import {
 } from '../../lib/scheduledTaskDefaults';
 import { AgentSelector } from '../agent/AgentSelector';
 import { AgentModelSelector } from '../agent/AgentModelSelector';
+import { InstructionComposer } from '../agent/InstructionComposer';
 import { AutomationProjectPicker } from '../automation/AutomationProjectPicker';
+import { BranchPicker } from './BranchPicker';
 import { Button } from '../ui/button';
 import {
   Dialog,
@@ -25,6 +27,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { WorkTask, WorkTaskInput } from '../../types/workTask';
 import type { ReasoningEffort } from '../../types/session';
+import type { GitRepositoryState } from '../../lib/gitTypes';
 
 interface TaskEditorDialogProps {
   open: boolean;
@@ -92,14 +95,17 @@ export function TaskEditorDialog({
   // WorkTaskInput 不含 reasoning effort；选择器需要该 prop，本地暂存不落库。
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // 项目当前分支（占位提示用）；预取失败静默回退为固定占位文案。
-  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+  // 选中项目的 Git 仓库状态（分支列表 + 当前分支）；用于基线分支选择器。
+  // status=error 视为「不是 Git 仓库 / 读不到仓库」，选择器禁用并给出提示。
+  const [repoState, setRepoState] = useState<GitRepositoryState | null>(null);
+  const [repoStatus, setRepoStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const branchFetchSeq = useRef(0);
 
   useEffect(() => {
     if (!open) return;
     fetchProjects();
-    setCurrentBranch(null);
+    setRepoState(null);
+    setRepoStatus('idle');
     if (task) {
       setDraft(draftFromTask(task));
     } else {
@@ -114,23 +120,41 @@ export function TaskEditorDialog({
     }
   }, [open, task, defaultProjectId, fetchProjects, config]);
 
-  // 选中项目且勾选 worktree 时预取当前分支，作为基线分支输入的占位提示（失败静默）。
+  // 选中项目后预取仓库状态（分支列表）。不依赖 worktree 勾选：分支选择器需要
+  // 知道项目是否 Git 仓库；非 Git 仓库读取失败 → error，选择器禁用。
   useEffect(() => {
-    if (!open || !draft.useWorktree || draft.projectId == null) return;
+    if (!open || draft.projectId == null) {
+      setRepoState(null);
+      setRepoStatus('idle');
+      return;
+    }
     const project = projects.find((entry) => entry.id === draft.projectId);
     if (!project) return;
     const seq = ++branchFetchSeq.current;
-    daemonFacade.git
-      .getRepositoryState(project.path)
+    setRepoStatus('loading');
+    Promise.resolve(daemonFacade.git.getRepositoryState(project.path))
       .then((state) => {
-        if (seq === branchFetchSeq.current) {
-          setCurrentBranch(state.currentBranch);
-        }
+        if (seq !== branchFetchSeq.current) return;
+        setRepoState(state);
+        setRepoStatus('ready');
       })
       .catch(() => {
-        // 预取失败静默：占位文案保持「默认：项目当前分支」。
+        if (seq !== branchFetchSeq.current) return;
+        setRepoState(null);
+        setRepoStatus('error');
       });
-  }, [open, draft.useWorktree, draft.projectId, projects]);
+  }, [open, draft.projectId, projects]);
+
+  const gitBranches = repoState?.branches ?? [];
+  // 基线分支选择器禁用原因（按优先级）；null = 可用。
+  // 勾选 worktree 时它是基准分支；未勾选时会在项目目录迁出该分支后运行。
+  const branchDisabledReason = draft.projectId == null
+    ? '请先选择项目'
+    : repoStatus === 'loading'
+      ? '正在读取分支……'
+      : repoStatus === 'error'
+        ? '该项目不是 Git 仓库'
+        : null;
 
   const modelProviders = useMemo(
     () => config?.model_providers ?? EMPTY_MODEL_PROVIDERS,
@@ -170,9 +194,6 @@ export function TaskEditorDialog({
     }
   };
 
-  const baseBranchPlaceholder = currentBranch
-    ? `默认：项目当前分支（${currentBranch}）`
-    : '默认：项目当前分支';
   return (
     // modal={false}:对话框里有 Radix 下拉/浮层(智能体、模型、思考强度)。模态
     // Dialog 会把 body 设成 pointer-events:none 并抢占焦点,portal 到 body 的弹层
@@ -205,29 +226,73 @@ export function TaskEditorDialog({
             <label htmlFor="work-task-instruction" className="text-ui-body font-medium text-foreground">
               任务指令
             </label>
-            <textarea
+            {/* 与「新建自动化」一致：智能体 / 模型 / 思考强度收进指令框底部工具栏。 */}
+            <InstructionComposer
               id="work-task-instruction"
               value={draft.instruction}
-              onChange={(event) => setDraft((current) => ({ ...current, instruction: event.target.value }))}
+              onChange={(instruction) => setDraft((current) => ({ ...current, instruction }))}
               placeholder="描述要完成的工作、目标文件或验收标准……"
               rows={5}
-              className="w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-ui-body text-foreground ring-offset-background transition-[background-color,border-color,color,box-shadow] duration-fast placeholder:text-muted-foreground hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0"
+              toolbar={
+                <AgentSelector
+                  value={draft.agentKind}
+                  // 换种类时把供应商/模型一并换成该种类在「智能体运行时」里配的默认,
+                  // 否则会带着上一个种类的模型提交(例如 Claude 的默认模型配到 Codex 上)。
+                  onChange={(agentKind) => setDraft((current) => ({ ...current, ...defaultsForAgent(agentKind) }))}
+                />
+              }
+              toolbarEnd={
+                <AgentModelSelector
+                  agentKind={draft.agentKind}
+                  providers={modelProviders}
+                  activeProviderId={draft.providerId ?? config?.active_provider_id ?? null}
+                  value={draft.model ?? ''}
+                  onChange={(modelId, providerId) => setDraft((current) => ({
+                    ...current,
+                    model: modelId,
+                    providerId,
+                  }))}
+                  reasoningEffort={reasoningEffort}
+                  onReasoningEffortChange={setReasoningEffort}
+                  enableModelContextRegistration={false}
+                />
+              }
             />
           </div>
 
           <div className="flex flex-col gap-3">
-            <span className="text-ui-body font-medium text-foreground">项目</span>
-            <AutomationProjectPicker
-              projects={projects}
-              value={draft.projectId}
-              onChange={(projectId) => setDraft((current) => ({ ...current, projectId }))}
-            />
+            {/* 项目靠左、基线分支靠右同排；分支选择器支持筛选与手动输入新分支名。 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-3">
+                <span className="text-ui-body font-medium text-foreground">项目</span>
+                <AutomationProjectPicker
+                  projects={projects}
+                  value={draft.projectId}
+                  onChange={(projectId) => setDraft((current) => ({ ...current, projectId }))}
+                  fullWidth
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <span className="text-ui-body font-medium text-foreground">基线分支</span>
+                <BranchPicker
+                  branches={gitBranches}
+                  currentBranch={repoState?.currentBranch ?? null}
+                  value={draft.baseBranch}
+                  onChange={(branch) => setDraft((current) => ({ ...current, baseBranch: branch }))}
+                  disabled={branchDisabledReason != null}
+                  disabledHint={branchDisabledReason ?? undefined}
+                  loading={repoStatus === 'loading'}
+                />
+              </div>
+            </div>
+            {draft.projectId != null && repoStatus === 'ready' && !draft.useWorktree && (
+              <p className="text-ui-caption text-muted-foreground">
+                未启用独立 worktree：将在项目目录迁出所选分支后运行。
+              </p>
+            )}
             {draft.projectId == null && (
               <p className="text-ui-caption text-destructive">请选择项目后保存</p>
             )}
-          </div>
-
-          <div className="flex flex-col gap-3">
             <label className="flex items-center gap-2 text-ui-body text-foreground">
               <input
                 type="checkbox"
@@ -240,48 +305,6 @@ export function TaskEditorDialog({
               />
               在独立 worktree 中执行
             </label>
-            {draft.useWorktree && (
-              <div className="flex flex-col gap-3">
-                <label
-                  htmlFor="work-task-base-branch"
-                  className="text-ui-body font-medium text-foreground"
-                >
-                  基线分支
-                </label>
-                <Input
-                  id="work-task-base-branch"
-                  value={draft.baseBranch}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    baseBranch: event.target.value,
-                  }))}
-                  placeholder={baseBranchPlaceholder}
-                />
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <AgentSelector
-              value={draft.agentKind}
-              // 换种类时把供应商/模型一并换成该种类在「智能体运行时」里配的默认,
-              // 否则会带着上一个种类的模型提交(例如 Claude 的默认模型配到 Codex 上)。
-              onChange={(agentKind) => setDraft((current) => ({ ...current, ...defaultsForAgent(agentKind) }))}
-            />
-            <AgentModelSelector
-              agentKind={draft.agentKind}
-              providers={modelProviders}
-              activeProviderId={draft.providerId ?? config?.active_provider_id ?? null}
-              value={draft.model ?? ''}
-              onChange={(modelId, providerId) => setDraft((current) => ({
-                ...current,
-                model: modelId,
-                providerId,
-              }))}
-              reasoningEffort={reasoningEffort}
-              onReasoningEffortChange={setReasoningEffort}
-              enableModelContextRegistration={false}
-            />
           </div>
         </div>
 

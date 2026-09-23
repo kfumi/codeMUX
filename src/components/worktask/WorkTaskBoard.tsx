@@ -348,7 +348,7 @@ export function WorkTaskBoard({ onOpenSession }: WorkTaskBoardProps) {
           <PopoverTrigger asChild>
             <Button type="button" variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-ui-body">
               <Filter className="h-3.5 w-3.5" aria-hidden />
-              显示
+              筛选
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-44 p-2">
@@ -378,34 +378,25 @@ export function WorkTaskBoard({ onOpenSession }: WorkTaskBoardProps) {
             </label>
           </PopoverContent>
         </Popover>
-        <div className="flex items-center rounded-md border border-border/60 p-0.5">
-          <Button
-            type="button"
-            variant={viewMode === 'board' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-7 gap-1 px-2 text-ui-caption"
-            onClick={() => {
-              setViewMode('board');
-              saveViewMode('board');
-            }}
-          >
-            <Columns3 className="h-3.5 w-3.5" aria-hidden />
-            看板
-          </Button>
-          <Button
-            type="button"
-            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-7 gap-1 px-2 text-ui-caption"
-            onClick={() => {
-              setViewMode('list');
-              saveViewMode('list');
-            }}
-          >
+        {/* 同一时间只展示一个切换按钮：当前是看板则显示「列表」，反之显示「看板」。 */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1.5 px-2 text-ui-body"
+          onClick={() => {
+            const next: ViewMode = viewMode === 'board' ? 'list' : 'board';
+            setViewMode(next);
+            saveViewMode(next);
+          }}
+        >
+          {viewMode === 'board' ? (
             <List className="h-3.5 w-3.5" aria-hidden />
-            列表
-          </Button>
-        </div>
+          ) : (
+            <Columns3 className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {viewMode === 'board' ? '列表' : '看板'}
+        </Button>
         {viewMode === 'list' && (
           <Select
             value={filters.listColumn ?? 'all'}

@@ -118,6 +118,7 @@ export function TaskCard({
           task={task}
           onEdit={onEdit}
           onOpenSession={onOpenSession}
+          layout="card"
         />
       </div>
     </div>
