@@ -100,6 +100,7 @@ import {
   type ThreadTokenUsage,
 } from '../components/agent/contextUsage';
 import { buildConversationTurns } from '../lib/conversationTurns';
+import { estimateOutputTokens } from '../lib/tokenSpeed';
 import { extractTodosFromEvents } from '../lib/extractTodosFromEvents';
 import type { ConversationTurn } from '../types/conversationTurn';
 
@@ -174,6 +175,8 @@ interface AgentState {
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
   streamingText: Record<string, string>;
+  /** Estimated output tokens received from real streaming deltas. */
+  streamingEstimatedOutputTokens: Record<string, number>;
   /** 单调递增的实时流版本，滚动逻辑无需订阅长字符串。 */
   streamingVersion: Record<string, number>;
   /**
@@ -273,6 +276,7 @@ interface AgentState {
 type StreamingBuffer = {
   thinking: string;
   text: string;
+  estimatedTokens: number;
 };
 
 // Leading-edge + coalesce: first delta paints immediately; later deltas
@@ -533,6 +537,10 @@ function applyStreamingBuffer(
       };
     }
 
+    updates.streamingEstimatedOutputTokens = {
+      ...state.streamingEstimatedOutputTokens,
+      [sessionId]: (state.streamingEstimatedOutputTokens[sessionId] ?? 0) + buffer.estimatedTokens,
+    };
     updates.streamingVersion = {
       ...state.streamingVersion,
       [sessionId]: (state.streamingVersion[sessionId] ?? 0) + 1,
@@ -931,9 +939,10 @@ function stripEphemeralLiveStreamNarrationEvents(events: AgentMessage[]): AgentM
 
 function queueStreamingDelta(
   sessionId: string,
-  key: keyof StreamingBuffer,
+  key: 'thinking' | 'text',
   chunk: string,
   set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+  countForOutputTokens: boolean,
 ) {
   if (!chunk) {
     return;
@@ -967,20 +976,24 @@ function queueStreamingDelta(
     if (!isClaude) {
       recordStreamingTelemetry(sessionId, 'flushes');
       recordStreamingTelemetry(sessionId, 'uiUpdates');
-      pendingStreamingBuffers.delete(sessionId);
-      applyStreamingBuffer(sessionId, { thinking: key === 'thinking' ? chunk : '', text: key === 'text' ? chunk : '' }, set);
-      pendingStreamingBuffers.set(sessionId, { thinking: '', text: '' });
+      applyStreamingBuffer(sessionId, {
+        thinking: key === 'thinking' ? chunk : '',
+        text: key === 'text' ? chunk : '',
+        estimatedTokens: countForOutputTokens ? estimateOutputTokens(chunk) : 0,
+      }, set);
+      pendingStreamingBuffers.set(sessionId, { thinking: '', text: '', estimatedTokens: 0 });
     } else {
       pendingStreamingBuffers.set(sessionId, {
         thinking: key === 'thinking' ? chunk : '',
         text: key === 'text' ? chunk : '',
+        estimatedTokens: countForOutputTokens ? estimateOutputTokens(chunk) : 0,
       });
     }
     return;
   }
-
-  const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
+  const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '', estimatedTokens: 0 };
   buffer[key] += chunk;
+  buffer.estimatedTokens += countForOutputTokens ? estimateOutputTokens(chunk) : 0;
   pendingStreamingBuffers.set(sessionId, buffer);
 }
 
@@ -1173,7 +1186,7 @@ function simulateStreamingContent(
     active.remaining = active.remaining.slice(size);
     current.remaining = queue.map((item) => item.remaining).join('');
 
-    queueStreamingDelta(sessionId, active.key, chunk, set);
+    queueStreamingDelta(sessionId, active.key === 'thinking' ? 'thinking' : 'text', chunk, set, false);
     current.timer = window.setTimeout(tick, SIM_TICK_MS);
   };
 
@@ -1857,6 +1870,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
+    commitPendingSimulatedStream(sessionId, set);
     set((s) => {
       const { [sessionId]: _removed, ...rest } = s.queryStartTime;
       return {
@@ -1864,6 +1878,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         queryStartTime: rest,
         streamingText: { ...s.streamingText, [sessionId]: '' },
         streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+        streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
       };
     });
     useSessionStore.getState().markSessionUnread(sessionId);
@@ -2223,7 +2238,7 @@ function createSessionEventHandler(
               }));
               sessionsWithLiveTextStream.delete(sessionId);
             }
-            queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
+            queueStreamingDelta(sessionId, 'thinking', delta.thinking, set, true);
           } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
             // OpenCode streams reasoning with field=text (text_delta). Keep it in the
             // reasoning panel until this turn enters the answer phase.
@@ -2248,12 +2263,12 @@ function createSessionEventHandler(
                 }));
                 sessionsWithLiveTextStream.delete(sessionId);
               }
-              queueStreamingDelta(sessionId, 'thinking', delta.text, set);
+              queueStreamingDelta(sessionId, 'thinking', delta.text, set, true);
             } else {
               if (phase === 'thinking' && !isOpencodeLikeAgent(sessionId)) {
                 setSessionStreamPhase(sessionId, 'answer');
               }
-              queueStreamingDelta(sessionId, 'text', delta.text, set);
+              queueStreamingDelta(sessionId, 'text', delta.text, set, true);
             }
           }
         } else if (eventType === 'content_block_stop') {
@@ -2384,6 +2399,8 @@ function createSessionEventHandler(
         resolveInterruptDrain(sessionId);
         const resultData = event.data;
         clearPendingStreaming(sessionId);
+        clearPendingStreamingToolInputs(sessionId);
+        clearSimulatedStream(sessionId);
         set((s) => {
           const { [sessionId]: _removed, ...rest } = s.queryStartTime;
           return {
@@ -2391,6 +2408,7 @@ function createSessionEventHandler(
             queryStartTime: rest,
             streamingText: { ...s.streamingText, [sessionId]: '' },
             streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+            streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
             streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
             streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
             streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
@@ -2737,6 +2755,7 @@ function createSessionEventHandler(
           queryStartTime: rest,
           streamingText: { ...s.streamingText, [sessionId]: '' },
           streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+          streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
           queuePaused: terminalFailed
             ? { ...s.queuePaused, [sessionId]: true }
             : s.queuePaused,
@@ -2776,6 +2795,7 @@ function createSessionEventHandler(
   tokenUsageRefreshRequests: {},
   streamingThinking: {},
   streamingText: {},
+  streamingEstimatedOutputTokens: {},
   streamingVersion: {},
   streamingThinkingStartEventCount: {},
   forceStopped: {},
@@ -2886,6 +2906,7 @@ function createSessionEventHandler(
     }
 
     clearPendingStreaming(sessionId);
+    daemonTurnActiveAt.delete(sessionId);
     firstStreamingDeltaLoggedSessions.delete(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
@@ -2966,6 +2987,7 @@ function createSessionEventHandler(
       queryStartTime: { ...s.queryStartTime, [sessionId]: queryStartedAt },
       error: { ...s.error, [sessionId]: null },
       queuePaused: { ...s.queuePaused, [sessionId]: false },
+      streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
     }));
     // A new prompt supersedes the "waiting for the parent summary" wait.
     useSubagentStore.getState().markContinuationSettled(sessionId);
@@ -3078,6 +3100,7 @@ function createSessionEventHandler(
 
     set((s) => ({
       backgroundLive: { ...s.backgroundLive, [sessionId]: true },
+      streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
     }));
     await get().loadSessionMessages(sessionId, { force: true });
 
@@ -3130,6 +3153,9 @@ function createSessionEventHandler(
       return;
     }
     stopBackgroundPoll(sessionId);
+    clearPendingStreaming(sessionId);
+    clearPendingStreamingToolInputs(sessionId);
+    clearSimulatedStream(sessionId);
     set((s) => {
       const { [sessionId]: _removed, ...rest } = s.queryStartTime;
       const { [sessionId]: _live, ...liveRest } = s.backgroundLive;
@@ -3137,6 +3163,9 @@ function createSessionEventHandler(
         isRunning: { ...s.isRunning, [sessionId]: false },
         backgroundLive: liveRest,
         queryStartTime: rest,
+        streamingText: { ...s.streamingText, [sessionId]: '' },
+        streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+        streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
       };
     });
   },
@@ -3159,6 +3188,7 @@ function createSessionEventHandler(
       isRunning: { ...s.isRunning, [sessionId]: true },
       queryStartTime: { ...s.queryStartTime, [sessionId]: s.queryStartTime[sessionId] ?? Date.now() },
       error: { ...s.error, [sessionId]: null },
+      streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
     }));
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
@@ -3244,6 +3274,7 @@ function createSessionEventHandler(
         queryStartTime: rest,
         streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         streamingText: { ...s.streamingText, [sessionId]: '' },
+        streamingEstimatedOutputTokens: { ...s.streamingEstimatedOutputTokens, [sessionId]: 0 },
         queuePaused: { ...s.queuePaused, [sessionId]: true },
       };
     });
@@ -3373,6 +3404,8 @@ function createSessionEventHandler(
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
+      const newEstimatedTokens = { ...state.streamingEstimatedOutputTokens };
+      delete newEstimatedTokens[sessionId];
       const newStreamingVersion = { ...state.streamingVersion };
       delete newStreamingVersion[sessionId];
       const newForceStopped = { ...state.forceStopped };
@@ -3393,6 +3426,7 @@ function createSessionEventHandler(
         tokenUsageRefreshRequests: newTokenUsageRefreshRequests,
         streamingThinking: newStreaming,
         streamingText: newStreamingText,
+        streamingEstimatedOutputTokens: newEstimatedTokens,
         streamingVersion: newStreamingVersion,
         forceStopped: newForceStopped,
         queuedQueries: newQueuedQueries,
@@ -3950,6 +3984,7 @@ function createSessionEventHandler(
         tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
         streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         streamingText: { ...s.streamingText, [sessionId]: '' },
+        streamingEstimatedOutputTokens: removeSessionEntry(s.streamingEstimatedOutputTokens, sessionId),
         streamingVersion: removeSessionEntry(s.streamingVersion, sessionId),
         forceStopped: nextForceStopped,
         streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),

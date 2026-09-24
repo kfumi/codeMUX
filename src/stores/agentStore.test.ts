@@ -224,6 +224,7 @@ describe('agent store Codex history loading', () => {
       tokenUsageRefreshRequests: {},
       streamingThinking: {},
       streamingText: {},
+      streamingEstimatedOutputTokens: {},
       forceStopped: {},
       queuedQueries: {},
       queuePaused: {},
@@ -587,6 +588,7 @@ describe('agent store Codex history loading', () => {
     // 回合起跑之后终止帧丢失(时间线重建导致去重水位线错位):isRunning 一直是 true。
     startSessionMock.mockImplementationOnce(async () => undefined);
     await useAgentStore.getState().startQuery(session.id, '卡住的回合', 'D:\\workspace');
+    useAgentStore.setState({ streamingEstimatedOutputTokens: { [session.id]: 42 } });
     expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
 
     const onState = sessionStateHandlers.get(session.id);
@@ -597,6 +599,41 @@ describe('agent store Codex history loading', () => {
 
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
     expect(useAgentStore.getState().queryStartTime[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
+  });
+
+  it('daemon idle fallback commits a pending one-shot assistant before settling', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-before-idle',
+        session_id: sessionId,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'one-shot final answer' }] },
+      }));
+    });
+
+    try {
+      const session = await primeSession('codex');
+      sessionHandlers.clear();
+      sessionStateHandlers.clear();
+      await useAgentStore.getState().startQuery(session.id, 'one-shot', 'D:/workspace');
+      await vi.advanceTimersByTimeAsync(40);
+      expect(useAgentStore.getState().streamingText[session.id]).toContain('one-shot');
+
+      sessionStateHandlers.get(session.id)?.(true);
+      sessionStateHandlers.get(session.id)?.(false);
+
+      expect(useAgentStore.getState().events[session.id]).toContainEqual(
+        expect.objectContaining({ kind: 'assistant' }),
+      );
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('刚发出的回合不会被紧跟而来的 state=false 抢跑', async () => {
@@ -693,6 +730,25 @@ describe('agent store Codex history loading', () => {
       expect(vi.mocked(daemonFacade.isSessionTurnActive).mock.calls.length)
         .toBeGreaterThan(probesBefore);
     }, { timeout: 900, interval: 25 });
+  });
+
+  it('settling a background turn clears late stream buffers and estimated tokens', async () => {
+    const session = await primeSession('codex');
+    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
+    useAgentStore.setState({
+      backgroundLive: { [session.id]: true },
+      isRunning: { [session.id]: true },
+      queryStartTime: { [session.id]: Date.now() },
+      streamingText: { [session.id]: 'late text' },
+      streamingEstimatedOutputTokens: { [session.id]: 42 },
+    });
+
+    await useAgentStore.getState().completeBackgroundLiveIfIdle(session.id);
+
+    expect(useAgentStore.getState().backgroundLive[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+    expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
   });
 
   it('proxy_status updates the settings indicator without entering the timeline', async () => {
@@ -2534,6 +2590,54 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('accumulates estimated tokens from real text and reasoning deltas across content blocks', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const session = await primeSession('claude_code');
+      await useAgentStore.getState().startQuery(session.id, 'count real deltas', 'D:/workspace');
+      const send = (event: Record<string, unknown>) => {
+        emitEvent?.(JSON.stringify({ session_id: session.id, type: 'stream_event', event }));
+      };
+
+      send({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+      send({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'abcd' } });
+      await vi.advanceTimersByTimeAsync(120);
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBeCloseTo(1);
+
+      send({ type: 'content_block_stop', index: 0, content_block: { type: 'thinking' } });
+      send({ type: 'content_block_start', index: 1, content_block: { type: 'text' } });
+      send({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '你好' } });
+      await vi.advanceTimersByTimeAsync(120);
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBeCloseTo(1 + 2 / 1.8);
+
+      const beforeToolInput = useAgentStore.getState().streamingEstimatedOutputTokens[session.id];
+      send({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tool-1', name: 'Bash' } });
+      send({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"command":"pwd"}' } });
+      await vi.advanceTimersByTimeAsync(120);
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(beforeToolInput);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clearEvents removes both estimated tokens and the session streaming version', () => {
+    const session = { id: 'clear-speed' };
+    useAgentStore.setState({
+      streamingEstimatedOutputTokens: { [session.id]: 42 },
+      streamingVersion: { [session.id]: 7 },
+    });
+
+    useAgentStore.getState().clearEvents(session.id);
+
+    expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().streamingVersion[session.id]).toBeUndefined();
+  });
+
   it('throttles simulated streaming text instead of updating visible state for every chunk', async () => {
     vi.useFakeTimers();
     const simulatedText = 'simulated-stream-text '.repeat(40);
@@ -2569,9 +2673,50 @@ describe('agent store Codex history loading', () => {
 
       await vi.advanceTimersByTimeAsync(3_000);
       expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id] ?? 0).toBe(0);
       expect(useAgentStore.getState().events[session.id]).toContainEqual(
         expect.objectContaining({ kind: 'assistant' }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupt cancels a buffered delta and resets estimated output tokens', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const session = await primeSession('claude_code');
+      await useAgentStore.getState().startQuery(session.id, 'interrupt tail', 'D:/workspace');
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'abcd' } },
+      }));
+
+      await useAgentStore.getState().interrupt(session.id);
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
+
+      emitEvent?.(JSON.stringify({
+        type: 'result', subtype: 'success', is_error: false, result: '',
+        duration_ms: 1, duration_api_ms: 1, num_turns: 1,
+        usage: { input_tokens: 1, output_tokens: 1 }, session_id: session.id,
+      }));
+      expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -3668,6 +3813,24 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().eventTimestamps[session.id]).toEqual([]);
     expect(useAgentStore.getState().todos[session.id]).toBeUndefined();
     expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+  });
+
+  it('clears estimated output tokens when rewinding the conversation', async () => {
+    const session = await primeSession('codex');
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'turn to rewind' } },
+          { kind: 'assistant', data: { message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] } } },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2] },
+      streamingEstimatedOutputTokens: { [session.id]: 42 },
+    });
+
+    await useAgentStore.getState().rewindToMessage(session.id, 0);
+
+    expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBeUndefined();
   });
 
   it('publishes the truncated transcript and its turn projection in a single store generation', async () => {

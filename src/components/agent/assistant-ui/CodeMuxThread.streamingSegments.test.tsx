@@ -16,13 +16,18 @@ import { CodeMuxThread } from './CodeMuxThread';
 
 const SESSION = 'session-streaming-segments';
 
-const { sessionHandlers, sendMessageViaDaemonMock } = vi.hoisted(() => {
+const { sessionHandlers, sendMessageViaDaemonMock, tokenSpeedMock } = vi.hoisted(() => {
   const sessionHandlers = new Map<string, (raw: string) => void>();
   return {
     sessionHandlers,
     sendMessageViaDaemonMock: vi.fn<(sessionId: string, prompt: string, payload?: { text: string }, options?: { delivery?: 'steer'; requestId?: string }) => Promise<void>>(),
+    tokenSpeedMock: vi.fn<() => number | null>(() => null),
   };
 });
+
+vi.mock('@/hooks/useTokenOutputSpeed', () => ({
+  useTokenOutputSpeed: tokenSpeedMock,
+}));
 
 vi.mock('../../../lib/daemon-session-bridge', () => ({
   registerDaemonSessionHandler: vi.fn((sessionId: string, handler: (raw: string) => void) => {
@@ -94,6 +99,8 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
 
     sessionHandlers.clear();
     sendMessageViaDaemonMock.mockReset();
+    tokenSpeedMock.mockReset();
+    tokenSpeedMock.mockReturnValue(null);
     sendMessageViaDaemonMock.mockImplementation(async (sessionId: string, prompt: string) => {
       const handler = sessionHandlers.get(sessionId);
       if (!handler) return;
@@ -116,7 +123,7 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     useAgentStore.setState({
       events: {}, eventTimestamps: {}, turns: {}, isRunning: {}, backgroundLive: {}, error: {},
       mcpRuntimeStatus: {}, todos: {}, tokenUsageBySession: {}, tokenUsageRefreshRequests: {},
-      streamingThinking: {}, streamingText: {}, streamingVersion: {},
+      streamingThinking: {}, streamingText: {}, streamingEstimatedOutputTokens: {}, streamingVersion: {},
       committedThinkingVersion: {}, streamingThinkingEpoch: {},
       forceStopped: {}, queuedQueries: {}, queuePaused: {},
       streamingToolInputs: {}, streamingToolMeta: {}, streamingToolIndexMap: {}, streamedToolUseIds: {},
@@ -249,4 +256,28 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     expect(triggers[0]?.getAttribute('aria-expanded')).toBe('false');
     expect(triggers[1]?.getAttribute('aria-expanded')).toBe('false');
   }, 30000);
+
+  it('shows the estimated output speed only while the turn is running', async () => {
+    tokenSpeedMock.mockReturnValue(42.42);
+    const { container } = render(<Harness />);
+    const { send, flush } = await startTurnWithUserMessage();
+
+    expect(container.textContent).toContain('42.4 tok/s');
+    const speedStatus = container.querySelector('[aria-label*="估算输出速度"]');
+    expect(speedStatus?.getAttribute('aria-label')).toContain('42.4');
+    expect(speedStatus?.getAttribute('tabindex')).toBe('0');
+
+    send({ type: 'turn_finished', event_id: 'speed-finished', outcome: 'completed', duration_ms: 10 });
+    await flush();
+    expect(container.textContent).not.toContain('tok/s');
+  });
+
+  it('does not render a speed placeholder before a reading is available', async () => {
+    const { container } = render(<Harness />);
+    const { send, flush } = await startTurnWithUserMessage();
+
+    send({ type: 'tool_started', event_id: 'speed-tool', tool_use_id: 'tool-speed', name: 'Bash', input: { command: 'pwd' } });
+    await flush();
+    expect(container.textContent).not.toContain('tok/s');
+  });
 });

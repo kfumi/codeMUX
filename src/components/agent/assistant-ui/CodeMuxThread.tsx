@@ -10,7 +10,7 @@ import {
   type PartState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
-import { ArrowDown, FileText, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
+import { ArrowDown, FileText, Gauge, Layers, Loader2, MessageSquare, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
@@ -37,6 +37,7 @@ import { isSubagentToolName } from '@/lib/subagentTools';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { useStreamingTextReveal } from './useStreamingTextReveal';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
+import { useTokenOutputSpeed } from '@/hooks/useTokenOutputSpeed';
 import { Button } from '@/components/ui/button';
 import { DotMatrix } from '@/components/ui/dot-matrix';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -2315,11 +2316,36 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
  * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的 `DotMatrix`
  * 是**绘制类**动画（SVG `opacity` 闪烁），无法卸载到合成线程。让它跟着每帧
  * 重渲染既无意义，也会把主线程预算浪费在重算这一小段 DOM 上。
- * 它的 props 只有 `startTime`，在整个回合内稳定。
+ * 它的 props 只有稳定的 `sessionId` / `startTime`，高频 TPS 由内部子组件单独刷新。
  */
+const StreamingTokenSpeedIndicator = memo(function StreamingTokenSpeedIndicator({
+  sessionId,
+  turnStartedAt,
+}: {
+  sessionId: string;
+  turnStartedAt?: number;
+}) {
+  const speed = useTokenOutputSpeed(sessionId, turnStartedAt, true);
+  if (speed == null) return null;
+  return (
+    <TooltipHint content="估算输出速度（正文 + 思考）">
+      <span
+        className="inline-flex items-center gap-1 text-ui-caption tabular-nums text-muted-foreground"
+        aria-label={`估算输出速度（正文 + 思考）：${speed.toFixed(1)} token 每秒`}
+        tabIndex={0}
+      >
+        <Gauge className="size-[1em]" aria-hidden="true" />
+        {speed.toFixed(1)} tok/s
+      </span>
+    </TooltipHint>
+  );
+});
+
 const StreamingStatusFooter = memo(function StreamingStatusFooter({
+  sessionId,
   startTime,
 }: {
+  sessionId: string;
   startTime?: number;
 }) {
   return (
@@ -2330,6 +2356,11 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
     >
       <DotMatrix state="loading" className="size-4" label="正在执行" />
       <RunningElapsedTimer startTime={startTime} label="正在执行" />
+      <StreamingTokenSpeedIndicator
+        key={`${sessionId}:${startTime ?? 'initial'}`}
+        sessionId={sessionId}
+        turnStartedAt={startTime}
+      />
     </div>
   );
 });
@@ -2445,7 +2476,7 @@ function StreamingContent({
           </div>
         ) : null}
 
-        {isRunning ? <StreamingStatusFooter startTime={queryStartTime} /> : null}
+        {isRunning ? <StreamingStatusFooter sessionId={sessionId} startTime={queryStartTime} /> : null}
       </div>
     </div>
   );
