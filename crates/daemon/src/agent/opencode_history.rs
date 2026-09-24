@@ -1,6 +1,7 @@
 use log::{debug, info};
 use rusqlite::Connection;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use tokio::sync::oneshot;
 
@@ -18,6 +19,10 @@ use crate::config::types::AgentKind;
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    };
 
     #[test]
     fn converts_opencode_sqlite_messages_into_ordered_codex_compatible_events() {
@@ -1403,6 +1408,98 @@ mod tests {
             .collect();
         assert_eq!(texts, vec!["first question".to_string()]);
     }
+    #[test]
+    fn bulk_parts_loader_preserves_message_and_stable_logical_order() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+             INSERT INTO message VALUES ('u1', 's1', 1000, 1000, '{\"role\":\"user\"}');
+             INSERT INTO message VALUES ('a1', 's1', 2000, 3000, '{\"role\":\"assistant\",\"tokens\":{\"input\":1,\"output\":2}}');
+             INSERT INTO part VALUES ('p-late', 'u1', 's1', 1002, '{\"type\":\"text\",\"text\":\"second\"}');
+             INSERT INTO part VALUES ('p-tie-z', 'u1', 's1', 1001, '{\"type\":\"text\",\"text\":\"first-z\"}');
+             INSERT INTO part VALUES ('p-tie-a', 'u1', 's1', 1001, '{\"type\":\"text\",\"text\":\"first-a\"}');
+             INSERT INTO part VALUES ('p-other', 'a1', 's1', 2001, '{\"type\":\"text\",\"text\":\"answer\"}');",
+        ).unwrap();
+
+        let by_message = load_opencode_parts_for_session(&connection, "s1").unwrap();
+        let user_ids: Vec<&str> = by_message["u1"]
+            .iter()
+            .map(|part| part.id.as_str())
+            .collect();
+        assert_eq!(user_ids, vec!["p-tie-a", "p-tie-z", "p-late"]);
+        assert_eq!(by_message["a1"].len(), 1);
+
+        let events = load_opencode_events_from_connection(&connection, "s1").unwrap();
+        let texts: Vec<&str> = events[0]["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|block| block["text"].as_str())
+            .collect();
+        assert_eq!(texts, vec!["first-a", "first-z", "second"]);
+    }
+
+    #[tokio::test]
+    async fn short_lived_sidecar_shuts_down_after_success() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let operation_events = Arc::clone(&events);
+        let shutdown_events = Arc::clone(&events);
+
+        let result = complete_short_lived_sidecar_operation(
+            async move {
+                operation_events.lock().unwrap().push("operation");
+                Ok::<_, String>(())
+            },
+            std::time::Duration::from_secs(1),
+            || async move {
+                shutdown_events.lock().unwrap().push("shutdown");
+            },
+        )
+        .await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(*events.lock().unwrap(), ["operation", "shutdown"]);
+    }
+
+    #[tokio::test]
+    async fn short_lived_sidecar_shuts_down_after_operation_error() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let test_shutdown_called = Arc::clone(&shutdown_called);
+
+        let result = complete_short_lived_sidecar_operation(
+            async { Err::<(), _>("delete command failed".to_string()) },
+            std::time::Duration::from_secs(1),
+            || async move {
+                test_shutdown_called.store(true, Ordering::SeqCst);
+            },
+        )
+        .await;
+
+        assert_eq!(result, Err("delete command failed".to_string()));
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn short_lived_sidecar_shuts_down_before_returning_timeout_error() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let test_shutdown_called = Arc::clone(&shutdown_called);
+
+        let result = complete_short_lived_sidecar_operation(
+            async { std::future::pending::<Result<(), String>>().await },
+            std::time::Duration::from_millis(1),
+            || async move {
+                test_shutdown_called.store(true, Ordering::SeqCst);
+            },
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err("Timed out waiting for OpenCode session deletion".to_string())
+        );
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
 }
 
 pub fn load_opencode_native_events(
@@ -1615,7 +1712,7 @@ pub(crate) fn find_opencode_database(home: &std::path::Path) -> Option<std::path
     candidates.into_iter().find(|path| path.exists())
 }
 
-fn load_opencode_events_from_connection(
+pub(crate) fn load_opencode_events_from_connection(
     connection: &Connection,
     session_id: &str,
 ) -> Result<Vec<Value>, String> {
@@ -1633,6 +1730,7 @@ fn load_opencode_events_from_connection(
         .map_err(|error| format!("Failed to read OpenCode messages: {}", error))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Failed to read OpenCode messages: {}", error))?;
+    let mut parts_by_message = load_opencode_parts_for_session(connection, session_id)?;
 
     // opencode 原生 rewind 在 session.revert 列记录回退边界({messageID,partID}
     // 的 JSON 文本):server 视角从该消息起全部隐藏。直接读库的时间线导入必须
@@ -1673,7 +1771,7 @@ fn load_opencode_events_from_connection(
             continue;
         }
 
-        let mut parts = load_opencode_parts(connection, session_id, message_id)?;
+        let mut parts = parts_by_message.remove(message_id).unwrap_or_default();
         sort_opencode_parts(&mut parts);
         let mut content = Vec::new();
         let mut tool_results = Vec::new();
@@ -2083,6 +2181,38 @@ pub(crate) fn sort_opencode_parts(parts: &mut [OpenCodePart]) {
             .then_with(|| left.id.cmp(&right.id))
     });
 }
+pub(crate) fn load_opencode_parts_for_session(
+    connection: &Connection,
+    session_id: &str,
+) -> Result<HashMap<String, Vec<OpenCodePart>>, String> {
+    let mut statement = connection
+        .prepare("SELECT id, message_id, time_created, data FROM part WHERE session_id = ?1 ORDER BY time_created ASC, id ASC")
+        .map_err(|error| format!("Failed to query OpenCode parts: {}", error))?;
+    let rows = statement
+        .query_map([session_id], |row| {
+            let data: String = row.get(3)?;
+            Ok((
+                row.get::<_, String>(1)?,
+                OpenCodePart {
+                    id: row.get(0)?,
+                    time_created: row.get(2)?,
+                    data: serde_json::from_str(&data).unwrap_or(Value::Null),
+                },
+            ))
+        })
+        .map_err(|error| format!("Failed to read OpenCode parts: {}", error))?;
+
+    let mut parts_by_message: HashMap<String, Vec<OpenCodePart>> = HashMap::new();
+    for row in rows {
+        let (message_id, part) =
+            row.map_err(|error| format!("Failed to decode OpenCode part: {}", error))?;
+        parts_by_message.entry(message_id).or_default().push(part);
+    }
+    for parts in parts_by_message.values_mut() {
+        sort_opencode_parts(parts);
+    }
+    Ok(parts_by_message)
+}
 
 pub(crate) fn load_opencode_parts(
     connection: &Connection,
@@ -2219,6 +2349,21 @@ pub async fn delete_opencode_session_for_companion(
     .await
 }
 
+async fn complete_short_lived_sidecar_operation<T, O, S, SF>(
+    operation: O,
+    timeout: std::time::Duration,
+    shutdown: S,
+) -> Result<T, String>
+where
+    O: std::future::Future<Output = Result<T, String>>,
+    S: FnOnce() -> SF,
+    SF: std::future::Future<Output = ()>,
+{
+    let result = tokio::time::timeout(timeout, operation).await;
+    shutdown().await;
+    result.map_err(|_| "Timed out waiting for OpenCode session deletion".to_string())?
+}
+
 pub(crate) async fn delete_opencode_native_session(
     roots: &crate::paths::PathRoots,
     state: &crate::AppState,
@@ -2265,6 +2410,11 @@ pub(crate) async fn delete_opencode_native_session(
         {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => {
+                agent_state
+                    .session_delete_waiters
+                    .lock()
+                    .await
+                    .remove(&request_id);
                 Err("OpenCode sidecar stopped before confirming session deletion".to_string())
             }
             Err(_) => {
@@ -2287,18 +2437,19 @@ pub(crate) async fn delete_opencode_native_session(
         handle.shutdown().await;
         return Err(error);
     }
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while let Some(event) = events.recv().await {
-            if let Some(result) = parse_session_delete_result_event(&event) {
-                if result.request_id == request_id {
-                    return result.result;
+    complete_short_lived_sidecar_operation(
+        async {
+            while let Some(event) = events.recv().await {
+                if let Some(result) = parse_session_delete_result_event(&event) {
+                    if result.request_id == request_id {
+                        return result.result;
+                    }
                 }
             }
-        }
-        Err("OpenCode sidecar stopped before confirming session deletion".to_string())
-    })
+            Err("OpenCode sidecar stopped before confirming session deletion".to_string())
+        },
+        std::time::Duration::from_secs(30),
+        || handle.shutdown(),
+    )
     .await
-    .map_err(|_| "Timed out waiting for OpenCode session deletion".to_string())?;
-    handle.shutdown().await;
-    result
 }

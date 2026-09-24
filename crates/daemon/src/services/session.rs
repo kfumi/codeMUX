@@ -9,6 +9,7 @@ use crate::config::types::AgentKind;
 use crate::db::operations::{self, NativeSessionRef};
 use crate::AppState;
 use log::{info, warn};
+use std::future::Future;
 
 pub async fn delete_session_impl(
     daemon: &crate::daemon::DaemonState,
@@ -33,20 +34,64 @@ pub async fn delete_session_impl(
         (skip, natives)
     };
 
-    if !skip_native_cleanup {
-        cleanup_native_sessions_best_effort(
-            &daemon.roots,
-            state,
-            agent_state,
-            &session_id,
-            &native_sessions,
-            true,
-        )
-        .await;
-    }
+    let has_active_sidecar =
+        !skip_native_cleanup && agent_state.sidecars.lock().await.contains_key(&session_id);
+    orchestrate_session_deletion(
+        has_active_sidecar,
+        || async {
+            if !skip_native_cleanup {
+                cleanup_native_sessions_best_effort(
+                    &daemon.roots,
+                    state,
+                    agent_state,
+                    &session_id,
+                    &native_sessions,
+                    true,
+                )
+                .await;
+            }
+        },
+        || shutdown_active_sidecar_after_native_cleanup(agent_state, &session_id),
+        || async {
+            let db = state.db.lock().unwrap();
+            operations::delete_session(&db, &session_id).map_err(|error| error.to_string())
+        },
+    )
+    .await
+}
 
-    let db = state.db.lock().unwrap();
-    operations::delete_session(&db, &session_id).map_err(|e| e.to_string())
+async fn orchestrate_session_deletion<N, NF, S, SF, D, DF>(
+    has_active_sidecar: bool,
+    native_cleanup: N,
+    shutdown_active_sidecar: S,
+    delete_local_session: D,
+) -> Result<(), String>
+where
+    N: FnOnce() -> NF,
+    NF: Future<Output = ()>,
+    S: FnOnce() -> SF,
+    SF: Future<Output = ()>,
+    D: FnOnce() -> DF,
+    DF: Future<Output = Result<(), String>>,
+{
+    native_cleanup().await;
+    if has_active_sidecar {
+        // Native cleanup is best-effort. The active runtime has already received
+        // the provider-specific delete command before it is shut down here.
+        shutdown_active_sidecar().await;
+    }
+    delete_local_session().await
+}
+
+async fn shutdown_active_sidecar_after_native_cleanup(agent_state: &AgentState, session_id: &str) {
+    crate::agent::session_lifecycle::invalidate_session_generation(agent_state, session_id).await;
+    let sidecar = {
+        let mut sidecars = agent_state.sidecars.lock().await;
+        sidecars.remove(session_id)
+    };
+    if let Some(mut sidecar) = sidecar {
+        sidecar.shutdown().await;
+    }
 }
 
 pub fn update_session_working_path_impl(
@@ -275,28 +320,12 @@ pub async fn delete_session_with_agent_cleanup_for_companion(
     daemon: &crate::daemon::DaemonState,
     session_id: String,
 ) -> Result<(), String> {
-    let state = &daemon.app;
-    let skip_cleanup = {
-        let db = state.db.lock().unwrap();
-        operations::get_session(&db, &session_id)
-            .map_err(|error| error.to_string())?
-            .map(|session| session.origin == "imported" || session.is_read_only)
-            .unwrap_or(true)
-    };
-    if !skip_cleanup {
-        let _ = crate::agent::session_lifecycle::shutdown_agent_for_companion(
-            state,
-            &daemon.agent,
-            &session_id,
-        )
-        .await;
-        let _ = crate::agent::session_lifecycle::reset_agent_session_for_companion(
-            state,
-            &daemon.agent,
-            &session_id,
-        )
-        .await;
-    }
+    // Serialize deletion with runtime lifecycle operations for this session.
+    // delete_session_impl keeps the sidecar alive through native cleanup, then
+    // shuts it down before removing the CodeMUX row.
+    let lifecycle_lock =
+        crate::agent::session_lifecycle::session_lifecycle_lock(&daemon.agent, &session_id).await;
+    let _lifecycle_guard = lifecycle_lock.lock().await;
     delete_session_impl(daemon, session_id).await
 }
 
@@ -340,4 +369,80 @@ pub async fn update_session_permissions_for_companion(
         plan_mode,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::orchestrate_session_deletion;
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn active_sidecar_cleanup_precedes_shutdown_and_local_delete() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let native_events = Arc::clone(&events);
+        let shutdown_events = Arc::clone(&events);
+        let delete_events = Arc::clone(&events);
+
+        let result = orchestrate_session_deletion(
+            true,
+            || async move {
+                native_events.lock().unwrap().push("native-active");
+            },
+            || async move {
+                shutdown_events.lock().unwrap().push("shutdown");
+            },
+            || async move {
+                delete_events.lock().unwrap().push("local-delete");
+                Ok(())
+            },
+        )
+        .await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["native-active", "shutdown", "local-delete"]
+        );
+    }
+
+    #[tokio::test]
+    async fn local_delete_failure_is_not_swallowed() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let native_events = Arc::clone(&events);
+        let shutdown_events = Arc::clone(&events);
+
+        let result = orchestrate_session_deletion(
+            true,
+            || async move {
+                native_events.lock().unwrap().push("native");
+            },
+            || async move {
+                shutdown_events.lock().unwrap().push("shutdown");
+            },
+            || async { Err("local delete failed".to_string()) },
+        )
+        .await;
+
+        assert_eq!(result, Err("local delete failed".to_string()));
+        assert_eq!(*events.lock().unwrap(), ["native", "shutdown"]);
+    }
+
+    #[tokio::test]
+    async fn absent_sidecar_skips_shutdown() {
+        let shutdown_called = Arc::new(Mutex::new(false));
+        let test_shutdown_called = Arc::clone(&shutdown_called);
+
+        orchestrate_session_deletion(
+            false,
+            || async {},
+            || async move {
+                *test_shutdown_called.lock().unwrap() = true;
+            },
+            || async { Ok(()) },
+        )
+        .await
+        .unwrap();
+
+        assert!(!*shutdown_called.lock().unwrap());
+    }
 }

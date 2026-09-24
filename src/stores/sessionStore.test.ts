@@ -406,6 +406,52 @@ describe('session store createSession', () => {
     expect(shutdownAgentMock).not.toHaveBeenCalled();
     expect(resetAgentSessionMock).not.toHaveBeenCalled();
   });
+
+  it('defers batched deletion state updates and preserves active-session semantics', async () => {
+    const first: Session = {
+      id: 'batch-a',
+      title: 'Batch A',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '',
+      updated_at: '',
+    };
+    const second = { ...first, id: 'batch-b' };
+    const failed = { ...first, id: 'batch-failed' };
+    deleteSessionMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => { throw new Error('batch delete failed'); });
+    useSessionStore.setState({
+      sessions: [first, second, failed],
+      archivedSessions: [first, second],
+      activeSessionId: second.id,
+      isLoading: false,
+      error: null,
+    });
+
+    const results = await Promise.all([
+      useSessionStore.getState().deleteSession(first.id, { deferLocalUpdate: true }),
+      useSessionStore.getState().deleteSession(second.id, { deferLocalUpdate: true }),
+      useSessionStore.getState().deleteSession(failed.id, { deferLocalUpdate: true }),
+    ]);
+
+    expect(results).toEqual([true, true, false]);
+    expect(useSessionStore.getState().sessions).toHaveLength(3);
+    expect(useSessionStore.getState().archivedSessions).toHaveLength(2);
+
+    useSessionStore.getState().removeDeletedSessions([first.id, second.id]);
+
+    expect(useSessionStore.getState().sessions.map((session) => session.id)).toEqual([failed.id]);
+    expect(useSessionStore.getState().archivedSessions).toEqual([]);
+    expect(useSessionStore.getState().activeSessionId).toBe(failed.id);
+    expect(clearEventsMock).toHaveBeenCalledWith(first.id);
+    expect(clearEventsMock).toHaveBeenCalledWith(second.id);
+  });
   it('archives a session and removes it from the active sidebar list', async () => {
     archiveMock.mockResolvedValue(undefined);
     const activeSession: Session = {

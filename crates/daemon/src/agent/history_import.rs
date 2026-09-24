@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -120,7 +121,10 @@ pub fn import_sessions_for_companion(
     let home = home_dir()?;
     let agent_kind = parse_agent_kind_filter(request.agent_kind.clone())?;
     let managed_pi_root = managed_pi_sessions_root(state);
-    let discovered = discover_all(&home, managed_pi_root.as_deref(), agent_kind)?;
+    let mut discovered = discover_all(&home, managed_pi_root.as_deref(), agent_kind)?;
+    let selected_keys: HashSet<String> = request.candidate_keys.iter().cloned().collect();
+    let hydration_errors =
+        hydrate_selected_opencode_snapshots(&mut discovered, &home, &selected_keys);
     let by_key: HashMap<String, DiscoveredSnapshot> = discovered
         .into_iter()
         .map(|snapshot| (snapshot.candidate.key.clone(), snapshot))
@@ -140,6 +144,11 @@ pub fn import_sessions_for_companion(
             result.skipped_keys.push(key);
             continue;
         };
+        if let Some(error) = hydration_errors.get(&key) {
+            result.errors.push(format!("{}: {}", key, error));
+            result.skipped_keys.push(key);
+            continue;
+        }
 
         let was_imported = operations::get_imported_source(
             &db,
@@ -790,7 +799,7 @@ fn discover_all(
         snapshots.extend(discover_codex(home));
     }
     if agent_kind.is_none() || agent_kind == Some(AgentKind::Opencode) {
-        snapshots.extend(discover_opencode(home));
+        snapshots.extend(discover_opencode(home)?);
     }
     if agent_kind.is_none() || agent_kind == Some(AgentKind::Pi) {
         snapshots.extend(discover_pi(home, managed_pi_root));
@@ -878,58 +887,340 @@ fn discover_codex(home: &Path) -> Vec<DiscoveredSnapshot> {
         .collect()
 }
 
-fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
+fn discover_opencode(home: &Path) -> Result<Vec<DiscoveredSnapshot>, String> {
     let Some(path) = opencode_history::find_opencode_database(home) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let Ok(connection) =
-        Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-    else {
-        return Vec::new();
-    };
-    let Ok(mut statement) =
-        connection.prepare("SELECT DISTINCT session_id FROM message ORDER BY session_id ASC")
-    else {
-        return Vec::new();
-    };
-    let Ok(session_ids) = statement.query_map([], |row| row.get::<_, String>(0)) else {
-        return Vec::new();
+    let connection = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("Failed to open OpenCode database for discovery: {error}"))?;
+    let metadata_rows = {
+        let mut statement = match connection.prepare(
+            "SELECT session_id, COUNT(*), MIN(time_created), MAX(time_updated) FROM message GROUP BY session_id ORDER BY session_id ASC",
+        ) {
+            Ok(statement) => statement,
+            Err(_) => match connection.prepare(
+                "SELECT session_id, COUNT(*), MIN(time_created), MAX(time_created) FROM message GROUP BY session_id ORDER BY session_id ASC",
+            ) {
+                Ok(statement) => statement,
+                Err(error) => {
+                    return Err(format!("Failed to inspect OpenCode message metadata: {error}"));
+                }
+            },
+        };
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, usize>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .map_err(|error| format!("Failed to read OpenCode message metadata: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Failed to read OpenCode message metadata: {error}"))?
     };
 
-    // 项目目录来自 session 表（旧版 schema 无此表时跳过注入，不影响发现）。
     let directories = opencode_session_directories(&connection);
     let titles = opencode_session_titles(&connection);
-
-    session_ids
-        .filter_map(Result::ok)
-        .filter_map(|session_id| {
-            let raw = opencode_history::load_opencode_native_events(home, &session_id).ok()?;
-            let mut events = normalize_history_events(raw, &session_id);
-            if let Some(directory) = directories.get(&session_id) {
-                for event in &mut events {
-                    if let Some(object) = event.as_object_mut() {
-                        object.insert("cwd".to_string(), Value::String(directory.clone()));
-                    }
-                }
-            }
-            if events.is_empty() {
-                return None;
-            }
+    let untitled_session_ids: HashSet<String> = metadata_rows
+        .iter()
+        .filter_map(|(session_id, _, _, _)| {
+            let has_native_title = titles
+                .get(session_id)
+                .map(|title| !is_opencode_placeholder_title(title))
+                .unwrap_or(false);
+            (!has_native_title).then_some(session_id.clone())
+        })
+        .collect();
+    let fallback_titles = opencode_untitled_session_titles(&connection, &untitled_session_ids);
+    Ok(metadata_rows
+        .into_iter()
+        .map(|(session_id, message_count, created, updated)| {
+            let created_at = created
+                .map(opencode_history::timestamp_string)
+                .unwrap_or_default();
+            let updated_at = updated.map(opencode_history::timestamp_string);
             let native_title = titles
                 .get(&session_id)
                 .map(String::as_str)
                 .filter(|title| !is_opencode_placeholder_title(title))
-                .map(ToOwned::to_owned);
-            Some(build_snapshot(
+                .map(ToOwned::to_owned)
+                .or_else(|| fallback_titles.get(&session_id).cloned());
+            let metadata = fs::metadata(&path).ok();
+            let modified = metadata
+                .as_ref()
+                .and_then(|value| value.modified().ok())
+                .map(format_system_time)
+                .unwrap_or_else(|| Utc::now().to_rfc3339());
+            let fingerprint = format!(
+                "opencode:{}:{}:{}:{}",
+                path.display(),
+                message_count,
+                created.map_or_else(String::new, |value| value.to_string()),
+                updated.map_or_else(String::new, |value| value.to_string()),
+            );
+            let title = resolve_snapshot_title(
                 AgentKind::Opencode,
-                session_id,
-                path.clone(),
-                events,
-                None,
-                native_title,
+                native_title.as_deref(),
+                &[],
+                &session_id,
+            );
+            DiscoveredSnapshot {
+                candidate: ImportCandidate {
+                    key: format!("{}:{}", AgentKind::Opencode.as_str(), session_id),
+                    agent_kind: AgentKind::Opencode,
+                    cwd: directories.get(&session_id).cloned(),
+                    title,
+                    created_at: if created_at.is_empty() {
+                        modified.clone()
+                    } else {
+                        created_at
+                    },
+                    updated_at: updated_at.unwrap_or_else(|| modified.clone()),
+                    source_locator: path.display().to_string(),
+                    source_fingerprint: fingerprint,
+                    event_count: message_count,
+                    agent_session_id: session_id,
+                    already_imported: false,
+                    warnings: Vec::new(),
+                },
+                source_modified_at: modified,
+                events: Vec::new(),
+            }
+        })
+        .collect())
+}
+
+/// Batch-load title fallbacks for all untitled sessions. This performs one
+/// message query and at most one part query, regardless of session count.
+fn opencode_untitled_session_titles(
+    connection: &Connection,
+    session_ids: &HashSet<String>,
+) -> HashMap<String, String> {
+    if session_ids.is_empty() {
+        return HashMap::new();
+    }
+    let Ok(mut statement) = connection.prepare(
+        "SELECT id, session_id, data FROM (
+             SELECT id, session_id, data,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY session_id ORDER BY time_created ASC, id ASC
+                    ) AS row_number
+             FROM message
+             WHERE json_valid(data) AND json_extract(data, '$.role') = 'user'
+         ) WHERE row_number = 1",
+    ) else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    }) else {
+        return HashMap::new();
+    };
+
+    let mut titles = HashMap::new();
+    let mut message_ids_needing_parts = Vec::new();
+    for row in rows.flatten() {
+        let (message_id, session_id, data) = row;
+        if !session_ids.contains(&session_id) {
+            continue;
+        }
+        let embedded_title = serde_json::from_str::<Value>(&data)
+            .ok()
+            .and_then(|message| {
+                message
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| message.get("content").and_then(Value::as_str))
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        message
+                            .get("content")
+                            .and_then(Value::as_array)
+                            .and_then(|blocks| blocks.first())
+                            .and_then(|block| block.get("text"))
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                    })
+            })
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
+        if let Some(title) = embedded_title {
+            titles.insert(session_id, title);
+        } else {
+            message_ids_needing_parts.push((session_id, message_id));
+        }
+    }
+    if message_ids_needing_parts.is_empty() {
+        return titles;
+    }
+
+    // One bounded dynamic OR query avoids per-message part loading. The
+    // limits stay below SQLite's default 999 bind-parameter ceiling.
+    const BATCH_SIZE: usize = 400;
+    for batch in message_ids_needing_parts.chunks(BATCH_SIZE) {
+        let filters = std::iter::repeat_n("(session_id = ? AND message_id = ?)", batch.len())
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!(
+            "SELECT session_id, json_extract(data, '$.text') \
+             FROM part \
+             WHERE json_valid(data) \
+               AND json_extract(data, '$.type') = 'text' \
+               AND ({}) \
+             ORDER BY session_id ASC, time_created ASC, id ASC",
+            filters
+        );
+        let Ok(mut statement) = connection.prepare(&sql) else {
+            continue;
+        };
+        let parameters = batch
+            .iter()
+            .flat_map(|(session_id, message_id)| [session_id.as_str(), message_id.as_str()]);
+        let Ok(rows) = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        }) else {
+            continue;
+        };
+        for (session_id, text) in rows.flatten() {
+            let title = text
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty());
+            if let Some(title) = title {
+                titles.entry(session_id).or_insert(title);
+            }
+        }
+    }
+    titles
+}
+
+fn opencode_session_fingerprint(
+    connection: &Connection,
+    path: &Path,
+    session_id: &str,
+) -> Result<String, String> {
+    let read_metadata = |sql: &str| {
+        connection.query_row(sql, rusqlite::params![session_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
             ))
         })
-        .collect()
+    };
+    let (message_count, created, updated) = read_metadata(
+        "SELECT COUNT(*), MIN(time_created), MAX(time_updated) FROM message WHERE session_id = ?1",
+    )
+    .or_else(|_| {
+        read_metadata(
+            "SELECT COUNT(*), MIN(time_created), MAX(time_created) FROM message WHERE session_id = ?1",
+        )
+    })
+    .map_err(|error| format!("Failed to recheck OpenCode session metadata: {error}"))?;
+    Ok(format!(
+        "opencode:{}:{}:{}:{}",
+        path.display(),
+        message_count,
+        created.map_or_else(String::new, |value| value.to_string()),
+        updated.map_or_else(String::new, |value| value.to_string()),
+    ))
+}
+
+/// Hydrate only selected OpenCode candidates. Discovery deliberately avoids
+/// parsing message/part JSON; import uses this single read-only connection for
+/// all selected sessions so an unselected broken or large history is untouched.
+fn hydrate_selected_opencode_snapshots(
+    snapshots: &mut [DiscoveredSnapshot],
+    home: &Path,
+    selected_keys: &HashSet<String>,
+) -> HashMap<String, String> {
+    let selected_opencode_keys: Vec<String> = snapshots
+        .iter()
+        .filter(|snapshot| {
+            snapshot.candidate.agent_kind == AgentKind::Opencode
+                && selected_keys.contains(&snapshot.candidate.key)
+        })
+        .map(|snapshot| snapshot.candidate.key.clone())
+        .collect();
+    let mut errors: HashMap<String, String> = selected_opencode_keys
+        .iter()
+        .map(|key| (key.clone(), "OpenCode database is unavailable".to_string()))
+        .collect();
+    if selected_opencode_keys.is_empty() {
+        return errors;
+    }
+    let Some(path) = opencode_history::find_opencode_database(home) else {
+        return errors;
+    };
+    let Ok(connection) =
+        Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return errors;
+    };
+    for key in &selected_opencode_keys {
+        errors.remove(key);
+    }
+    for snapshot in snapshots.iter_mut() {
+        if snapshot.candidate.agent_kind != AgentKind::Opencode
+            || !selected_keys.contains(&snapshot.candidate.key)
+        {
+            continue;
+        }
+        match opencode_history::load_opencode_events_from_connection(
+            &connection,
+            &snapshot.candidate.agent_session_id,
+        ) {
+            Ok(raw) => {
+                let mut events =
+                    normalize_history_events(raw, &snapshot.candidate.agent_session_id);
+                if events.is_empty() {
+                    errors.insert(
+                        snapshot.candidate.key.clone(),
+                        "OpenCode history has no importable events".to_string(),
+                    );
+                    continue;
+                }
+                match opencode_session_fingerprint(
+                    &connection,
+                    &path,
+                    &snapshot.candidate.agent_session_id,
+                ) {
+                    Ok(current_fingerprint)
+                        if current_fingerprint == snapshot.candidate.source_fingerprint => {}
+                    Ok(_) => {
+                        errors.insert(
+                            snapshot.candidate.key.clone(),
+                            "OpenCode session changed during import; scan again and retry"
+                                .to_string(),
+                        );
+                        continue;
+                    }
+                    Err(error) => {
+                        errors.insert(snapshot.candidate.key.clone(), error);
+                        continue;
+                    }
+                }
+                if let Some(directory) = &snapshot.candidate.cwd {
+                    for event in &mut events {
+                        if let Some(object) = event.as_object_mut() {
+                            object.insert("cwd".to_string(), Value::String(directory.clone()));
+                        }
+                    }
+                }
+                snapshot.candidate.event_count = events.len();
+                snapshot.events = events;
+            }
+            Err(error) => {
+                errors.insert(snapshot.candidate.key.clone(), error);
+            }
+        }
+    }
+    errors
 }
 
 /// opencode 会话标题映射：session.id -> session.title。查询失败（旧版 schema
@@ -1673,7 +1964,7 @@ mod tests {
             )
             .unwrap();
 
-        let snapshots = discover_opencode(&home);
+        let mut snapshots = discover_opencode(&home).unwrap();
         assert_eq!(snapshots.len(), 1);
         let candidate = &snapshots[0].candidate;
         assert_eq!(candidate.agent_kind.as_str(), "opencode");
@@ -1683,11 +1974,140 @@ mod tests {
             Some("D:/project/ai-code/codeMUX"),
             "opencode 候选必须携带 session.directory 作为 cwd,否则按项目导入过滤会丢掉全部会话"
         );
+        let selected = HashSet::from([candidate.key.clone()]);
+        assert!(hydrate_selected_opencode_snapshots(&mut snapshots, &home, &selected).is_empty());
         assert!(snapshots[0]
             .events
             .iter()
             .all(|event| event.get("cwd").and_then(Value::as_str)
                 == Some("D:/project/ai-code/codeMUX")));
+
+        let _ = fs::remove_dir_all(home);
+    }
+    #[test]
+    fn hydrates_only_selected_opencode_history() {
+        let home = test_home("opencode-selected");
+        let db_dir = home.join(".local/share/opencode");
+        fs::create_dir_all(&db_dir).unwrap();
+        let connection = Connection::open(db_dir.join("opencode.db")).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+             CREATE TABLE part (id TEXT PRIMARY KEY, session_id TEXT, message_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO message VALUES ('good', 'selected', 1000, 1000, '{\"role\":\"user\"}');
+             INSERT INTO part VALUES ('good-part', 'selected', 'good', 1001, '{\"type\":\"text\",\"text\":\"selected history\"}');
+             INSERT INTO message VALUES ('bad', 'unselected', 2000, 2000, '{broken');",
+        ).unwrap();
+        drop(connection);
+
+        let mut snapshots = discover_opencode(&home).unwrap();
+        assert_eq!(
+            snapshots.len(),
+            2,
+            "metadata discovery must not parse message JSON"
+        );
+        let selected_key = snapshots
+            .iter()
+            .find(|snapshot| snapshot.candidate.agent_session_id == "selected")
+            .unwrap()
+            .candidate
+            .key
+            .clone();
+        let errors = hydrate_selected_opencode_snapshots(
+            &mut snapshots,
+            &home,
+            &HashSet::from([selected_key]),
+        );
+
+        assert!(errors.is_empty());
+        let selected = snapshots
+            .iter()
+            .find(|snapshot| snapshot.candidate.agent_session_id == "selected")
+            .unwrap();
+        assert!(!selected.events.is_empty());
+        let unselected = snapshots
+            .iter()
+            .find(|snapshot| snapshot.candidate.agent_session_id == "unselected")
+            .unwrap();
+        assert!(
+            unselected.events.is_empty(),
+            "unselected malformed history must not be parsed"
+        );
+
+        let _ = fs::remove_dir_all(home);
+    }
+    #[test]
+    fn discovers_opencode_old_schema_title_and_session_fingerprints() {
+        let home = test_home("opencode-old-schema");
+        let db_dir = home.join(".local/share/opencode");
+        fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("opencode.db");
+        let connection = Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+                 CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+                 INSERT INTO message VALUES ('u1', 'old-a', 1000, '{\"role\":\"user\",\"time\":{\"created\":1000}}');
+                 INSERT INTO part VALUES ('p1', 'u1', 'old-a', 1001, '{\"type\":\"text\",\"text\":\"First prompt from old schema\"}');
+                 INSERT INTO message VALUES ('a1', 'old-a', 2000, '{\"role\":\"assistant\"}');
+                 INSERT INTO message VALUES ('u2', 'old-b', 3000, '{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Second prompt\"}]}');
+                 INSERT INTO message VALUES ('u3', 'old-c', 4000, '{\"role\":\"user\"}');
+                 INSERT INTO part VALUES ('p3', 'u3', 'old-c', 4001, '{\"type\":\"step-start\"}');
+                 INSERT INTO part VALUES ('p3b', 'u3', 'old-c', 4002, '{\"type\":\"text\",\"text\":\"Third prompt\"}');
+                 INSERT INTO message VALUES ('u4', 'old-d', 5000, '{\"role\":\"user\"}');
+                 INSERT INTO part VALUES ('p4', 'u4', 'old-d', 5001, '{\"type\":\"text\",\"text\":\"Fourth prompt\"}');",
+            )
+            .unwrap();
+        drop(connection);
+
+        let snapshots = discover_opencode(&home).unwrap();
+
+        assert_eq!(snapshots.len(), 4);
+        let candidates: HashMap<_, _> = snapshots
+            .iter()
+            .map(|snapshot| {
+                (
+                    snapshot.candidate.agent_session_id.as_str(),
+                    snapshot.candidate.title.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(candidates["old-a"], "First prompt from old schema");
+        assert_eq!(candidates["old-b"], "Second prompt");
+        assert_eq!(candidates["old-c"], "Third prompt");
+        assert_eq!(candidates["old-d"], "Fourth prompt");
+        let first = &snapshots[0].candidate;
+        let second = &snapshots[1].candidate;
+        assert_ne!(first.source_fingerprint, second.source_fingerprint);
+        assert!(first.source_fingerprint.contains("opencode:"));
+        assert!(first.source_fingerprint.contains(":2:1000:2000"));
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn selected_opencode_hydration_reports_missing_database_and_empty_history() {
+        let home = test_home("opencode-hydration-errors");
+        let db_dir = home.join(".local/share/opencode");
+        fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("opencode.db");
+        let connection = Connection::open(&db_path).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+             CREATE TABLE part (id TEXT PRIMARY KEY, session_id TEXT, message_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO message VALUES ('empty', 'empty', 1000, 1000, '{\"role\":\"assistant\",\"text\":\"no parts\"}');",
+        ).unwrap();
+        drop(connection);
+
+        let mut snapshots = discover_opencode(&home).unwrap();
+        let key = snapshots[0].candidate.key.clone();
+        let selected = HashSet::from([key.clone()]);
+        let errors = hydrate_selected_opencode_snapshots(&mut snapshots, &home, &selected);
+        assert!(errors[&key].contains("no importable events"));
+        assert!(snapshots[0].events.is_empty());
+
+        fs::remove_file(&db_path).unwrap();
+        let errors = hydrate_selected_opencode_snapshots(&mut snapshots, &home, &selected);
+        assert!(errors[&key].contains("database is unavailable"));
 
         let _ = fs::remove_dir_all(home);
     }

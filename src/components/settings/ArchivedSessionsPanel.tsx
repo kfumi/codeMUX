@@ -19,6 +19,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 type SortMode = 'updated_at' | 'created_at' | 'title';
 
+
+const ARCHIVED_DELETE_CONCURRENCY = 3;
+
+export async function settleWithConcurrency<T, TResult>(
+  items: readonly T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<TResult>,
+): Promise<PromiseSettledResult<TResult>[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<PromiseSettledResult<TResult>>(items.length);
+  const normalizedConcurrency = Number.isFinite(concurrency) ? Math.floor(concurrency) : 1;
+  const workerCount = Math.min(items.length, Math.max(1, normalizedConcurrency));
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: 'fulfilled', value: await task(items[index], index) };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '未知时间';
   return new Intl.DateTimeFormat('zh-CN', {
@@ -47,6 +77,7 @@ export function ArchivedSessionsPanel() {
   const fetchArchivedSessions = useSessionStore((state) => state.fetchArchivedSessions);
   const unarchiveSession = useSessionStore((state) => state.unarchiveSession);
   const deleteSession = useSessionStore((state) => state.deleteSession);
+  const removeDeletedSessions = useSessionStore((state) => state.removeDeletedSessions);
   const updateSessionTitle = useSessionStore((state) => state.updateSessionTitle);
   const projects = useProjectStore((state) => state.projects);
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
@@ -58,6 +89,7 @@ export function ArchivedSessionsPanel() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
   const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -117,11 +149,30 @@ export function ArchivedSessionsPanel() {
 
   const handleClearAll = async () => {
     setIsClearing(true);
+    setClearError(null);
+    const sessionsToDelete = [...filteredSessions];
     try {
-      for (const session of filteredSessions) {
-        await deleteSession(session.id);
+      const results = await settleWithConcurrency(
+        sessionsToDelete,
+        ARCHIVED_DELETE_CONCURRENCY,
+        (session) => deleteSession(session.id, { deferLocalUpdate: true }),
+      );
+      const deletedIds = results.flatMap((result, index) =>
+        result.status === 'fulfilled' && result.value ? [sessionsToDelete[index].id] : [],
+      );
+      const failedSessions = results.flatMap((result, index) =>
+        result.status === 'rejected' || !result.value ? [sessionsToDelete[index]] : [],
+      );
+
+      removeDeletedSessions(deletedIds);
+      if (failedSessions.length > 0) {
+        const failedTitles = failedSessions.map((session) => `“${getSessionDisplayTitle(session.title)}”`);
+        setClearError(
+          `已删除 ${deletedIds.length} 个，${failedSessions.length} 个删除失败：${failedTitles.join('、')}`,
+        );
+      } else {
+        setClearConfirm(false);
       }
-      setClearConfirm(false);
     } finally {
       setIsClearing(false);
     }
@@ -141,6 +192,12 @@ export function ArchivedSessionsPanel() {
           全部删除
         </Button>
       </div>
+
+      {clearError && (
+        <div role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-ui-caption text-destructive">
+          {clearError}
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="relative md:col-span-2 xl:col-span-1">

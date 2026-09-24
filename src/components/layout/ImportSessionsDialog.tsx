@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, Download, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -65,15 +65,35 @@ export function ImportSessionsDialog({
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
+  const scanGenerationRef = useRef(0);
+  const importGenerationRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    scanGenerationRef.current += 1;
+    importGenerationRef.current += 1;
+
+    if (!open) {
+      setLoading(false);
+      setImporting(false);
+      return () => {
+        scanGenerationRef.current += 1;
+        importGenerationRef.current += 1;
+      };
+    }
+
     setCandidates([]);
     setSelected(new Set());
     setFilter('claude_code');
+    setLoading(false);
+    setImporting(false);
     setHasScanned(false);
     setError(null);
+
+    return () => {
+      scanGenerationRef.current += 1;
+      importGenerationRef.current += 1;
+    };
   }, [open, projectId]);
 
   useEffect(() => {
@@ -85,26 +105,34 @@ export function ImportSessionsDialog({
   }, []);
 
   const handleFilterChange = (value: string) => {
+    scanGenerationRef.current += 1;
     setFilter(value as ImportFilter);
     setCandidates([]);
     setSelected(new Set());
     setHasScanned(false);
     setError(null);
+    setLoading(false);
   };
 
   const handleDiscover = async () => {
+    scanGenerationRef.current += 1;
+    const generation = scanGenerationRef.current;
     setLoading(true);
     setHasScanned(false);
     setError(null);
     try {
       const items = await daemonFacade.historyImport.discover(filter === 'all' ? undefined : filter);
+      if (generation !== scanGenerationRef.current) return;
       setCandidates(items);
       setSelected(new Set());
       setHasScanned(true);
     } catch (reason) {
+      if (generation !== scanGenerationRef.current) return;
       setError(String(reason));
     } finally {
-      setLoading(false);
+      if (generation === scanGenerationRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -131,7 +159,10 @@ export function ImportSessionsDialog({
 
   const handleImport = async () => {
     if (selected.size === 0) return;
+    const generation = importGenerationRef.current + 1;
+    importGenerationRef.current = generation;
     setImporting(true);
+    setError(null);
     try {
       const result = await daemonFacade.historyImport.import({
         candidateKeys: [...selected],
@@ -139,19 +170,27 @@ export function ImportSessionsDialog({
         refreshExisting: true,
         agentKind: filter === 'all' ? undefined : filter,
       }) as ImportSessionsResult;
+      if (generation !== importGenerationRef.current) return;
       await Promise.all([fetchSessions(), fetchArchivedSessions()]);
+      if (generation !== importGenerationRef.current) return;
       const count = result.importedCount + result.refreshedCount;
-      if (result.errors.length > 0) {
-        toast.warning(`已处理 ${count} 个会话，${result.errors.length} 个失败`);
+      const skippedMessages = result.skippedKeys.map((key) => `${key}: 候选已失效，请重新扫描`);
+      if (result.errors.length > 0 || skippedMessages.length > 0) {
+        setError([...result.errors, ...skippedMessages].join('\n'));
+        toast.warning(`已处理 ${count} 个会话，${result.errors.length + result.skippedKeys.length} 个失败`);
+        onImported?.();
       } else {
         toast.success(`已导入 ${count} 个会话`);
+        onImported?.();
+        onOpenChange(false);
       }
-      onImported?.();
-      onOpenChange(false);
     } catch (reason) {
+      if (generation !== importGenerationRef.current) return;
       setError(String(reason));
     } finally {
-      setImporting(false);
+      if (generation === importGenerationRef.current) {
+        setImporting(false);
+      }
     }
   };
 

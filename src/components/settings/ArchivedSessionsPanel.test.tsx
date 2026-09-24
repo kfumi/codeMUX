@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../../types/session';
 
 // 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
-import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
+import { ArchivedSessionsPanel, settleWithConcurrency } from './ArchivedSessionsPanel';
 
 const unarchiveSession = vi.fn();
 const deleteSession = vi.fn();
+const removeDeletedSessions = vi.fn();
 const fetchArchivedSessions = vi.fn();
 const fetchProjects = vi.fn();
 
@@ -58,6 +59,7 @@ vi.mock('../../stores/sessionStore', () => ({
       unarchiveSession,
       deleteSession,
       updateSessionTitle,
+      removeDeletedSessions,
     }),
 }));
 
@@ -88,10 +90,14 @@ describe('ArchivedSessionsPanel', () => {
   beforeEach(() => {
     unarchiveSession.mockClear();
     deleteSession.mockClear();
+    removeDeletedSessions.mockClear();
+    deleteSession.mockResolvedValue(true);
     fetchArchivedSessions.mockClear();
     fetchProjects.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
   });
+
+  afterEach(() => cleanup());
 
   it('filters archived sessions by agent and resolves legacy titles before truncating', async () => {
     render(<ArchivedSessionsPanel />);
@@ -113,5 +119,43 @@ describe('ArchivedSessionsPanel', () => {
     expect(screen.getByText('1 个对话')).toBeTruthy();
     expect(screen.getByText('Codex 归档会话')).toBeTruthy();
     expect(screen.queryByText(longTitle)).toBeNull();
+  });
+
+  it('limits concurrency, preserves input order, and waits for every result', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const delays = [30, 5, 20, 1, 10, 15];
+
+    const results = await settleWithConcurrency(delays, 3, async (delay, index) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      active -= 1;
+      if (index === 1) throw new Error('delete failed');
+      return index;
+    });
+
+    expect(maxActive).toBe(3);
+    expect(results).toHaveLength(delays.length);
+    expect(results.map((result, index) => result.status === 'fulfilled' ? result.value : index))
+      .toEqual([0, 1, 2, 3, 4, 5]);
+    expect(results[1]).toMatchObject({ status: 'rejected', reason: new Error('delete failed') });
+  });
+
+  it('reports partial batch failure and reconciles successful deletions once', async () => {
+    deleteSession
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    render(<ArchivedSessionsPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: '全部删除' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '全部删除' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('已删除 1 个，1 个删除失败');
+    expect(deleteSession).toHaveBeenCalledWith('session-claude', { deferLocalUpdate: true });
+    expect(deleteSession).toHaveBeenCalledWith('session-codex', { deferLocalUpdate: true });
+    expect(removeDeletedSessions).toHaveBeenCalledTimes(1);
+    expect(removeDeletedSessions).toHaveBeenCalledWith(['session-claude']);
   });
 });

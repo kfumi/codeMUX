@@ -26,7 +26,8 @@ interface SessionState {
     forkProviderTurnId?: string,
     forkProviderTurnOrdinal?: number,
   ) => Promise<Session>;
-  deleteSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string, options?: DeleteSessionOptions) => Promise<boolean>;
+  removeDeletedSessions: (sessionIds: string[]) => void;
   archiveSession: (sessionId: string) => Promise<void>;
   unarchiveSession: (sessionId: string) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
@@ -52,6 +53,12 @@ type CreateSessionAction = {
   model?: string,
 ): Promise<Session>;
 };
+
+type DeleteSessionOptions = {
+  deferLocalUpdate?: boolean;
+};
+let sessionsRequestGeneration = 0;
+let archivedSessionsRequestGeneration = 0;
 
 function resolveDefaultAgentKind(): AgentKind {
   return useSettingsStore.getState().config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
@@ -143,6 +150,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   error: null,
   unreadSessions: new Set<string>(),
   fetchSessions: async () => {
+    const requestGeneration = ++sessionsRequestGeneration;
     set({ isLoading: true, error: null });
     try {
       const rememberedPaths = useAgentStore.getState().sessionWorkingPaths;
@@ -154,6 +162,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
         return session;
       });
+      if (requestGeneration !== sessionsRequestGeneration) return;
       set({ sessions, isLoading: false });
       for (const session of sessions) {
         const remembered = rememberedPaths[session.id]?.trim();
@@ -162,15 +171,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
       }
     } catch (error) {
+      if (requestGeneration !== sessionsRequestGeneration) return;
       set({ error: String(error), isLoading: false });
     }
   },
   fetchArchivedSessions: async () => {
+    const requestGeneration = ++archivedSessionsRequestGeneration;
     set({ isArchivedLoading: true, error: null });
     try {
       const archivedSessions = await daemonFacade.listArchivedSessions();
+      if (requestGeneration !== archivedSessionsRequestGeneration) return;
       set({ archivedSessions, isArchivedLoading: false });
     } catch (error) {
+      if (requestGeneration !== archivedSessionsRequestGeneration) return;
       set({ error: String(error), isArchivedLoading: false });
     }
   },
@@ -211,11 +224,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       throw error;
     }
   },
-  deleteSession: async (sessionId: string) => {
-    set({ isLoading: true, error: null });
+  deleteSession: async (sessionId: string, options?: DeleteSessionOptions) => {
+    const deferLocalUpdate = options?.deferLocalUpdate ?? false;
+    if (!deferLocalUpdate) {
+      set({ isLoading: true, error: null });
+    }
     try {
-      useAgentStore.getState().clearEvents(sessionId);
+      if (!deferLocalUpdate) {
+        useAgentStore.getState().clearEvents(sessionId);
+      }
       await daemonFacade.deleteSession(sessionId);
+      if (deferLocalUpdate) {
+        return true;
+      }
       set((state) => {
         const newSessions = state.sessions.filter((s) => s.id !== sessionId);
         const newArchivedSessions = state.archivedSessions.filter((s) => s.id !== sessionId);
@@ -227,9 +248,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           isLoading: false,
         };
       });
+      return true;
     } catch (error) {
-      set({ error: String(error), isLoading: false });
+      set({
+        error: String(error),
+        ...(!deferLocalUpdate ? { isLoading: false } : {}),
+      });
+      return false;
     }
+  },
+  removeDeletedSessions: (sessionIds: string[]) => {
+    if (sessionIds.length === 0) return;
+    const deletedIds = new Set(sessionIds);
+    for (const sessionId of sessionIds) {
+      useAgentStore.getState().clearEvents(sessionId);
+    }
+    set((state) => {
+      const sessions = state.sessions.filter((session) => !deletedIds.has(session.id));
+      return {
+        sessions,
+        archivedSessions: state.archivedSessions.filter((session) => !deletedIds.has(session.id)),
+        activeSessionId: state.activeSessionId && deletedIds.has(state.activeSessionId)
+          ? (sessions[0]?.id ?? null)
+          : state.activeSessionId,
+        isLoading: false,
+      };
+    });
   },
   archiveSession: async (sessionId: string) => {
     try {

@@ -11,6 +11,7 @@ use crate::agent::opencode_history;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::AppState;
+use rusqlite::Connection;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -204,7 +205,7 @@ pub async fn get_usage_token_breakdown_impl(
 
     let home = home_dir()?;
 
-    let (daily_map, model_map, agent_map) = tokio::task::spawn_blocking(move || {
+    let (daily_map, model_map, agent_map) = tokio::task::spawn_blocking(move || -> Result<(BTreeMap<String, DailyTokens>, BTreeMap<String, (u64, i64)>, BTreeMap<String, (u64, i64)>), String> {
         let mut daily_map: BTreeMap<String, DailyTokens> = BTreeMap::new();
         // model -> (total_tokens, session_count)
         let mut model_map: BTreeMap<String, (u64, i64)> = BTreeMap::new();
@@ -218,6 +219,21 @@ pub async fn get_usage_token_breakdown_impl(
                 .format("%Y-%m-%d")
         );
 
+        // OpenCode's native database is shared by every native session. Keep
+        // one read-only connection for the whole breakdown and project only
+        // message token fields; loading history would also read every part.
+        let opencode_connection = if session_sources.iter().any(|source| {
+            source.agent_kind == AgentKind::Opencode.as_str()
+        }) {
+            let path = opencode_history::find_opencode_database(&home)
+                .ok_or_else(|| "OpenCode database not found".to_string())?;
+            Some(
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|error| format!("Failed to open OpenCode database for usage: {error}"))?,
+            )
+        } else {
+            None
+        };
         for source in &session_sources {
             let agent_kind_enum = match AgentKind::from_str(&source.agent_kind) {
                 Ok(k) => k,
@@ -230,25 +246,23 @@ pub async fn get_usage_token_breakdown_impl(
             let session_daily_result = match agent_kind_enum {
                 AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
                 AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
-                AgentKind::Opencode => aggregate_opencode_tokens(&home, agent_session_id),
+                AgentKind::Opencode => {
+                    let connection = opencode_connection
+                        .as_ref()
+                        .ok_or_else(|| "OpenCode database not found".to_string())?;
+                    aggregate_opencode_tokens_from_connection(connection, agent_session_id)
+                }
                 // pi 的 DB 映射存的是会话 JSONL 绝对路径，直接读文件聚合。
                 AgentKind::Pi => aggregate_pi_tokens(agent_session_id),
                 AgentKind::GeminiCli => Ok(BTreeMap::new()),
             };
 
-            let session_daily = match session_daily_result {
-                Ok(d) => d,
-                Err(error) => {
-                    warn!(
-                        target: "usage",
-                        "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
-                        source.agent_kind,
-                        agent_session_id,
-                        error
-                    );
-                    continue;
-                }
-            };
+            let session_daily = session_daily_result.map_err(|error| {
+                format!(
+                    "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
+                    source.agent_kind, agent_session_id, error
+                )
+            })?;
 
             // Merge session daily tokens into global daily_map (for heatmap + chart)
             let mut session_total: u64 = 0;
@@ -278,10 +292,10 @@ pub async fn get_usage_token_breakdown_impl(
             }
         }
 
-        (daily_map, model_map, agent_map)
+        Ok((daily_map, model_map, agent_map))
     })
     .await
-    .map_err(|e| format!("Failed to join token breakdown task: {}", e))?;
+    .map_err(|e| format!("Failed to join token breakdown task: {}", e))??;
 
     // Split daily_map into chart daily (days window) and heatmap_tokens (all 365 days)
     let days_cutoff_str = format!(
@@ -526,44 +540,76 @@ fn aggregate_codex_tokens(
     Ok(session_daily)
 }
 
-fn aggregate_opencode_tokens(
-    home: &Path,
+fn aggregate_opencode_tokens_from_connection(
+    connection: &Connection,
     opencode_session_id: &str,
 ) -> Result<BTreeMap<String, DailyTokens>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT time_created, \
+                    json_extract(data, '$.role'), \
+                    json_extract(data, '$.tokens.input'), \
+                    json_extract(data, '$.tokens.output'), \
+                    json_extract(data, '$.tokens.cache.read') \
+             FROM message \
+             WHERE session_id = ?1 \
+               AND json_valid(data) \
+               AND json_extract(data, '$.role') = 'assistant' \
+             ORDER BY time_created ASC, id ASC",
+        )
+        .map_err(|error| format!("Failed to query OpenCode token usage: {}", error))?;
+    let rows = statement
+        .query_map([opencode_session_id], |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, rusqlite::types::Value>(2)?,
+                row.get::<_, rusqlite::types::Value>(3)?,
+                row.get::<_, rusqlite::types::Value>(4)?,
+            ))
+        })
+        .map_err(|error| format!("Failed to read OpenCode token usage: {}", error))?;
+
     let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
-
-    let events = opencode_history::load_opencode_native_events(home, opencode_session_id)?;
-
-    for event in events {
-        if event.get("type").and_then(|v| v.as_str()) != Some("assistant") {
+    for row in rows {
+        let (time_created, role, input, output, cached) =
+            row.map_err(|error| format!("Failed to read OpenCode token usage row: {}", error))?;
+        if role != "assistant" {
             continue;
         }
-
-        let Some(usage) = event.get("usage") else {
-            continue;
-        };
-
-        let input_tokens = read_u64(usage.get("input_tokens"));
-        let output_tokens = read_u64(usage.get("output_tokens"));
-        let cached_tokens = read_u64(usage.get("cached_input_tokens"));
-
+        let input_tokens = read_opencode_projected_token(&input);
+        let output_tokens = read_opencode_projected_token(&output);
+        let cached_tokens = read_opencode_projected_token(&cached);
         if input_tokens == 0 && cached_tokens == 0 && output_tokens == 0 {
             continue;
         }
-
-        let timestamp = event
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let date = extract_date_from_timestamp(timestamp);
-
-        let entry = session_daily.entry(date).or_default();
-        entry.input_tokens += input_tokens;
-        entry.cached_tokens += cached_tokens;
-        entry.output_tokens += output_tokens;
+        let Some(time_created) = time_created else {
+            continue;
+        };
+        let date = chrono::DateTime::from_timestamp_millis(time_created)
+            .map(|value| value.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| time_created.to_string());
+        let daily = session_daily.entry(date).or_default();
+        daily.input_tokens += input_tokens;
+        daily.cached_tokens += cached_tokens;
+        daily.output_tokens += output_tokens;
     }
-
     Ok(session_daily)
+}
+
+fn read_opencode_projected_token(value: &rusqlite::types::Value) -> u64 {
+    // `json_extract` returns SQL INTEGER/REAL/TEXT. Wrap that already-small
+    // scalar as a serde value so the shared float/string token reader applies.
+    let value = match value {
+        rusqlite::types::Value::Null => return 0,
+        rusqlite::types::Value::Integer(value) => serde_json::Value::Number((*value).into()),
+        rusqlite::types::Value::Real(value) => serde_json::Number::from_f64(*value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        rusqlite::types::Value::Text(value) => serde_json::Value::String(value.clone()),
+        rusqlite::types::Value::Blob(_) => return 0,
+    };
+    read_u64(Some(&value))
 }
 
 /// 汇总 pi 会话 JSONL 中活动对话链上各条 assistant 消息的 `usage`，按日期归集 Token 消耗。
@@ -782,5 +828,25 @@ mod tests {
         assert_eq!(day.cached_tokens, 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn aggregates_opencode_usage_without_part_table_and_tolerates_bad_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER, time_updated INTEGER, data TEXT NOT NULL);
+             INSERT INTO message VALUES ('a1', 's1', 1757894400000, 1757894400000, '{\"role\":\"assistant\",\"tokens\":{\"input\":10.0,\"output\":\"20\",\"reasoning\":99,\"cache\":{\"read\":\"30\"}}}');
+             INSERT INTO message VALUES ('a2', 's1', 1757894400000, 1757894400000, '{\"role\":\"assistant\",\"tokens\":{\"input\":1.0,\"output\":2.0}}');
+             INSERT INTO message VALUES ('a3', 's1', 1757894400000, 1757894400000, '{\"role\":\"assistant\",\"tokens\":{\"input\":5,\"output\":6}}');
+             INSERT INTO message VALUES ('missing', 's1', 1757894400000, 1757894400000, '{\"role\":\"assistant\"}');
+             INSERT INTO message VALUES ('no-time', 's1', NULL, NULL, '{\"role\":\"assistant\",\"tokens\":{\"input\":7,\"output\":8}}');
+             INSERT INTO message VALUES ('u1', 's1', 1757894400000, 1757894400000, '{\"role\":\"user\",\"tokens\":{\"input\":999,\"output\":999}}');
+             INSERT INTO message VALUES ('bad', 's1', 1757894400000, 1757894400000, '{broken');",
+        ).unwrap();
+
+        let daily = aggregate_opencode_tokens_from_connection(&connection, "s1").unwrap();
+        let day = daily.get("2025-09-15").unwrap();
+        assert_eq!(day.input_tokens, 16);
+        assert_eq!(day.output_tokens, 28);
+        assert_eq!(day.cached_tokens, 30);
     }
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TokenBreakdownResponse, UsageStatsResponse } from '../../types/usage';
@@ -77,6 +77,7 @@ describe('UsageStatistics', () => {
   // RTL 在 vitest 非全局模式下不自动 cleanup，重复渲染会让同一文本匹配到多次。
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
   it('筛选列表不再提供 Gemini 选项', async () => {
     render(<UsageStatistics />);
@@ -111,5 +112,23 @@ describe('UsageStatistics', () => {
     await waitFor(() => expect(screen.getByText('17.7K · 100.0%')).toBeTruthy());
     // pi 会话只统计一次，不会因为 token 与 session 两个数据源重复成两行。
     expect(screen.getAllByText('pi')).toHaveLength(1);
+  });
+
+  it('快速切换时间范围时只请求最终参数', () => {
+    vi.useFakeTimers();
+    render(<UsageStatistics />);
+
+    fireEvent.click(screen.getByRole('button', { name: '最近 7 天' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近 30 天' }));
+
+    act(() => vi.advanceTimersByTime(149));
+    expect(getStatsMock).not.toHaveBeenCalled();
+    expect(getTokenBreakdownMock).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(getStatsMock).toHaveBeenCalledTimes(1);
+    expect(getStatsMock).toHaveBeenCalledWith(undefined, 30);
+    expect(getTokenBreakdownMock).toHaveBeenCalledTimes(1);
+    expect(getTokenBreakdownMock).toHaveBeenCalledWith(undefined, 30);
   });
 });

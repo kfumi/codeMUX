@@ -57,6 +57,8 @@ const TIME_RANGE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 30, label: '最近 30 天' },
 ];
 
+const USAGE_REQUEST_DEBOUNCE_MS = 150;
+
 function formatTokenValue(n: number | null): string {
   if (n === null) return '—';
   if (n >= 1_000_000) {
@@ -107,36 +109,50 @@ export function UsageStatistics() {
   const [tokenBreakdown, setTokenBreakdown] = useState<TokenBreakdownResponse | null>(null);
   const [loadingStats, setLoadingStats] = useState<boolean>(true);
   const [loadingTokens, setLoadingTokens] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoadingStats(true);
     setLoadingTokens(true);
+    setError(null);
+    setStats(null);
+    setTokenBreakdown(null);
 
     const agentArg = agentKind === 'all' ? undefined : agentKind;
+    const requestTimer = window.setTimeout(() => {
+      if (cancelled) return;
 
-    daemonFacade.usage
-      .getStats(agentArg, days)
-      .then((response) => {
-        if (cancelled) return;
-        setStats(response);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingStats(false);
-      });
+      daemonFacade.usage
+        .getStats(agentArg, days)
+        .then((response) => {
+          if (cancelled) return;
+          setStats(response);
+        })
+        .catch((reason) => {
+          if (!cancelled) setError(String(reason));
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingStats(false);
+        });
 
-    daemonFacade.usage
-      .getTokenBreakdown(agentArg, days)
-      .then((response) => {
-        if (cancelled) return;
-        setTokenBreakdown(response);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTokens(false);
-      });
+      daemonFacade.usage
+        .getTokenBreakdown(agentArg, days)
+        .then((response) => {
+          if (cancelled) return;
+          setTokenBreakdown(response);
+        })
+        .catch((reason) => {
+          if (!cancelled) setError(String(reason));
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingTokens(false);
+        });
+    }, USAGE_REQUEST_DEBOUNCE_MS);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(requestTimer);
     };
   }, [agentKind, days]);
 
@@ -223,6 +239,11 @@ export function UsageStatistics() {
 
   return (
     <div className="space-y-8">
+      {error && (
+        <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
       {/* Filter bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Select value={agentKind} onValueChange={setAgentKind}>
