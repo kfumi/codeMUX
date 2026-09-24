@@ -2330,10 +2330,11 @@ const StreamingTokenSpeedIndicator = memo(function StreamingTokenSpeedIndicator(
   return (
     <TooltipHint content="估算输出速度（正文 + 思考）">
       <span
-        className="inline-flex items-center gap-1 text-ui-caption tabular-nums text-muted-foreground"
+        className="inline-flex items-center gap-1 text-ui-body leading-none tabular-nums text-muted-foreground"
         aria-label={`估算输出速度（正文 + 思考）：${speed.toFixed(1)} token 每秒`}
         tabIndex={0}
       >
+        <span aria-hidden>·</span>
         <Gauge className="size-[1em]" aria-hidden="true" />
         {speed.toFixed(1)} tok/s
       </span>
@@ -2351,7 +2352,7 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 py-1 text-sm text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
+        'flex items-center gap-2.5 py-1 text-ui-body text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
       )}
     >
       <DotMatrix state="loading" className="size-4" label="正在执行" />

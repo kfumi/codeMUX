@@ -266,6 +266,9 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     const speedStatus = container.querySelector('[aria-label*="估算输出速度"]');
     expect(speedStatus?.getAttribute('aria-label')).toContain('42.4');
     expect(speedStatus?.getAttribute('tabindex')).toBe('0');
+    expect(speedStatus?.className).toContain('text-ui-body');
+    expect(speedStatus?.className).toContain('leading-none');
+    expect(speedStatus?.textContent).toMatch(/·\s*42\.4 tok\/s/);
 
     send({ type: 'turn_finished', event_id: 'speed-finished', outcome: 'completed', duration_ms: 10 });
     await flush();
