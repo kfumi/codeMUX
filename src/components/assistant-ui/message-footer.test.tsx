@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { forwardRef } from 'react';
 
 const narrowState = vi.hoisted(() => ({ value: false }));
 
@@ -14,7 +15,11 @@ import { MessageFooter } from './message-footer';
 vi.mock('@assistant-ui/react', () => ({
   ActionBarPrimitive: {
     Root: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-    Copy: ({ children, copiedDuration: _copiedDuration, ...props }: any) => <button {...props}>{children}</button>,
+    Copy: forwardRef<HTMLButtonElement, any>(
+      ({ children, copiedDuration: _copiedDuration, ...props }: any, ref) => (
+        <button ref={ref} {...props}>{children}</button>
+      ),
+    ),
   },
   useAuiState: (selector: (state: any) => unknown) =>
     selector({ message: { isCopied: false } }),
@@ -23,6 +28,35 @@ vi.mock('@assistant-ui/react', () => ({
 describe('MessageFooter', () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it.each([
+    ['actions only', {}],
+    ['full', { timestamp: Date.parse('2026-06-12T21:40:00+08:00') }],
+    ['minimal', { timestamp: Date.parse('2026-06-12T21:40:00+08:00'), variant: 'minimal' as const }],
+  ])('uses the configured UI body size for %s footers', (_label, props) => {
+    const { container } = render(<MessageFooter copyText="message" {...props} />);
+
+    expect(container.querySelector('[data-message-footer]')?.className).toContain('text-ui-body');
+  });
+
+  it('scales action icons with the configured footer font size', () => {
+    const { container } = render(
+      <MessageFooter
+        sessionId="session-1"
+        canFork
+        isForking
+        onFork={() => undefined}
+      />,
+    );
+
+    const icons = container.querySelectorAll('[data-message-footer] svg');
+    expect(icons).toHaveLength(3);
+    icons.forEach((icon) => {
+      expect(icon.getAttribute('class')).toContain('size-[1em]');
+      expect(icon.getAttribute('class')).not.toContain('h-3');
+      expect(icon.getAttribute('class')).not.toContain('w-3');
+    });
   });
 
   it('can stay hidden until the message row is hovered', () => {

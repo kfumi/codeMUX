@@ -74,7 +74,7 @@ export function MessageFooter({
     return (
       <div
         data-message-footer
-        className={cn('mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/68', revealClass, className)}
+        className={cn('mt-1 flex items-center gap-1.5 text-ui-body text-muted-foreground/68', revealClass, className)}
       >
         {actions}
       </div>
@@ -86,8 +86,8 @@ export function MessageFooter({
       data-message-footer
       className={cn(
         isMinimal
-          ? 'mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/68'
-          : 'mt-2 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
+          ? 'mt-1 flex items-center gap-1.5 text-ui-body text-muted-foreground/68'
+          : 'mt-2 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-body text-muted-foreground/68',
         revealClass,
         className,
       )}
@@ -124,7 +124,7 @@ function DebugCopyButton({ sessionId, sourceUuid }: { sessionId: string; sourceU
         )}
         aria-label="复制排查问题提示词"
       >
-        {isCopied ? <Check className="h-3 w-3" /> : <Bug className="h-3 w-3" />}
+        {isCopied ? <Check className="size-[1em]" /> : <Bug className="size-[1em]" />}
       </button>
     </TooltipHint>
   );
@@ -152,7 +152,7 @@ function ExplicitCopyButton({ text }: { text: string }) {
           'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
         )}
       >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        {copied ? <Check className="size-[1em]" /> : <Copy className="size-[1em]" />}
       </button>
     </TooltipHint>
   );
@@ -171,7 +171,7 @@ function MessageCopyButton() {
         )}
         aria-label="复制"
       >
-        {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        {isCopied ? <Check className="size-[1em]" /> : <Copy className="size-[1em]" />}
       </ActionBarPrimitive.Copy>
     </TooltipHint>
   );
@@ -190,7 +190,7 @@ function ForkButton({ isForking, onFork }: { isForking: boolean; onFork: () => v
         )}
         aria-label="从此回复创建分支"
       >
-        {isForking ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitForkIcon className="h-3 w-3" />}
+        {isForking ? <Loader2 className="size-[1em] animate-spin" /> : <GitForkIcon className="size-[1em]" />}
       </button>
     </TooltipHint>
   );

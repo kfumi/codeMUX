@@ -2397,7 +2397,13 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const rewindButtons = screen.getAllByRole('button', { name: '回退到此消息' });
     expect(rewindButtons).toHaveLength(5);
 
-    openRewindMenu(rewindButtons[rewindButtons.length - 1]);
+    const latestRewindButton = rewindButtons[rewindButtons.length - 1];
+    expect(latestRewindButton.className).toContain('text-ui-body');
+    expect(latestRewindButton.querySelector('svg')?.getAttribute('class')).toContain('size-[1em]');
+
+    openRewindMenu(latestRewindButton);
+    const rewindConversationItem = (await screen.findByText('回退对话')).closest('[role="menuitem"]');
+    expect(rewindConversationItem?.querySelector('svg')?.getAttribute('class')).toContain('size-[1em]');
     fireEvent.click(await screen.findByText('回退对话'));
 
     await waitFor(() => {

@@ -999,9 +999,9 @@ const UserMessage = memo(function UserMessage({
                       size="icon"
                       aria-label={rewindTooltip}
                       disabled={isRewinding}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:ring-0 disabled:pointer-events-none disabled:opacity-40"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-ui-body text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:ring-0 disabled:pointer-events-none disabled:opacity-40"
                     >
-                      {isRewinding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+                      {isRewinding ? <Loader2 className="size-[1em] animate-spin" /> : <Undo2 className="size-[1em]" />}
                     </Button>
                   </TooltipTrigger>
                 </DropdownMenuTrigger>
@@ -1012,17 +1012,17 @@ const UserMessage = memo(function UserMessage({
                   此操作无法撤销
                 </div>
                 {rewindModes.includes('conversation') ? (
-                  <DropdownMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('conversation')}>
+                  <DropdownMenuItem icon={<MessageSquare className="size-[1em]" />} onSelect={() => handleRewindSelect('conversation')}>
                     回退对话
                   </DropdownMenuItem>
                 ) : null}
                 {rewindModes.includes('files') ? (
-                  <DropdownMenuItem icon={<FileText className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('files')}>
+                  <DropdownMenuItem icon={<FileText className="size-[1em]" />} onSelect={() => handleRewindSelect('files')}>
                     回退文件
                   </DropdownMenuItem>
                 ) : null}
                 {rewindModes.includes('both') ? (
-                  <DropdownMenuItem icon={<Layers className="h-3.5 w-3.5" />} onSelect={() => handleRewindSelect('both')}>
+                  <DropdownMenuItem icon={<Layers className="size-[1em]" />} onSelect={() => handleRewindSelect('both')}>
                     回退对话和文件
                   </DropdownMenuItem>
                 ) : null}
