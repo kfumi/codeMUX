@@ -181,6 +181,24 @@ ad-hoc 签名的 mac 包能运行,但 Gatekeeper 会拦:用户需右键「打开
 
 核心链路(对话、Agent、daemon、文件、终端、内置浏览器、网页/手机形态)不挑平台。
 
+### 签名现状
+
+| 平台 | 状态 |
+| --- | --- |
+| Windows | 未配 `CSC_LINK` → 未签名;配了走 signtool 链(含 daemon) |
+| macOS | **永久无 Apple Developer ID** → ad-hoc 签名(`identity: null` 显式写死) |
+| Linux | 不签名 |
+
+macOS 的无证书状态是**既定决策**,不是待办:拿不到、也不打算申请(年费 + 需实体
+组织)。代价是首次打开被 Gatekeeper 拦一次,用户需右键「打开」,或执行
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CodeMUX.app
+```
+
+这是 Apple 对所有未公证应用的统一策略,任何配置都绕不开;不这么做就无法分发。
+安装说明写进了 Release 说明正文(`release.yml` 的 `createRelease`),用户下载页
+上直接能看到。
 ## 通知身份(Windows)
 
 - main 进程 `app.setAppUserModelId('com.codemux.desktop')`,与 electron-builder

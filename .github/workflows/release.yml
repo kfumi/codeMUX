@@ -108,7 +108,7 @@ jobs:
                 repo,
                 tag_name: tag,
                 name: `codeMUX v${version}`,
-                body: "桌面端安装包下载见下方 Assets。",
+                body: "安装包见下方 Assets。\n\n| 平台 | 下载 | 说明 |\n| --- | --- | --- |\n| Windows | CodeMUX Setup *.exe | NSIS 安装包，双击安装 |\n| macOS (Apple Silicon) | CodeMUX *-arm64.dmg | 见下方「macOS 安装」 |\n| macOS (Intel) | CodeMUX *-x64.dmg | 见下方「macOS 安装」 |\n| Linux | CodeMUX *-x86_64.AppImage | chmod +x 后直接运行，无需安装 |\n\n## macOS 安装（未签名）\n\n本项目没有 Apple Developer ID 证书，因此 macOS 包是 ad-hoc 签名，**没有经过 Apple 公证**。首次打开会被 Gatekeeper 拦一次，这是 Apple 对所有未公证应用的统一策略，无法通过任何配置绕开。\n\n任选一种方式绕过：\n\n1. 打开 dmg，把 CodeMUX 拖进「应用程序」；然后**右键点 CodeMUX → 打开**，在弹窗里再点一次「打开」。\n2. 或在「终端」里执行：\n\n```bash\nxattr -dr com.apple.quarantine /Applications/CodeMUX.app\n```\n\n之后即可正常启动与自动更新。",
                 draft: false,
                 prerelease: false,
                 target_commitish: targetBranch,

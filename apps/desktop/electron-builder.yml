@@ -75,12 +75,19 @@ nsis:
   shortcutName: CodeMUX
 
 # macOS:dmg 给人装/分发,zip 给 electron-updater —— latest-mac.yml 指向的是 zip,
-# 只出 dmg 的话已装用户能检测到新版本却装不上。两个产物都要。
-# 未配 Apple 证书时 electron-builder 走 ad-hoc 签名:能跑,但 Gatekeeper 会拦,
-# 用户需右键「打开」或在系统设置里放行。
+# 只出 dmg 的话已装用户检测得到新版本却装不上。两个产物都要。
+#
+# identity: null 是**明确的既定选择**,不是默认值碰运气:本项目拿不到、也不打算申请
+# Apple Developer ID(年费 + 需实体组织),因此不做 Developer ID 签名与公证。
+# electron-builder 会走 ad-hoc 签名(codesign -s -),产物能正常运行,代价是首启被
+# Gatekeeper 拦一次:用户需右键点「打开」,或
+#   xattr -dr com.apple.quarantine /Applications/CodeMUX.app
+# 这条限制是 Apple 的策略,任何未公证的 mac 应用都一样,改不了。
+# 安装说明写在 Release 说明正文里(见 .github/workflows/release.yml 的 createRelease)。
 mac:
   icon: build/icons/icon.icns
   category: public.app-category.developer-tools
+  identity: null
   target:
     - target: dmg
       arch:
