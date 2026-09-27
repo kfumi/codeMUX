@@ -7,7 +7,9 @@
 - 桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**（Tauri 壳已从仓库移除；daemon crate 位于 `crates/daemon/`，目录已由 `src-tauri/` 改名）。
 - 出包：`npm run build:electron-installer`（详见下文「构建安装包」），产物输出到 `apps/desktop/release/`。
 - 发布：把安装包（NSIS exe）与 `latest.yml` 上传到 [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)，现有安装版经 electron-updater 检测到更新。
-- CI 发版流水线待迁移：`.github/workflows/release.yml` 目前只负责推标签时创建 GitHub Release 记录（`publish-tauri` 任务已随 Tauri 壳移除），**不产出也不上传安装包**；正式标签发版请本地出包后手动上传附件，或先完成 workflow 迁移。
+- CI 发版流水线已迁回 Electron：`.github/workflows/release.yml` 的 `ensure-release` 建 Release 记录，紧随其后的 `build-windows` job（`windows-latest`）跑完整出包链路并把 NSIS exe / blockmap / `latest.yml` 用 `gh release upload --clobber` 附到该 Release 上。推 tag 即自动出包，无需本地手工上传。
+- 需要人工介入的只剩两处：仓库 Secrets 里的签名证书（未配置则出未签名包），以及 mac / linux 打包（`electron-builder.yml` 仍只配了 win，属待办）。
+- 本地出包仍可用（见下文），用于临时验证或绕过 CI；`build-windows` 的步骤顺序刻意与 `build:electron-installer` 一致，改动出包链路时两边都要看。
 
 ## 版本号同步（daemon 版本配对依赖）
 
@@ -93,6 +95,15 @@ npm run build:electron-installer
 - daemon 与应用使用同一证书、同一时间戳服务（RFC3161, SHA256），信任链一致。
 - 证书文件与密码不得提交仓库；CI 中经 GitHub Secrets 注入。
 
+CI 侧对应两个仓库 Secrets（Settings → Secrets and variables → Actions）：
+
+| Secret | 内容 | 缺失后果 |
+| --- | --- | --- |
+| `CSC_LINK` | `.pfx` 的 base64 内容（Actions 里传文件路径没意义，务必 base64） | workflow 跳过签名，产出未签名安装包，并在 job summary 里标注 |
+| `CSC_KEY_PASSWORD` | 证书密码 | 同上 |
+
+`build-windows` job 先把 Secrets 注入为环境变量再判断是否配置（`secrets` 上下文不能直接用于 `if` 条件），**已配置但签名失败会直接让 job 失败**，不会产出未签名发布物。
+
 ## 更新通道(GitHub Releases)
 
 - [`apps/desktop/electron-builder.yml`](/D:/project/my-project/codeMUX/apps/desktop/electron-builder.yml:1)
@@ -149,3 +160,25 @@ v0.3.1 之前发布面为 Tauri(`tauri build` + tauri updater 密钥对 + `lates
 Tauri 壳与其发版脚本 `release:local` 已随工单 09 下线;`tauri.conf.json` 及其
 updater `pubkey` 不再存在,相关 GitHub Secrets(`TAURI_SIGNING_PRIVATE_KEY*`)可
 在 CI 迁移完成后一并清理。
+
+## CI 出包 job 一览(`build-windows`)
+
+`.github/workflows/release.yml` 在推 `v*.*.*` tag 时触发,两个 job 串行:
+
+| job | runner | 职责 |
+| --- | --- | --- |
+| `ensure-release` | ubuntu | 按 `package.json` 版本确保 tag 与 GitHub Release 存在 |
+| `build-windows` | windows | 检出 tag → 装依赖 → 构建 → NSIS 打包 → 上传产物与 Release 附件 |
+
+`build-windows` 的构建步骤与根脚本 `build:electron-installer` 一一对应,唯一区别是
+打包命令走 `npm run pack:win -- --publish never`:electron-builder 的默认发布策略是
+`onTagOrDraft`,在 tag 触发的 CI 上会自行发布并和 `ensure-release` 建的 Release 打架;
+`--publish never` 让它只出包,上传统一交给 `gh release upload --clobber`(可重复执行)。
+缓存了 `crates/daemon` 的 cargo 产物(`Swatinem/rust-cache`)与 electron-builder 工具包
+(`%LOCALAPPDATA%\electron-builder\Cache`,含 nsis/7zip,约 100MB+,不缓存则每次重下)。
+产物同时用 `actions/upload-artifact` 留存 14 天,即使 Release 附件传失败也能从
+workflow 页面取回安装包。
+
+给已存在的 tag 补装安装包(如迁移期间漏出包的版本):在 Actions 页手动
+`workflow_dispatch` 跑一次 Release workflow 即可 —— `ensure-release` 会识别到
+Release 已存在而跳过创建,`build-windows` 照常出包并覆盖上传。

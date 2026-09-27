@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # 仓库默认分支是 master(远端 HEAD 已确认);原配置的 main 导致 push 从不触发 CI。
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

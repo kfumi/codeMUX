@@ -116,3 +116,126 @@ jobs:
 
               core.info(`已创建 Release ${tag}，id: ${created.data.id}`);
             }
+
+  # Tauri 时代这里是 publish-tauri(tauri-action 一步出包并附到 Release)。
+  # 迁移到 Electron 壳后该 job 被删掉,只剩 ensure-release 建记录、不出包 ——
+  # 于是推 tag 只能得到一个空 Assets 的 Release。本 job 补回出包与上传:
+  # 出包(Windows NSIS,与本地 build:electron-installer 同链路)→ upload-artifact
+  # 留存 → gh release upload 附到 ensure-release 建的 Release 上。
+  build-windows:
+    name: Build Windows Installer
+    needs: ensure-release
+    runs-on: windows-latest
+    env:
+      TAG_NAME: ${{ needs.ensure-release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 按 tag 而非触发 ref 取代码:workflow_dispatch 时 tag 可能刚由
+          # ensure-release 创建,或与分支头有偏差,出包必须对齐 tag 指向的提交。
+          ref: ${{ needs.ensure-release.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/sidecar/package-lock.json
+            apps/desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/daemon
+
+      - name: Cache electron-builder binaries
+        uses: actions/cache@v4
+        with:
+          # nsis / nsis-resources / 7zip / winCodeSign 等工具包约 100MB+,
+          # 缓存后免去每次重新下载(国内网络下这步尤其容易超时)。
+          path: ~\AppData\Local\electron-builder\Cache
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('apps/desktop/package-lock.json') }}
+          restore-keys: |
+            electron-builder-${{ runner.os }}-
+
+      - name: Configure code signing
+        shell: pwsh
+        env:
+          # secrets 上下文不能直接用于 if 条件,故先入环境变量再判断。
+          CSC_LINK_SECRET: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_SECRET: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          if ($env:CSC_LINK_SECRET) {
+            "CSC_LINK=$env:CSC_LINK_SECRET" >> $env:GITHUB_ENV
+            "CSC_KEY_PASSWORD=$env:CSC_KEY_PASSWORD_SECRET" >> $env:GITHUB_ENV
+            Write-Host "已注入签名证书,本次出包将签名(应用本体 + daemon)。"
+          } else {
+            Write-Host "未配置 secrets.CSC_LINK,本次出包为未签名产物。"
+            "未配置 secrets.CSC_LINK,本次安装包未签名。" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install sidecar dependencies
+        working-directory: apps/sidecar
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build sidecar
+        working-directory: apps/sidecar
+        run: npm run build
+
+      - name: Build daemon (release binary)
+        run: npm run build:daemon:release
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build unified web bundle
+        run: npm run build:web
+
+      - name: Package NSIS installer
+        working-directory: apps/desktop
+        # 不用根 build:electron-installer:它结尾的 pack:win 无法透传参数,而
+        # electron-builder 默认策略是 onTagOrDraft —— 在 tag 触发的 CI 上会自行
+        # 发布,和 ensure-release 建的 Release 打架。--publish never 让本 job 只出包,
+        # 上传交给下一步统一做(可 --clobber 重跑)。
+        run: npm run pack:win -- --publish never
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-${{ needs.ensure-release.outputs.version }}
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish assets to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: kfumi/codeMUX
+        run: |
+          $assets = Get-ChildItem "apps/desktop/release" -File |
+            Where-Object { $_.Extension -in ".exe", ".blockmap", ".yml" }
+          if (-not $assets) {
+            throw "apps/desktop/release 下没有可上传的安装包产物。"
+          }
+          $assets | ForEach-Object { Write-Host "上传: $($_.Name)" }
+          gh release upload $env:TAG_NAME @($assets.FullName) --clobber
+          Write-Host "已附加到 Release $env:TAG_NAME"
