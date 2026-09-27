@@ -118,6 +118,15 @@ struct DailyTokens {
     cached_tokens: u64,
 }
 
+// 维度名 -> (total_tokens, session_count)
+type DimensionTokens = BTreeMap<String, (u64, i64)>;
+// spawn_blocking 聚合的产物:按天 / 按模型 / 按 agent 三张表。
+type UsageBreakdown = (
+    BTreeMap<String, DailyTokens>,
+    DimensionTokens,
+    DimensionTokens,
+);
+
 fn extract_date_from_timestamp(timestamp: &str) -> String {
     if timestamp.len() >= 10 {
         timestamp[..10].to_string()
@@ -205,97 +214,100 @@ pub async fn get_usage_token_breakdown_impl(
 
     let home = home_dir()?;
 
-    let (daily_map, model_map, agent_map) = tokio::task::spawn_blocking(move || -> Result<(BTreeMap<String, DailyTokens>, BTreeMap<String, (u64, i64)>, BTreeMap<String, (u64, i64)>), String> {
-        let mut daily_map: BTreeMap<String, DailyTokens> = BTreeMap::new();
-        // model -> (total_tokens, session_count)
-        let mut model_map: BTreeMap<String, (u64, i64)> = BTreeMap::new();
-        // agent_kind -> (total_tokens, session_count)
-        let mut agent_map: BTreeMap<String, (u64, i64)> = BTreeMap::new();
-        let days_cutoff = format!(
-            "{}",
-            chrono::Utc::now()
-                .checked_sub_signed(chrono::Duration::days(days as i64))
-                .unwrap_or_else(chrono::Utc::now)
-                .format("%Y-%m-%d")
-        );
+    let (daily_map, model_map, agent_map) =
+        tokio::task::spawn_blocking(move || -> Result<UsageBreakdown, String> {
+            let mut daily_map: BTreeMap<String, DailyTokens> = BTreeMap::new();
+            let mut model_map: DimensionTokens = DimensionTokens::new();
+            let mut agent_map: DimensionTokens = DimensionTokens::new();
+            let days_cutoff = format!(
+                "{}",
+                chrono::Utc::now()
+                    .checked_sub_signed(chrono::Duration::days(days as i64))
+                    .unwrap_or_else(chrono::Utc::now)
+                    .format("%Y-%m-%d")
+            );
 
-        // OpenCode's native database is shared by every native session. Keep
-        // one read-only connection for the whole breakdown and project only
-        // message token fields; loading history would also read every part.
-        let opencode_connection = if session_sources.iter().any(|source| {
-            source.agent_kind == AgentKind::Opencode.as_str()
-        }) {
-            let path = opencode_history::find_opencode_database(&home)
-                .ok_or_else(|| "OpenCode database not found".to_string())?;
-            Some(
-                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                    .map_err(|error| format!("Failed to open OpenCode database for usage: {error}"))?,
-            )
-        } else {
-            None
-        };
-        for source in &session_sources {
-            let agent_kind_enum = match AgentKind::from_str(&source.agent_kind) {
-                Ok(k) => k,
-                Err(_) => continue,
-            };
-            let Some(agent_session_id) = source.agent_session_id.as_ref() else {
-                continue;
-            };
-
-            let session_daily_result = match agent_kind_enum {
-                AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
-                AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
-                AgentKind::Opencode => {
-                    let connection = opencode_connection
-                        .as_ref()
-                        .ok_or_else(|| "OpenCode database not found".to_string())?;
-                    aggregate_opencode_tokens_from_connection(connection, agent_session_id)
-                }
-                // pi 的 DB 映射存的是会话 JSONL 绝对路径，直接读文件聚合。
-                AgentKind::Pi => aggregate_pi_tokens(agent_session_id),
-                AgentKind::GeminiCli => Ok(BTreeMap::new()),
-            };
-
-            let session_daily = session_daily_result.map_err(|error| {
-                format!(
-                    "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
-                    source.agent_kind, agent_session_id, error
+            // OpenCode's native database is shared by every native session. Keep
+            // one read-only connection for the whole breakdown and project only
+            // message token fields; loading history would also read every part.
+            let opencode_connection = if session_sources
+                .iter()
+                .any(|source| source.agent_kind == AgentKind::Opencode.as_str())
+            {
+                let path = opencode_history::find_opencode_database(&home)
+                    .ok_or_else(|| "OpenCode database not found".to_string())?;
+                Some(
+                    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(|error| {
+                        format!("Failed to open OpenCode database for usage: {error}")
+                    })?,
                 )
-            })?;
+            } else {
+                None
+            };
+            for source in &session_sources {
+                let agent_kind_enum = match AgentKind::from_str(&source.agent_kind) {
+                    Ok(k) => k,
+                    Err(_) => continue,
+                };
+                let Some(agent_session_id) = source.agent_session_id.as_ref() else {
+                    continue;
+                };
 
-            // Merge session daily tokens into global daily_map (for heatmap + chart)
-            let mut session_total: u64 = 0;
-            for (date, tokens) in &session_daily {
-                let entry = daily_map.entry(date.clone()).or_default();
-                entry.input_tokens += tokens.input_tokens;
-                entry.cached_tokens += tokens.cached_tokens;
-                entry.output_tokens += tokens.output_tokens;
-                session_total += tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
+                let session_daily_result = match agent_kind_enum {
+                    AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
+                    AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
+                    AgentKind::Opencode => {
+                        let connection = opencode_connection
+                            .as_ref()
+                            .ok_or_else(|| "OpenCode database not found".to_string())?;
+                        aggregate_opencode_tokens_from_connection(connection, agent_session_id)
+                    }
+                    // pi 的 DB 映射存的是会话 JSONL 绝对路径，直接读文件聚合。
+                    AgentKind::Pi => aggregate_pi_tokens(agent_session_id),
+                    AgentKind::GeminiCli => Ok(BTreeMap::new()),
+                };
+
+                let session_daily = session_daily_result.map_err(|error| {
+                    format!(
+                        "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
+                        source.agent_kind, agent_session_id, error
+                    )
+                })?;
+
+                // Merge session daily tokens into global daily_map (for heatmap + chart)
+                let mut session_total: u64 = 0;
+                for (date, tokens) in &session_daily {
+                    let entry = daily_map.entry(date.clone()).or_default();
+                    entry.input_tokens += tokens.input_tokens;
+                    entry.cached_tokens += tokens.cached_tokens;
+                    entry.output_tokens += tokens.output_tokens;
+                    session_total +=
+                        tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
+                }
+
+                // Aggregate by model and agent_kind (only for sessions within the days window)
+                let session_date = source.created_at.get(..10).unwrap_or(&source.created_at);
+                if session_date >= days_cutoff.as_str() {
+                    let model_label = source
+                        .model
+                        .as_deref()
+                        .filter(|m| !m.is_empty())
+                        .unwrap_or("未知模型");
+                    let model_entry = model_map.entry(model_label.to_string()).or_insert((0, 0));
+                    model_entry.0 += session_total;
+                    model_entry.1 += 1;
+
+                    let agent_entry = agent_map.entry(source.agent_kind.clone()).or_insert((0, 0));
+                    agent_entry.0 += session_total;
+                    agent_entry.1 += 1;
+                }
             }
 
-            // Aggregate by model and agent_kind (only for sessions within the days window)
-            let session_date = source.created_at.get(..10).unwrap_or(&source.created_at);
-            if session_date >= days_cutoff.as_str() {
-                let model_label = source
-                    .model
-                    .as_deref()
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or("未知模型");
-                let model_entry = model_map.entry(model_label.to_string()).or_insert((0, 0));
-                model_entry.0 += session_total;
-                model_entry.1 += 1;
-
-                let agent_entry = agent_map.entry(source.agent_kind.clone()).or_insert((0, 0));
-                agent_entry.0 += session_total;
-                agent_entry.1 += 1;
-            }
-        }
-
-        Ok((daily_map, model_map, agent_map))
-    })
-    .await
-    .map_err(|e| format!("Failed to join token breakdown task: {}", e))??;
+            Ok((daily_map, model_map, agent_map))
+        })
+        .await
+        .map_err(|e| format!("Failed to join token breakdown task: {}", e))??;
 
     // Split daily_map into chart daily (days window) and heatmap_tokens (all 365 days)
     let days_cutoff_str = format!(
