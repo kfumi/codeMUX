@@ -90,7 +90,8 @@ console.log(`已完成一键发版流程：${tagName}`);
 if (dryRun) {
   console.log("当前为 dry-run，仅输出了将执行的命令，没有改动文件、提交或推送。");
 } else {
-  console.log("注意:当前 GitHub Actions 发版流水线仍是 Tauri 时代配置,Electron 安装包");
-  console.log("请用 `npm run build:electron-installer` 本地出包后上传到 GitHub Releases");
-  console.log("(见 docs/guides/desktop-release-guide.md;CI 迁移为待办)。");
+  console.log("Release workflow 已接管出包:tag 推送后 build-windows 会自动构建 NSIS 安装包");
+  console.log("并上传到 GitHub Releases,无需本地出包。");
+  console.log("注意:仓库 Secrets 未配置 CSC_LINK 时出的是未签名包;");
+  console.log("详见 docs/guides/desktop-release-guide.md。");
 }

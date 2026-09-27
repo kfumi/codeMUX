@@ -218,10 +218,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer-${{ needs.ensure-release.outputs.version }}
+          # builder-debug.yml 是 electron-builder 的调试输出,不是发布物,别挂上去。
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest.yml
+            !apps/desktop/release/builder-*.yml
           if-no-files-found: error
           retention-days: 14
 
@@ -232,7 +234,7 @@ jobs:
           GH_REPO: kfumi/codeMUX
         run: |
           $assets = Get-ChildItem "apps/desktop/release" -File |
-            Where-Object { $_.Extension -in ".exe", ".blockmap", ".yml" }
+            Where-Object { $_.Extension -in ".exe", ".blockmap", ".yml" -and $_.Name -notlike "builder-*.yml" }
           if (-not $assets) {
             throw "apps/desktop/release 下没有可上传的安装包产物。"
           }
