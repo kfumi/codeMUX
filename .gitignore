@@ -31,6 +31,12 @@ dist-ssr
 .worktrees/
 *.local
 
+
+# 根目录出现这些只可能是误操作(本地演练脚本曾把 Copy-Item 的目标写成空,
+# PowerShell 会默认复制到当前目录)。它们是 100MB+ 的构建产物,绝不该进仓库。
+/latest.yml
+/*.exe
+/*.blockmap
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

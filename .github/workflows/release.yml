@@ -264,11 +264,19 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          # 无论成败都把打包日志尾部打进 annotations。::warning:: 不会让 job 失败,
-          # 但内容可经 GitHub API 读到 —— 排查时不必去翻需要鉴权的原始日志。
+          # 诊断一律用 ::warning:: / ::error:: 打到 stdout —— runner 是从 stdout 解析
+          # workflow 命令的,管道给 Out-Null 会把命令一起吞掉(踩过:上一版的诊断
+          # 就是这么消失的)。命令本身不会出现在日志正文里,但可经 GitHub API
+          # 读到,排查时不必去翻需要鉴权的原始日志。
+          # 注意消息里不能有裸换行(会被当成命令结束)或裸 % (会被当占位符),
+          # 所以先压成单行并转义。
+          function Say([string]$level, [string]$title, [string]$msg) {
+            $safe = ($msg -replace "%", "%25") -replace "\r?\n", " / "
+            "::${level} title=${title}::${safe}"
+          }
+
           if (Test-Path "apps/desktop/packaging.log") {
-            $tail = (Get-Content "apps/desktop/packaging.log" -Tail 30) -join " / "
-            "::warning title=打包日志尾部::$tail" | Out-Null
+            Say "warning" "打包日志尾部" ((Get-Content "apps/desktop/packaging.log" -Tail 30) -join "`n")
           }
 
           $dest = Join-Path $env:GITHUB_WORKSPACE "release-assets"
@@ -285,10 +293,10 @@ jobs:
               $_.FullName -notmatch "\\(win-unpacked|linux-unpacked|[^\\]+\.app|resources)\\" -and
               $_.Extension -in ".exe", ".dmg", ".zip", ".AppImage", ".blockmap", ".yml"
             }
-          "::warning title=收集到的产物::$($assets.Count) 个: $(($assets.Name) -join ' / ')" | Out-Null
+          Say "warning" "收集到的产物" "$($assets.Count) 个: $(($assets.Name) -join ' / ')"
           if (-not $assets) {
-            "::error title=没有出包产物::apps/desktop/release 下没有可上传的安装包文件" | Out-Null
-            "::error title=release 目录现状::$((Get-ChildItem apps/desktop/release -Recurse -Depth 2 | Select-Object -First 30 -ExpandProperty FullName) -join ' / ')" | Out-Null
+            Say "error" "没有出包产物" "apps/desktop/release 下没有可上传的安装包文件"
+            Say "error" "release 目录现状" ((Get-ChildItem "apps/desktop/release" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 30 -ExpandProperty FullName) -join "`n")
             exit 1
           }
           $assets | ForEach-Object {
