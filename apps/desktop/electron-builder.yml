@@ -33,9 +33,14 @@ files:
   - renderer-dist/**
   - package.json
 extraResources:
-  # daemon 独立二进制(工单 03)→ 资源根 daemon/
-  - from: ../../crates/daemon/target/release/codemux-daemon.exe
-    to: daemon/codemux-daemon.exe
+  # daemon 独立二进制(工单 03)→ 资源根 daemon/。不能直接写
+  # target/release/codemux-daemon.exe:文件名随平台变(unix 不带 .exe),而
+  # electron-builder.yml 没有按目标平台分支的能力。改由
+  # scripts/stage-daemon-bin.mjs 先按当前平台把二进制放进 daemon-bin/,这里只
+  # 引用目录名,一份配置通吃 win/mac/linux。落地文件名与 main.ts 的
+  # resolveDaemonExe() 对应。
+  - from: daemon-bin
+    to: daemon
   # 统一前端产物(工单 02):daemon 经资源根 dist-web 把它服务给浏览器/移动形态,
   # 与壳内 renderer-dist 同源同一次构建(npm run build:web)。
   - from: ../../dist-web
@@ -68,3 +73,30 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   shortcutName: CodeMUX
+
+# macOS:dmg 给人装/分发,zip 给 electron-updater —— latest-mac.yml 指向的是 zip,
+# 只出 dmg 的话已装用户能检测到新版本却装不上。两个产物都要。
+# 未配 Apple 证书时 electron-builder 走 ad-hoc 签名:能跑,但 Gatekeeper 会拦,
+# 用户需右键「打开」或在系统设置里放行。
+mac:
+  icon: build/icons/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+
+# Linux:AppImage 单文件免 root,是最省事的分发形态;extraResources 的
+# icons/icon.ico 在这里用不到(托盘走 PNG),保留无害。
+linux:
+  icon: build/icons/icon.png
+  category: Development
+  target:
+    - target: AppImage
+      arch:
+        - x64

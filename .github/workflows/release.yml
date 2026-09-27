@@ -119,13 +119,32 @@ jobs:
 
   # Tauri 时代这里是 publish-tauri(tauri-action 一步出包并附到 Release)。
   # 迁移到 Electron 壳后该 job 被删掉,只剩 ensure-release 建记录、不出包 ——
-  # 于是推 tag 只能得到一个空 Assets 的 Release。本 job 补回出包与上传:
-  # 出包(Windows NSIS,与本地 build:electron-installer 同链路)→ upload-artifact
-  # 留存 → gh release upload 附到 ensure-release 建的 Release 上。
-  build-windows:
-    name: Build Windows Installer
+  # 于是推 tag 只能得到一个空 Assets 的 Release。本 job 补回出包与上传。
+  #
+  # 三平台矩阵,而不是三份几乎一样的 job:pwsh 在 windows/ubuntu/macos runner 上
+  # 都预装,所以「取产物 → 上传」这段 PowerShell 三个平台能原样共用;每个 runner
+  # 只产自己平台的产物(electron-builder 只构建请求的 target),所以上传整个
+  # release/ 目录、排除 builder-*.yml 即可,不必按平台写扩展名白名单。
+  #
+  # daemon 必须在本平台原生编译(Rust 无法从 Windows 交叉编译到 mac/linux),
+  # 所以矩阵不能省,三个 runner 都要各自跑一遍完整构建。
+  build-desktop:
+    name: Build ${{ matrix.name }} Installer
     needs: ensure-release
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            pack: win
+          - name: macOS
+            os: macos-latest
+            pack: mac
+          - name: Linux
+            os: ubuntu-latest
+            pack: linux
     env:
       TAG_NAME: ${{ needs.ensure-release.outputs.tag }}
     steps:
@@ -157,11 +176,30 @@ jobs:
         uses: actions/cache@v4
         with:
           # nsis / nsis-resources / 7zip / winCodeSign 等工具包约 100MB+,
-          # 缓存后免去每次重新下载(国内网络下这步尤其容易超时)。
-          path: ~\AppData\Local\electron-builder\Cache
+          # 缓存后免去每次重新下载(国内网络下这步尤其容易超时)。三个平台的
+          # 缓存目录不同,用 shell 变量拼(GitHub 表达式里取不到 LOCALAPPDATA 等)。
+          path: |
+            ~\AppData\Local\electron-builder\Cache
+            ~/.cache/electron-builder
           key: electron-builder-${{ runner.os }}-${{ hashFiles('apps/desktop/package-lock.json') }}
           restore-keys: |
             electron-builder-${{ runner.os }}-
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # 与 ci.yml 的 rust-check 同一套:openssl-sys 走系统 libssl,
+          # sodiumoxide/libsqlite 需要 cc。
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # macos-latest 预装了 Homebrew 的 openssl@3,但 openssl-sys 不总能自己
+          # 找到 brew 装的 openssl(它在 /opt/homebrew 而非 /usr/local),显式指一下。
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3 || brew --prefix openssl)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3 || brew --prefix openssl)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
 
       - name: Configure code signing
         shell: pwsh
@@ -206,23 +244,21 @@ jobs:
       - name: Build unified web bundle
         run: npm run build:web
 
-      - name: Package NSIS installer
+      - name: Package installer
         working-directory: apps/desktop
-        # 不用根 build:electron-installer:它结尾的 pack:win 无法透传参数,而
-        # electron-builder 默认策略是 onTagOrDraft —— 在 tag 触发的 CI 上会自行
-        # 发布,和 ensure-release 建的 Release 打架。--publish never 让本 job 只出包,
-        # 上传交给下一步统一做(可 --clobber 重跑)。
-        run: npm run pack:win -- --publish never
+        # pack:* 里已固定 --publish never:electron-builder 默认策略是 onTagOrDraft,
+        # 在 tag 触发的 CI 上会自行发布并和 ensure-release 建的 Release 打架。
+        # 上传统一交给下一步(gh release upload --clobber,可重跑)。
+        run: npm run pack:${{ matrix.pack }}
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-${{ needs.ensure-release.outputs.version }}
-          # builder-debug.yml 是 electron-builder 的调试输出,不是发布物,别挂上去。
+          name: ${{ matrix.pack }}-installer-${{ needs.ensure-release.outputs.version }}
+          # 本 runner 只产本平台的产物,整个目录传上去即可;builder-debug.yml 是
+          # electron-builder 的调试输出,不是发布物,排除掉。
           path: |
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.blockmap
-            apps/desktop/release/latest.yml
+            !apps/desktop/release/builder-*
             !apps/desktop/release/builder-*.yml
           if-no-files-found: error
           retention-days: 14
@@ -233,8 +269,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: kfumi/codeMUX
         run: |
+          # 同上:排除 builder-*.yml,其余(安装包 / blockmap / latest*.yml)全传。
           $assets = Get-ChildItem "apps/desktop/release" -File |
-            Where-Object { $_.Extension -in ".exe", ".blockmap", ".yml" -and $_.Name -notlike "builder-*.yml" }
+          # 同上:排除 builder-*(builder-debug.yml / builder-effective-config.yaml),
+          # 其余(安装包 / blockmap / latest*.yml)全传。
+          $assets = Get-ChildItem "apps/desktop/release" -File |
+            Where-Object { $_.Name -notlike "builder-*" }
           if (-not $assets) {
             throw "apps/desktop/release 下没有可上传的安装包产物。"
           }

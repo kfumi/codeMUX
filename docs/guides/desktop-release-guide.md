@@ -7,9 +7,9 @@
 - 桌面发布面为 **Electron 壳 + 独立 Rust daemon 二进制**（Tauri 壳已从仓库移除；daemon crate 位于 `crates/daemon/`，目录已由 `src-tauri/` 改名）。
 - 出包：`npm run build:electron-installer`（详见下文「构建安装包」），产物输出到 `apps/desktop/release/`。
 - 发布：把安装包（NSIS exe）与 `latest.yml` 上传到 [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)，现有安装版经 electron-updater 检测到更新。
-- CI 发版流水线已迁回 Electron：`.github/workflows/release.yml` 的 `ensure-release` 建 Release 记录，紧随其后的 `build-windows` job（`windows-latest`）跑完整出包链路并把 NSIS exe / blockmap / `latest.yml` 用 `gh release upload --clobber` 附到该 Release 上。推 tag 即自动出包，无需本地手工上传。
-- 需要人工介入的只剩两处：仓库 Secrets 里的签名证书（未配置则出未签名包），以及 mac / linux 打包（`electron-builder.yml` 仍只配了 win，属待办）。
-- 本地出包仍可用（见下文），用于临时验证或绕过 CI；`build-windows` 的步骤顺序刻意与 `build:electron-installer` 一致，改动出包链路时两边都要看。
+- CI 发版流水线已迁回 Electron：`.github/workflows/release.yml` 的 `ensure-release` 建 Release 记录，紧随其后的 `build-desktop` **三平台矩阵 job**（windows-latest / macos-latest / ubuntu-latest）各跑一遍完整出包链路，并用 `gh release upload --clobber` 把产物附到该 Release 上。推 tag 即自动出包，无需本地手工上传。
+- 需要人工介入的只剩一处：仓库 Secrets 里的签名证书（未配置则出未签名包；macOS 另需 Apple Developer ID 才能免 Gatekeeper 拦截，见下文「macOS / Linux 打包」）。
+- 本地出包仍可用（见下文），用于临时验证或绕过 CI；`build-desktop` 的步骤顺序刻意与 `build:electron-installer` 一致，改动出包链路时两边都要看。
 
 ## 版本号同步（daemon 版本配对依赖）
 
@@ -44,7 +44,7 @@ daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查
 
 | 路径 | 来源 | 缺失后果 |
 | --- | --- | --- |
-| `daemon/codemux-daemon.exe` | `extraResources` ← `crates/daemon/target/release/` | 壳拉不起 daemon |
+| `daemon/codemux-daemon[.exe]` | `extraResources` ← `apps/desktop/daemon-bin/`(脚本生成,见下文) | 壳拉不起 daemon |
 | `sidecar/dist/index.js` + `sidecar/package.json` | `extraResources` ← `apps/desktop/sidecar-dist/`(脚本生成) | 发消息报 `Bundled sidecar was not found at sidecar\dist/index.js` |
 | `dist-web/` | `extraResources` ← 仓库根 `dist-web/` | 浏览器/移动形态无页面 |
 | `icons/icon.ico` | `extraResources` ← `crates/daemon/icons/` | 托盘无图标 |
@@ -124,10 +124,62 @@ daemon 的应用数据目录不变(`%APPDATA%/com.codemux.desktop` 及平台等�
 SQLite 会话、config.json、配对设备、Local Daemon Token 全部原地复用。旧 Tauri
 版用户**一次性安装 Electron 安装包即完成迁移**,无数据搬家脚本。
 
-## unix 打包(待办)
+## macOS / Linux 打包
 
-`electron-builder.yml` 当前仅配置 win(NSIS);mac/linux 的 daemon 二进制命名、
-resources 映射与公证流程为待办事项。
+三个平台都由 Release workflow 的 `build-desktop` 矩阵 job 自动出包,本地对应命令:
+
+| 平台 | 产物 | 本地命令 |
+| --- | --- | --- |
+| Windows | NSIS `x64` | `npm run build:electron-installer` |
+| macOS | `dmg` + `zip`,`x64` / `arm64` | `npm run build:electron-installer:mac` |
+| Linux | `AppImage` `x64` | `npm run build:electron-installer:linux` |
+
+**macOS 必须同时出 dmg 和 zip。** `latest-mac.yml` 指向的是 zip 而不是 dmg ——
+electron-updater 靠 zip 做更新。只出 dmg 的话,已装用户能检测到新版本却装不上。
+
+### 跨平台资源映射:为什么有 stage-daemon-bin.mjs
+
+`electron-builder.yml` 没有按目标平台分支的能力,而 daemon 的产物文件名随平台
+变化(Windows 带 `.exe`,unix 不带)。原先 `extraResources` 直接写死
+`from: ../../crates/daemon/target/release/codemux-daemon.exe`,换个平台就是
+「文件不存在」。
+
+现在改为 `scripts/stage-daemon-bin.mjs` 先按当前 runner 平台把二进制复制进
+`apps/desktop/daemon-bin/`(win 下叫 `codemux-daemon.exe`,unix 下叫
+`codemux-daemon`),`extraResources` 只引用目录名:
+
+```yaml
+- from: daemon-bin
+  to: daemon
+```
+
+落地后的文件名与 `apps/desktop/src/main.ts` 的 `resolveDaemonExe()` 一致
+(`win32` → `codemux-daemon.exe`,其余 → `codemux-daemon`),壳的代码不用改。
+`daemon-bin/` 是生成目录,已在 `.gitignore` 里。
+
+### 签名现状
+
+| 平台 | 状态 |
+| --- | --- |
+| Windows | 未配 `CSC_LINK` → 未签名;配了走 signtool 链(含 daemon) |
+| macOS | **无 Apple Developer ID**,electron-builder 走 ad-hoc 签名 |
+| Linux | 不签名 |
+
+ad-hoc 签名的 mac 包能运行,但 Gatekeeper 会拦:用户需右键「打开」,或去
+系统设置 → 隐私与安全性 放行。拿到 Developer ID 后,在 `electron-builder.yml`
+的 `mac:` 段补 `identity`/`notarize` 并在 Secrets 注入证书即可。
+
+### 已知的功能缺口(打包不等于功能对齐)
+
+以下能力是 Windows 专属,在 mac/linux 上**不会报错但会不工作**,属待适配项:
+
+- `open-project.ts` 找 VS Code / Cursor / git-bash 走的是 `cmd.exe`、`Code.exe`、
+  `AppData\Roaming`,非 Windows 上找不到
+- 通知的「应用名 + 图标归组」靠 AUMID + 注册表 IconUri(Windows 概念),非
+  Windows 上退化为普通通知;`main.ts` 已用 `process.platform === 'win32'` 挡住
+  `ensureNotificationIdentity()` 的调用
+
+核心链路(对话、Agent、daemon、文件、终端、内置浏览器、网页/手机形态)不挑平台。
 
 ## 通知身份(Windows)
 
@@ -168,17 +220,27 @@ updater `pubkey` 不再存在,相关 GitHub Secrets(`TAURI_SIGNING_PRIVATE_KEY*`
 | job | runner | 职责 |
 | --- | --- | --- |
 | `ensure-release` | ubuntu | 按 `package.json` 版本确保 tag 与 GitHub Release 存在 |
-| `build-windows` | windows | 检出 tag → 装依赖 → 构建 → NSIS 打包 → 上传产物与 Release 附件 |
+| `build-desktop` | 矩阵:windows / macos / ubuntu | 检出 tag → 装依赖 → 构建 → 打包 → 上传产物与 Release 附件 |
 
-`build-windows` 的构建步骤与根脚本 `build:electron-installer` 一一对应,唯一区别是
-打包命令走 `npm run pack:win -- --publish never`:electron-builder 的默认发布策略是
-`onTagOrDraft`,在 tag 触发的 CI 上会自行发布并和 `ensure-release` 建的 Release 打架;
-`--publish never` 让它只出包,上传统一交给 `gh release upload --clobber`(可重复执行)。
-缓存了 `crates/daemon` 的 cargo 产物(`Swatinem/rust-cache`)与 electron-builder 工具包
-(`%LOCALAPPDATA%\electron-builder\Cache`,含 nsis/7zip,约 100MB+,不缓存则每次重下)。
-产物同时用 `actions/upload-artifact` 留存 14 天,即使 Release 附件传失败也能从
-workflow 页面取回安装包。
+`build-desktop` 的构建步骤与根脚本 `build:electron-installer` 一一对应,打包命令走
+`npm run pack:${{ matrix.pack }}`(`win` / `mac` / `linux` 三选一)。这些脚本里已固定
+`--publish never`:electron-builder 的默认发布策略是 `onTagOrDraft`,在 tag 触发的
+CI 上会自行发布并和 `ensure-release` 建的 Release 打架;`--publish never` 让它只
+出包,上传统一交给 `gh release upload --clobber`(可重复执行)。
 
-给已存在的 tag 补装安装包(如迁移期间漏出包的版本):在 Actions 页手动
-`workflow_dispatch` 跑一次 Release workflow 即可 —— `ensure-release` 会识别到
-Release 已存在而跳过创建,`build-windows` 照常出包并覆盖上传。
+几个实现要点:
+
+- **矩阵而非三份 job**:`pwsh` 在三个 runner 上都预装,「取产物 → 上传」这段
+  PowerShell 原样共用;每个 runner 只产本平台产物,上传整个 `release/` 目录、
+  排除 `builder-*` 即可,不必按平台写扩展名白名单。
+- **daemon 必须原生编译**:Rust 无法从 Windows 交叉编译到 mac/linux,三个 runner
+  各自跑一遍完整构建。Linux 需 `libssl-dev`;macOS 显式指 `OPENSSL_DIR`
+  (brew 装的 openssl 在 `/opt/homebrew`,openssl-sys 有时找不到)。
+- **缓存**:`crates/daemon` 的 cargo 产物(`Swatinem/rust-cache`)+ electron-builder
+  工具包(nsis/7zip 等约 100MB+,不缓存则每次重下;macOS runner 较贵,缓存更值)。
+- 产物同时用 `actions/upload-artifact` 留存 14 天,即使 Release 附件传失败也能从
+  workflow 页面取回安装包。
+
+给已存在的 tag 补装安装包:在 Actions 页手动 `workflow_dispatch` 跑一次 Release
+workflow 即可 —— `ensure-release` 会识别到 Release 已存在而跳过创建,
+`build-desktop` 照常出包并覆盖上传。

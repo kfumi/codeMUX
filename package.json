@@ -12,6 +12,8 @@
     "build:daemon:release": "cd crates/daemon && cargo build --release --bin codemux-daemon",
     "build:electron": "cd apps/desktop && npm run build",
     "build:electron-installer": "npm run build:sidecar && npm run build:daemon:release && npm run build:renderer && npm run build:web && cd apps/desktop && npm run pack:win",
+    "build:electron-installer:mac": "npm run build:sidecar && npm run build:daemon:release && npm run build:renderer && npm run build:web && cd apps/desktop && npm run pack:mac",
+    "build:electron-installer:linux": "npm run build:sidecar && npm run build:daemon:release && npm run build:renderer && npm run build:web && cd apps/desktop && npm run pack:linux",
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "dev:electron": "cd apps/desktop && npm run dev",
     "build:sidecar": "cd apps/sidecar && npm run build",

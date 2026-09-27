@@ -19,6 +19,19 @@ const COPY_SIDECAR_SCRIPT = join(REPO_ROOT, 'apps', 'desktop', 'scripts', 'copy-
 const DESKTOP_PACKAGE_JSON = JSON.parse(
   readFileSync(join(REPO_ROOT, 'apps', 'desktop', 'package.json'), 'utf8'),
 ) as { scripts: Record<string, string> };
+const STAGE_DAEMON_SCRIPT = readFileSync(
+  join(REPO_ROOT, 'apps', 'desktop', 'scripts', 'stage-daemon-bin.mjs'),
+  'utf8',
+);
+const MAIN_TS = readFileSync(join(REPO_ROOT, 'apps', 'desktop', 'src', 'main.ts'), 'utf8');
+const RELEASE_WORKFLOW = readFileSync(
+  join(REPO_ROOT, '.github', 'workflows', 'release.yml'),
+  'utf8',
+);
+// daemon 二进制名随平台变(win 带 .exe)。这个表达式同时出现在 stage-daemon-bin.mjs
+// (决定打进包的叫什么)和 main.ts 的 resolveDaemonExe(决定去哪找),两边必须一致,
+// 否则壳在非 Windows 上找不到 daemon。
+const DAEMON_BINARY_EXPR = /process\.platform === 'win32' \? 'codemux-daemon\.exe' : 'codemux-daemon'/;
 const ROOT_PACKAGE_JSON = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
   scripts: Record<string, string>;
 };
@@ -42,10 +55,14 @@ describe('electron bundle resources', () => {
   });
 
   it('bundles the supervisor daemon binary into the resource daemon/ directory', () => {
-    // supervisor 在 release 下从资源根 daemon/ 解析 codemux-daemon.exe。
-    expect(BUILDER_YML).toMatch(
-      /from:\s*\.\.\/\.\.\/crates\/daemon\/target\/release\/codemux-daemon\.exe\s*\n\s*to:\s*daemon\/codemux-daemon\.exe/,
-    );
+    // 跨平台:electron-builder.yml 没有按目标平台分支的能力,而 daemon 产物名随平台
+    // 变(win 带 .exe),所以 extraResources 收的是 stage-daemon-bin.mjs 生成的目录,
+    // 而不是写死某个平台的文件名(那样换个平台就是「文件不存在」)。
+    expect(BUILDER_YML).toMatch(/from:\s*daemon-bin\s*\n\s*to:\s*daemon\s*(\n|$)/);
+    expect(DESKTOP_PACKAGE_JSON.scripts['pack:prepare']).toContain('scripts/stage-daemon-bin.mjs');
+    // 打进包的名字与壳找名字的规则必须一致,否则非 Windows 上壳拉不起 daemon。
+    expect(STAGE_DAEMON_SCRIPT).toMatch(DAEMON_BINARY_EXPR);
+    expect(MAIN_TS).toMatch(DAEMON_BINARY_EXPR);
   });
 
   it('bundles the tray/app icon', () => {
@@ -78,7 +95,40 @@ describe('electron bundle resources', () => {
 
   it('rebuilds and copies the sidecar in the installer pipeline', () => {
     expect(ROOT_PACKAGE_JSON.scripts['build:electron-installer']).toContain('build:sidecar');
-    expect(DESKTOP_PACKAGE_JSON.scripts['pack:win']).toContain('scripts/copy-sidecar-dist.mjs');
+    // pack:win/mac/linux 都收敛到 pack:prepare,拷贝脚本挂在那一步。
+    expect(DESKTOP_PACKAGE_JSON.scripts['pack:prepare']).toContain('scripts/copy-sidecar-dist.mjs');
+    for (const target of ['pack:win', 'pack:mac', 'pack:linux']) {
+      expect(DESKTOP_PACKAGE_JSON.scripts[target]).toContain('npm run pack:prepare');
+    }
+  });
+
+  it('configures a packaging target for each shipped platform', () => {
+    expect(BUILDER_YML).toMatch(/^win:/m);
+    expect(BUILDER_YML).toMatch(/^mac:/m);
+    expect(BUILDER_YML).toMatch(/^linux:/m);
+    expect(BUILDER_YML).toMatch(/- target: nsis/);
+    // macOS 必须同时出 dmg 和 zip:latest-mac.yml 指向 zip,只出 dmg 的话已装
+    // 用户能检测到新版本却装不上(electron-updater 靠 zip 更新)。
+    expect(BUILDER_YML).toMatch(/- target: dmg/);
+    expect(BUILDER_YML).toMatch(/- target: zip/);
+    expect(BUILDER_YML).toMatch(/- target: AppImage/);
+  });
+
+  it('builds every platform in the release workflow', () => {
+    // daemon 无法从 Windows 交叉编译到 mac/linux,矩阵里三个 runner 都得跑一遍
+    // 完整构建;只配一个 runner 就等于另外两个平台没有包。
+    for (const runner of ['windows-latest', 'macos-latest', 'ubuntu-latest']) {
+      expect(RELEASE_WORKFLOW).toContain(runner);
+    }
+    expect(RELEASE_WORKFLOW).toContain('npm run pack:${{ matrix.pack }}');
+  });
+
+  it('only registers the Windows notification identity on Windows', () => {
+    // AUMID + 注册表 IconUri 是 Windows 概念;mac/linux 上 ensureNotificationIdentity
+    // 内部是 reg.exe,不挡掉会白跑一次注定失败的命令。
+    expect(MAIN_TS).toMatch(
+      /if \(process\.platform === 'win32'\) \{\s*\n\s*void ensureNotificationIdentity\(/,
+    );
   });
 });
 

@@ -438,11 +438,16 @@ if (app.isPackaged) {
   app.setAppUserModelId(APP_ID);
   // 通知归属区(应用名左侧)的名字/图标来自 HKCU\Software\Classes\AppUserModelId\<AUMID>:
   // 旧 Tauri 写入的 IconUri 指向 dev 产物路径,不刷新就只显示名字、不显示图标。
-  void ensureNotificationIdentity({
-    appId: APP_ID,
-    displayName: APP_DISPLAY_NAME,
-    iconPath: resolveNotificationIcon(),
-  });
+  // AUMID 是 Windows 概念(AppUserModelId + 注册表 IconUri),mac/linux 没有对应机制,
+  // 那里会退化成普通通知;ensureNotificationIdentity 内部是 reg.exe,非 Windows 上
+  // 必然失败,所以在这里就挡掉。
+  if (process.platform === 'win32') {
+    void ensureNotificationIdentity({
+      appId: APP_ID,
+      displayName: APP_DISPLAY_NAME,
+      iconPath: resolveNotificationIcon(),
+    });
+  }
 }
 
 // app:// 需要在 ready 前声明特权(fetch/标准 scheme)。

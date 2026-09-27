@@ -20,6 +20,9 @@ dist-electron
 apps/desktop/renderer-dist
 apps/desktop/sidecar-dist
 apps/desktop/release
+# 打包前由 scripts/stage-daemon-bin.mjs 生成:按当前平台放 codemux-daemon[.exe],
+# 供 electron-builder 的 extraResources(from: daemon-bin)收进资源根。
+apps/desktop/daemon-bin
 dist-ssr
 .worktrees/
 *.local
