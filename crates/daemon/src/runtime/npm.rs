@@ -352,6 +352,9 @@ fn configure_hidden_command(command: &mut Command) {
     {
         command.creation_flags(0x08000000);
     }
+    // unix 上函数体为空,不消费参数会报 unused_variables。
+    #[cfg(not(target_os = "windows"))]
+    let _ = command;
 }
 
 async fn run_npm(args: Vec<String>, provider: Provider) -> Result<String, RuntimeError> {

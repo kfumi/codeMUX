@@ -25,6 +25,19 @@ vi.mock('@assistant-ui/react', () => ({
     selector({ message: { isCopied: false } }),
 }));
 
+// formatTime 用 Date#getHours/getMinutes 渲染「本地时区」的 HH:MM,所以断言不能写死
+// 某个墙钟时刻:GMT+8 的开发机上是 21:40,CI(UTC)上是 13:40,写死就必然在某一端失败。
+// 改成用同一个时间戳在当前时区算出期望标签。
+const TIMESTAMP = Date.parse('2026-06-12T21:40:00+08:00');
+const localTimeLabel = (() => {
+  const date = new Date(TIMESTAMP);
+  const hh = date.getHours().toString().padStart(2, '0');
+  const mm = date.getMinutes().toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+})();
+// FooterItem 渲染的是「06-12 21:40」这类前缀 + 时间的整串,所以用子串正则匹配。
+const localTimePattern = new RegExp(localTimeLabel);
+
 describe('MessageFooter', () => {
   afterEach(() => {
     cleanup();
@@ -32,8 +45,8 @@ describe('MessageFooter', () => {
 
   it.each([
     ['actions only', {}],
-    ['full', { timestamp: Date.parse('2026-06-12T21:40:00+08:00') }],
-    ['minimal', { timestamp: Date.parse('2026-06-12T21:40:00+08:00'), variant: 'minimal' as const }],
+    ['full', { timestamp: TIMESTAMP }],
+    ['minimal', { timestamp: TIMESTAMP, variant: 'minimal' as const }],
   ])('uses the configured UI body size for %s footers', (_label, props) => {
     const { container } = render(<MessageFooter copyText="message" {...props} />);
 
@@ -60,9 +73,9 @@ describe('MessageFooter', () => {
   });
 
   it('can stay hidden until the message row is hovered', () => {
-    render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} revealOnHover />);
+    render(<MessageFooter timestamp={TIMESTAMP} revealOnHover />);
 
-    const footer = screen.getByText(/21:40/).closest('[data-message-footer]');
+    const footer = screen.getByText(localTimePattern).closest('[data-message-footer]');
 
     expect(footer?.className).toContain('opacity-0');
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
@@ -70,9 +83,9 @@ describe('MessageFooter', () => {
 
   it('stays visible on narrow viewports even with revealOnHover (no hover on touch)', () => {
     narrowState.value = true;
-    render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} revealOnHover />);
+    render(<MessageFooter timestamp={TIMESTAMP} revealOnHover />);
 
-    const footer = screen.getByText(/21:40/).closest('[data-message-footer]');
+    const footer = screen.getByText(localTimePattern).closest('[data-message-footer]');
 
     expect(footer?.className).not.toContain('opacity-0');
     expect(footer?.className).not.toContain('group-hover');
@@ -80,7 +93,7 @@ describe('MessageFooter', () => {
   });
 
   it('renders duration without a turn status label', () => {
-    render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} stats={{ durationMs: 1200 }} />);
+    render(<MessageFooter timestamp={TIMESTAMP} stats={{ durationMs: 1200 }} />);
 
     expect(screen.getByText(/耗时 1s/)).toBeTruthy();
     expect(screen.queryByText(/token/)).toBeNull();
@@ -95,7 +108,7 @@ describe('MessageFooter', () => {
     render(
       <MessageFooter
         variant="minimal"
-        timestamp={Date.parse('2026-06-12T21:40:00+08:00')}
+        timestamp={TIMESTAMP}
         copyText="子智能体结论"
         revealOnHover
         sessionId="session-1"
@@ -105,7 +118,7 @@ describe('MessageFooter', () => {
       />,
     );
 
-    expect(screen.getByText(/21:40/)).toBeTruthy();
+    expect(screen.getByText(localTimePattern)).toBeTruthy();
     expect(screen.queryByText(/耗时/)).toBeNull();
     expect(screen.queryByRole('button', { name: '从此回复创建分支' })).toBeNull();
     expect(screen.queryByRole('button', { name: '复制排查问题提示词' })).toBeNull();

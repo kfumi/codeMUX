@@ -367,10 +367,16 @@ pub async fn spawn_sidecar(
 #[cfg(test)]
 mod tests {
     use super::{
-        missing_node_prerequisite_error, normalize_windows_verbatim_path,
-        resolve_node_runtime_path, resolve_sidecar_script_path, BuildEnvironment,
+        missing_node_prerequisite_error, resolve_node_runtime_path, resolve_sidecar_script_path,
+        BuildEnvironment,
     };
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    // 下面两个只在 #[cfg(target_os = "windows")] 的 verbatim 路径测试里用到;
+    // 不隔离的话 unix 上 clippy 报 unused_imports。
+    #[cfg(target_os = "windows")]
+    use super::normalize_windows_verbatim_path;
+    #[cfg(target_os = "windows")]
+    use std::path::PathBuf;
 
     #[test]
     fn release_build_requires_bundled_sidecar_resources() {

@@ -41,12 +41,24 @@ function packageNameFor(platform: SupportedPlatform, arch: SupportedArch): strin
 function binaryNameFor(platform: SupportedPlatform): string {
   return platform === 'win32' ? 'claude.exe' : 'claude';
 }
+// 本模块按 platform 参数解析目标平台,所以路径分隔符语义也要跟着目标平台走。
+// 直接用宿主机的 path.resolve,在 Linux 上传 platform:'win32' 会按 posix 分隔符拼出
+// 混合路径(`C:\...\0.3.220/node_modules/...`),与调用方给的候选路径对不上。
+function pathModuleFor(platform: SupportedPlatform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 
 function runtimeClaudePath(runtimePath: string, platform: SupportedPlatform, arch: SupportedArch): string | undefined {
   const packageName = packageNameFor(platform, arch);
   if (!packageName) return undefined;
 
-  return path.resolve(runtimePath, 'node_modules', packageName, binaryNameFor(platform));
+  return pathModuleFor(platform).resolve(
+    runtimePath,
+    'node_modules',
+    packageName,
+    binaryNameFor(platform),
+  );
 }
 
 export function resolveClaudeExecutable(params: ResolveClaudeExecutableParams): string | undefined {

@@ -134,15 +134,19 @@ fn relative_path_to_absolute(root: &Path, relative_path: &str) -> String {
 }
 
 fn normalize_display_path(path: &str) -> String {
-    let mut text = path.replace('\\', "/");
+    let text = path.replace('\\', "/");
+    // mut 只在 windows 分支里需要。写成 cfg 块 + 遮蔽,unix 上拿到的就是不可变绑定,
+    // 否则 clippy 在非 Windows 平台报 unused_mut。
     #[cfg(target_os = "windows")]
-    {
+    let text = {
+        let mut text = text;
         if let Some(rest) = text.strip_prefix("//?/UNC/") {
             text = format!("//{}", rest);
         } else if let Some(rest) = text.strip_prefix("//?/") {
             text = rest.to_string();
         }
-    }
+        text
+    };
     text.trim_end_matches('/').to_string()
 }
 
@@ -156,15 +160,17 @@ fn path_to_repo_relative(root: &Path, file_path: &str) -> String {
 }
 
 fn path_to_display_string(path: &Path) -> String {
-    let mut text = path.to_string_lossy().to_string();
+    let text = path.to_string_lossy().to_string();
     #[cfg(target_os = "windows")]
-    {
+    let text = {
+        let mut text = text;
         if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
             text = format!(r"\\{}", rest);
         } else if let Some(rest) = text.strip_prefix(r"\\?\") {
             text = rest.to_string();
         }
-    }
+        text
+    };
     text.replace('\\', "/")
 }
 
