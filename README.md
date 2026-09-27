@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  用统一界面管理 Claude Code、Codex、多 Provider、MCP、Skills、Git Review、内置终端与项目会话。
+  在一个界面里管理 Claude Code / Codex / OpenCode / pi、多 Provider、MCP、Skills、Git Review、内置终端与内置浏览器，并可把任务派给 Agent 看板执行、用定时任务按时自动开工。
 </p>
 
 <p align="center">
@@ -41,7 +41,7 @@
 - MCP、Skills、权限模式、历史会话都缺少统一管理入口
 - 想做代码审查或开一个项目终端，还要在应用外反复切换
 
-`CodeMUX` 的做法是把这些环节收拢到一个桌面工作台里：会话、项目、Provider、Agent、MCP、Skills、Review、Terminal 都放在同一个界面中完成。
+`CodeMUX` 的做法是把这些环节收拢到一个桌面工作台里：会话、项目、Provider、Agent、MCP、Skills、Review、Terminal、Browser 都放在同一个界面中完成，还能派发工作任务与定时任务，让 Agent 在隔离分支上把活干完。
 
 当前真正可用的核心运行时：
 
@@ -75,28 +75,57 @@
 
 - 项目分组 + 多会话管理
 - 流式对话、Thinking、Todo、工具调用卡片
-- 变更文件预览、Diff 展示、子 Agent 结果展示
+- 整轮 AI 输出折叠为「已处理 + 时长 + 步骤数」，可展开查看思考、读取、搜索、终端与子智能体的完整过程
+- 子智能体有独立时间线与实时预览面板
+- 变更文件预览、Diff 展示
 - 会话归档、置顶、重命名、恢复
+- 任意用户消息上可「回退」（只回对话 / 同时回滚文件 / 两者），也可从任意回复「分叉」出新会话
 - `AskUserQuestion` 交互卡片，支持选项选择与自由文本回答
-- 图片附件输入与预览（多模态）
+- 图片附件输入与预览；模型无视觉能力时可用兜底视觉模型解析后注入上下文
+- 流式生成时显示实时输出速度（`xx.x tok/s`）
 - 实时上下文使用进度，展示当前 token 占用与上下文窗口占比
-
+- 可导入 Claude Code / Codex / OpenCode 的外部 CLI 会话历史并归入对应项目
 ### 把 AI 工作流放进同一个桌面壳里
 
-- 内置 `Review` 面板查看 `staged` / `unstaged` 改动
+- 内置 `Review` 面板查看 `staged` / `unstaged` 改动与 Diff
 - 内置 `Terminal` 面板在项目目录直接开 PTY 终端
+- 内置 `浏览器` 面板：沙箱 webview（独立 partition，可配 CDP），Agent 可被授权操作网页、选取网页元素加入对话
 - Git 分支管理：分支切换、新建分支、AI 辅助生成 Commit Message、Commit / Push 与创建 Pull Request
 - 右侧 Side Panel 支持多标签切换
-- 输入、代码审查、文件变更、终端不用再来回切应用
+- 输入、代码审查、文件变更、终端、网页不用再来回切应用
+
+### 工作任务看板：把任务交给 Agent 去跑
+
+- 四列看板：待办 / 进行中 / 等你处理 / 完成
+- 任务 = 标题 + 指令 + 项目 + Agent 与模型；启动后由 daemon 按项目配额排队，创建真实会话执行
+- 默认在 `git worktree` 隔离分支里干活，不污染当前工作区
+- 跑完进入「等你处理」，查看 Diff 统计后三选一：合并（可自定义提交信息）/ 直接完成 / 重新开始
+- 支持按项目筛选、列表 / 看板视图切换、归档与一键归档全部已完成
+
+### 定时任务：按时自动开会话
+
+- 支持一次性、每日、每周、间隔等时点，到点自动新建会话并执行指令
+- 可绑定项目与 Agent，支持建议模板（如「每日提交简报」「每周回顾」「跟进监控」）
+- 每个任务有独立启停开关、立即执行、运行历史回看与时区显示
+- 仅在 CodeMUX 运行时触发（含托盘隐藏），不会补跑错过的任务
+
+### 自定义快捷键
+
+- 内置 9 条命令（后退 / 前进、新建会话、打开设置、搜索、折叠侧边栏 / 侧面板、停止生成、聚焦输入框）
+- 点键位即进入录制，拒绝无修饰键与系统保留键位，并检测键位冲突
+- 支持单项禁用、单项恢复默认与一键恢复全部默认
+- 键位按物理键匹配，与键盘布局无关；绑定存于 daemon 配置，所有客户端一致
+
 
 ### 多 Provider 与多模型管理
 
-- 按 Claude Code / Codex / OpenCode 分标签管理供应商
-- Claude Code 默认供应商直接复用 `~/.claude/settings.json`，切换时自动备份与恢复
-- 每个 provider 可配置 `API Key`、Anthropic / OpenAI Base URL、模型列表、默认模型、Token 单价
-- 支持测试连通性、从接口拉取模型列表
-- 支持 `codex_needs_proxy` 路由开关、`1M context` 标记
+- 「设置 → 模型配置」用一份统一的供应商列表管理多家上游，按名称搜索、逐个启停
+- 每个供应商可配置 `API 密钥`、`Anthropic` / `OpenAI 兼容` / `OpenAI Responses` 三类端点与模型列表
+- 支持测试连通性、从接口拉取模型列表、添加 / 删除模型与 Token 单价
+- 支持 `Codex 需要兼容代理` 路由开关与 `1M context` 标记
+- 「设置 → 智能体运行时」为 Claude Code / Codex / OpenCode / pi 分别指定默认智能体、新建会话默认模型与默认权限
 - OpenCode 支持 `@ai-sdk/openai`、`@ai-sdk/anthropic`、`@ai-sdk/openai-compatible`、`@ai-sdk/google`、`@ai-sdk/amazon-bedrock` 等多 adapter
+- 运行时安装与升级都在设置内完成，不依赖系统全局 CLI；另有只读的「外部 CLI 诊断」
 
 ### 本地代理兼容 Codex
 
@@ -109,7 +138,8 @@
 
 - MCP 支持 `stdio`、`http`、`sse`
 - 支持 JSON 编辑、配置向导、探测、从本机工具导入
-- 每个 MCP 可单独启用到 Claude / Codex / Gemini / OpenCode
+- 内置 `codemux-browser` MCP 随「设置 → 浏览器控制」开关生效，让会话直接驱动内置浏览器
+- 每个 MCP 可单独启用到 Claude Code / Codex / OpenCode / pi
 - Skills 以 `~/.codemux/skills/` 为单一数据源，Windows 下按 symlink → junction → copy 回退链处理
 - Skills 支持内置同步、预览、启用 / 禁用、卸载
 - 启用的 Skills 会自动注册到斜杠命令系统，每个 Skill 维护 4 个独立的 per-agent 启用开关
@@ -147,21 +177,39 @@
 
 ### 新建会话与项目入口
 
-![主页](public/demo/home.png)
+![新对话](public/demo/home.png)
 
 ### 主对话面板
 
 ![对话面板](public/demo/chat.png)
 
-![对话面板 - 完整视图](public/demo/chat_full.png)
+### AI 过程与工具卡片
+
+整轮 AI 输出可折叠为「已处理 + 时长 + 步骤数」，展开后是完整的思考、读取、搜索、终端与子智能体过程。
+
+![AI 过程与工具卡片](public/demo/tools.png)
 
 ### 文件改动与 Diff
 
 ![Diff 视图](public/demo/diff.png)
 
-### Provider 配置
+### 内置浏览器
 
-![提供商列表](public/demo/provider.png)
+右侧面板内嵌沙箱浏览器，Agent 可被授权直接操作网页。
+
+![内置浏览器](public/demo/browser.png)
+
+### 工作任务看板
+
+![待办任务看板](public/demo/worktask.png)
+
+### 定时任务
+
+![定时任务](public/demo/automation.png)
+
+### 模型与供应商配置
+
+![模型配置](public/demo/provider.png)
 
 ### MCP 管理
 
@@ -171,6 +219,13 @@
 
 ![Skills 设置](public/demo/skill.png)
 
+### 自定义快捷键
+
+![快捷键设置](public/demo/shortcuts.png)
+
+### 外观自定义
+
+![外观设置](public/demo/appearance.png)
 ---
 
 ## 适合谁
@@ -180,6 +235,7 @@
 - 想要可视化工具调用、Diff、终端与 Review 面板的人
 - 希望把 MCP / Skills 当作长期工作流能力来管理的重度用户
 - 关注 token 用量、成本与活跃度，想要长期统计洞察的人
+- 想把任务直接派给 Agent 在隔离分支上跑完、再统一验收合并的人
 
 ---
 
@@ -256,29 +312,30 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## 使用概览
 
-### 1. 配置 Provider
+### 1. 配置供应商
 
-在设置中的“供应商配置”里按 Claude Code / Codex / OpenCode 分标签填写：
+在「设置 → 模型配置」里维护一份统一的供应商列表，可新增、启停并搜索。每个供应商需要填写：
 
-- `供应商名称`
-- `API Key`
-- `Anthropic Base URL`
-- `OpenAI Base URL`
-- `模型列表`
+- `API 密钥`
+- `Anthropic` / `OpenAI 兼容` / `OpenAI Responses` 端点（按供应商实际协议填）
+- `模型列表`（模型 ID 与显示名称，可从接口拉取）
 
-第一行模型会作为默认模型。  
-如果目标上游不是原生 OpenAI Responses API，建议开启“需要本地路由映射”。
-
-Claude Code 默认供应商直接复用 `~/.claude/settings.json`，切换时自动备份为 `settings.json.bak` 并支持回滚。Codex 与 OpenCode 使用各自供应商的模型与密钥配置。
+如果目标上游不是原生 OpenAI Responses API，在该供应商上开启“Codex 需要兼容代理”。
 
 ### 2. 选择默认智能体
 
-在“智能体”设置中选择默认智能体。当前已可用运行时：
+在「设置 → 智能体运行时」中为每个智能体选择默认模型与默认权限，并设定默认智能体。当前已可用运行时：
 
 - `Claude Code`
 - `Codex`
 - `OpenCode`
 - `pi`
+
+同一页面还能安装 / 校验托管 Runtime、升级版本与回滚，并查看系统 PATH 上的外部 CLI 诊断。
+
+### 2.1 启用内置浏览器（可选）
+
+在「设置 → 浏览器控制」打开开关后，右侧面板会出现「浏览器」标签，同时内置的 `codemux-browser` MCP 会自动启用，会话即可直接操作网页。
 
 ### 3. 管理 MCP
 
@@ -296,7 +353,7 @@ Claude Code 默认供应商直接复用 `~/.claude/settings.json`，切换时自
 
 - 浏览并安装内置 Skills 与 GitHub Skills
 - 预览 Skill 内容
-- 为 Claude / Codex / Gemini / OpenCode 单独启用 / 禁用
+- 为 Claude Code / Codex / OpenCode / pi 单独启用 / 禁用
 - 卸载已安装 Skills
 
 Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink → junction → copy 回退链处理跨卷与权限问题。已启用的 Skills 会自动注册为斜杠命令。
@@ -326,6 +383,23 @@ Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink �
 - 查看每日 token 堆叠柱状图与缓存命中率
 - 查看 Agent / 模型分布与累计会话数
 
+
+### 7. 派发工作任务
+
+在侧边栏的「待办任务」中新建任务，选择项目、Agent 与模型并写下指令即可启动。任务由 daemon 按项目配额排队，在隔离的 git worktree 分支里创建真实会话执行；完成后任务进入「等你处理」，可查看 Diff 统计并选择合并、标记完成或重新开始。
+
+### 8. 配置定时任务
+
+在侧边栏的「自动化」中按模板或从零创建定时任务，绑定项目与 Agent 后启用。到点会自动新建会话执行指令，并保留运行历史供回看。
+
+### 9. 改键与外观
+
+- 「设置 → 快捷键」：点键位进入录制，可重绑、禁用或恢复默认
+- 「设置 → 外观」：主题、强调色、界面字体与字号、代码字号、圆角风格、幕布宽度
+
+### 10. 从手机或另一台电脑继续
+
+在同一局域网或远程环境下，用手机 / 浏览器扫码配对后即可查看并驱动桌面会话。配对使用 Pairing Token，业务权威始终在运行 CodeMUX 的那台机器上。
 ---
 
 ## 斜杠命令
@@ -448,12 +522,14 @@ codeMUX/
 ├─ src/                     # React 统一前端（桌面 UI、PC 浏览器、手机浏览器共用一套构建）
 │  ├─ components/agent/     # 对话面板、工具卡片、权限卡片、上下文进度
 │  ├─ components/settings/  # 设置页（Provider / MCP / Skills / 通知 / 使用统计 / 日志）
-│  ├─ components/workspace/ # Review / Terminal / Plan 等侧边面板
+│  ├─ components/workspace/ # Review / Terminal / Browser 等侧边面板
+│  ├─ components/automation/ # 定时任务面板与编辑器
+│  ├─ components/worktask/  # 工作任务看板
 │  ├─ stores/               # Zustand 状态（agent / session / mcp / skill 等）
 │  └─ lib/                  # 工具函数（通知、权限、模型、上下文计算等）
 ├─ apps/
 │  ├─ desktop/              # Electron 壳（main / preload / supervisor / Browser Host / updater）
-│  ├─ sidecar/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
+│  ├─ sidecar/              # Node.js Agent Sidecar（Claude / Codex / OpenCode / pi 运行时）
 │  └─ cli/                  # 本机命令行 Daemon Client
 ├─ crates/
 │  └─ daemon/               # Rust daemon crate（Tauri 壳已移除，目录由 src-tauri/ 改名）
@@ -488,6 +564,12 @@ codeMUX/
 - [OpenCode SDK Agent 接入设计](docs/specs/2026-07-12-opencode-sdk-agent.md)
 - [ADR 0011 — Daemon 权威与 Local Daemon Token](docs/adr/0011-daemon-authority-local-token.md)
 - [ADR 0012 — Daemon 独立进程与 Electron 桌面壳](docs/adr/0012-daemon-process-electron-shell.md)
+- [ADR 0013 — 用户可配置键盘快捷键](docs/adr/0013-user-configurable-keyboard-shortcuts.md)
+- [统一前端（桌面 / 浏览器 / 手机共用一套构建）](docs/specs/2026-09-13-unified-frontend.md)
+- [内置浏览器设计](docs/specs/2026-09-02-built-in-browser.md)
+- [Agent 任务看板设计](docs/specs/2026-09-21-agent-task-board.md)
+- [定时任务设计](docs/specs/2026-08-27-scheduled-tasks.md)
+- [pi Agent 接入设计](docs/specs/2026-09-03-pi-agent-integration.md)
 
 ---
 

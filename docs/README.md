@@ -12,6 +12,7 @@
 | `tickets/` | 工单(可执行的实施单元,按 feature 分组) | `tickets/<feature-slug>/<NN>-<slug>.md`,NN 从 01 起 |
 | `research/` | 调研笔记(外部方案调研、根因排查) | `YYYY-MM-DD-<slug>.md` |
 | `guides/` | 使用 / 运维指南(长期有效的 how-to) | `<topic>-guide.md`,kebab-case |
+| `agents/` | 给 agent 的仓库协作约定(issue 追踪方式等) | `<topic>.md`,kebab-case |
 
 约定:
 
@@ -179,3 +180,15 @@
 ### adr
 
 架构决策记录见 [adr/](adr/),当前 0002–0013,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
+
+近期记录:
+
+- [0011 — Daemon 权威与 Local Daemon Token](adr/0011-daemon-authority-local-token.md)
+- [0012 — Daemon 独立进程与 Electron 桌面壳](adr/0012-daemon-process-electron-shell.md)
+- [0013 — 用户可配置键盘快捷键](adr/0013-user-configurable-keyboard-shortcuts.md)
+
+### agents
+
+| 文档 | 用途 |
+|---|---|
+| [issue-tracker](agents/issue-tracker.md) | 本仓库的 issue 追踪约定:spec 与 ticket 的落盘位置、状态与评论写法,以及 skill 提到 "publish to the issue tracker" 时的处理方式 |

@@ -43,6 +43,7 @@ crates/daemon/config.json
 out/
 .superpowers/
 log/
+.pi/
 *.zip
 
 # TypeScript 增量构建产物
