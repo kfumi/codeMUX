@@ -140,6 +140,14 @@ describe('electron bundle resources', () => {
     expect(DESKTOP_PACKAGE_JSON.scripts['pack:mac']).toContain('--x64 --arm64');
   });
 
+  it('pins a filesystem-safe Linux executable name', () => {
+    // Linux 的可执行文件名默认取 package.json 的 name,而它是作用域包名
+    // @codemux/desktop —— 清洗后得到 @codemuxdesktop,其中的 @ 在 AppImage 路径里
+    // 非法,构建直接失败(win/macOS 从 productName 取名,只有 Linux 踩得到)。
+    expect(DESKTOP_PACKAGE_JSON.name).toMatch(/^@/);
+    expect(BUILDER_YML).toMatch(/^ {2}executableName: CodeMUX$/m);
+  });
+
   it('only registers the Windows notification identity on Windows', () => {
     // AUMID + 注册表 IconUri 是 Windows 概念;mac/linux 上 ensureNotificationIdentity
     // 内部是 reg.exe,不挡掉会白跑一次注定失败的命令。

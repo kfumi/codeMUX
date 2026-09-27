@@ -97,10 +97,16 @@ mac:
       arch:
         - x64
         - arm64
-
 # Linux:AppImage 单文件免 root,是最省事的分发形态;extraResources 的
 # icons/icon.ico 在这里用不到(托盘走 PNG),保留无害。
 linux:
+  # executableName 必须显式指定:Linux 的可执行文件名默认取 package.json 的
+  # name,而这里是作用域包名「@codemux/desktop」—— electron-builder 清洗后得到
+  # 「@codemuxdesktop」,其中的 @ 在 AppImage 路径里非法,构建会直接失败:
+  #   failed to build AppImage error=executableName contains characters that
+  #   cannot be safely used in file paths: @codemuxdesktop
+  # win/macOS 从 productName 取名,不受影响,所以只有 Linux 踩得到这个坑。
+  executableName: CodeMUX
   icon: build/icons/icon.png
   category: Development
   target:
