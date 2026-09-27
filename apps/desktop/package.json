@@ -9,9 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "node scripts/dev.mjs",
     "pack:prepare": "npm run build && node scripts/stage-daemon-bin.mjs && node scripts/copy-renderer-dist.mjs && node scripts/copy-sidecar-dist.mjs",
-    "pack:win": "npm run pack:prepare && electron-builder --win nsis --publish never",
-    "pack:mac": "npm run pack:prepare && electron-builder --mac dmg zip --publish never",
-    "pack:linux": "npm run pack:prepare && electron-builder --linux AppImage --publish never"
+    "pack:win": "npm run pack:prepare && electron-builder --win nsis --x64 --publish never",
+    "pack:mac": "npm run pack:prepare && electron-builder --mac dmg zip --x64 --arm64 --publish never",
+    "pack:linux": "npm run pack:prepare && electron-builder --linux AppImage --x64 --publish never"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

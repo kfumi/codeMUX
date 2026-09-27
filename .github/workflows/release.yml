@@ -264,24 +264,31 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          # 无论成败都把打包日志尾部打进 annotations。::warning:: 不会让 job 失败,
+          # 但内容可经 GitHub API 读到 —— 排查时不必去翻需要鉴权的原始日志。
+          if (Test-Path "apps/desktop/packaging.log") {
+            $tail = (Get-Content "apps/desktop/packaging.log" -Tail 30) -join " / "
+            "::warning title=打包日志尾部::$tail" | Out-Null
+          }
+
           $dest = Join-Path $env:GITHUB_WORKSPACE "release-assets"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # 排除三样东西:
+          #   builder-*       electron-builder 调试输出
+          #   app-update.yml  打包期生成的更新配置,不是发布物
+          #   *-unpacked / *.app / resources  解包目录(v0.4.3 曾误收
+          #                 win-unpacked/CodeMUX.exe,180MB 纯垃圾)
           $assets = Get-ChildItem "apps/desktop/release" -Recurse -File |
             Where-Object {
               $_.Name -notlike "builder-*" -and
-              $_.FullName -notmatch "\\resources\\" -and
+              $_.Name -ne "app-update.yml" -and
+              $_.FullName -notmatch "\\(win-unpacked|linux-unpacked|[^\\]+\.app|resources)\\" -and
               $_.Extension -in ".exe", ".dmg", ".zip", ".AppImage", ".blockmap", ".yml"
             }
+          "::warning title=收集到的产物::$($assets.Count) 个: $(($assets.Name) -join ' / ')" | Out-Null
           if (-not $assets) {
-            # 走到这里通常是打包失败。用 ::error:: 把日志尾巴和目录现状打进
-            # annotations —— 它能被 GitHub API 读到,排查时不必去翻原始日志。
             "::error title=没有出包产物::apps/desktop/release 下没有可上传的安装包文件" | Out-Null
-            if (Test-Path "apps/desktop/packaging.log") {
-              "::error title=打包日志尾部::$(Get-Content apps/desktop/packaging.log -Tail 25 -Raw)" | Out-Null
-            } else {
-              "::error title=打包日志缺失::apps/desktop/packaging.log 不存在,失败发生在打包之前的步骤" | Out-Null
-            }
-            "::error title=release 目录现状::$(Get-ChildItem apps/desktop/release -Recurse -Depth 2 | Select-Object -First 30 -ExpandProperty FullName)" | Out-Null
+            "::error title=release 目录现状::$((Get-ChildItem apps/desktop/release -Recurse -Depth 2 | Select-Object -First 30 -ExpandProperty FullName) -join ' / ')" | Out-Null
             exit 1
           }
           $assets | ForEach-Object {

@@ -123,6 +123,23 @@ describe('electron bundle resources', () => {
     expect(RELEASE_WORKFLOW).toContain('npm run pack:${{ matrix.pack }}');
   });
 
+  it('excludes unpacked bundles and build-time files from release assets', () => {
+    // v0.4.3 教训:按扩展名白名单挑产物时,win-unpacked/CodeMUX.exe(180MB)和
+    // app-update.yml(打包期生成的更新配置)都会被误当成发布物挂上 Release。
+    expect(RELEASE_WORKFLOW).toContain('$_.Name -ne "app-update.yml"');
+    expect(RELEASE_WORKFLOW).toContain('win-unpacked|linux-unpacked');
+    expect(RELEASE_WORKFLOW).toMatch(/linux-unpacked\|\[\^/);
+    // 上传与附加都走收敛后的 release-assets/,不再直接对 release/ 写 glob。
+    expect(RELEASE_WORKFLOW).toContain('path: release-assets/*');
+    expect(RELEASE_WORKFLOW).toContain('Get-ChildItem "release-assets" -File');
+  });
+
+  it('asks electron-builder for every macOS arch explicitly', () => {
+    // yml 里写了 arch: [x64, arm64],但 CLI 一旦带 target(--mac dmg zip)就会
+    // 用宿主架构覆盖掉配置里的 arch 列表 —— v0.4.3 因此只出了 arm64。
+    expect(DESKTOP_PACKAGE_JSON.scripts['pack:mac']).toContain('--x64 --arm64');
+  });
+
   it('only registers the Windows notification identity on Windows', () => {
     // AUMID + 注册表 IconUri 是 Windows 概念;mac/linux 上 ensureNotificationIdentity
     // 内部是 reg.exe,不挡掉会白跑一次注定失败的命令。
