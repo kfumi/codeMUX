@@ -23,6 +23,10 @@ apps/desktop/release
 # 打包前由 scripts/stage-daemon-bin.mjs 生成:按当前平台放 codemux-daemon[.exe],
 # 供 electron-builder 的 extraResources(from: daemon-bin)收进资源根。
 apps/desktop/daemon-bin
+# CI 出包时在 apps/desktop/ 下产生的中间物(packaging.log 是打包日志,
+# release-assets 是收集后的待上传产物目录)。
+apps/desktop/packaging.log
+release-assets/
 dist-ssr
 .worktrees/
 *.local

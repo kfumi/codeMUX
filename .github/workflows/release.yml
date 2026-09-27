@@ -249,17 +249,52 @@ jobs:
         # pack:* 里已固定 --publish never:electron-builder 默认策略是 onTagOrDraft,
         # 在 tag 触发的 CI 上会自行发布并和 ensure-release 建的 Release 打架。
         # 上传统一交给下一步(gh release upload --clobber,可重跑)。
-        run: npm run pack:${{ matrix.pack }}
+        shell: bash
+        # pipefail:不设的话管道会以 tee 的退出码为准,打包失败会被吞掉。
+        # 显式用 bash(Windows runner 上是 Git Bash),三个平台同一份。
+        run: |
+          set -o pipefail
+          npm run pack:${{ matrix.pack }} 2>&1 | tee packaging.log
+
+      # 把产物收敛到一个干净目录再上传/附加。直接对 release/ 写 glob 有两个坑:
+      #   1) 多架构时 electron-builder 会把文件放进 release/<target>/ 子目录,顶层 glob 抓不到;
+      #   2) 用 ** 递归又会把 win-unpacked 之类解包目录(几百 MB)一并传上去。
+      # 所以按扩展名白名单挑,并排除 builder-* 调试输出和解包目录内的 resources/。
+      - name: Collect release assets
+        if: always()
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $assets = Get-ChildItem "apps/desktop/release" -Recurse -File |
+            Where-Object {
+              $_.Name -notlike "builder-*" -and
+              $_.FullName -notmatch "\\resources\\" -and
+              $_.Extension -in ".exe", ".dmg", ".zip", ".AppImage", ".blockmap", ".yml"
+            }
+          if (-not $assets) {
+            # 走到这里通常是打包失败。用 ::error:: 把日志尾巴和目录现状打进
+            # annotations —— 它能被 GitHub API 读到,排查时不必去翻原始日志。
+            "::error title=没有出包产物::apps/desktop/release 下没有可上传的安装包文件" | Out-Null
+            if (Test-Path "apps/desktop/packaging.log") {
+              "::error title=打包日志尾部::$(Get-Content apps/desktop/packaging.log -Tail 25 -Raw)" | Out-Null
+            } else {
+              "::error title=打包日志缺失::apps/desktop/packaging.log 不存在,失败发生在打包之前的步骤" | Out-Null
+            }
+            "::error title=release 目录现状::$(Get-ChildItem apps/desktop/release -Recurse -Depth 2 | Select-Object -First 30 -ExpandProperty FullName)" | Out-Null
+            exit 1
+          }
+          $assets | ForEach-Object {
+            Write-Host "收集: $($_.Name)"
+            Copy-Item $_.FullName -Destination $dest
+          }
+          Write-Host "共收集 $($assets.Count) 个文件到 release-assets"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.pack }}-installer-${{ needs.ensure-release.outputs.version }}
-          # 本 runner 只产本平台的产物,整个目录传上去即可;builder-debug.yml 是
-          # electron-builder 的调试输出,不是发布物,排除掉。
-          path: |
-            !apps/desktop/release/builder-*
-            !apps/desktop/release/builder-*.yml
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 14
 
@@ -269,14 +304,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: kfumi/codeMUX
         run: |
-          # 同上:排除 builder-*.yml,其余(安装包 / blockmap / latest*.yml)全传。
-          $assets = Get-ChildItem "apps/desktop/release" -File |
-          # 同上:排除 builder-*(builder-debug.yml / builder-effective-config.yaml),
-          # 其余(安装包 / blockmap / latest*.yml)全传。
-          $assets = Get-ChildItem "apps/desktop/release" -File |
-            Where-Object { $_.Name -notlike "builder-*" }
+          $assets = Get-ChildItem "release-assets" -File
           if (-not $assets) {
-            throw "apps/desktop/release 下没有可上传的安装包产物。"
+            throw "release-assets 下没有可上传的安装包产物。"
           }
           $assets | ForEach-Object { Write-Host "上传: $($_.Name)" }
           gh release upload $env:TAG_NAME @($assets.FullName) --clobber
