@@ -147,6 +147,90 @@ describe('piEvents tool execution', () => {
     expect(failed[0]).toMatchObject({ type: 'tool_finished', is_error: true, content: '{"message":"boom"}' });
   });
 
+  it('normalizes ask_user_question answers into the question card shape', () => {
+    const ctx = createContext();
+    const finished = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user_question',
+        result: {
+          content: [{ type: 'text', text: 'Q1: a\nQ2: b' }],
+          details: { answers: [{ question: 'Q1', answer: 'a' }, { question: 'Q2', answer: 'b' }] },
+        },
+        isError: false,
+      },
+      ctx,
+    );
+    // 提问卡按位置序读 answers；直接透传 result 会让它读不到（回显"未作答"）。
+    expect(finished[0]).toMatchObject({ type: 'tool_finished', content: '{"answers":[["a"],["b"]]}' });
+  });
+
+  it('maps an all-null ask_user_question answer list to the cancelled sentinel', () => {
+    const ctx = createContext();
+    const cancelled = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user_question',
+        result: {
+          content: [{ type: 'text', 'text': 'Q1: (no answer)' }],
+          details: { answers: [{ question: 'Q1', answer: null }] },
+        },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(cancelled[0]).toMatchObject({ type: 'tool_finished', content: '__cancelled__' });
+
+    // 空串是合法的自由文本答复，不能当取消。
+    const blank = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user_question',
+        result: { content: [], details: { answers: [{ question: 'Q1', answer: '' }] } },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(blank[0]).toMatchObject({ content: '{"answers":[[""]]}' });
+  });
+
+  it('keeps the raw result when the ask tool has no structured answers', () => {
+    const ctx = createContext();
+    const withoutDetails = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user_question',
+        result: { content: [{ type: 'text', text: 'Q1: a' }], details: {} },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(withoutDetails[0]).toMatchObject({
+      type: 'tool_finished',
+      content: '{"content":[{"type":"text","text":"Q1: a"}],"details":{}}',
+    });
+
+    // 非提问工具即便碰巧带 details.answers 也不改写（避免误伤别的工具输出）。
+    const otherTool = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-x',
+        toolName: 'bash',
+        result: { details: { answers: [{ question: 'Q', answer: 'a' }] } },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(otherTool[0]).toMatchObject({
+      type: 'tool_finished',
+      content: '{"details":{"answers":[{"question":"Q","answer":"a"}]}}',
+    });
+  });
+
   it('ignores lifecycle and unsupported events without output', () => {
     const ctx = createContext();
     for (const event of [

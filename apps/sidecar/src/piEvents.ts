@@ -213,12 +213,47 @@ function projectToolStart(event: PiRuntimeEvent, outputs: CodeMuxEvent[]): void 
   });
 }
 
+/** pi 提问工具名（与前端 ASK_USER_QUESTION_TOOL_NAMES 对齐）。 */
+const PI_ASK_TOOL_NAMES = new Set([
+  'ask_user_question',
+  'AskUserQuestion',
+  'askUserQuestion',
+  'request_user_input',
+  'question',
+]);
+
+/**
+ * pi 提问工具的 tool result → CodeMUX 提问卡能读的位置序形状
+ * `{"answers":[["答案"], ...]}`；不是提问工具（或没有结构化答案）返回 null。
+ *
+ * pi 扩展把答案放在 `details.answers`（`[{question, answer}]`），`content`
+ * 只是喂给模型的 `"问题: 答案"` 文本。直接透传整个 result 时提问卡读不到
+ * `answers`（藏在 `details` 下），答案回显成"未作答"。全部 answer 为 null
+ * 表示用户取消（`ctx.ui.select` 收到 cancelled），映射成提问卡已支持的
+ * `__cancelled__` 哨兵；空字符串是合法的自由文本答复，不算取消。
+ */
+export function piAskToolResultContent(toolName: string | null | undefined, result: unknown): string | null {
+  if (!toolName || !PI_ASK_TOOL_NAMES.has(toolName)) return null;
+  if (!isRecord(result)) return null;
+  const details = result.details;
+  if (!isRecord(details) || !Array.isArray(details.answers)) return null;
+
+  const answers = details.answers.map((entry) =>
+    isRecord(entry) && typeof entry.answer === 'string' ? entry.answer : null,
+  );
+  if (answers.length > 0 && answers.every((answer) => answer === null)) return '__cancelled__';
+  return JSON.stringify({ answers: answers.map((answer) => [answer ?? '']) });
+}
+
 function projectToolEnd(event: PiRuntimeEvent, outputs: CodeMuxEvent[]): void {
   const toolCallId = readString(event.toolCallId);
   if (!toolCallId) return;
   const isError = event.isError === true;
+  const askContent = piAskToolResultContent(readString(event.toolName), event.result);
   let content = '';
-  if (typeof event.result === 'string') {
+  if (askContent !== null) {
+    content = askContent;
+  } else if (typeof event.result === 'string') {
     content = event.result;
   } else if (event.result !== undefined && event.result !== null) {
     try {

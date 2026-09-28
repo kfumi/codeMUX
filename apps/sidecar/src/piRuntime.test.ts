@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
 import { PI_APPROVE_TITLE_PREFIX, PI_ASK_TITLE_PREFIX } from './piExtension.js';
-import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, normalizePiAnthropicBaseUrl, normalizePiProviderBaseUrl, writePiModelsJson } from './piRuntime.js';
+import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, normalizePiAnthropicBaseUrl, normalizePiProviderBaseUrl, resolvePiEntryFromRuntimeRef, writePiModelsJson } from './piRuntime.js';
 import type { PiSessionConfig } from './types.js';
 
 const FAKE_PI_PATH = fileURLToPath(new URL('./__fixtures__/fake-pi.mjs', import.meta.url));
@@ -654,7 +654,7 @@ describe('PiRuntime', () => {
       fs.rmSync(runtimeDir, { recursive: true, force: true });
       fs.rmSync(configDir, { recursive: true, force: true });
     });
-    const entry = path.join(runtimeDir, 'node_modules', '@mariozechner', 'pi-coding-agent', 'dist', 'cli.js');
+    const entry = path.join(runtimeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js');
     fs.mkdirSync(path.dirname(entry), { recursive: true });
     fs.writeFileSync(entry, 'process.exit(0);\n', 'utf8');
 
@@ -671,6 +671,36 @@ describe('PiRuntime', () => {
     expect(written.providers.codemux.api).toBe('anthropic-messages');
     expect(written.providers.codemux.baseUrl).toBe('https://provider.example');
     expect(written.providers.codemux.models[0].id).toBe('glm-5.3-flash');
+  });
+
+  it('resolvePiEntryFromRuntimeRef prefers the new earendil bundle entry', () => {
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-runtime-new-'));
+    pendingCleanups.push(() => fs.rmSync(runtimeDir, { recursive: true, force: true }));
+    const newEntry = path.join(runtimeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js');
+    fs.mkdirSync(path.dirname(newEntry), { recursive: true });
+    fs.writeFileSync(newEntry, 'process.exit(0);\n', 'utf8');
+
+    expect(resolvePiEntryFromRuntimeRef({ provider: 'pi', runtimeRoot: runtimeDir, runtimePath: runtimeDir } as never))
+      .toBe(newEntry);
+  });
+
+  it('resolvePiEntryFromRuntimeRef falls back to the legacy mariozechner entry for pre-migration runtimes', () => {
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-runtime-legacy-'));
+    pendingCleanups.push(() => fs.rmSync(runtimeDir, { recursive: true, force: true }));
+    const legacyEntry = path.join(runtimeDir, 'node_modules', '@mariozechner', 'pi-coding-agent', 'dist', 'cli.js');
+    fs.mkdirSync(path.dirname(legacyEntry), { recursive: true });
+    fs.writeFileSync(legacyEntry, 'process.exit(0);\n', 'utf8');
+
+    expect(resolvePiEntryFromRuntimeRef({ provider: 'pi', runtimeRoot: runtimeDir, runtimePath: runtimeDir } as never))
+      .toBe(legacyEntry);
+  });
+
+  it('resolvePiEntryFromRuntimeRef reports the new entry path when no pi entry exists', () => {
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-runtime-empty-'));
+    pendingCleanups.push(() => fs.rmSync(runtimeDir, { recursive: true, force: true }));
+
+    expect(resolvePiEntryFromRuntimeRef({ provider: 'pi', runtimeRoot: runtimeDir, runtimePath: runtimeDir } as never))
+      .toBe(path.join(runtimeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js'));
   });
 });
 
@@ -795,7 +825,23 @@ describe('PiRuntime interactive extension bridge', () => {
               event: { type: 'extension_ui_request', id: 'ask-1', method: 'input', title: askTitle('a1', 1) },
               awaitResponse: true,
             },
-            { event: { type: 'tool_execution_end', toolCallId: 'a1', result: 'done', isError: false } },
+            {
+              event: {
+                type: 'tool_execution_end',
+                toolCallId: 'a1',
+                toolName: 'ask_user_question',
+                result: {
+                  content: [{ type: 'text', text: '选择方案: B\n补充说明: 补充文字' }],
+                  details: {
+                    answers: [
+                      { question: '选择方案', answer: 'B' },
+                      { question: '补充说明', answer: '补充文字' },
+                    ],
+                  },
+                },
+                isError: false,
+              },
+            },
             { event: { type: 'agent_end' } },
           ],
         },
@@ -821,6 +867,12 @@ describe('PiRuntime interactive extension bridge', () => {
         { id: 'ask-0', value: 'B' },
         { id: 'ask-1', value: '补充文字' },
       ]);
+      // 提问卡的答案回显靠这条 content 的位置序 answers（与 OpenCode 同形）。
+      expect(events.find((event) => event.type === 'tool_finished')).toMatchObject({
+        tool_use_id: 'a1',
+        content: '{"answers":[["B"],["补充文字"]]}',
+        is_error: false,
+      });
       expect(events.find((event) => event.type === 'permission_resolved')).toMatchObject({
         request_id: 'a1',
         request_kind: 'question',

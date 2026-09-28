@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::config::types::AgentKind;
 
 use super::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
-use super::history_events::normalize_history_events;
+use super::history_events::{is_ask_user_question_tool_name, normalize_history_events};
 use super::native_jsonl::read_json_stream_values;
 use super::rewind::normalize_rewind_text;
 use super::session_lifecycle::get_agent_session_id;
@@ -496,7 +496,11 @@ fn convert_pi_message_entry(raw: &Value) -> Option<Value> {
 /// `[{type:"text",...}]` 块数组拍平为纯文本，避免渲染成 JSON 转储。
 fn convert_pi_tool_result_entry(raw: &Value, message: &Value) -> Option<Value> {
     let tool_use_id = message.get("toolCallId").and_then(Value::as_str)?;
-    let content = flatten_pi_content_text(message.get("content").unwrap_or(&Value::Null));
+    let tool_name = message
+        .get("toolName")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let content = pi_tool_result_content(tool_name, message);
     let mut converted = json!({
         "type": "user",
         "message": {
@@ -517,6 +521,42 @@ fn convert_pi_tool_result_entry(raw: &Value, message: &Value) -> Option<Value> {
         converted["source_event_index"] = line_index.clone();
     }
     Some(converted)
+}
+
+/// 提问工具的 tool result content：把 `details.answers` 归一化成 CodeMUX
+/// 提问卡读的位置序形状 `{"answers":[["答案"], ...]}`；其余工具保持拍平文本。
+///
+/// pi 扩展只把答案写进 `details.answers`（`[{question, answer}]`），content
+/// 是喂给模型的 `"问题: 答案"` 文本，直接拍平后前端解析不到答案、回显成
+/// "未作答"。answer 全为 null 表示用户取消（`ctx.ui.select` 收到
+/// cancelled），映射成提问卡支持的 `__cancelled__` 哨兵；空字符串是合法的
+/// 自由文本答复，不算取消。存量会话文件同样带 `details`，一并受益。
+fn pi_tool_result_content(tool_name: &str, message: &Value) -> Value {
+    let flattened = flatten_pi_content_text(message.get("content").unwrap_or(&Value::Null));
+    if !is_ask_user_question_tool_name(tool_name) {
+        return flattened;
+    }
+    let Some(Value::Array(entries)) = message
+        .get("details")
+        .and_then(|details| details.get("answers"))
+    else {
+        return flattened;
+    };
+    if entries.is_empty() {
+        return flattened;
+    }
+
+    let answers: Vec<Value> = entries
+        .iter()
+        .map(|entry| match entry.get("answer").and_then(Value::as_str) {
+            Some(answer) => json!([answer]),
+            None => Value::Null,
+        })
+        .collect();
+    if answers.iter().all(Value::is_null) {
+        return json!("__cancelled__");
+    }
+    json!({ "answers": answers })
 }
 
 /// 把 pi 内容块数组拍平为纯文本（拼接 text 块）；字符串原样返回。
@@ -998,6 +1038,9 @@ mod tests {
                         "toolCallId": "call-775ead75336345cb8b3ff7b1",
                         "toolName": "ask_user_question",
                         "content": [{ "type": "text", "text": "你更喜欢哪种编程语言？: Python" }],
+                        "details": {
+                            "answers": [{ "question": "你更喜欢哪种编程语言？", "answer": "Python" }]
+                        },
                         "isError": false
                     }
                 }),
@@ -1029,6 +1072,67 @@ mod tests {
             ]
         );
         assert_eq!(events[1]["tool_use_id"], "call-775ead75336345cb8b3ff7b1");
+        // 提问卡的答案靠 tool_finished.content 里的位置序 answers 渲染，
+        // 不能退化成喂给模型的 `"问题: 答案"` 文本（否则回显"未作答"）。
+        assert_eq!(events[2]["content"], r#"{"answers":[["Python"]]}"#);
+    }
+
+    #[test]
+    fn normalizes_ask_user_question_answers_for_the_question_card() {
+        let ask_result = |answers: Value| {
+            json!({
+                "type": "message",
+                "id": "result-1",
+                "message": {
+                    "role": "toolResult",
+                    "toolCallId": "call-1",
+                    "toolName": "ask_user_question",
+                    "content": [{ "type": "text", "text": "Q1: a\nQ2: b" }],
+                    "details": { "answers": answers },
+                    "isError": false
+                }
+            })
+        };
+        let finished_content = |entry: &Value| {
+            convert_pi_history_values_to_events(std::slice::from_ref(entry), "app-1")
+                .into_iter()
+                .find(|event| event["type"] == "tool_finished")
+                .expect("tool_finished event")["content"]
+                .clone()
+        };
+
+        // 多问题按位置序展开；自由文本空串是合法答复，不能当取消。
+        assert_eq!(
+            finished_content(&ask_result(json!([
+                { "question": "Q1", "answer": "a" },
+                { "question": "Q2", "answer": "" }
+            ]))),
+            r#"{"answers":[["a"],[""]]}"#
+        );
+
+        // answer 全为 null = 用户取消（select 收到 cancelled）。
+        assert_eq!(
+            finished_content(&ask_result(json!([
+                { "question": "Q1", "answer": null },
+                { "question": "Q2", "answer": null }
+            ]))),
+            json!("__cancelled__")
+        );
+
+        // 缺 details / 空 answers 时保持拍平文本，不产出半截 answers。
+        let without_details = json!({
+            "type": "message",
+            "id": "result-2",
+            "message": {
+                "role": "toolResult",
+                "toolCallId": "call-2",
+                "toolName": "ask_user_question",
+                "content": [{ "type": "text", "text": "Q1: a" }],
+                "details": {},
+                "isError": false
+            }
+        });
+        assert_eq!(finished_content(&without_details), json!("Q1: a"));
     }
 
     #[test]

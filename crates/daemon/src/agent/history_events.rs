@@ -338,7 +338,7 @@ fn tool_started_from_block(block: &Value, source: &Value) -> Option<Value> {
     Some(event)
 }
 
-fn is_ask_user_question_tool_name(name: &str) -> bool {
+pub(crate) fn is_ask_user_question_tool_name(name: &str) -> bool {
     matches!(
         name,
         "AskUserQuestion"
