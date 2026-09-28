@@ -140,6 +140,8 @@ type OperationKind = 'install' | 'upgrade' | 'repair' | 'remove';
 interface ProviderOperationState {
   kind: OperationKind;
   progress: RuntimeInstallProgress | null;
+  /** 操作开始的墙上时间，供进度条显示已用时；daemon 不上报耗时。 */
+  startedAt: number;
 }
 
 export function RuntimeSettingsPanel({
@@ -245,7 +247,12 @@ export function RuntimeSettingsPanel({
       const { provider, progress } = (payload ?? {}) as RuntimeInstallProgressEvent;
       setOperations((prev) => ({
         ...prev,
-        [provider]: { kind: prev[provider]?.kind ?? 'install', progress },
+        [provider]: {
+          kind: prev[provider]?.kind ?? 'install',
+          progress,
+          // 进度事件可能先于本地操作状态到达，兜一个当前时间，之后保持不变。
+          startedAt: prev[provider]?.startedAt ?? Date.now(),
+        },
       }));
     };
     const unsubscribe = desktopBridge?.onDesktopEvent('runtime-install-progress', handleProgress);
@@ -298,7 +305,7 @@ export function RuntimeSettingsPanel({
       });
       setOperations((prev) => ({
         ...prev,
-        [provider]: { kind, progress: null },
+        [provider]: { kind, progress: null, startedAt: Date.now() },
       }));
       const toastId = toast.loading(`正在${describeOperation(kind)} ${label}...`);
       try {
@@ -344,7 +351,7 @@ export function RuntimeSettingsPanel({
     async (provider: RuntimeProvider, label: string) => {
       setOperations((prev) => ({
         ...prev,
-        [provider]: { kind: 'remove', progress: null },
+        [provider]: { kind: 'remove', progress: null, startedAt: Date.now() },
       }));
       const toastId = toast.loading(`正在删除 ${label}...`);
       try {
@@ -621,7 +628,7 @@ function ProviderRuntimeCard({
           )}
 
           {progress && (
-            <ProgressBar progress={progress} />
+            <ProgressBar progress={progress} startedAt={operation?.startedAt ?? Date.now()} />
           )}
 
           {errorMessage && (
@@ -717,34 +724,80 @@ function ProviderRuntimeCard({
 
 /* ------------------------------- 进度条 ------------------------------- */
 
-function ProgressBar({ progress }: { progress: RuntimeInstallProgress }) {
-  const percent = progress.percent ?? 0;
+/**
+ * daemon 的进度字段是 Rust `Option`，"未知"时字段直接不出现；旧版本 daemon 会发
+ * `null`。两种都要归一成 `null`（未知），绝不能落到 `?? 0` ——那会把"没有数据"
+ * 画成一个假的 0%。
+ */
+export function knownNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** 超过一分钟用「x分y秒」，否则只报秒 —— 安装动辄一两分钟，秒数更有存在感。 */
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
+}
+
+export function ProgressBar({
+  progress,
+  startedAt,
+}: {
+  progress: RuntimeInstallProgress;
+  startedAt: number;
+}) {
+  const percent = knownNumber(progress.percent);
+  const bytesDone = knownNumber(progress.bytesDone);
+  const bytesTotal = knownNumber(progress.bytesTotal);
+  const elapsed = useElapsedSeconds(startedAt);
   const stageLabel = STAGE_LABEL[progress.stage] ?? progress.stage;
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between text-ui-caption text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          {stageLabel}
-          {progress.message ? ` · ${progress.message}` : ''}
+      <div className="flex items-center justify-between gap-2 text-ui-caption text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+          <span className="truncate">
+            {stageLabel}
+            {progress.message ? ` · ${progress.message}` : ''}
+          </span>
         </span>
-        {progress.percent !== undefined && (
-          <span className="font-mono text-muted-foreground">{percent}%</span>
+        {/* 百分比是 daemon 真的测出来才显示；未知时宁可留空也不编一个 0%。 */}
+        {percent !== null && (
+          <span className="shrink-0 font-mono text-muted-foreground">{percent}%</span>
         )}
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
-        <div
-          className="h-full rounded-full bg-blue-500 transition-all duration-slow"
-          style={{ width: `${Math.max(2, percent)}%` }}
-        />
+        {percent === null ? (
+          // 不确定态：npm 没有可用的百分比接口，与其画一条永远停在低位的假进度条，
+          // 不如明确告诉用户「还在动」——下方的时间与步骤数就是真实证据。
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+        ) : (
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-slow"
+            style={{ width: `${Math.max(2, percent)}%` }}
+          />
+        )}
       </div>
-      {progress.bytesTotal !== undefined && progress.bytesDone !== undefined && (
-        <div className="text-ui-caption text-muted-foreground">
-          {formatBytes(progress.bytesDone)} / {formatBytes(progress.bytesTotal)}
-        </div>
-      )}
+      <div className="flex items-center justify-between text-ui-caption text-muted-foreground">
+        <span className="font-mono">{bytesDone !== null && bytesTotal !== null
+          ? `${formatBytes(bytesDone)} / ${formatBytes(bytesTotal)}`
+          : ''}</span>
+        <span className="font-mono">已用时 {formatElapsed(elapsed)}</span>
+      </div>
     </div>
   );
+}
+
+/** 每秒推进一次的已用时秒数，让长时间没有新事件的安装也不会显得卡死。 */
+function useElapsedSeconds(startedAt: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  return now - startedAt;
 }
 
 function formatBytes(bytes: number): string {

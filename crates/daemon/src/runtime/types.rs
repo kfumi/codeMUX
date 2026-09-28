@@ -426,9 +426,16 @@ impl InstallStage {
 pub struct Progress {
     pub stage: InstallStage,
     /// 0-100，未知时为 `None`。
+    ///
+    /// `skip_serializing_if` 不是可选的洁癖：前端按"字段缺失"判断进度未知，
+    /// 而 `None` 默认序列化成 `null`，会让前端把"没有数据"渲染成一个假的 0%。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percent: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes_done: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes_total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 

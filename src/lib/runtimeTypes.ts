@@ -59,7 +59,11 @@ export interface RuntimeErrorInfo {
   recoverable: boolean;
 }
 
-/** 安装进度。 */
+/**
+ * 安装进度。数值字段在 daemon 侧是 Rust `Option`：未知时字段直接不出现
+ * （`skip_serializing_if`），老版本 daemon 会发 `null`。消费方一律按「未知」处理，
+ * 不要 fallback 成 0 ——那会把「没数据」画成一条假的 0% 进度。
+ */
 export interface RuntimeInstallProgress {
   stage: RuntimeInstallStage;
   percent?: number;

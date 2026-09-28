@@ -3,10 +3,11 @@
 //! Runtime 不再从 CodeMUX 的 GitHub Release 下载。每个 Provider 都从 npm registry
 //! 解析版本，并在 CodeMUX 自有 Runtime 目录中执行隔离安装。
 
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -122,7 +123,12 @@ fn candidate_binaries(provider: Provider) -> Vec<String> {
         // `@openai/codex` 元包通过 npm alias（如 `@openai/codex-win32-x64` →
         // `npm:@openai/codex@<version>-win32-x64`）分发平台二进制。alias 可能被
         // npm 提升到顶层 node_modules，也可能嵌套在元包内；元包自身亦内置
-        // `vendor/<triple>/codex/<binary>` 兜底布局。三者任一存在即视为完整。
+        // `vendor/<triple>/<binary>` 兜底布局。任一存在即视为完整。
+        //
+        // vendor 下的目录名有历史包袱：0.146 起二进制在 `bin/`，更早版本在 `codex/`。
+        // **两种都必须接受**，且必须与 sidecar `runtimeLoader.ts` 的 `vendorLayouts`
+        // 保持一致 —— 之前这里只认 `codex/`，于是 0.146 之后每一次 Codex 安装都会在
+        // 校验环节被判「缺少平台二进制」并删掉装好的目录，而 sidecar 明明能正常启动它。
         Provider::Codex => {
             let platform = match Platform::current() {
                 Platform::Windows => "win32",
@@ -146,16 +152,25 @@ fn candidate_binaries(provider: Provider) -> Vec<String> {
                 (Platform::Linux, Arch::X64) => "x86_64-unknown-linux-musl",
                 (Platform::Linux, Arch::Arm64) => "aarch64-unknown-linux-musl",
             };
-            let vendor_path = format!("vendor/{}/codex/{}", target_triple, binary);
             let platform_package = format!("@openai/codex-{}-{}", platform, arch);
-            vec![
-                format!("node_modules/{}/{}", platform_package, vendor_path),
+            let roots = [
+                // alias 被 npm 提升到顶层（实测 0.146.1 / 0.158.0 都是这个布局）。
+                format!("node_modules/{}", platform_package),
                 format!(
-                    "node_modules/@openai/codex/node_modules/{}/{}",
-                    platform_package, vendor_path
+                    "node_modules/@openai/codex/node_modules/{}",
+                    platform_package
                 ),
-                format!("node_modules/@openai/codex/{}", vendor_path),
-            ]
+                "node_modules/@openai/codex".to_string(),
+            ];
+            roots
+                .iter()
+                // 新布局 `bin` 排前面，让常见情况先命中。
+                .flat_map(|root| {
+                    ["bin", "codex"]
+                        .iter()
+                        .map(move |dir| format!("{root}/vendor/{target_triple}/{dir}/{binary}"))
+                })
+                .collect()
         }
         Provider::OpenCode => {
             let binary = if cfg!(target_os = "windows") {
@@ -269,29 +284,192 @@ impl NpmRuntimeInstaller {
         destination: &Path,
         progress: &dyn ProgressReporter,
     ) -> Result<(), RuntimeError> {
-        let spec = spec.clone();
-        let destination = destination.to_path_buf();
+        let provider = spec.provider;
+        let base_message = format!("正在从 npm 安装 {} {}", spec.provider.label(), spec.version);
         progress
-            .report(
-                Progress::new(InstallStage::Downloading).with_message(format!(
-                    "正在从 npm 安装 {} {}",
-                    spec.provider.label(),
-                    spec.version
-                )),
-            )
+            .report(Progress::new(InstallStage::Downloading).with_message(base_message.clone()))
             .await;
 
-        let provider = spec.provider;
-        let result = tokio::task::spawn_blocking(move || install_sync(&spec, &destination))
-            .await
-            .map_err(|e| {
-                RuntimeError::download_failed(Some(provider), format!("npm 安装任务异常：{}", e))
-            })?;
-        result
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<InstallStep>();
+        let spec = spec.clone();
+        let destination = destination.to_path_buf();
+        let install = tokio::task::spawn_blocking(move || install_sync(&spec, &destination, &tx));
+
+        // npm 没有可用的百分比接口，唯一真实的信号是它自己输出的逐包 fetch 行。
+        // 这里刻意**不**填 percent：编造的百分比比"未知"更糟，前端会把它画成一条
+        // 永远停在低位的进度条，看起来就像卡死了。缺 percent 时前端走不确定态。
+        let mut last_sent = Instant::now();
+        let mut pending: Option<InstallStep> = None;
+        while let Some(step) = rx.recv().await {
+            // 一次安装能刷出几百行 fetch，按固定节奏节流，避免刷爆 UI 事件通道。
+            if step.done == 1 || last_sent.elapsed() >= PROGRESS_THROTTLE {
+                progress
+                    .report(
+                        Progress::new(InstallStage::Downloading)
+                            .with_message(step.describe(&base_message)),
+                    )
+                    .await;
+                last_sent = Instant::now();
+                pending = None;
+            } else {
+                pending = Some(step);
+            }
+        }
+        // 补发最后一步，否则收尾时的最终计数会永远停在上一条节流消息上。
+        if let Some(step) = pending {
+            progress
+                .report(
+                    Progress::new(InstallStage::Downloading)
+                        .with_message(step.describe(&base_message)),
+                )
+                .await;
+        }
+
+        install.await.map_err(|e| {
+            RuntimeError::download_failed(Some(provider), format!("npm 安装任务异常：{}", e))
+        })?
     }
 }
 
-fn install_sync(spec: &NpmRuntimeSpec, destination: &Path) -> Result<(), RuntimeError> {
+/// npm 安装过程中的一次真实进展，对应一条 `npm http fetch` 输出。
+#[derive(Debug, Clone)]
+struct InstallStep {
+    /// 已完成的下载步骤数。
+    done: u64,
+    /// 最近一次下载的包名，让"还在动"这件事对用户可见。
+    label: Option<String>,
+}
+
+impl InstallStep {
+    /// 拼成面向用户的一行消息，保留"正在从 npm 安装 X"这个主语。
+    fn describe(&self, base: &str) -> String {
+        match &self.label {
+            Some(label) => format!("{base} · 已获取 {} 个依赖（{label}）", self.done),
+            None => format!("{base} · 已获取 {} 个依赖", self.done),
+        }
+    }
+}
+
+/// 进度事件的最小转发间隔。npm 的 fetch 行来得很快，人眼和 UI 都不需要那么密。
+const PROGRESS_THROTTLE: Duration = Duration::from_millis(400);
+
+/// 解析一行 npm 输出，判断它是否代表一次可展示的下载进展。`done` 是当前已完成数。
+///
+/// npm 把 `--loglevel=http` 的逐包行写在 **stderr**（不是 stdout），实测有三种形态：
+///
+/// ```text
+/// npm http fetch GET 200 https://registry.example.com/tiny-invariant 119ms (cache miss)
+/// npm http cache tiny-invariant@https://…/tiny-invariant-1.3.3.tgz 0ms (cache hit)
+/// npm http cache https://registry.example.com/is-number 20ms (cache hit)
+/// ```
+///
+/// 所以 `fetch` / `cache` 都算一步，且包名要能从 `name@url` 前缀或任意镜像/registry
+/// 的 URL 里取出来。`warn`、`notice`、空行都是噪音，当成进度会让计数虚高。
+fn parse_install_progress_line(line: &str, done: u64) -> Option<InstallStep> {
+    let rest = line.trim().strip_prefix("npm http ")?;
+    // 不能按空格切词找 URL：`cache <name>@<url>` 形式里 token 是 `name@https://…`，
+    // 并不以 `https://` 开头，按 token 匹配会把整行丢掉。
+    let url_at = rest.find("https://")?;
+    let prefix = &rest[..url_at];
+    let url = rest[url_at..].split_whitespace().next()?;
+    // tarball 命中缓存时 npm 会写成 `<name>@<url>`，这个包名比从 URL 反推可靠。
+    // 末位 token 必须以 `@` 结尾才能当成包名，否则 `cache`（npm 自己的动词）和
+    // `GET 200`（动作与状态码）会被误读成包名。
+    let label = prefix
+        .split_whitespace()
+        .last()
+        .filter(|token| token.ends_with('@'))
+        .map(|token| token.trim_end_matches('@'))
+        .filter(|name| !name.is_empty() && !name.starts_with(|c: char| c.is_ascii_digit()))
+        .map(ToOwned::to_owned)
+        .or_else(|| package_label_from_url(url));
+    Some(InstallStep {
+        done: done + 1,
+        label: Some(label.unwrap_or_else(|| "依赖包".to_string())),
+    })
+}
+
+/// 从任意 registry / 镜像的 URL 里反推包名。npm 默认源、npmmirror、私有源 URL 形态
+/// 都不同，逐一匹配不现实，所以按可靠性从高到低试几种启发式。
+fn package_label_from_url(url: &str) -> Option<String> {
+    let path = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split_once('/'))
+        .map(|(_, rest)| rest)?
+        .split('?')
+        .next()?;
+
+    // 1) registry tarball 的标准形态：`<name>/-/<file>.tgz`，scope 也在这里面。
+    if let Some((name, _)) = path.split_once("/-/") {
+        let name = name.trim_matches('/');
+        if !name.is_empty() {
+            // scoped 包的 packument URL 把 `/` 编码成了 %2f。
+            return Some(name.replace("%2f", "/").replace("%2F", "/"));
+        }
+    }
+
+    // 2) packument 元数据：路径只有一段，那一段就是包名。
+    //    必须限定"只有一段"——CDN 直链首段是 `packages`，当成包名会误导用户。
+    if !path.contains('/') {
+        let name = path.trim_matches('/');
+        if !name.is_empty() {
+            return Some(name.replace("%2f", "/").replace("%2F", "/"));
+        }
+    }
+
+    // 3) CDN 直链：`/packages/<name>/<version>/<name>-<version>.tgz`，只能靠文件名反推。
+    let file = path.rsplit('/').next()?;
+    if !file.ends_with(".tgz") {
+        return None;
+    }
+    let name = strip_trailing_version(file.trim_end_matches(".tgz"));
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// 去掉文件名尾部的版本号（`tiny-invariant-1.3.3-beta.1` → `tiny-invariant`）。
+/// 包名本身可能带连字符，所以要从右往左找**最后一个**后面跟数字的连字符。
+fn strip_trailing_version(stem: &str) -> &str {
+    stem.char_indices()
+        .rev()
+        .find(|(_, ch)| *ch == '-')
+        .filter(|(index, _)| stem[index + 1..].starts_with(|c: char| c.is_ascii_digit()))
+        .map(|(index, _)| &stem[..index])
+        .unwrap_or(stem)
+}
+
+/// 保留 stdout 末尾的少量有效行，供失败时给出可读上下文。
+fn push_tail_line(tail: &mut Vec<String>, line: &str) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with("npm http ") {
+        return;
+    }
+    tail.push(trimmed.to_string());
+    if tail.len() > 8 {
+        tail.remove(0);
+    }
+}
+
+/// 合并 stderr 与 stdout 尾部，滤掉 http 噪音，只留下对用户有用的最后若干行。
+fn failure_tail(stderr_tail: &[String], stdout_tail: &[String]) -> String {
+    let lines: Vec<&str> = stderr_tail
+        .iter()
+        .chain(stdout_tail.iter())
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("npm http "))
+        .collect();
+    if lines.is_empty() {
+        return "npm 未输出错误详情".to_string();
+    }
+    let start = lines.len().saturating_sub(12);
+    lines[start..].join("\n")
+}
+
+fn install_sync(
+    spec: &NpmRuntimeSpec,
+    destination: &Path,
+    steps: &tokio::sync::mpsc::UnboundedSender<InstallStep>,
+) -> Result<(), RuntimeError> {
     std::fs::create_dir_all(destination).map_err(|e| {
         RuntimeError::io_failed(
             Some(spec.provider),
@@ -327,9 +505,13 @@ fn install_sync(spec: &NpmRuntimeSpec, destination: &Path) -> Result<(), Runtime
         .arg("--include=optional")
         .arg("--no-audit")
         .arg("--no-fund")
-        .current_dir(destination);
+        // 只有 http 级别日志才有逐包的 fetch 行，是 npm 唯一可用的实时进度信号。
+        .arg("--loglevel=http")
+        .current_dir(destination)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     configure_hidden_command(&mut command);
-    let output = command.output().map_err(|e| {
+    let mut child = command.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             RuntimeError::node_unavailable(
                 "未找到 npm，请安装 Node.js 18+（npm 应随 Node.js 一起安装）",
@@ -338,13 +520,62 @@ fn install_sync(spec: &NpmRuntimeSpec, destination: &Path) -> Result<(), Runtime
             RuntimeError::download_failed(Some(spec.provider), format!("启动 npm 失败：{}", e))
         }
     })?;
-    if !output.status.success() {
+
+    // stderr 才是进度信号的来源（npm 把 --loglevel=http 的逐包行写在这里），
+    // 所以由当前线程逐行解析；stdout 另起线程排空 —— 两条管道都必须有人读，
+    // 写满 64KB 后 npm 会直接阻塞。
+    let stdout = child.stdout.take().expect("stdout 已配置为 piped");
+    let stdout_tail = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let sink = Arc::clone(&stdout_tail);
+    let stdout_thread = std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let mut tail = match sink.lock() {
+                Ok(guard) => guard,
+                // 拿不到锁说明主流程已经结束，没必要再收集。
+                Err(_) => return,
+            };
+            push_tail_line(&mut tail, &line);
+        }
+    });
+
+    let stderr = child.stderr.take().expect("stderr 已配置为 piped");
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    let mut stderr_tail: Vec<String> = Vec::new();
+    let mut done = 0u64;
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        match parse_install_progress_line(&line, done) {
+            Some(step) => {
+                done = step.done;
+                let _ = steps.send(step);
+            }
+            // 顺带留一份非 http 的尾部，安装失败时用来解释原因。
+            None => push_tail_line(&mut stderr_tail, &line),
+        }
+    }
+
+    let status = child.wait().map_err(|e| {
+        RuntimeError::download_failed(Some(spec.provider), format!("等待 npm 进程结束失败：{}", e))
+    })?;
+    let _ = stdout_thread.join();
+
+    if !status.success() {
+        let stdout_lines = stdout_tail
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
         return Err(RuntimeError::download_failed(
             Some(spec.provider),
             format!(
                 "npm 安装失败（退出码 {}）：{}",
-                output.status.code().unwrap_or(-1),
-                tail_output(&output)
+                status.code().unwrap_or(-1),
+                failure_tail(&stderr_tail, &stdout_lines)
             ),
         ));
     }
@@ -1300,6 +1531,74 @@ mod tests {
         );
     }
 
+    /// 0.146 起 `@openai/codex-<platform>-<arch>` 把二进制放在 `vendor/<triple>/bin/`，
+    /// 0.145 及更早在 `vendor/<triple>/codex/`。两个布局都必须被判为完整。
+    ///
+    /// 回归：候选路径表曾只列 `codex/`，导致 0.146 之后每一次 Codex 安装都在校验
+    /// 环节失败，报「npm Runtime 缺少必要文件、平台二进制或版本不匹配」并删掉刚装好的
+    /// 目录——而同一时刻 sidecar 的 `runtimeLoader.ts` 却能正常启动它。
+    #[test]
+    fn codex_candidate_binaries_cover_both_vendor_layouts() {
+        let spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.158.0").unwrap();
+        let binary = if cfg!(target_os = "windows") {
+            "codex.exe"
+        } else {
+            "codex"
+        };
+        let triple = match (Platform::current(), Arch::current()) {
+            (Platform::Windows, Arch::X64) => "x86_64-pc-windows-msvc",
+            (Platform::Windows, Arch::Arm64) => "aarch64-pc-windows-msvc",
+            (Platform::Macos, Arch::X64) => "x86_64-apple-darwin",
+            (Platform::Macos, Arch::Arm64) => "aarch64-apple-darwin",
+            (Platform::Linux, Arch::X64) => "x86_64-unknown-linux-musl",
+            (Platform::Linux, Arch::Arm64) => "aarch64-unknown-linux-musl",
+        };
+        let platform = match Platform::current() {
+            Platform::Windows => "win32",
+            Platform::Macos => "darwin",
+            Platform::Linux => "linux",
+        };
+        let arch = match Arch::current() {
+            Arch::X64 => "x64",
+            Arch::Arm64 => "arm64",
+        };
+        let hoisted = format!("node_modules/@openai/codex-{platform}-{arch}");
+
+        for layout in ["bin", "codex"] {
+            let path = format!("{hoisted}/vendor/{triple}/{layout}/{binary}");
+            assert!(
+                spec.candidate_binaries.contains(&path),
+                "候选路径缺少 {layout} 布局：{path}"
+            );
+        }
+        // 新布局要排在前面，让常见情况先命中。
+        assert!(spec.candidate_binaries[0].contains("/bin/"));
+    }
+
+    /// 用真实安装布局（alias 提升到顶层 + `bin/`）跑一遍完整性校验。
+    #[test]
+    fn codex_integrity_accepts_the_real_0_146_layout() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let version = "0.158.0";
+        let spec = NpmRuntimeSpec::for_version(Provider::Codex, version).unwrap();
+        let dir = fs.version_dir(Provider::Codex, version);
+        // 只铺真实布局：hoisted alias 的 `bin/` 目录，其余候选一律不存在。
+        write_runtime_layout(&spec, &dir).unwrap();
+        for candidate in spec.candidate_binaries.iter().skip(1) {
+            let _ = std::fs::remove_file(dir.join(candidate));
+        }
+
+        let manager = test_manager(
+            fs.clone(),
+            Arc::new(TestInstaller { fail: true }),
+            spec.clone(),
+        );
+        assert!(
+            manager.verify_integrity(Provider::Codex, version),
+            "真实安装布局应通过完整性校验"
+        );
+    }
+
     #[tokio::test]
     async fn codex_integrity_requires_candidate_binary() {
         let fs = Arc::new(TempRuntimeFileSystem::new());
@@ -1331,5 +1630,160 @@ mod tests {
         std::fs::create_dir_all(nested_path.parent().unwrap()).unwrap();
         std::fs::write(&nested_path, b"fake-binary").unwrap();
         assert!(manager.verify_integrity(Provider::Codex, "0.2.0"));
+    }
+}
+
+#[cfg(test)]
+mod install_progress_tests {
+    use super::*;
+
+    /// 全部取自本机 `npm install --loglevel=http` 的真实输出（npmmirror 源）。
+    /// npm 把这些行写在 stderr，且 URL 形态随 registry / 镜像而变，所以不能按
+    /// npmjs 官方源硬编码去解析。
+    const REAL_LINES: &[&str] = &[
+        "npm http fetch GET 200 https://registry.npmmirror.com/tiny-invariant 119ms (cache miss)",
+        "npm http cache tiny-invariant@https://registry.npmmirror.com/tiny-invariant/-/tiny-invariant-1.3.3.tgz 0ms (cache hit)",
+        "npm http fetch GET 200 https://cdn.npmmirror.com/packages/tiny-invariant/1.3.3/tiny-invariant-1.3.3.tgz 139ms (cache miss)",
+        "npm http cache https://registry.npmmirror.com/is-number 20ms (cache hit)",
+    ];
+
+    #[test]
+    fn every_http_line_counts_as_one_step() {
+        // fetch 和 cache 都算一步：命中缓存的 tarball 同样是"这个包已经就绪了"。
+        let mut done = 0u64;
+        for line in REAL_LINES {
+            let step = parse_install_progress_line(line, done)
+                .unwrap_or_else(|| panic!("应被识别为进展：{line}"));
+            done = step.done;
+        }
+        assert_eq!(done, REAL_LINES.len() as u64);
+    }
+
+    #[test]
+    fn every_real_line_yields_its_package_name() {
+        // 回归：末位 token 曾经被无条件当成包名，于是 `cache`（npm 的动词）和
+        // `GET 200`（动作与状态码）会显示成"正在下载 cache"。
+        let expected = [
+            "tiny-invariant",
+            "tiny-invariant",
+            "tiny-invariant",
+            "is-number",
+        ];
+        for (line, name) in REAL_LINES.iter().zip(expected) {
+            assert_eq!(
+                parse_install_progress_line(line, 0)
+                    .unwrap()
+                    .label
+                    .as_deref(),
+                Some(name),
+                "包名解析错误：{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn derives_labels_for_scoped_and_cdn_urls() {
+        let cases = [
+            (
+                "npm http fetch GET 200 https://registry.npmjs.org/@babel%2fcore/-/core-7.24.0.tgz 9ms (cache miss)",
+                Some("@babel/core"),
+            ),
+            (
+                "npm http fetch GET 200 https://registry.npmmirror.com/tiny-invariant 119ms (cache miss)",
+                Some("tiny-invariant"),
+            ),
+            // CDN 直链的路径里没有包名，只能从文件名反推。
+            (
+                "npm http fetch GET 200 https://cdn.npmmirror.com/packages/tiny-invariant/1.3.3/tiny-invariant-1.3.3.tgz 139ms (cache miss)",
+                Some("tiny-invariant"),
+            ),
+        ];
+        for (line, expected) in cases {
+            assert_eq!(
+                parse_install_progress_line(line, 0)
+                    .unwrap()
+                    .label
+                    .as_deref(),
+                expected,
+                "包名解析错误：{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn falls_back_to_a_generic_label_for_unrecognisable_urls() {
+        let step =
+            parse_install_progress_line("npm http fetch GET 200 https://example.com/ 1ms", 0)
+                .unwrap();
+        assert_eq!(step.label.as_deref(), Some("依赖包"));
+    }
+
+    #[test]
+    fn ignores_noise_lines() {
+        for line in [
+            "npm warn deprecated foo@1.0.0: no longer supported",
+            "npm notice New major version of npm available! 10.9.3 -> 12.1.0",
+            "added 152 packages, and audited 153 packages in 12s",
+            "",
+            "   ",
+        ] {
+            assert!(
+                parse_install_progress_line(line, 3).is_none(),
+                "噪音行不该被当成进展：{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn describes_step_without_faking_a_percentage() {
+        let step = InstallStep {
+            done: 12,
+            label: Some("opencode".to_string()),
+        };
+        assert_eq!(
+            step.describe("正在从 npm 安装 OpenCode 1.18.33"),
+            "正在从 npm 安装 OpenCode 1.18.33 · 已获取 12 个依赖（opencode）"
+        );
+    }
+
+    #[test]
+    fn failure_tail_drops_http_noise_and_keeps_the_real_error() {
+        let mut tail = Vec::new();
+        push_tail_line(
+            &mut tail,
+            "npm http fetch GET 200 https://example.com/x 1ms",
+        );
+        push_tail_line(&mut tail, "npm ERR! code ELIFECYCLE");
+        push_tail_line(&mut tail, "npm ERR! command failed: node install.js");
+        assert_eq!(
+            tail,
+            vec![
+                "npm ERR! code ELIFECYCLE",
+                "npm ERR! command failed: node install.js"
+            ]
+        );
+
+        let stdout = vec!["added 1 package".to_string()];
+        assert_eq!(
+            failure_tail(&tail, &stdout),
+            "npm ERR! code ELIFECYCLE
+npm ERR! command failed: node install.js
+added 1 package"
+        );
+    }
+
+    #[test]
+    fn failure_tail_never_renders_empty() {
+        assert_eq!(failure_tail(&[], &[]), "npm 未输出错误详情");
+    }
+
+    #[test]
+    fn failure_tail_ignores_an_http_only_failure() {
+        let mut tail = Vec::new();
+        for line in REAL_LINES {
+            push_tail_line(&mut tail, line);
+        }
+        assert!(tail.is_empty());
+        assert_eq!(failure_tail(&tail, &[]), "npm 未输出错误详情");
     }
 }
