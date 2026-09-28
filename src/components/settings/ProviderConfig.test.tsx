@@ -531,4 +531,123 @@ describe('ProviderConfigPanel', () => {
     expect(screen.queryByText('1M 上下文')).toBeNull();
     expect(screen.queryByText('模型类型')).toBeNull();
   });
+  it('saves supports_reasoning true after toggling the pi reasoning switch on', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    expect(await screen.findByText('支持思考（推理）')).toBeTruthy();
+    // Not protocol gated: the openai-only provider has no anthropic endpoint.
+    expect(screen.queryByText('1M 上下文')).toBeNull();
+
+    const reasoningSwitch = () =>
+      within(
+        screen.getByText('支持思考（推理）').closest('.justify-between') as HTMLElement,
+      ).getByRole('switch');
+
+    expect(reasoningSwitch().getAttribute('data-state')).toBe('unchecked');
+
+    fireEvent.click(reasoningSwitch());
+    await waitFor(() => {
+      expect(reasoningSwitch().getAttribute('data-state')).toBe('checked');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+
+    await waitFor(() => {
+      expect(upsertModelProvider).toHaveBeenCalled();
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]?.supports_reasoning).toBe(true);
+    });
+  });
+
+  it('saves supports_reasoning null when the pi reasoning switch is turned back off', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    expect(await screen.findByText('支持思考（推理）')).toBeTruthy();
+
+    const reasoningSwitch = () =>
+      within(
+        screen.getByText('支持思考（推理）').closest('.justify-between') as HTMLElement,
+      ).getByRole('switch');
+
+    fireEvent.click(reasoningSwitch());
+    await waitFor(() => {
+      expect(reasoningSwitch().getAttribute('data-state')).toBe('checked');
+    });
+    fireEvent.click(reasoningSwitch());
+    await waitFor(() => {
+      expect(reasoningSwitch().getAttribute('data-state')).toBe('unchecked');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+
+    await waitFor(() => {
+      expect(upsertModelProvider).toHaveBeenCalled();
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      const model = saved.models[0] as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(model, 'supports_reasoning')).toBe(true);
+      expect(model.supports_reasoning).toBeNull();
+    });
+  });
 });

@@ -282,7 +282,8 @@ fn resolve_active_runtime_config(
             }
             (!limits.is_empty()).then_some(serde_json::Value::Object(limits))
         }
-        // pi models.json 的模型条目：contextWindow / maxTokens（输出上限）。
+        // pi models.json 的模型条目：contextWindow / maxTokens（输出上限），
+        // reasoning / thinkingLevelMap（是否声明支持思考），input（输入模态）。
         AgentKind::Pi => {
             let mut limits = serde_json::Map::new();
             if let Some(context_window) = provider_model.context_window.filter(|value| *value > 0) {
@@ -297,6 +298,28 @@ fn resolve_active_runtime_config(
                     serde_json::Value::Number(max_output.into()),
                 );
             }
+            // `reasoning` 是 pi 是否认为该模型支持思考的开关：不声明时 pi 取
+            // `definition.reasoning ?? false`，于是可用档位只有 `off`，任何请求都被
+            // 钳回 `off`，且不会向供应商发送 thinking 参数。只在用户明确声明支持时
+            // 写，避免对非推理模型发出无效参数。
+            if provider_model.supports_reasoning == Some(true) {
+                limits.insert("reasoning".to_string(), serde_json::Value::Bool(true));
+                // pi 对 `xhigh` / `max` 额外要求 thinkingLevelMap 有显式条目，否则这两
+                // 档不列为可用、请求会被降级到 `high`。其余档位沿用 pi 的默认映射。
+                limits.insert(
+                    "thinkingLevelMap".to_string(),
+                    serde_json::json!({ "xhigh": "xhigh", "max": "max" }),
+                );
+            }
+            // pi 的模型条目默认 `input: ["text"]`，未声明图像的模型会被 pi 把图片块
+            // 换成「(image omitted: ...)」占位符。pi 的 input 只接受 text / image，
+            // 其它模态写进去会让整份 models.json 校验失败，故在此过滤。
+            let input: Vec<serde_json::Value> = resolve_model_input_modalities(provider_model)
+                .into_iter()
+                .filter(|modality| modality == "text" || modality == "image")
+                .map(serde_json::Value::String)
+                .collect();
+            limits.insert("input".to_string(), serde_json::Value::Array(input));
             (!limits.is_empty()).then_some(serde_json::Value::Object(limits))
         }
         _ => None,
@@ -1837,6 +1860,7 @@ mod tests {
                     max_output_tokens: None,
                     input_modalities: None,
                     supports_vision: None,
+                    supports_reasoning: None,
                 })
                 .collect(),
             default_model: default_model.to_string(),
@@ -2313,6 +2337,107 @@ mod tests {
         );
     }
 
+    /// pi 的模型条目必须声明 `reasoning`，否则 pi 会把任何思考档位钳回 `off`；
+    /// `xhigh` / `max` 还需要 thinkingLevelMap 有显式条目才被列为可用档位。
+    #[test]
+    fn pi_model_limits_declare_thinking_and_input_modalities() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-pi-reasoning",
+                "Pi",
+                "pi",
+                "pi-provider",
+                "glm-5.3-flash",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let mut provider = test_model_provider(
+            "pi-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "glm-5.3-flash",
+            &["glm-5.3-flash"],
+            Some(false),
+        );
+        provider.models[0].input_modalities = Some(vec!["text".to_string(), "image".to_string()]);
+        provider.models[0].supports_reasoning = Some(true);
+
+        let mut config = crate::config::types::AppConfig::default();
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("pi-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-pi-reasoning").unwrap();
+        let limits = resolved.model_limits.expect("model limits");
+        assert_eq!(limits["reasoning"], serde_json::json!(true));
+        assert_eq!(
+            limits["thinkingLevelMap"],
+            serde_json::json!({ "xhigh": "xhigh", "max": "max" })
+        );
+        assert_eq!(limits["input"], serde_json::json!(["text", "image"]));
+    }
+
+    /// 未声明支持推理时不得写 `reasoning`（写了对非推理模型会发出无效思考参数）；
+    /// 未声明图像的模型条目只写 `text`，否则 pi 默认会给图片换成占位符。
+    #[test]
+    fn pi_model_limits_omit_reasoning_when_not_declared() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-pi-plain",
+                "Pi",
+                "pi",
+                "pi-provider",
+                "glm-5.3-flash",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let provider = test_model_provider(
+            "pi-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "glm-5.3-flash",
+            &["glm-5.3-flash"],
+            Some(false),
+        );
+
+        let mut config = crate::config::types::AppConfig::default();
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("pi-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-pi-plain").unwrap();
+        let limits = resolved.model_limits.expect("model limits");
+        assert!(limits.get("reasoning").is_none(), "{limits}");
+        assert!(limits.get("thinkingLevelMap").is_none(), "{limits}");
+        assert_eq!(limits["input"], serde_json::json!(["text"]));
+    }
+
     #[test]
     fn codex_without_active_provider_returns_configuration_error() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -2566,6 +2691,8 @@ mod tests {
         );
         assert_eq!(command["modelLimits"]["contextWindow"], 1_000_000);
         assert_eq!(command["modelLimits"]["maxTokens"], 128_000);
+        // daemon 仍随会话命令下发为 pi 启用的 MCP server（含 browser MCP），
+        // sidecar 对 pi 忽略该字段——pi 无原生 MCP，0.87 起未知 -- flag 会阻断启动。
         assert_eq!(command["mcpServers"]["fetch"]["command"], "npx");
     }
 

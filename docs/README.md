@@ -65,6 +65,8 @@
 | [2026-09-16-streaming-animation-freeze-fix.md](research/2026-09-16-streaming-animation-freeze-fix.md) | 加载动效大面积失效:真实根因与修复 |
 | [2026-09-18-inter-opentype-features-best-practice.md](research/2026-09-18-inter-opentype-features-best-practice.md) | 调研:桌面应用 UI 内置 Inter 的 OpenType 特性(font-feature-settings)最佳实践 |
 | [2026-09-21-pi-desktop-performance-cross-reference.md](research/2026-09-21-pi-desktop-performance-cross-reference.md) | 参照 PI-Desktop 的性能改造清单:流式掉帧与空闲卡顿 |
+| [2026-09-28-pi-npm-package-migration.md](research/2026-09-28-pi-npm-package-migration.md) | pi npm 包迁移 @mariozechner→@earendil-works:版本停在 0.73.1 的根因、入口路径变化、--mcp-config 变致命、迁移决定 |
+| [2026-09-28-codeg-pi-integration-reference.md](research/2026-09-28-codeg-pi-integration-reference.md) | codeg 的 Pi 接入参考:ACP 适配器路线、项目信任门、历史解析纪律与对 CodeMUX 的启发 |
 | [2026-09-24-codeg-token-speed-reference.md](research/2026-09-24-codeg-token-speed-reference.md) | codeg 实时 TPS 方案参考与 CodeMUX 差异 |
 | [2026-09-24-opencode-storage-performance-audit.md](research/2026-09-24-opencode-storage-performance-audit.md) | OpenCode 存储性能审计 |
 
@@ -157,6 +159,7 @@
 | [2026-09-15-session-title-sync.md](plans/2026-09-15-session-title-sync.md) | 会话标题自动同步(底层标题 → CodeMUX) |
 | [2026-09-18-rewind-stream-render-perf-batch2.md](plans/2026-09-18-rewind-stream-render-perf-batch2.md) | 长线程 rewind / 流式渲染性能优化(第二批) |
 | [2026-09-19-pi-message-display-alignment.md](plans/2026-09-19-pi-message-display-alignment.md) | pi 桌面对话消息展示对齐(工具/思考分组/计时/状态/间距/Markdown) |
+| [2026-09-28-pi-agent-integration-optimizations.md](plans/2026-09-28-pi-agent-integration-optimizations.md) | pi 接入优化(codeg 对照走查与本机实测):思考档位静默失效、视觉附件被丢弃、项目信任显式化 |
 
 ### tickets(按 feature 分组)
 
@@ -172,20 +175,21 @@
 | [electron-shell-swap](tickets/electron-shell-swap/) | 9 | [2026-09-11](specs/2026-09-11-electron-shell-swap.md) |
 | [enhance-agent-runtime-detection](tickets/enhance-agent-runtime-detection/) | 2 | [2026-07-25](specs/2026-07-25-enhance-agent-runtime-detection.md) |
 | [long-session-render-scale](tickets/long-session-render-scale/) | 3 | [2026-09-18](specs/2026-09-18-long-session-render-scale.md) |
-| [pi-agent-integration](tickets/pi-agent-integration/) | 11 | [2026-09-03](specs/2026-09-03-pi-agent-integration.md) |
+| [pi-agent-integration](tickets/pi-agent-integration/) | 12 | [2026-09-03](specs/2026-09-03-pi-agent-integration.md) |
 | [project-scoped-agent-skills](tickets/project-scoped-agent-skills/) | 3 | [2026-08-08](specs/2026-08-08-project-scoped-agent-skills.md) |
 | [rewind-any-message](tickets/rewind-any-message/) | 3 | [2026-08-23](specs/2026-08-23-rewind-to-any-user-message.md) |
 | [unified-frontend](tickets/unified-frontend/) | 4 | [2026-09-13](specs/2026-09-13-unified-frontend.md) |
 
 ### adr
 
-架构决策记录见 [adr/](adr/),当前 0002–0013,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
+架构决策记录见 [adr/](adr/),当前 0002–0014,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
 
 近期记录:
 
 - [0011 — Daemon 权威与 Local Daemon Token](adr/0011-daemon-authority-local-token.md)
 - [0012 — Daemon 独立进程与 Electron 桌面壳](adr/0012-daemon-process-electron-shell.md)
 - [0013 — 用户可配置键盘快捷键](adr/0013-user-configurable-keyboard-shortcuts.md)
+- [0014 — pi 项目资源默认不信任](adr/0014-pi-project-resources-untrusted-by-default.md)
 
 ### agents
 

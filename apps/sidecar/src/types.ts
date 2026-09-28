@@ -19,6 +19,12 @@ export interface SidecarModelLimits {
   /** pi 模型条目的输出 token 上限（models.json `maxTokens`）。 */
   maxTokens?: number;
   inputModalities?: string[];
+  /** pi 模型条目是否声明支持思考（models.json `reasoning`）。 */
+  reasoning?: boolean;
+  /** pi 模型条目的输入模态（models.json `input`；只写 pi 支持的 text / image）。 */
+  input?: string[];
+  /** pi 模型条目的思考档位映射（models.json `thinkingLevelMap`；xhigh/max 需显式条目才可用）。 */
+  thinkingLevelMap?: Record<string, string>;
 }
 
 export interface OpenCodeSessionConfig {
@@ -71,9 +77,15 @@ export interface PiSessionConfig {
   /** pi models.json 模型条目元数据（来自 CodeMUX ProviderModel）。 */
   modelContextWindow?: number;
   modelMaxTokens?: number;
+  /** 是否向 pi 声明该模型支持思考（未声明时 pi 会把思考档位钳回 off）。 */
+  modelReasoning?: boolean;
+  /** pi 模型条目的档位映射（xhigh / max 必须显式，否则这两档不存在）。 */
+  modelThinkingLevelMap?: Record<string, string>;
+  /** pi 模型条目的输入模态（只写 pi 支持的 text / image）。 */
+  modelInputModalities?: string[];
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
-  /** CodeMUX 为 pi 启用的 MCP 服务器（启动时写入临时 mcp.json 并传 `--mcp-config`）。 */
+  /** CodeMUX 为 pi 启用的 MCP 服务器。pi 无原生 MCP（0.87 起未知 -- flag 会阻断启动），PiRuntime 接受但忽略；将来 pi 提供原生 MCP 时经 piMcp.ts 接入。 */
   mcpServers?: PiMcpServers;
 }
 

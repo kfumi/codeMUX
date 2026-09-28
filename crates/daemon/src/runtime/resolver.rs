@@ -118,7 +118,7 @@ impl RuntimeResolver {
     /// - ClaudeCode: `@anthropic-ai/claude-agent-sdk-{platform}-{arch}/claude[.exe]`
     /// - Codex: 无平台二进制（纯 SDK）
     /// - OpenCode: `opencode-ai/bin/opencode[.exe|.cmd]`
-    /// - Pi: `@mariozechner/pi-coding-agent/dist/cli.js`（纯 Node 包，无平台二进制）
+    /// - Pi: `@earendil-works/pi-coding-agent/dist/bundle/cli.js`（纯 Node 包，无平台二进制）
     fn local_key_binaries(&self, provider: Provider) -> Vec<String> {
         match provider {
             Provider::ClaudeCode => {
@@ -146,7 +146,7 @@ impl RuntimeResolver {
                 }
             }
             Provider::Pi => {
-                vec!["node_modules/@mariozechner/pi-coding-agent/dist/cli.js".to_string()]
+                vec!["node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js".to_string()]
             }
         }
     }
@@ -155,6 +155,7 @@ impl RuntimeResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::NpmRuntimeSpec;
     use tempfile::TempDir;
 
     fn create_runtime_pack(root: &std::path::Path, provider: Provider, version: &str) {
@@ -277,6 +278,43 @@ mod tests {
         create_full_runtime_pack(tmp.path(), Provider::OpenCode, "1.18.3");
         let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
         assert!(resolver.check_integrity(Provider::OpenCode));
+    }
+
+    /// pi 是纯 Node 包：完整性凭证就是 bun bundle 的 `dist/bundle/cli.js`。包名或入口
+    /// 路径一旦漂移，已装好的 Runtime 会被判为损坏（`check_integrity` 返回 false），
+    /// 这正是我们想要的失败方式——迁移与禁止回退的理由见
+    /// `docs/research/2026-09-28-pi-npm-package-migration.md`。
+    #[test]
+    fn check_integrity_returns_false_when_pi_bundle_entry_missing() {
+        let tmp = TempDir::new().unwrap();
+        create_runtime_pack(tmp.path(), Provider::Pi, "0.87.1");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(!resolver.check_integrity(Provider::Pi));
+    }
+
+    #[test]
+    fn check_integrity_returns_true_for_pi_with_bundle_entry() {
+        let tmp = TempDir::new().unwrap();
+        create_full_runtime_pack(tmp.path(), Provider::Pi, "0.87.1");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(resolver.check_integrity(Provider::Pi));
+    }
+
+    /// 钉住 pi 托管 Runtime 的目录契约（包名 + 入口相对路径，与 spawn 侧
+    /// `apps/sidecar/src/piRuntime.ts` 的 `PI_RPC_ENTRY_RELATIVE` 必须一致）。改这个断言
+    /// 等于宣布不再兼容已安装的 Runtime 布局，必须同时更新迁移调研与设置页安装文案。
+    #[test]
+    fn pi_runtime_pack_contract_pins_package_and_entry_path() {
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "0.87.1").unwrap();
+        assert_eq!(
+            spec.packages,
+            vec!["@earendil-works/pi-coding-agent@0.87.1"]
+        );
+        let resolver = RuntimeResolver::new(std::path::PathBuf::new());
+        assert_eq!(
+            resolver.local_key_binaries(Provider::Pi),
+            vec!["node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"]
+        );
     }
 
     #[cfg(target_os = "windows")]

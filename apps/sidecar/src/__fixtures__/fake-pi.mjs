@@ -36,6 +36,21 @@
 // - Commands in `hang` never receive a response.
 // - Default behavior without a scenario: answer every command with
 //   `{ type: "response", success: true, data: {} }`.
+//
+// Frame provenance (companion note to the header of `piRpcTransport.test.ts`):
+// every payload here is SYNTHETIC and hand-written for determinism — none of it
+// is a byte-for-byte capture. What *is* taken from the real thing: the wire
+// shapes, re-checked on 2026-09-28 against a real `pi --mode rpc` process at pi
+// 0.87.1 (the managed Runtime under
+// `%LOCALAPPDATA%/CodeMUX/runtimes/pi/0.87.1`) — request lines `{id, type}`,
+// response lines `{id, type:"response", command, success, data}`, failure as
+// `success:false` + `error`, and events as bare `{type:...}` lines on stdout.
+//
+// When bumping pi, re-check against the real process before trusting a green
+// run: the response envelope fields, the `success`/`error` failure shape, the
+// unknown-command wording the client matches (`Unknown command: <cmd>`, see
+// `isUnknownPiRpcCommand`), `extension_ui_request`/`extension_ui_response`
+// pairing, and stdout CRLF tolerance (`frameStyle: "crlf"` above).
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

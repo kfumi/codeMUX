@@ -89,6 +89,8 @@ export interface ProviderModel {
   input_modalities?: InputModality[] | null;
   /** @deprecated 由 input_modalities 是否包含 image 推导。 */
   supports_vision?: boolean | null;
+  /** 该模型原生支持思考/推理（pi 会话据此向 pi 声明 reasoning；未声明时 pi 会把思考档位钳回 off）。 */
+  supports_reasoning?: boolean | null;
 }
 
 export interface ImageRecognitionConfig {

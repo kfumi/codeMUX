@@ -164,6 +164,28 @@ describe('piEvents tool execution', () => {
     );
     // 提问卡按位置序读 answers；直接透传 result 会让它读不到（回显"未作答"）。
     expect(finished[0]).toMatchObject({ type: 'tool_finished', content: '{"answers":[["a"],["b"]]}' });
+
+    // 部分作答（中途取消）：未作答项落成空串而非 null，须与历史投影
+    // `crates/daemon/src/agent/pi_history.rs` 的 `pi_tool_result_content` 逐字一致。
+    const mixed = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask-mixed',
+        toolName: 'ask_user_question',
+        result: {
+          content: [{ type: 'text', text: 'Q1: (no answer)\nQ2: b' }],
+          details: {
+            answers: [
+              { question: 'Q1', answer: null },
+              { question: 'Q2', answer: 'b' },
+            ],
+          },
+        },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(mixed[0]).toMatchObject({ content: '{"answers":[[""],["b"]]}' });
   });
 
   it('maps an all-null ask_user_question answer list to the cancelled sentinel', () => {
@@ -213,6 +235,20 @@ describe('piEvents tool execution', () => {
       type: 'tool_finished',
       content: '{"content":[{"type":"text","text":"Q1: a"}],"details":{}}',
     });
+
+    // 空 answers 数组：本侧返回空 answers，Rust 侧返回拍平文本——双方注释里记录的
+    // 刻意差异，真实 pi 不产出空数组。
+    const emptyAnswers = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-ask-empty',
+        toolName: 'ask_user_question',
+        result: { content: [], details: { answers: [] } },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(emptyAnswers[0]).toMatchObject({ content: '{"answers":[]}' });
 
     // 非提问工具即便碰巧带 details.answers 也不改写（避免误伤别的工具输出）。
     const otherTool = toCodeMuxEvents(

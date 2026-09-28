@@ -1,3 +1,24 @@
+/**
+ * Wire-protocol contract tests for pi's RPC mode.
+ *
+ * Frame provenance: everything asserted here describes the *wire*, and the wire
+ * shapes were re-checked on 2026-09-28 against a real `pi --mode rpc` process at
+ * pi 0.87.1 (the managed Runtime under `%LOCALAPPDATA%/CodeMUX/runtimes/pi/0.87.1`),
+ * not against a reading of pi's source: requests are `{id, type}` lines on stdin,
+ * responses are `{id, type:"response", command, success, data}` lines on stdout,
+ * a rejected command comes back as `success:false` + `error`, and an unsupported
+ * command is rejected with the literal text `Unknown command: <cmd>` (that exact
+ * wording is what `isUnknownPiRpcCommand` matches). Payloads are synthetic and
+ * deterministic — see `__fixtures__/fake-pi.mjs`, which carries the companion
+ * provenance note; no fixture is a byte-for-byte capture.
+ *
+ * When bumping the managed pi Runtime, re-check the real process first: the
+ * response envelope fields, the `success`/`error` failure shape, the
+ * unknown-command wording, `extension_ui_request`/`extension_ui_response`
+ * pairing, and stdout CRLF tolerance. A version bump that changes any of those
+ * must turn these tests red — a green run after a bump means an assertion is too
+ * loose.
+ */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

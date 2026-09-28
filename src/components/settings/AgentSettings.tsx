@@ -597,6 +597,9 @@ function PiPermissionSection({
       <div className="shrink-0 space-y-1 lg:w-44">
         <h3 className="text-sm font-semibold text-foreground">pi 默认权限</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">新建对话时默认使用的审批级别。</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          不会加载项目内 .pi 的设置与扩展：pi 以无界面模式运行，无法询问项目信任，按默认拒绝处理。
+        </p>
       </div>
       <div className="w-full lg:w-72 lg:flex-none">
         <Select value={executionMode} onValueChange={(value) => onChange(value as AgentExecutionMode)}>

@@ -2539,10 +2539,15 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
     ...(cmd.modelLimits?.maxTokens && cmd.modelLimits.maxTokens > 0
       ? { modelMaxTokens: cmd.modelLimits.maxTokens }
       : {}),
-    ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
-    ...(cmd.mcpServers && Object.keys(cmd.mcpServers).length > 0
-      ? { mcpServers: cmd.mcpServers }
+    ...(cmd.modelLimits?.reasoning ? { modelReasoning: true } : {}),
+    ...(cmd.modelLimits?.thinkingLevelMap
+      ? { modelThinkingLevelMap: cmd.modelLimits.thinkingLevelMap }
       : {}),
+    ...(cmd.modelLimits?.input?.length ? { modelInputModalities: cmd.modelLimits.input } : {}),
+    ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
+    // COMPAT(piMcpConfigUnknownFlag)：pi 无原生 MCP，0.87 起未知 -- flag 会使
+    // RPC 进程启动即退出——daemon 下发的 mcpServers 不再传入 pi 会话配置
+    // （PiRuntime 接受该字段但忽略，见 piRuntime.ts start() 注释）。
   };
 }
 

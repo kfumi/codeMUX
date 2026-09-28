@@ -231,6 +231,21 @@ const PI_ASK_TOOL_NAMES = new Set([
  * `answers`（藏在 `details` 下），答案回显成"未作答"。全部 answer 为 null
  * 表示用户取消（`ctx.ui.select` 收到 cancelled），映射成提问卡已支持的
  * `__cancelled__` 哨兵；空字符串是合法的自由文本答复，不算取消。
+ *
+ * 本函数是 pi 提问卡投影的**孪生实现**之一：另一侧是历史/重放投影
+ * `crates/daemon/src/agent/pi_history.rs` 的 `pi_tool_result_content`。同一份 pi
+ * 会话既会实时投影、也会被重放投影（导入 / 重开会话 / rewind），两侧对同一输入
+ * 必须输出**逐字相同**的字符串，否则"重开会话"会渲染出与当时不同的内容：
+ * - 全部 answer 为 null → 两侧都 `__cancelled__`；
+ * - 部分作答（有的 answer 为 null、有的为字符串，用户在对话框中途取消）→
+ *   两侧都把未作答项落成空串 `[""]`，不落 `null`；
+ * - 空字符串是合法答复，不算取消。
+ * 改任一侧时必须同步改另一侧，并同时更新两侧测试。
+ *
+ * 已知且刻意的差异：`details.answers` 为**空数组**时本侧返回 `{"answers":[]}`，
+ * Rust 侧返回拍平文本；真实 pi 不会写出空数组，且前端对两者都渲染成"未作答"
+ *（`AskUserQuestionCard.tsx` 的 `normalizeAnswerValues` 把 null 与 `''` 一并归一
+ * 成空），故不强行统一。
  */
 export function piAskToolResultContent(toolName: string | null | undefined, result: unknown): string | null {
   if (!toolName || !PI_ASK_TOOL_NAMES.has(toolName)) return null;

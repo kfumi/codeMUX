@@ -19,11 +19,6 @@ import {
   type PiApprovalMode,
   type PiExtensionFile,
 } from './piExtension.js';
-import {
-  createPiMcpConfigFile,
-  piCommandsIncludeMcpAdapter,
-  type PiMcpConfigFile,
-} from './piMcp.js';
 import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { emit } from './streamEventBatcher.js';
@@ -31,8 +26,6 @@ import { buildSessionTitleEvent } from './sessionTitleEvent.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { setLogCtx, writeLog } from './writeLog.js';
-
-export const PI_RPC_ENTRY_RELATIVE = 'node_modules/@mariozechner/pi-coding-agent/dist/cli.js';
 
 /** pi 用量快照（get_session_stats 的 token 子集，用于 turn 级差值）。 */
 interface PiUsageSnapshot {
@@ -93,9 +86,30 @@ interface PiImageContent {
   mimeType: string;
 }
 
-/** 托管 Runtime 里的 pi JS 入口（`@mariozechner/pi-coding-agent` 的 bin 目标）。 */
+/**
+ * 托管 Runtime 里的 pi JS 入口候选（按序探测，首个存在者胜出）。
+ *
+ * pi 0.74 起发包从 `@mariozechner/pi-coding-agent`（已 deprecated，停更于 0.73.1）
+ * 迁移到 `@earendil-works/pi-coding-agent`，bin 入口也改为 bun bundle 的
+ * `dist/bundle/cli.js`。新装 Runtime 一律是新包；候选列表保留旧包路径仅为
+ * 让迁移前安装的 0.73.x Runtime 继续可用。
+ */
+export const PI_RPC_ENTRY_CANDIDATES = [
+  'node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js',
+  'node_modules/@mariozechner/pi-coding-agent/dist/cli.js',
+] as const;
+
+/** 托管 Runtime 里的 pi JS 入口（新包 bun bundle 入口；缺失时作为报错路径返回）。 */
+export const PI_RPC_ENTRY_RELATIVE = PI_RPC_ENTRY_CANDIDATES[0];
+
+/** 托管 Runtime 里的 pi JS 入口（`@earendil-works/pi-coding-agent` 的 bin 目标）。 */
 export function resolvePiEntryFromRuntimeRef(runtimeRef: ProviderRuntimeRef | undefined): string | null {
   if (!runtimeRef?.runtimePath) return null;
+  for (const relative of PI_RPC_ENTRY_CANDIDATES) {
+    const entry = path.join(runtimeRef.runtimePath, relative);
+    if (fs.existsSync(entry)) return entry;
+  }
+  // 都不存在时返回新包入口，让调用方给出指向新包的可读报错。
   return path.join(runtimeRef.runtimePath, PI_RPC_ENTRY_RELATIVE);
 }
 
@@ -163,10 +177,8 @@ export class PiRuntime {
   private piSessionId: string | undefined;
   private stopping = false;
   private usageBaseline: PiUsageSnapshot | undefined;
-  /** 临时审批/ask-user 扩展（approvalMode 配置时随进程注入）。 */
+  /** 会话级审批/ask-user 临时扩展。 */
   private extensionFile: PiExtensionFile | undefined;
-  /** 会话级 `--mcp-config` 临时文件。 */
-  private mcpConfigFile: PiMcpConfigFile | undefined;
   /** 挂起的 extension_ui_request（id → 语义）。 */
   private pendingExtensionUi = new Map<string, PiPendingExtensionUi>();
   /** 本 turn 已见到的工具调用参数（审批卡/提问卡的 metadata 来源）。 */
@@ -206,6 +218,11 @@ export class PiRuntime {
       (next.baseUrl ?? undefined) === (this.config.baseUrl ?? undefined) &&
       (next.modelContextWindow ?? undefined) === (this.config.modelContextWindow ?? undefined) &&
       (next.modelMaxTokens ?? undefined) === (this.config.modelMaxTokens ?? undefined) &&
+      (next.modelReasoning ?? false) === (this.config.modelReasoning ?? false) &&
+      JSON.stringify(next.modelThinkingLevelMap ?? null) ===
+        JSON.stringify(this.config.modelThinkingLevelMap ?? null) &&
+      JSON.stringify(next.modelInputModalities ?? null) ===
+        JSON.stringify(this.config.modelInputModalities ?? null) &&
       JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null) &&
       JSON.stringify(next.mcpServers ?? null) === JSON.stringify(this.config.mcpServers ?? null)
     );
@@ -471,15 +488,11 @@ export class PiRuntime {
     if (!transport) {
       this.extensionFile?.cleanup();
       this.extensionFile = undefined;
-      this.mcpConfigFile?.cleanup();
-      this.mcpConfigFile = undefined;
       return;
     }
     await transport.close(new Error('pi runtime is shutting down')).catch(() => undefined);
     this.extensionFile?.cleanup();
     this.extensionFile = undefined;
-    this.mcpConfigFile?.cleanup();
-    this.mcpConfigFile = undefined;
   }
 
   private currentNativeSessionId(): string {
@@ -502,20 +515,13 @@ export class PiRuntime {
       extensionFile = createPiExtensionFile(spawnConfig.approvalMode);
       this.extensionFile = extensionFile;
     }
-    let mcpConfigFile: PiMcpConfigFile | undefined;
-    if (
-      spawnConfig.mcpServers
-      && Object.keys(spawnConfig.mcpServers).length > 0
-      && !this.options.transportFactory
-    ) {
-      mcpConfigFile = createPiMcpConfigFile(spawnConfig.mcpServers, {
-        ...(spawnConfig.piConfigDir ? { piConfigDir: spawnConfig.piConfigDir } : {}),
-      });
-      this.mcpConfigFile = mcpConfigFile;
-    }
+    // COMPAT(piMcpConfigUnknownFlag): pi 无原生 MCP（上游明确立场，0.87 README 仍
+    // "No MCP"），且 0.87 起未知 -- flag 会产生 error diagnostic 使 RPC 进程启动即
+    // 退出——不再向 pi 传 --mcp-config。mcpServers 参数接受但不落盘（将来 pi 提
+    // 供原生 MCP 时经 piMcp.ts 立项接入）。
     const transport = this.options.transportFactory
       ? this.options.transportFactory(spawnConfig)
-      : createDefaultPiTransport(spawnConfig, extensionFile?.path, mcpConfigFile?.path);
+      : createDefaultPiTransport(spawnConfig, extensionFile?.path);
     this.transport = transport;
     transport.onMessage((message) => this.handlePiEvent(message as PiRuntimeEvent));
     writeLog('[pi-task]', `[perf] pi process spawned elapsed_ms=${Date.now() - startStartedAt}`);
@@ -525,17 +531,12 @@ export class PiRuntime {
 
     try {
       await this.readSessionIdentity(transport);
-      if (mcpConfigFile) {
-        await this.noteMcpAdapterAvailability(transport);
-      }
     } catch (error) {
       this.state = 'disposed';
       this.transport = undefined;
       await transport.close(new Error('pi runtime failed to start')).catch(() => undefined);
       extensionFile?.cleanup();
       this.extensionFile = undefined;
-      mcpConfigFile?.cleanup();
-      this.mcpConfigFile = undefined;
       throw error;
     }
     writeLog('[pi-task]', `[perf] pi start complete (spawn+handshake+session identity) elapsed_ms=${Date.now() - startStartedAt}`);
@@ -570,21 +571,6 @@ export class PiRuntime {
       title: value,
       runtimeGeneration: this.config.runtimeGeneration,
     }));
-  }
-
-  /** MCP 依赖 cwd 已加载的 pi-mcp-adapter；探测失败只记日志，不阻断会话。 */
-  private async noteMcpAdapterAvailability(transport: PiRpcProcess): Promise<void> {
-    try {
-      const payload = await transport.request({ type: 'get_commands' }, { timeoutMs: 5_000 });
-      if (!piCommandsIncludeMcpAdapter(payload)) {
-        writeLog('[pi-task]', 'mcp WARN pi-mcp-adapter not loaded; --mcp-config may have no effect');
-      }
-    } catch (error) {
-      writeLog(
-        '[pi-task]',
-        `mcp WARN get_commands failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   private async refreshSessionIdentity(): Promise<void> {
@@ -1069,6 +1055,12 @@ export interface PiProviderDefinition {
   modelId: string;
   contextWindow?: number;
   maxTokens?: number;
+  /** 是否向 pi 声明该模型支持思考（不声明时 pi 把任何档位钳回 off）。 */
+  reasoning?: boolean;
+  /** 思考档位映射；xhigh / max 需显式条目才会被 pi 列为可用档位。 */
+  thinkingLevelMap?: Record<string, string>;
+  /** pi 模型条目的输入模态，只接受 text / image。 */
+  input?: string[];
 }
 
 const PI_ANTHROPIC_ENDPOINT_SUFFIXES = ['/v1/messages', '/v1'] as const;
@@ -1118,6 +1110,18 @@ export function buildPiModelsJson(definition: PiProviderDefinition): string {
   if (definition.maxTokens && definition.maxTokens > 0) {
     model.maxTokens = definition.maxTokens;
   }
+  // pi 取 `reasoning ?? false`：不声明时可用思考档位只有 `off`，任何档位都被钳回
+  // `off`，也不会向供应商发送思考参数（pi `provider-composer.js` + pi-ai `models.js`）。
+  if (definition.reasoning === true) {
+    model.reasoning = true;
+    // xhigh / max 在 pi 里额外要求 thinkingLevelMap 有显式条目，否则这两档不存在、
+    // 请求会被降级到 high。
+    model.thinkingLevelMap = definition.thinkingLevelMap ?? { xhigh: 'xhigh', max: 'max' };
+  }
+  // 未声明 input 时 pi 默认 ['text']，并把图片块替换成「(image omitted: ...)」占位符。
+  if (definition.input?.length) {
+    model.input = definition.input;
+  }
   return `${JSON.stringify(
     {
       providers: {
@@ -1155,7 +1159,6 @@ export function writePiModelsJson(dir: string, definition: PiProviderDefinition)
 export function createDefaultPiTransport(
   config: PiSessionConfig,
   extensionPath?: string,
-  mcpConfigPath?: string,
 ): PiRpcProcess {
   const args = ['--mode', 'rpc'];
   let command: string;
@@ -1171,27 +1174,10 @@ export function createDefaultPiTransport(
     command = 'pi';
   }
 
-  if (config.agentSessionId && looksLikePiSessionPath(config.agentSessionId)) {
-    args.push('--session', config.agentSessionId);
-  }
-  if (extensionPath) {
-    args.push('--extension', extensionPath);
-  }
-  if (mcpConfigPath) {
-    args.push('--mcp-config', mcpConfigPath);
-  }
-  if (config.thinkingLevel) {
-    args.push('--thinking', config.thinkingLevel);
-  }
+  args.push(...buildPiLaunchArgs(config, extensionPath));
+
   const provider = config.provider?.trim();
   const model = config.model?.trim();
-  // codemux 凭据来源固定走注入的 `codemux` 供应商命名空间（models.json）。
-  const modelFlagProvider = config.credentialSource === 'codemux' ? 'codemux' : provider;
-  if (modelFlagProvider && model && model !== 'default') {
-    args.push('--model', `${modelFlagProvider}/${model}`);
-  } else if (model && model !== 'default') {
-    args.push('--model', model);
-  }
 
   const env: Record<string, string | undefined> =
     config.credentialSource === 'environment'
@@ -1231,6 +1217,9 @@ export function createDefaultPiTransport(
       modelId: model,
       ...(config.modelContextWindow ? { contextWindow: config.modelContextWindow } : {}),
       ...(config.modelMaxTokens ? { maxTokens: config.modelMaxTokens } : {}),
+      ...(config.modelReasoning ? { reasoning: true } : {}),
+      ...(config.modelThinkingLevelMap ? { thinkingLevelMap: config.modelThinkingLevelMap } : {}),
+      ...(config.modelInputModalities?.length ? { input: config.modelInputModalities } : {}),
     });
     env.PI_CODING_AGENT_DIR = config.piConfigDir;
   }
@@ -1242,4 +1231,46 @@ export function createDefaultPiTransport(
     env,
     requestTimeoutMs: 30_000,
   });
+}
+
+/**
+ * pi 的启动 flag。抽成纯函数，便于把「我们不传任何信任类 flag」这一安全姿态钉在测试里。
+ *
+ * 项目信任（pi 0.87.1 `docs/security.md#project-trust` + `core/project-trust.js`）：pi 只在
+ * 工作区被信任时才加载项目自己的 `.pi/settings.json`、`.pi/extensions`、`.pi/skills` 等资源，
+ * 而 `.pi/extensions` 是模块、顶层代码以 pi 进程的权限执行。决策顺序是 `--approve`/`--no-approve`
+ * → 用户级与命令行扩展的 `project_trust` 事件 → `<agentDir>/trust.json` 中最近的已保存决策
+ * → 全局 `defaultProjectTrust`（默认 `ask`）；`ask` 在**无 UI** 的进程里直接返回 false
+ * （`project-trust.js:49-51`）。RPC 模式没有 UI，我们的托管 agent 目录也从不写 trust.json
+ * （信任存储路径是 `<agentDir>/trust.json`，见 `core/trust-manager.js:173`），因此当前姿态
+ * 就是「不信任」：仓库自带扩展不会被执行。
+ *
+ * 这里**故意不传** `--approve` / `--no-approve`：我们要的姿态是「默认不信任」，而不是「强制
+ * 永久不信任」（后者会与用户对自己 pi 配置的意图冲突）；并且 pi 对未知 `--` flag 会在启动时
+ * 直接退出（见下面 COMPAT(piMcpConfigUnknownFlag)），少传一个 flag 就少一处版本耦合。
+ * 改动本函数前请先读 pi 的 `docs/security.md#project-trust`。
+ */
+export function buildPiLaunchArgs(config: PiSessionConfig, extensionPath?: string): string[] {
+  const args: string[] = [];
+  if (config.agentSessionId && looksLikePiSessionPath(config.agentSessionId)) {
+    args.push('--session', config.agentSessionId);
+  }
+  if (extensionPath) {
+    args.push('--extension', extensionPath);
+  }
+  // COMPAT(piMcpConfigUnknownFlag)：pi 无原生 MCP，0.87 起未知 -- flag 会产生
+  // error diagnostic 使 RPC 进程启动即退出——不传 --mcp-config（见 start()）。
+  if (config.thinkingLevel) {
+    args.push('--thinking', config.thinkingLevel);
+  }
+  const provider = config.provider?.trim();
+  const model = config.model?.trim();
+  // codemux 凭据来源固定走注入的 `codemux` 供应商命名空间（models.json）。
+  const modelFlagProvider = config.credentialSource === 'codemux' ? 'codemux' : provider;
+  if (modelFlagProvider && model && model !== 'default') {
+    args.push('--model', `${modelFlagProvider}/${model}`);
+  } else if (model && model !== 'default') {
+    args.push('--model', model);
+  }
+  return args;
 }

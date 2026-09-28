@@ -28,6 +28,7 @@ fn model(id: &str, name: &str, input_modalities: Option<Vec<&str>>) -> ProviderM
         input_modalities: input_modalities
             .map(|items| items.into_iter().map(str::to_string).collect()),
         supports_vision: None,
+        supports_reasoning: None,
     }
 }
 

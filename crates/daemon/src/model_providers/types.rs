@@ -50,6 +50,15 @@ pub struct ProviderModel {
     pub input_modalities: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_vision: Option<bool>,
+    /// 用户声明的「模型原生支持思考/推理」。
+    ///
+    /// 目前只有 pi 消费它：pi 从托管 `models.json` 读模型条目，条目缺
+    /// `reasoning` 时（pi 默认 `definition.reasoning ?? false`）它会认为该模型
+    /// 不支持思考，把任何思考档位钳回 `off`，且不向供应商发送思考参数。只有
+    /// `Some(true)` 才向 pi 声明支持；`None`/`Some(false)` 一律不声明（保持
+    /// `off`），避免对非推理模型发出无效的 thinking 参数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_reasoning: Option<bool>,
 }
 
 /// Strip Claude Code `[1m]` context markers from a model id (case-insensitive).
@@ -290,6 +299,7 @@ mod tests {
                 context_window: None,
                 max_input_tokens: None,
                 max_output_tokens: None,
+                supports_reasoning: None,
                 supports_vision: None,
                 input_modalities: None,
             }],

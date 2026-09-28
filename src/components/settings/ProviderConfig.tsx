@@ -165,6 +165,7 @@ function cleanProviderModel(
   if (model.input_modalities?.length) {
     cleaned.input_modalities = normalizeInputModalities(model.input_modalities);
   }
+  cleaned.supports_reasoning = model.supports_reasoning ?? null;
   return cleaned;
 }
 
@@ -1159,6 +1160,25 @@ export function ProviderConfigPanel() {
                       />
                     </div>
                   )}
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm">支持思考（推理）</p>
+                      <p className="text-xs text-muted-foreground">
+                        仅 pi 会读取：未勾选时 pi 会把思考等级钳回 off
+                      </p>
+                    </div>
+                    <Switch
+                      checked={editingModel.supports_reasoning === true}
+                      onCheckedChange={(checked) =>
+                        setDraft({
+                          ...draft,
+                          models: updateModelAt(draft.models, editingModelIndex, {
+                            supports_reasoning: checked ? true : null,
+                          }),
+                        })
+                      }
+                    />
+                  </div>
                   {showOpenAiModelLimits && (
                     <div className="grid gap-3">
                       <label className="grid gap-1.5 text-sm">

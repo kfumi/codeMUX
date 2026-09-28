@@ -59,7 +59,7 @@ impl NpmRuntimeSpec {
                 format!("@opencode-ai/sdk@{}", version),
                 format!("opencode-ai@{}", version),
             ],
-            Provider::Pi => vec![format!("@mariozechner/pi-coding-agent@{}", version)],
+            Provider::Pi => vec![format!("@earendil-works/pi-coding-agent@{}", version)],
         };
 
         let key_files = vec![
@@ -82,7 +82,18 @@ fn primary_package(provider: Provider) -> &'static str {
         Provider::ClaudeCode => "@anthropic-ai/claude-agent-sdk",
         Provider::Codex => "@openai/codex",
         Provider::OpenCode => "@opencode-ai/sdk",
-        Provider::Pi => "@mariozechner/pi-coding-agent",
+        // pi 0.74 起发包从 `@mariozechner/pi-coding-agent`（已 deprecated，停更于 0.73.1）
+        // 迁移到 `@earendil-works/pi-coding-agent`，CodeMUX 一律从新包安装。
+        //
+        // 不要回退到旧包名，也不要加「旧包兜底安装」：旧包既没有项目信任机制（会无条件
+        // 加载 `<cwd>/.pi/extensions`，等于打开仓库就执行其代码），也没有 0.87 的 RPC 命令面。
+        // 迁移过程、入口路径变化与 `--mcp-config` 变成致命参数的原因见
+        // `docs/research/2026-09-28-pi-npm-package-migration.md`。
+        //
+        // 版本在安装时由调用方选定（`NpmRuntimeSpec::for_version`），代码里没有编译期版本
+        // 常量可断言；被钉住的是**包名与入口相对路径**（见本文件与 `runtime/resolver.rs`
+        // 的 `pi_runtime_*` 测试）。
+        Provider::Pi => "@earendil-works/pi-coding-agent",
     }
 }
 
@@ -154,11 +165,12 @@ fn candidate_binaries(provider: Provider) -> Vec<String> {
             };
             vec![format!("node_modules/opencode-ai/bin/{}", binary)]
         }
-        // `@mariozechner/pi-coding-agent` 是纯 Node 包：bin 入口为 `dist/cli.js`（无平台二进制），
-        // 以该文件作为关键完整性凭证。运行时由 sidecar 以其自身 node 进程启动。
-        // 注意不是 `@mariozechner/pi`——那是同一 monorepo 下的 vLLM pods 管理 CLI。
+        // `@earendil-works/pi-coding-agent` 是纯 Node 包：bin 入口为 bun bundle 的
+        // `dist/bundle/cli.js`（无平台二进制），以该文件作为关键完整性凭证。
+        // 运行时由 sidecar 以其自身 node 进程启动。
+        // 注意不是 `@earendil-works/pi`——那不是 pi coding agent 的包。
         Provider::Pi => {
-            vec!["node_modules/@mariozechner/pi-coding-agent/dist/cli.js".to_string()]
+            vec!["node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js".to_string()]
         }
     }
 }
@@ -1152,7 +1164,7 @@ mod tests {
             NpmRuntimeSpec::for_version(Provider::Pi, "1.2.3")
                 .unwrap()
                 .packages,
-            vec!["@mariozechner/pi-coding-agent@1.2.3"]
+            vec!["@earendil-works/pi-coding-agent@1.2.3"]
         );
     }
 
@@ -1161,7 +1173,7 @@ mod tests {
         let spec = NpmRuntimeSpec::for_version(Provider::Pi, "1.2.3").unwrap();
         assert_eq!(
             spec.candidate_binaries,
-            vec!["node_modules/@mariozechner/pi-coding-agent/dist/cli.js"]
+            vec!["node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"]
         );
     }
 

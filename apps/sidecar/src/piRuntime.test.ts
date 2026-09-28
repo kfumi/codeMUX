@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { PiRpcProcess } from './piRpcTransport.js';
 import { PI_APPROVE_TITLE_PREFIX, PI_ASK_TITLE_PREFIX } from './piExtension.js';
-import { PiRuntime, buildPiModelsJson, createDefaultPiTransport, normalizePiAnthropicBaseUrl, normalizePiProviderBaseUrl, resolvePiEntryFromRuntimeRef, writePiModelsJson } from './piRuntime.js';
+import { PiRuntime, buildPiLaunchArgs, buildPiModelsJson, createDefaultPiTransport, normalizePiAnthropicBaseUrl, normalizePiProviderBaseUrl, resolvePiEntryFromRuntimeRef, writePiModelsJson } from './piRuntime.js';
 import type { PiSessionConfig } from './types.js';
 
 const FAKE_PI_PATH = fileURLToPath(new URL('./__fixtures__/fake-pi.mjs', import.meta.url));
@@ -634,6 +634,80 @@ describe('PiRuntime', () => {
     })).toContain('"baseUrl": "https://provider.example/v1"');
   });
 
+  it('declares pi reasoning and input modalities only when asked', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-models-cap-'));
+    pendingCleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    // 未声明时 pi 取 `reasoning ?? false`（可用档位只有 off）与 `input ?? ['text']`
+    // （图片块会被换成占位符），所以这两个键必须缺席。
+    const bare = JSON.parse(buildPiModelsJson({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'anthropic-messages',
+      modelId: 'glm-5.3-flash',
+    }));
+    expect(bare.providers.codemux.models[0]).not.toHaveProperty('reasoning');
+    expect(bare.providers.codemux.models[0]).not.toHaveProperty('thinkingLevelMap');
+    expect(bare.providers.codemux.models[0]).not.toHaveProperty('input');
+
+    writePiModelsJson(dir, {
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'anthropic-messages',
+      modelId: 'glm-5.3-flash',
+      reasoning: true,
+      input: ['text', 'image'],
+    });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, 'models.json'), 'utf8'));
+    expect(written.providers.codemux.models[0]).toMatchObject({
+      reasoning: true,
+      // xhigh / max 在 pi 里必须显式映射，否则这两档不在可用列表里。
+      thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+      input: ['text', 'image'],
+    });
+
+    // 显式给的映射优先于默认值。
+    const custom = JSON.parse(buildPiModelsJson({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'sk-test',
+      api: 'openai-completions',
+      modelId: 'glm-5.3-flash',
+      reasoning: true,
+      thinkingLevelMap: { off: 'none', xhigh: 'high' },
+    }));
+    expect(custom.providers.codemux.models[0].thinkingLevelMap).toEqual({
+      off: 'none',
+      xhigh: 'high',
+    });
+  });
+
+  it('forwards session/thinking/model flags but never a project-trust flag', () => {
+    const sessionFile = path.join(os.tmpdir(), 'pi-session-flag.jsonl');
+    const extensionFile = path.join(os.tmpdir(), 'pi-extension.js');
+    const args = buildPiLaunchArgs(
+      buildConfig({
+        credentialSource: 'codemux',
+        provider: 'anthropic',
+        model: 'glm-5.3-flash',
+        thinkingLevel: 'high',
+        agentSessionId: sessionFile,
+      }),
+      extensionFile,
+    );
+    expect(args).toEqual([
+      '--session', sessionFile,
+      '--extension', extensionFile,
+      '--thinking', 'high',
+      '--model', 'codemux/glm-5.3-flash',
+    ]);
+    // 项目信任交给 pi 自己按「无 UI → 不信任」判定（pi core/project-trust.js:49-51）：
+    // 我们既不用 --approve 批准仓库自带扩展，也不用 --no-approve 强制永久拒绝，更不碰
+    // pi 的 trust.json；同理不传 --mcp-config（未知 flag 会让 RPC 进程启动即退出）。
+    for (const flag of ['--approve', '-a', '--no-approve', '-na', '--mcp-config']) {
+      expect(args).not.toContain(flag);
+    }
+  });
+
   it('normalizes anthropic baseUrl before pi appends /v1/messages', () => {
     expect(normalizePiAnthropicBaseUrl('https://developer.amd.com.cn/radeon/api/v1'))
       .toBe('https://developer.amd.com.cn/radeon/api');
@@ -665,12 +739,22 @@ describe('PiRuntime', () => {
       apiKey: 'sk-test',
       baseUrl: 'https://provider.example/v1',
       piConfigDir: configDir,
+      modelReasoning: true,
+      modelThinkingLevelMap: { off: 'none', xhigh: 'high' },
+      modelInputModalities: ['text', 'image'],
       runtimeRef: { provider: 'pi', runtimeRoot: runtimeDir, runtimePath: runtimeDir } as never,
     }));
     const written = JSON.parse(fs.readFileSync(path.join(configDir, 'models.json'), 'utf8'));
     expect(written.providers.codemux.api).toBe('anthropic-messages');
     expect(written.providers.codemux.baseUrl).toBe('https://provider.example');
     expect(written.providers.codemux.models[0].id).toBe('glm-5.3-flash');
+    // 这三个字段决定 pi 是否把思考档位钳回 off、以及是否给图片换占位符。
+    expect(written.providers.codemux.models[0].reasoning).toBe(true);
+    expect(written.providers.codemux.models[0].thinkingLevelMap).toEqual({
+      off: 'none',
+      xhigh: 'high',
+    });
+    expect(written.providers.codemux.models[0].input).toEqual(['text', 'image']);
   });
 
   it('resolvePiEntryFromRuntimeRef prefers the new earendil bundle entry', () => {

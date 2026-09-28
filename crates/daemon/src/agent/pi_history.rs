@@ -127,13 +127,23 @@ pub(crate) fn convert_pi_history_values_to_events(
     }
 
     let normalized = normalize_history_events(intermediate, app_session_id);
-    inject_pi_turn_boundaries(normalized)
+    let mut events = inject_pi_turn_boundaries(normalized);
+    // 投影出口清洗：内部 marker 前缀（见 strip_pi_internal_markers）不得出现在历史里。
+    strip_pi_internal_markers(&mut events);
+    events
 }
 
 /// pi 会话文件是 `id`/`parentId` 树（`/tree` 分支后文件包含所有分支的条目），
 /// 真正的"当前对话"是活动叶子到根的链。仅在条目实际使用 parentId 链接时按链
-/// 选取（返回链上条目）；线性文件（无 parentId，含 v1 旧格式）或链损坏/成环
-/// 时返回 None 走全量线性转换，宁可交错也不丢条目。
+/// 选取；线性文件（无 parentId，含 v1 旧格式）返回全量线性转换。
+///
+/// 与 codeg 实现的取舍差异（同一份树投影，两处边界选择相反）：
+/// - 成环（链上重复出现同一 id）时我们**保留已经解析出来的那段链**并终止遍历；
+///   codeg 会整体放弃链退回全量线性，那会把被放弃分支交错进对话。
+/// - 父条目缺失（断链）时我们退回全量线性：断链意味着文件不是 pi 写的或已损坏，
+///   按链裁剪此时可能丢内容，宁可交错也不丢条目。
+/// - 不参与树结构的条目（缺 `id` 或无 `parentId` 键）不按链裁剪，原样保留
+///   （见 `is_detached_pi_tree_entry`）。
 pub(crate) fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
     let uses_parent_links = raw_events.iter().any(|entry| {
         entry
@@ -174,19 +184,82 @@ pub(crate) fn select_pi_active_chain(raw_events: &[Value]) -> Vec<&Value> {
             break; // 到根，链完整
         };
         let Some(parent_index) = id_to_index.get(parent) else {
-            return raw_events.iter().collect(); // 父条目缺失，回退线性
+            // 父条目缺失（断链）：意味着文件不是 pi 写的或已损坏，此时按链裁剪
+            // 可能丢内容，故退回全量线性（宁可交错也不丢条目）。
+            return raw_events.iter().collect();
         };
         if !visited.insert(*parent_index) {
-            return raw_events.iter().collect(); // 成环，回退线性
+            break; // 成环：终止遍历，保留已经解析出来的那段链
         }
         chain.push(*parent_index);
         cursor = *parent_index;
     }
 
-    chain.reverse();
-    chain.into_iter().map(|index| &raw_events[index]).collect()
+    // 结果按原始下标升序（文件序）返回：链上条目 + 不参与树结构的条目；
+    // 其余条目属于被放弃的分支，剔除。
+    let on_chain: HashSet<usize> = chain.into_iter().collect();
+    raw_events
+        .iter()
+        .enumerate()
+        .filter(|(index, entry)| on_chain.contains(index) || is_detached_pi_tree_entry(entry))
+        .map(|(_, entry)| entry)
+        .collect()
 }
 
+/// 是否是不参与 pi 会话树结构的条目：pi 给每个条目都写 `parentId` 键（显式
+/// `null` 表示虚拟根），所以「`id` 缺失或为空」以及「没有 `parentId` 键」都说明该
+/// 条目不在树里（或不是 pi 写的）。按链裁剪时这类条目必须原样保留，否则会丢内容。
+fn is_detached_pi_tree_entry(entry: &Value) -> bool {
+    let has_id = entry
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.is_empty());
+    let has_parent_key = entry.get("parentId").is_some();
+    !has_id || !has_parent_key
+}
+
+/// CodeMUX pi 临时扩展用 title 前缀做语义标记（定义在
+/// `apps/sidecar/src/piExtension.ts`：`__codemux_approve__:` 审批、`__codemux_ask__:`
+/// 提问），sidecar 靠它识别扩展 UI 请求的语义。这是传输侧的内部约定：只应到达
+/// 客户端，不应写回会话文件，也不该出现在投影出来的历史里。
+///
+/// 只剥前缀而不是丢掉整条记录：前缀通常直接贴在用户真看到过的文案前面（如
+/// `__codemux_ask__:请确认`），整条丢弃会误删对话内容；剥掉前缀既隐藏实现细节
+/// 又完整保留其后的可读文本。
+fn strip_pi_internal_markers(events: &mut [Value]) {
+    for event in events.iter_mut() {
+        strip_pi_internal_markers_in_value(event);
+    }
+}
+
+fn strip_pi_internal_markers_in_value(value: &mut Value) {
+    match value {
+        Value::String(text) => {
+            if let Some(stripped) = strip_pi_marker_prefix(text) {
+                *text = stripped;
+            }
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(strip_pi_internal_markers_in_value),
+        Value::Object(map) => map
+            .values_mut()
+            .for_each(strip_pi_internal_markers_in_value),
+        _ => {}
+    }
+}
+
+/// 剥掉字符串开头的 CodeMUX 内部 marker 前缀（判定用 trim 后的内容，前缀前的
+/// 空白原样保留），其余文本不动。
+fn strip_pi_marker_prefix(text: &str) -> Option<String> {
+    const MARKER_PREFIXES: [&str; 2] = ["__codemux_approve__:", "__codemux_ask__:"];
+    let head = text.trim_start();
+    let leading_whitespace = &text[..text.len() - head.len()];
+    MARKER_PREFIXES
+        .iter()
+        .find_map(|prefix| head.strip_prefix(prefix))
+        .map(|rest| format!("{}{}", leading_whitespace, rest))
+}
 /// 活动链上一条可回退的用户消息条目（fork 目标）。
 struct PiRewindableUser {
     entry_id: String,
@@ -531,6 +604,24 @@ fn convert_pi_tool_result_entry(raw: &Value, message: &Value) -> Option<Value> {
 /// "未作答"。answer 全为 null 表示用户取消（`ctx.ui.select` 收到
 /// cancelled），映射成提问卡支持的 `__cancelled__` 哨兵；空字符串是合法的
 /// 自由文本答复，不算取消。存量会话文件同样带 `details`，一并受益。
+///
+/// 本函数是 pi 提问卡投影的**孪生实现**之一：另一侧是实时投影
+/// `apps/sidecar/src/piEvents.ts` 的 `piAskToolResultContent`。同一份 pi 会话
+/// 既会实时投影、也会被重放投影（导入 / 重开会话 / rewind），两侧对同一输入
+/// 必须输出**逐字相同**的字符串，否则"重开会话"会渲染出与当时不同的内容：
+/// - 全部 answer 为 null → 两侧都 `__cancelled__`（本侧测试
+///   `normalizes_ask_user_question_answers_for_the_question_card`，TS 侧
+///   `maps an all-null ask_user_question answer list to the cancelled sentinel`）；
+/// - 部分作答（有的 answer 为 null、有的为字符串，用户在对话框中途取消）→
+///   两侧都把未作答项落成空串 `[""]`，不落 `null`；
+/// - 空字符串是合法答复，不算取消。
+///
+/// 改任一侧时必须同步改另一侧，并同时更新两侧测试。
+///
+/// 已知且刻意的差异：`details.answers` 为**空数组**时本侧返回拍平文本（不凭空
+/// 造一张空答案卡），TS 侧返回 `{"answers":[]}`；真实 pi 不会写出空数组，且前端
+/// 对两者都渲染成"未作答"（`AskUserQuestionCard.tsx` 的 `normalizeAnswerValues`
+/// 把 null 与 `''` 一并归一成空），故不强行统一。
 fn pi_tool_result_content(tool_name: &str, message: &Value) -> Value {
     let flattened = flatten_pi_content_text(message.get("content").unwrap_or(&Value::Null));
     if !is_ask_user_question_tool_name(tool_name) {
@@ -546,14 +637,20 @@ fn pi_tool_result_content(tool_name: &str, message: &Value) -> Value {
         return flattened;
     }
 
+    // 先判定"全部未作答"（= 用户取消），再落形状：映射时就把未作答项落成空串
+    // 以与实时投影逐字一致，因此取消判定必须基于映射结果之外的标志位。
+    let mut all_unanswered = true;
     let answers: Vec<Value> = entries
         .iter()
         .map(|entry| match entry.get("answer").and_then(Value::as_str) {
-            Some(answer) => json!([answer]),
-            None => Value::Null,
+            Some(answer) => {
+                all_unanswered = false;
+                json!([answer])
+            }
+            None => json!([""]),
         })
         .collect();
-    if answers.iter().all(Value::is_null) {
+    if all_unanswered {
         return json!("__cancelled__");
     }
     json!({ "answers": answers })
@@ -1119,6 +1216,20 @@ mod tests {
             json!("__cancelled__")
         );
 
+        // 部分作答（用户在对话框中途取消）：未作答项落成空串而非 null，须与实时
+        // 投影 `apps/sidecar/src/piEvents.ts` 的 `piAskToolResultContent` 逐字一致
+        //（TS 侧同名断言在 `piEvents.test.ts` 的 `normalizes ask_user_question
+        // answers into the question card shape`）。前端 `AskUserQuestionCard.tsx`
+        // 把 null 与 '' 都渲染成"未作答"，但同一份会话在实时与重放两条路径上必须
+        // 产出同一个字符串，否则两侧会各自演化。
+        assert_eq!(
+            finished_content(&ask_result(json!([
+                { "question": "Q1", "answer": null },
+                { "question": "Q2", "answer": "b" }
+            ]))),
+            r#"{"answers":[[""],["b"]]}"#
+        );
+
         // 缺 details / 空 answers 时保持拍平文本，不产出半截 answers。
         let without_details = json!({
             "type": "message",
@@ -1133,6 +1244,22 @@ mod tests {
             }
         });
         assert_eq!(finished_content(&without_details), json!("Q1: a"));
+
+        // 空 answers 数组同样保持拍平文本（真实 pi 不产出空数组；TS 侧此处返回
+        // `{"answers":[]}`，是双方注释里明确记录的刻意差异）。
+        let empty_answers = json!({
+            "type": "message",
+            "id": "result-3",
+            "message": {
+                "role": "toolResult",
+                "toolCallId": "call-3",
+                "toolName": "ask_user_question",
+                "content": [{ "type": "text", "text": "Q1: a" }],
+                "details": { "answers": [] },
+                "isError": false
+            }
+        });
+        assert_eq!(finished_content(&empty_answers), json!("Q1: a"));
     }
 
     #[test]
@@ -1598,5 +1725,159 @@ mod tests {
             .contains("Not a pi session file"));
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn keeps_resolved_chain_when_parent_links_cycle() {
+        // 成环会话（a1 ↔ a2 互为父子）：不再整体退回全量线性，而是保留已经解析
+        // 出来的那段链（a1 → a2 → b1 → b2）；被放弃分支 c1 不得进入结果。
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message", "id": "a1", "parentId": "a2",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "cycle head" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a2", "parentId": "a1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "cycle tail" }] }
+                }),
+                json!({
+                    "type": "message", "id": "c1", "parentId": "a2",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "abandoned branch" }] }
+                }),
+                json!({
+                    "type": "message", "id": "b1", "parentId": "a2",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "second prompt" }] }
+                }),
+                json!({
+                    "type": "message", "id": "b2", "parentId": "b1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "active answer" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        let serialized = serde_json::to_string(&events).unwrap();
+        assert!(serialized.contains("cycle head"));
+        assert!(serialized.contains("cycle tail"));
+        assert!(serialized.contains("second prompt"));
+        assert!(serialized.contains("active answer"));
+        assert!(!serialized.contains("abandoned branch"));
+    }
+
+    #[test]
+    fn keeps_entries_without_id_or_parent_id_key_when_pruning_to_chain() {
+        // 树会话里混入两类不参与树结构的条目：缺 `id` 的、缺 `parentId` 键的。
+        // 它们不在活动链上，但按链裁剪时必须原样保留（不丢内容优先）；同层的被
+        // 放弃分支仍要剔除。
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message", "id": "u1", "parentId": null,
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "first prompt" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a1", "parentId": "u1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "first answer" }] }
+                }),
+                // 缺 id：不参与树结构
+                json!({
+                    "type": "message", "parentId": "a1",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "entry without id" }] }
+                }),
+                // 有 id 但没有 parentId 键：同样不参与树结构
+                json!({
+                    "type": "message", "id": "detached-1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "entry without parent key" }] }
+                }),
+                json!({
+                    "type": "message", "id": "abandoned", "parentId": "a1",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "abandoned branch" }] }
+                }),
+                json!({
+                    "type": "message", "id": "u2", "parentId": "a1",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "second prompt" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a2", "parentId": "u2",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "second answer" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        let serialized = serde_json::to_string(&events).unwrap();
+        assert!(serialized.contains("entry without id"));
+        assert!(serialized.contains("entry without parent key"));
+        assert!(serialized.contains("first prompt"));
+        assert!(serialized.contains("second answer"));
+        assert!(!serialized.contains("abandoned branch"));
+    }
+
+    #[test]
+    fn follows_one_branch_when_session_has_two_null_parent_roots() {
+        // pi 改写首条提问时会写出第二个 `parentId: null` 显式根：两个根都按分叉
+        // 处理，活动链只含叶子自己那一支（被放弃的首条分支不进结果）。
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message", "id": "r1", "parentId": null,
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "original first prompt" }] }
+                }),
+                json!({
+                    "type": "message", "id": "r1a", "parentId": "r1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "original first answer" }] }
+                }),
+                json!({
+                    "type": "message", "id": "r2", "parentId": null,
+                    "message": { "role": "user", "content": [{ "type": "text", "text": "rewritten first prompt" }] }
+                }),
+                json!({
+                    "type": "message", "id": "r2a", "parentId": "r2",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "rewritten first answer" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        let serialized = serde_json::to_string(&events).unwrap();
+        assert!(serialized.contains("rewritten first prompt"));
+        assert!(serialized.contains("rewritten first answer"));
+        assert!(!serialized.contains("original first prompt"));
+        assert!(!serialized.contains("original first answer"));
+    }
+
+    #[test]
+    fn strips_codemux_internal_markers_from_projected_history() {
+        // marker 只应到达客户端、不写回会话文件；投影出口必须剥掉前缀并保留其后
+        // 的可读文本（整条丢弃会误删对话内容）。
+        let events = convert_pi_history_values_to_events(
+            &[
+                json!({
+                    "type": "message", "id": "u1", "parentId": null,
+                    "message": { "role": "user",
+                        "content": [{ "type": "text", "text": "__codemux_ask__:请确认" }] }
+                }),
+                json!({
+                    "type": "message", "id": "a1", "parentId": "u1",
+                    "message": { "role": "assistant", "stopReason": "stop",
+                        "content": [{ "type": "text", "text": "__codemux_approve__:允许执行 bash" }] }
+                }),
+            ],
+            "app-1",
+        );
+
+        assert_eq!(events.len(), 3);
+        let serialized = serde_json::to_string(&events).unwrap();
+        assert!(!serialized.contains("__codemux_"));
+        assert!(serialized.contains("请确认"));
+        assert!(serialized.contains("允许执行 bash"));
     }
 }

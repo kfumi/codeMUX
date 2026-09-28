@@ -593,6 +593,7 @@ mod tests {
                     max_output_tokens: None,
                     input_modalities: None,
                     supports_vision: None,
+                    supports_reasoning: None,
                 }],
                 default_model: "deepseek-v4-flash".to_string(),
                 builtin_template_id: Some("deepseek".to_string()),
