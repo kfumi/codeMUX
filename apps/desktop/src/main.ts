@@ -495,6 +495,8 @@ if (!gotLock) {
     const updater = createUpdaterService({
       isPackaged: () => app.isPackaged,
       sendToRenderer,
+      // 更新器全过程落盘 logs/updater.log:失败原因原先只存在于内存里。
+      logDir: resolveLogDir(),
     });
     unregisterBridge = registerShellBridge({
       getAppDataDir: resolveAppDataDir,

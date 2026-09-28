@@ -73,6 +73,19 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   shortcutName: CodeMUX
+  # artifactName 必须钉死成**无空格**的名字(v0.4.3~v0.4.6 的自动更新在 Windows
+  # 上一直是坏的,根因就在这里):
+  #   1. electron-builder 的 NSIS 默认产物名是 `CodeMUX Setup 0.4.6.exe`(带空格)。
+  #   2. 写 latest.yml 时 computeSafeArtifactNameIfNeeded 会把空格换成短横,
+  #      于是 latest.yml 里记的是 `CodeMUX-Setup-0.4.6.exe`;
+  #      而磁盘上的文件仍叫 `CodeMUX Setup 0.4.6.exe`,**electron-builder 不会
+  #      重命名它**。
+  #   3. `gh release upload` 上传后,GitHub 把资产名里的空格替换成点,
+  #      Release 上实际存的是 `CodeMUX.Setup.0.4.6.exe`。
+  #   → latest.yml 指向的 URL 404,已装用户「检测得到新版本、点下载就失败」,
+  #     而失败路径全程静默(见 updater.ts 的 updater.log 补齐前)。
+  # 这里直接给一个 GitHub 安全名:磁盘名、latest.yml 的 url、Release 资产名三者一致。
+  artifactName: ${productName}-Setup-${version}.${ext}
 
 # macOS:dmg 给人装/分发,zip 给 electron-updater —— latest-mac.yml 指向的是 zip,
 # 只出 dmg 的话已装用户检测得到新版本却装不上。两个产物都要。

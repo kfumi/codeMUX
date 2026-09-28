@@ -4,8 +4,9 @@ import { ExternalLink, Github } from 'lucide-react';
 import { desktopBridge } from '@/lib/desktop-bridge';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
+import { getUpdateEntryView, getUpdatePercent, formatBytes } from '@/features/update/updateDisplay';
 import { useHostCapabilities } from '@/hooks/useHostCapabilities';
-
+import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import {
@@ -36,7 +37,7 @@ export function AboutSettings() {
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
   const [latestDialogOpen, setLatestDialogOpen] = useState(false);
   const [updateErrorDialogOpen, setUpdateErrorDialogOpen] = useState(false);
-  const { stage, version, checkForUpdates, startUpdate } = useUpdaterContext();
+  const { stage, version, progress, error: updateError, checkForUpdates, startUpdate } = useUpdaterContext();
   // 自动更新是壳独占能力(与 UpdateEntry 同一判据):浏览器/移动形态隐藏入口。
   const capabilities = useHostCapabilities();
   const canUpdate = capabilities.has('updater');
@@ -54,6 +55,15 @@ export function AboutSettings() {
       })
       .catch(() => {});
   }, []);
+  // 更新进度区:此前本页只在 stage 上把「检查更新」按钮置灰,downloading /
+  // installing / restarting / error 一个都不渲染 —— 从关于页点「下载并安装」
+  // 后确认框一关,界面零变化(而标题栏 UpdateEntry 只在非设置页渲染)。
+  // 口径与 UpdateEntry 共用 updateDisplay,两处必须一致。
+  const updateView = getUpdateEntryView(stage, progress, updateError);
+  const showUpdateStatus = canUpdate && updateView !== null && stage !== 'available';
+  const updatePercent = stage === 'downloading' ? getUpdatePercent(progress) : null;
+  const downloadedBytes = progress?.downloadedBytes ?? 0;
+  const totalBytes = progress?.totalBytes ?? null;
 
   return (
     <div className="space-y-6">
@@ -90,6 +100,62 @@ export function AboutSettings() {
           <InfoRow label="系统架构" value={getArchInfo()} />
         </div>
       </div>
+
+      {/* 更新状态:下载/安装/重启进度 + 失败原因(此前本页完全没有反馈) */}
+      {showUpdateStatus && updateView && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <label
+              className={cn(
+                'text-ui-compact font-medium',
+                updateView.tone === 'error' ? 'text-destructive' : 'text-muted-foreground',
+              )}
+            >
+              {updateView.label}
+            </label>
+            {updatePercent !== null && (
+              <span className="font-mono text-code text-foreground">{updatePercent}%</span>
+            )}
+          </div>
+          {stage === 'downloading' && (
+            <>
+              <div
+                role="progressbar"
+                aria-label="更新下载进度"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={updatePercent ?? undefined}
+                className="h-1.5 w-full overflow-hidden rounded-full bg-secondary"
+              >
+                {updatePercent === null ? (
+                  // 总量未知(未收到 content-length):不确定态,不做假百分比。
+                  <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+                ) : (
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-normal ease-motion-out"
+                    style={{ width: `${updatePercent}%` }}
+                  />
+                )}
+              </div>
+              <span className="text-ui-meta text-muted-foreground">
+                {totalBytes !== null
+                  ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
+                  : `已下载 ${formatBytes(downloadedBytes)}`}
+              </span>
+            </>
+          )}
+          {updateView.tone === 'error' && updateView.detail && (
+            <span className="text-ui-meta text-destructive [overflow-wrap:anywhere]">
+              {updateView.detail}
+            </span>
+          )}
+          {updateView.tone === 'error' && (
+            <span className="text-ui-meta text-muted-foreground">
+              完整原因见应用数据目录下的 logs/updater.log
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Links */}
       <div className="flex flex-col gap-3">
@@ -171,7 +237,7 @@ export function AboutSettings() {
           <DialogHeader>
             <DialogTitle>检查更新失败</DialogTitle>
             <DialogDescription>
-              暂时无法检查更新，请稍后再试。
+              暂时无法检查更新，请确认网络可访问 GitHub，并在桌面正式环境中重试。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -3,17 +3,26 @@
 //! - feed 源来自 electron-builder.yml 的 `publish`(provider: github,
 //!   owner/repo)——打包时 electron-builder 生成 resources/app-update.yml,
 //!   electron-updater 运行时自动读取,代码里无需 setFeedURL。
-//! - 开发/未打包环境(app.isPackaged === false)自动禁用:check 显式返回
-//!   unavailable、downloadAndInstall 显式拒绝(该环境没有 app-update.yml)。
 //! - autoDownload=false:下载由用户在渲染层显式确认后触发;
 //!   autoInstallOnAppQuit=true:下载完成后即使不立即重启,退出时也会安装
 //!   (「退出时安装」语义)。
 //! - 进度/状态事件经 webContents 转发到渲染层(channel: `updater-event`),
 //!   契约见 src/lib/desktop-bridge.ts 的 DesktopUpdaterEvent。
+//! - 全过程落盘 `<appDataDir>/logs/updater.log`(见 updater-log.ts):壳侧
+//!   生命周期 + electron-updater 本体日志(原先 `logger = null` 把失败原因
+//!   全部吞掉,更新失败在线上无从排查)。
+//! - 开发/未打包环境(app.isPackaged === false)更新器禁用:check 显式返回
+//!   unavailable、downloadAndInstall 显式拒绝、quitAndInstall 空转。
 
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import type { ProgressInfo, UpdateInfo } from 'builder-util-runtime';
+import {
+  createElectronUpdaterLogger,
+  createUpdaterLogRecorder,
+  formatUpdaterMessage,
+  type UpdaterLogRecorder,
+} from './updater-log';
 
 /** checkForUpdates 的返回(unavailable = 开发/未打包环境,更新器已禁用)。 */
 export interface UpdaterCheckResult {
@@ -42,27 +51,54 @@ export function createUpdaterService(deps: {
   isPackaged(): boolean;
   /** 渲染层事件出口(webContents 转发)。 */
   sendToRenderer(channel: string, payload: unknown): void;
+  /** 更新日志目录(= main 的 resolveLogDir)。 */
+  logDir: string;
+  now?: () => Date;
 }): UpdaterService {
+  const recorder: UpdaterLogRecorder = createUpdaterLogRecorder(deps.logDir, deps.now);
+  const log = (level: 'info' | 'warn' | 'error', message: string): void => {
+    recorder.record(level, message);
+  };
+
   const forward = (event: UpdaterMainEvent): void => {
     deps.sendToRenderer('updater-event', event);
   };
+
 
   /** 最近一次 check/update-downloaded 得到的远端版本(downloadAndInstall 返回用)。 */
   let latestVersion: string | null = null;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.logger = null;
+  // electron-updater 6.x 起默认走 web installer,并会在下载时刷弃用警告;本项目
+  // 走 NSIS 离线安装包,明确关掉(log 里可见该警告)。
+  autoUpdater.disableWebInstaller = true;
+  autoUpdater.logger = createElectronUpdaterLogger(recorder);
+  log(
+    'info',
+    `更新器初始化:packaged=${deps.isPackaged()} current=${app.getVersion()} `
+      + `autoDownload=${autoUpdater.autoDownload} log=${recorder.filePath}`,
+  );
   // 持久事件转发:渲染层在 downloadAndInstall 期间消费 progress/downloaded。
-  autoUpdater.on('checking-for-update', () => forward({ type: 'checking' }));
+  autoUpdater.on('checking-for-update', () => {
+    log('info', '事件: checking-for-update');
+    forward({ type: 'checking' });
+  });
   autoUpdater.on('update-available', (info: UpdateInfo) => {
     latestVersion = info.version;
+    log('info', `事件: update-available version=${info.version}`);
     forward({ type: 'available', version: info.version });
   });
   autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+    log('info', `事件: update-not-available version=${info.version ?? 'null'}`);
     forward({ type: 'not-available', version: info.version ?? null });
   });
   autoUpdater.on('download-progress', (progress: ProgressInfo) => {
+    log(
+      'info',
+      `事件: download-progress ${progress.percent.toFixed(2)}% `
+        + `(${progress.transferred}/${progress.total})`,
+    );
     forward({
       type: 'progress',
       percent: progress.percent,
@@ -72,47 +108,69 @@ export function createUpdaterService(deps: {
   });
   autoUpdater.on('update-downloaded', (event: UpdateInfo) => {
     latestVersion = event.version;
+    log('info', `事件: update-downloaded version=${event.version ?? 'null'}`);
     forward({ type: 'downloaded', version: event.version ?? null });
   });
   autoUpdater.on('error', (error: Error) => {
+    log('error', `事件: error ${formatUpdaterMessage(error)}`);
     forward({ type: 'error', message: error?.message ?? String(error) });
   });
 
   return {
     check: async (): Promise<UpdaterCheckResult> => {
       if (!deps.isPackaged()) {
+        log('info', 'check: 未打包环境更新器禁用,返回 unavailable');
         return { status: 'unavailable', version: null };
       }
       // 6.x 的 UpdateCheckResult 带 isUpdateAvailable(版本比较由
       // electron-updater 完成,含 prerelease/allowDowngrade 语义)。
-      const result = await autoUpdater.checkForUpdates();
-      if (!result || !result.isUpdateAvailable) {
-        return { status: 'not-available', version: result?.updateInfo.version ?? null };
+      log('info', `check: 开始检查更新 current=${app.getVersion()}`);
+      try {
+        const result = await autoUpdater.checkForUpdates();
+        if (!result || !result.isUpdateAvailable) {
+          log('info', `check: 无可用更新 latest=${result?.updateInfo.version ?? 'null'}`);
+          return { status: 'not-available', version: result?.updateInfo.version ?? null };
+        }
+        latestVersion = result.updateInfo.version;
+        log('info', `check: 发现新版本 ${latestVersion}`);
+        return { status: 'available', version: result.updateInfo.version };
+      } catch (error) {
+        log('error', `check: 失败 ${formatUpdaterMessage(error)}`);
+        throw error;
       }
-      latestVersion = result.updateInfo.version;
-      return { status: 'available', version: result.updateInfo.version };
     },
 
     downloadAndInstall: async (): Promise<{ version: string | null }> => {
       if (!deps.isPackaged()) {
+        log('warn', 'downloadAndInstall: 未打包环境拒绝下载');
         throw new Error('更新器在开发/未打包环境不可用');
       }
       // 前置 check 已缓存 updateInfo;resolve 即安装包下载完成
       // ('update-downloaded' 事件同步转发给渲染层)。此后:
       // 立即 quitAndInstall,或等 autoInstallOnAppQuit 在退出时安装。
-      await autoUpdater.downloadUpdate();
+      log('info', `downloadAndInstall: 开始下载 version=${latestVersion ?? 'null'}`);
+      try {
+        const files = await autoUpdater.downloadUpdate();
+        log('info', `downloadAndInstall: 下载完成 files=${files.join(', ')}`);
+      } catch (error) {
+        log('error', `downloadAndInstall: 下载失败 ${formatUpdaterMessage(error)}`);
+        throw error;
+      }
       return { version: latestVersion };
     },
 
     quitAndInstall: (): void => {
       if (!deps.isPackaged()) {
+        log('warn', 'quitAndInstall: 未打包环境跳过安装(开发态请手动运行已下载的安装包)');
         return;
       }
       // NSIS 静默安装 + 完成后自动重启;应用退出仍会先走壳的 before-quit
       // (停自有 daemon)再交给安装器。
+      log('info', 'quitAndInstall: 交给安装器(静默安装 + 自动重启)');
       autoUpdater.quitAndInstall(true, true);
     },
 
     currentVersion: (): string => app.getVersion(),
+
   };
 }

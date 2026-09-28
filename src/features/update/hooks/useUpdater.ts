@@ -22,6 +22,11 @@ export type DownloadEvent =
   }
   | {
     event: 'Finished';
+  }
+  | {
+    /** 壳侧 autoUpdater 的 error 事件(独立于 IPC 返回值,先于 reject 到达)。 */
+    event: 'Error';
+    data: { message: string };
   };
 
 export type UpdateStage =
@@ -91,6 +96,8 @@ const loadUpdaterAdapters = async (): Promise<UpdaterAdapters> => {
 };
 
 const isUpdaterSupported = () => isElectronDesktop() || testAdapters != null;
+
+
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error && error.message) {
@@ -166,6 +173,12 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
           stage: 'error',
           error: '当前环境不支持更新检查，请在桌面正式环境中使用。',
         });
+      }
+      // throwOnError 时必须抛,不能静默 return null —— 调用方(关于页)把 null
+      // 一律当成「已经是最新版本」,于是「环境不支持」会被显示成最新版本,
+      // 用户完全看不出到底发生了什么(这正是 dev 态误报的由来)。
+      if (throwOnError) {
+        throw new Error('当前环境不支持更新检查，请在桌面正式环境中使用。');
       }
       return null;
     }
@@ -290,6 +303,17 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
           return;
         }
 
+        if (event.event === 'Error') {
+          // 壳侧 error 事件先于 IPC reject 到达,立即给出可见反馈;
+          // 后续 catch 会用更完整的上下文再兜一次(同 stage,幂等)。
+          setState((current) => ({
+            ...current,
+            stage: 'error',
+            error: event.data.message,
+          }));
+          return;
+        }
+
         setState((current) => ({
           ...current,
           stage: 'installing',
@@ -301,6 +325,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
       if (startRequestIdRef.current !== requestId) {
         return;
       }
+
 
       await relaunch();
     } catch (error) {

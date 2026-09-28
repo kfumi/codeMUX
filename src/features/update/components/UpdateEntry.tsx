@@ -1,4 +1,4 @@
-import { Download, Loader2 } from 'lucide-react';
+import { AlertCircle, Download, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -7,81 +7,46 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 import { cn } from '@/lib/utils';
 
-import type { UpdateProgress, UpdateStage } from '../hooks/useUpdater';
 import { useUpdaterContext } from '../UpdaterProvider';
+import { getUpdateEntryView } from '../updateDisplay';
 
-const getProgressPercent = (progress?: UpdateProgress) => {
-  const totalBytes = progress?.totalBytes;
-  const downloadedBytes = progress?.downloadedBytes ?? 0;
-
-  if (!totalBytes || totalBytes <= 0) {
-    return null;
-  }
-
-  return Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
-};
-
-const getEntryState = (stage: UpdateStage, progress?: UpdateProgress) => {
-  if (stage === 'available') {
-    return {
-      label: '更新',
-      tooltip: '发现新版本，点击安装',
-      disabled: false,
-      tone: 'available' as const,
-      Icon: Download,
-    };
-  }
-
-  if (stage === 'downloading') {
-    const percent = getProgressPercent(progress);
-    return {
-      label: percent === null ? '下载中' : `下载中 ${percent}%`,
-      tooltip: '正在下载更新',
-      disabled: true,
-      tone: 'busy' as const,
-      Icon: Loader2,
-    };
-  }
-
-  if (stage === 'installing') {
-    return {
-      label: '安装中',
-      tooltip: '正在安装更新',
-      disabled: true,
-      tone: 'busy' as const,
-      Icon: Loader2,
-    };
-  }
-
-  if (stage === 'restarting') {
-    return {
-      label: '重启中',
-      tooltip: '正在重启应用',
-      disabled: true,
-      tone: 'busy' as const,
-      Icon: Loader2,
-    };
-  }
-
-  return null;
-};
+const TONE_ICON = {
+  available: Download,
+  busy: Loader2,
+  error: AlertCircle,
+} as const;
 
 export function UpdateEntry() {
   const updater = useUpdaterContext();
   // 工单 02:自动更新是壳独占能力,浏览器/移动形态隐藏入口而非留一个死按钮。
   const capabilities = useHostCapabilities();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const entry = getEntryState(updater.stage, updater.progress);
+  const view = getUpdateEntryView(updater.stage, updater.progress, updater.error);
 
-  if (!entry || !capabilities.has('updater')) {
+  if (!view || !capabilities.has('updater')) {
     return null;
   }
 
-  const { Icon } = entry;
+  const Icon = TONE_ICON[view.tone];
+
+  // available → 确认后开装;error → 先重新检查(拿到的 update handle 才能下载;
+  // 失败后壳侧缓存的 handle 可能已失效),成功则回到确认框。
   const handleClick = () => {
     if (updater.stage === 'available') {
       setConfirmOpen(true);
       return;
+    }
+    if (updater.stage === 'error') {
+      void updater
+        .checkForUpdates({ interactive: true, announceNoUpdate: false, throwOnError: true })
+        .then((update) => {
+          if (update) {
+            setConfirmOpen(true);
+          }
+        })
+        .catch(() => {
+          // checkForUpdates 自身已把 stage 置为 error 并带上原因。
+        });
     }
   };
 
@@ -93,21 +58,23 @@ export function UpdateEntry() {
             type="button"
             size="sm"
             variant="ghost"
-            disabled={entry.disabled}
+            disabled={view.disabled}
             onClick={handleClick}
             className={cn(
               'h-7 gap-1.5 rounded-md px-2.5 text-ui-meta shadow-none',
               'border border-transparent',
-              entry.tone === 'available' && 'bg-[hsl(var(--sidebar-accent)/0.16)] text-[hsl(var(--sidebar-accent))] hover:bg-[hsl(var(--sidebar-accent)/0.24)] hover:text-[hsl(var(--sidebar-accent))]',
-              entry.tone === 'busy' && 'text-foreground/58',
+              view.tone === 'available' && 'bg-[hsl(var(--sidebar-accent)/0.16)] text-[hsl(var(--sidebar-accent))] hover:bg-[hsl(var(--sidebar-accent)/0.24)] hover:text-[hsl(var(--sidebar-accent))]',
+              view.tone === 'busy' && 'text-foreground/58',
+              // 语义色直用,不叠透明度(见 AGENTS.md 文字对比两档规范)。
+              view.tone === 'error' && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
             )}
           >
-            <Icon className={cn('h-3.5 w-3.5', entry.tone === 'busy' && 'animate-spin')} />
-            <span>{entry.label}</span>
+            <Icon className={cn('h-3.5 w-3.5', view.tone === 'busy' && 'animate-spin')} />
+            <span>{view.label}</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          <p>{entry.tooltip}</p>
+          <p>{view.hint}</p>
         </TooltipContent>
       </Tooltip>
 

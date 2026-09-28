@@ -392,6 +392,29 @@ describe('useUpdater', () => {
     expect(result.current.error).toBe('network down');
   });
 
+  it('环境不支持时:interactive 进 error,throwOnError 会抛(不再静默 null 被当成「已是最新」)', async () => {
+    const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
+    __setUpdaterTestAdapters(null);
+    // 非 Electron 壳 + DEV 态 → 环境不支持。
+    vi.stubEnv('DEV', true);
+    setTauri(false);
+
+    const { result } = renderHook(() => useUpdater({ autoCheck: false }));
+
+    // 不抛时保持原样:返回 null + error 状态(静默自动检查路径依赖这个)。
+    await act(async () => {
+      expect(await result.current.checkForUpdates({ interactive: true })).toBeNull();
+    });
+    expect(result.current.stage).toBe('error');
+
+    await act(async () => {
+      await expect(result.current.checkForUpdates({
+        interactive: true,
+        throwOnError: true,
+      })).rejects.toThrow('当前环境不支持更新检查');
+    });
+  });
+
   it('忽略过期检查结果，保持最新请求状态', async () => {
     let resolveFirst: ((value: MockUpdate | null) => void) | undefined;
     const checkMock = vi

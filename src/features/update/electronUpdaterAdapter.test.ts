@@ -83,7 +83,7 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
 
     emit({ type: 'progress', percent: 25, transferred: 25, total: 100 });
     emit({ type: 'progress', percent: 100, transferred: 100, total: 100 });
-    emit({ type: 'error', message: 'should be ignored' });
+    emit({ type: 'error', message: 'download failed' });
     emit({ type: 'downloaded', version: '1.2.3' });
     resolveInstall?.();
     await installPromise;
@@ -93,6 +93,9 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
       [{ event: 'Started', data: { contentLength: 100 } }],
       [{ event: 'Progress', data: { chunkLength: 25 } }],
       [{ event: 'Progress', data: { chunkLength: 75 } }],
+      // 壳侧 error 事件不再被丢弃(回归:此前这里 error 完全无消费者,
+      // 下载中途失败时 UI 拿不到任何信号,只等 IPC reject)。
+      [{ event: 'Error', data: { message: 'download failed' } }],
       [{ event: 'Finished' }],
     ]);
     // 完成后必须取消订阅,避免泄漏/串扰下一次安装。

@@ -113,10 +113,50 @@ CI 侧对应两个仓库 Secrets（Settings → Secrets and variables → Action
   preload 桥 → main `autoUpdater`(见 `apps/desktop/src/updater.ts`);
   `autoDownload=false`(用户确认后下载)、`autoInstallOnAppQuit=true`(下载后
   即使不立即重启,退出时也会安装)。
-- 开发/未打包环境(`app.isPackaged === false`)更新器自动禁用,check 返回
-  unavailable。
+- 开发/未打包环境(`app.isPackaged === false`)更新器默认禁用,check 返回
+  unavailable;设 `CODEMUX_UPDATER_DEV=1` 可在开发态放行(见下节)。
 - 发布新版本时,把 GitHub Release 附件(latest.yml + NSIS exe)上传到
   `kfumi/codeMUX` Releases 即可被现有安装版检测到。
+
+### ⚠️ NSIS 产物名必须钉死(Windows 自动更新曾经一直是坏的)
+
+v0.4.3~v0.4.6 的 Windows 用户「检测得到新版本、点下载就失败」,根因是
+`latest.yml` 里的 `url` 指向一个 Release 上**不存在**的文件:
+
+| 环节 | 名字 |
+| --- | --- |
+| electron-builder NSIS 默认产物(磁盘) | `CodeMUX Setup 0.4.6.exe`(带空格) |
+| `computeSafeArtifactNameIfNeeded` 写进 latest.yml | `CodeMUX-Setup-0.4.6.exe`(空格→短横) |
+| `gh release upload` 后 GitHub 实际存的资产 | `CodeMUX.Setup.0.4.6.exe`(空格→点) |
+
+electron-builder **不会**把磁盘文件重命名成 safe name,而 GitHub 会把资产名里的
+空格替换成点,于是 latest.yml 的 URL 404。mac/Linux 的产物名本来就没有空格,
+不受影响。
+
+修法:`nsis.artifactName: ${productName}-Setup-${version}.${ext}`,让磁盘名、
+latest.yml 的 url、Release 资产名三者完全一致。**改名后必须发一个新版本**,
+存量 v0.4.6 的 latest.yml 仍然是坏的(已装用户升不到)。
+
+自检(发版后跑一次,latest.yml 里的每个 url 都必须是 200):
+
+```powershell
+$tag = 'v0.4.7'
+$yml = Invoke-RestMethod "https://github.com/kfumi/codeMUX/releases/latest/download/latest.yml"
+$names = ($yml -split "`n" | Select-String 'url: (.+)$').Matches.Groups[1].Value
+$names | ForEach-Object {
+  "$_ -> " + (Invoke-WebRequest "https://github.com/kfumi/codeMUX/releases/download/$tag/$_" -Method Head).StatusCode
+}
+```
+
+### 更新排障日志
+
+更新全过程落盘 `%APPDATA%/com.codemux.desktop/logs/updater.log`(与 daemon.log /
+renderer.log 同目录,应用内「日志」面板可看):壳侧生命周期(check 结果、下载
+成功/失败、每个转发给渲染层的事件)+ electron-updater 本体日志(HTTP、重试、
+校验和)。更新没反应或失败时先看这个文件。
+
+更新失败时 UI 不会静默:标题栏入口变成红色的「更新失败」并可点击重试,关于页
+展示失败原因与进度条(两处口径共用 `src/features/update/updateDisplay.ts`)。
 
 ## 数据目录与旧壳用户迁移
 

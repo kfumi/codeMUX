@@ -14,6 +14,8 @@ const currentVersionMock = vi.hoisted(() => vi.fn(async () => '1.0.0'));
 type MockUpdaterContext = {
   stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
   version?: string;
+  progress?: { totalBytes: number | null; downloadedBytes: number };
+  error?: string;
   checkForUpdates: ReturnType<typeof vi.fn>;
   startUpdate: ReturnType<typeof vi.fn>;
 };
@@ -39,6 +41,8 @@ describe('AboutSettings', () => {
     mockUpdaterContext = {
       stage: 'idle',
       version: undefined,
+      progress: undefined,
+      error: undefined,
       checkForUpdates: vi.fn(async () => null),
       startUpdate: vi.fn(),
     };
@@ -108,7 +112,7 @@ describe('AboutSettings', () => {
     });
 
     expect(await screen.findByText('检查更新失败')).toBeTruthy();
-    expect(screen.getByText('暂时无法检查更新，请稍后再试。')).toBeTruthy();
+    expect(screen.getByText('暂时无法检查更新，请确认网络可访问 GitHub，并在桌面正式环境中重试。')).toBeTruthy();
     expect(screen.queryByText('network down')).toBeNull();
     expect(screen.queryByText('已经是最新版本')).toBeNull();
     expect(screen.queryByText('安装更新')).toBeNull();
@@ -158,5 +162,59 @@ describe('AboutSettings', () => {
     expect(await screen.findByText('CodeMUX')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '检查更新' })).toBeNull();
     expect(screen.getByText('PC 浏览器')).toBeTruthy();
+  });
+
+  it('下载中展示百分比进度条与字节数(回归:本页此前完全没有进度反馈)', async () => {
+    mockUpdaterContext.stage = 'downloading';
+    mockUpdaterContext.progress = { totalBytes: 2 * 1024 * 1024, downloadedBytes: 1024 * 1024 };
+
+    render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+
+    const bar = screen.getByRole('progressbar', { name: '更新下载进度' });
+    expect(bar.getAttribute('aria-valuenow')).toBe('50');
+    expect(screen.getByText('50%')).toBeTruthy();
+    expect(screen.getByText('1.0 MB / 2.0 MB')).toBeTruthy();
+  });
+
+  it('总量未知时不显示假百分比,退化为不确定态', async () => {
+    mockUpdaterContext.stage = 'downloading';
+    mockUpdaterContext.progress = { totalBytes: null, downloadedBytes: 2048 };
+
+    render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBeNull();
+    expect(screen.queryByText('%')).toBeNull();
+    expect(screen.getByText('已下载 2 KB')).toBeTruthy();
+  });
+
+  it('安装中/重启中展示阶段文案', async () => {
+    mockUpdaterContext.stage = 'installing';
+    const { rerender } = render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+    expect(screen.getByText('安装中')).toBeTruthy();
+
+    mockUpdaterContext.stage = 'restarting';
+    rerender(<AboutSettings />);
+    expect(screen.getByText('重启中')).toBeTruthy();
+  });
+
+  it('更新失败时展示原因与日志指引,而不是静默', async () => {
+    mockUpdaterContext.stage = 'error';
+    mockUpdaterContext.error = 'Cannot download "CodeMUX-Setup-0.4.6.exe", status 404';
+
+    render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+
+    expect(screen.getByText('更新失败')).toBeTruthy();
+    expect(screen.getByText(/status 404/)).toBeTruthy();
+    expect(screen.getByText(/logs\/updater\.log/)).toBeTruthy();
+  });
+
+  it('idle 状态不展示进度区', async () => {
+    render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
 });

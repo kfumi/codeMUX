@@ -97,14 +97,54 @@ describe('UpdateEntry', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '重启中' }).disabled).toBe(true);
   });
 
-  it('更新检查失败时不展示左上角入口按钮', async () => {
+  it('更新失败时**保留**入口并展示原因与重试(回归:此前 error 返回 null,按钮凭空消失)', async () => {
     mockUpdaterState.stage = 'error';
-    mockUpdaterState.error = 'network down';
+    mockUpdaterState.error = 'Cannot download CodeMUX-Setup-0.4.6.exe, status 404';
 
     render(<UpdateEntry />);
 
-    expect(screen.queryByRole('button', { name: /更新失败|更新/ })).toBeNull();
+    const button = screen.getByRole('button', { name: '更新失败' });
+    expect(button).toBeTruthy();
+    // tooltip 走 mock 渲染,原因对用户可见。
+    expect(screen.getByText(/status 404/)).toBeTruthy();
+    // 静默检查失败走的是 idle,error 态一定来自用户交互,可安全重试。
     expect(mockUpdaterState.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('点击「更新失败」重新检查,拿到新版本后回到确认框', async () => {
+    mockUpdaterState.stage = 'error';
+    mockUpdaterState.error = 'status 404';
+    // 确认框标题取 context 的 version(真实运行时 checkForUpdates 会写入 state)。
+    mockUpdaterState.version = '1.2.4';
+    mockUpdaterState.checkForUpdates.mockResolvedValue({
+      version: '1.2.4',
+      downloadAndInstall: vi.fn(async () => {}),
+    });
+
+    render(<UpdateEntry />);
+    fireEvent.click(screen.getByRole('button', { name: '更新失败' }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('安装更新 1.2.4？')).toBeTruthy();
+    });
+    expect(mockUpdaterState.checkForUpdates).toHaveBeenCalledWith(
+      expect.objectContaining({ interactive: true, throwOnError: true }),
+    );
+  });
+
+  it('重新检查仍失败时停留在失败态并展示新原因', async () => {
+    mockUpdaterState.stage = 'error';
+    mockUpdaterState.error = 'status 404';
+    mockUpdaterState.checkForUpdates.mockRejectedValue(new Error('network down'));
+
+    render(<UpdateEntry />);
+    fireEvent.click(screen.getByRole('button', { name: '更新失败' }));
+
+    // 失败原因由 hook 自己写进 state,组件不吞异常、不弹确认框。
+    await vi.waitFor(() => {
+      expect(mockUpdaterState.checkForUpdates).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/安装更新/)).toBeNull();
   });
 
   it('浏览器形态隐藏壳独占的更新入口', async () => {
