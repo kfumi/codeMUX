@@ -11,6 +11,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useModelDisplayNames } from './hooks/useModelDisplayNames';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
@@ -122,6 +123,7 @@ function App() {
 
   useTheme();
   useAgentNotifications();
+  useModelDisplayNames();
 
   useEffect(() => {
     if (activeView !== 'automation') return;

@@ -163,6 +163,8 @@ export const PROTOCOL_BACKED_DAEMON_METHODS = [
   'loadSessionEvents',
   'fetchProviderModels',
   'fetchOpenCodeFreeModels',
+  'lookupModelCatalog',
+  'fetchModelCatalogNames',
 ] as const;
 
 export const DAEMON_CAPABILITIES = CAPABILITY_MANIFEST.filter((entry) => entry.owner === 'daemon');

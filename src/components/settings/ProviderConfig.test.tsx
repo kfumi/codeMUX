@@ -8,10 +8,14 @@ const {
   listTemplates,
   upsertModelProvider,
   fetchProviderModels,
+  lookupModelCatalog,
   openExternal,
   settingsState,
 } = vi.hoisted(() => ({
   fetchConfig: vi.fn(() => Promise.resolve()),
+  lookupModelCatalog: vi.fn(() =>
+    Promise.resolve({ found: false as boolean, source: 'bundled' as const }),
+  ),
   listTemplates: vi.fn(() =>
     Promise.resolve([
       {
@@ -110,6 +114,9 @@ vi.mock('@/lib/facades/daemon-facade', () => ({
   daemonFacade: {
     listBuiltinProviderTemplates: listTemplates,
     fetchProviderModels,
+    // The models.dev catalog is advisory: a miss is the normal answer for
+    // relay endpoints, so the default mock is "no opinion".
+    lookupModelCatalog,
   },
 }));
 
@@ -129,6 +136,8 @@ describe('ProviderConfigPanel', () => {
     listTemplates.mockClear();
     upsertModelProvider.mockClear();
     fetchProviderModels.mockClear();
+    lookupModelCatalog.mockClear();
+    lookupModelCatalog.mockResolvedValue({ found: false, source: 'bundled' });
     openExternal.mockClear();
     settingsState.config = {
       model_providers: [],
@@ -228,7 +237,7 @@ describe('ProviderConfigPanel', () => {
     });
   });
 
-  it('fills default OpenAI model limits when adding a model', async () => {
+  it('leaves model limits blank when adding a model', async () => {
     render(<ProviderConfigPanel />);
 
     await waitFor(() => {
@@ -243,9 +252,10 @@ describe('ProviderConfigPanel', () => {
     fireEvent.change(modelIdInput, { target: { value: 'new-model' } });
     fireEvent.click(screen.getByRole('button', { name: '设置模型 new-model' }));
 
-    expect(screen.getByDisplayValue('200000')).toBeTruthy();
-    expect(screen.queryByDisplayValue('128000')).toBeNull();
-    expect(screen.getByDisplayValue('65536')).toBeTruthy();
+    // 不再编造 200000 / 65536：那些值会被写进用户配置并持久化，之后目录查到
+    // 的真实上限反而被压在下面。留空 = 未声明，由目录或用户填。
+    expect(screen.queryByDisplayValue('200000')).toBeNull();
+    expect(screen.queryByDisplayValue('65536')).toBeNull();
   });
 
   it('opens model picker with api results', async () => {
@@ -531,7 +541,7 @@ describe('ProviderConfigPanel', () => {
     expect(screen.queryByText('1M 上下文')).toBeNull();
     expect(screen.queryByText('模型类型')).toBeNull();
   });
-  it('saves supports_reasoning true after toggling the pi reasoning switch on', async () => {
+  it('saves the default thinking-level whitelist after enabling thinking', async () => {
     settingsState.config = {
       model_providers: [
         {
@@ -564,20 +574,20 @@ describe('ProviderConfigPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
-    expect(await screen.findByText('支持思考（推理）')).toBeTruthy();
+    expect(await screen.findByText('思考档位')).toBeTruthy();
     // Not protocol gated: the openai-only provider has no anthropic endpoint.
     expect(screen.queryByText('1M 上下文')).toBeNull();
 
-    const reasoningSwitch = () =>
-      within(
-        screen.getByText('支持思考（推理）').closest('.justify-between') as HTMLElement,
-      ).getByRole('switch');
+    const thinkingSwitch = () =>
+      within(screen.getByText('思考档位').closest('.justify-between') as HTMLElement).getByRole(
+        'switch',
+      );
 
-    expect(reasoningSwitch().getAttribute('data-state')).toBe('unchecked');
+    expect(thinkingSwitch().getAttribute('data-state')).toBe('unchecked');
 
-    fireEvent.click(reasoningSwitch());
+    fireEvent.click(thinkingSwitch());
     await waitFor(() => {
-      expect(reasoningSwitch().getAttribute('data-state')).toBe('checked');
+      expect(thinkingSwitch().getAttribute('data-state')).toBe('checked');
     });
     fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
 
@@ -586,11 +596,11 @@ describe('ProviderConfigPanel', () => {
       const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
         models: Array<Record<string, unknown>>;
       };
-      expect(saved.models[0]?.supports_reasoning).toBe(true);
+      expect(saved.models[0]?.thinking_levels).toEqual(['none', 'low', 'medium', 'high']);
     });
   });
 
-  it('saves supports_reasoning null when the pi reasoning switch is turned back off', async () => {
+  it('saves an empty whitelist when thinking is turned back off', async () => {
     settingsState.config = {
       model_providers: [
         {
@@ -623,20 +633,20 @@ describe('ProviderConfigPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
-    expect(await screen.findByText('支持思考（推理）')).toBeTruthy();
+    expect(await screen.findByText('思考档位')).toBeTruthy();
 
-    const reasoningSwitch = () =>
-      within(
-        screen.getByText('支持思考（推理）').closest('.justify-between') as HTMLElement,
-      ).getByRole('switch');
+    const thinkingSwitch = () =>
+      within(screen.getByText('思考档位').closest('.justify-between') as HTMLElement).getByRole(
+        'switch',
+      );
 
-    fireEvent.click(reasoningSwitch());
+    fireEvent.click(thinkingSwitch());
     await waitFor(() => {
-      expect(reasoningSwitch().getAttribute('data-state')).toBe('checked');
+      expect(thinkingSwitch().getAttribute('data-state')).toBe('checked');
     });
-    fireEvent.click(reasoningSwitch());
+    fireEvent.click(thinkingSwitch());
     await waitFor(() => {
-      expect(reasoningSwitch().getAttribute('data-state')).toBe('unchecked');
+      expect(thinkingSwitch().getAttribute('data-state')).toBe('unchecked');
     });
     fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
 
@@ -645,9 +655,286 @@ describe('ProviderConfigPanel', () => {
       const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
         models: Array<Record<string, unknown>>;
       };
-      const model = saved.models[0] as Record<string, unknown>;
-      expect(Object.prototype.hasOwnProperty.call(model, 'supports_reasoning')).toBe(true);
-      expect(model.supports_reasoning).toBeNull();
+      // 空数组 = 明确不支持（而不是 null = 未声明，目录建议之后仍应能覆盖）。
+      expect(saved.models[0]?.thinking_levels).toEqual([]);
     });
+  });
+
+  it('keeps the off level pinned once other levels are enabled', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [
+            { id: 'gpt-5', name: 'GPT-5', thinking_levels: ['none', 'low', 'high'] },
+          ],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    await screen.findByText('思考档位');
+
+    const chip = (label: string) => screen.getByRole('button', { name: label });
+    expect(chip('关闭').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('极高').getAttribute('aria-pressed')).toBe('false');
+
+    // 「关闭」被钉住：点它不生效，否则 pi 会把它从可用档位里剔除。
+    fireEvent.click(chip('关闭'));
+    expect(chip('关闭').getAttribute('aria-pressed')).toBe('true');
+
+    // 其余档位可以自由勾选。
+    fireEvent.click(chip('极高'));
+    await waitFor(() => {
+      expect(chip('极高').getAttribute('aria-pressed')).toBe('true');
+    });
+    // 「中」原本没勾，点一下应变成勾选。
+    fireEvent.click(chip('中'));
+    await waitFor(() => {
+      expect(chip('中').getAttribute('aria-pressed')).toBe('true');
+    });
+    // 再点一下取消。
+    fireEvent.click(chip('中'));
+    await waitFor(() => {
+      expect(chip('中').getAttribute('aria-pressed')).toBe('false');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]?.thinking_levels).toEqual(['none', 'low', 'high', 'xhigh']);
+    });
+  });
+
+  it('round-trips a model declared as not supporting reasoning', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          // 手写配置里的空数组 = 明确不支持思考，开关应显示为关且原样保存。
+          models: [{ id: 'gpt-5', name: 'GPT-5', thinking_levels: [] }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    await screen.findByText('思考档位');
+
+    const thinkingSwitch = () =>
+      within(screen.getByText('思考档位').closest('.justify-between') as HTMLElement).getByRole(
+        'switch',
+      );
+    expect(thinkingSwitch().getAttribute('data-state')).toBe('unchecked');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]?.thinking_levels).toEqual([]);
+    });
+  });
+
+  it('treats a model with no thinking declaration as unconfigured', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          // 完全没有 thinking_levels 字段 = 用户还没配过。
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+
+    // 未声明 ≠ 明确不支持：保存时不得凭空补成空数组，否则目录建议之后
+    // 就再也分不出「用户还没配」和「用户说这个模型不思考」。
+    await waitFor(() => {
+      expect(upsertModelProvider).toHaveBeenCalled();
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]).not.toHaveProperty('thinking_levels');
+    });
+  });
+
+  it('offers a catalog suggestion and applies it on demand', async () => {
+    lookupModelCatalog.mockResolvedValue({
+      found: true,
+      source: 'remote',
+      entry: {
+        provider: 'openai',
+        model_id: 'gpt-5',
+        name: 'GPT-5 (from models.dev)',
+        reasoning: true,
+        reasoning_published: true,
+        thinking_levels: ['low', 'medium', 'high'],
+        context_window: 400_000,
+        max_input_tokens: undefined,
+        max_output_tokens: 128_000,
+        input_modalities: ['text', 'image'],
+      },
+    });
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    const card = await screen.findByText('模型目录建议');
+    expect(card).toBeTruthy();
+    // Nothing is written before the user opts in: the dialog's name field still
+    // holds what the user typed, not the catalog's.
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByDisplayValue('GPT-5')).toBeTruthy();
+    expect(dialog.queryByDisplayValue('GPT-5 (from models.dev)')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '应用' }));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('400000')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]?.thinking_levels).toEqual(['low', 'medium', 'high']);
+      expect(saved.models[0]?.context_window).toBe(400_000);
+      expect(saved.models[0]?.input_modalities).toEqual(['text', 'image']);
+      // The user had already named the model, so the catalog must not rename it.
+      expect(saved.models[0]?.name).toBe('GPT-5');
+    });
+  });
+
+  it('shows no suggestion card when the catalog has no opinion', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'my-proxy/internal-7', name: 'Internal 7' }],
+          default_model: 'my-proxy/internal-7',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('my-proxy/internal-7')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 my-proxy\/internal-7/ }));
+    await screen.findByText('思考档位');
+    expect(lookupModelCatalog).toHaveBeenCalledWith('my-proxy/internal-7', null);
+    expect(screen.queryByText('模型目录建议')).toBeNull();
   });
 });

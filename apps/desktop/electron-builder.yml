@@ -51,6 +51,12 @@ extraResources:
   # 不含 node_modules(sidecar 运行时从托管 Runtime 目录加载 SDK)。
   - from: sidecar-dist
     to: sidecar
+  # models.dev 模型能力快照(ADR 0015/0016):目录不可达(离线、上游故障)时的
+  # 兜底,资源根下与 dist-web / sidecar / daemon 同级,daemon 经
+  # PathRoots::bundled_model_catalog() 定位。内容是公开目录数据
+  # (https://models.dev/api.json),非用户配置。
+  - from: resources/models.dev
+    to: models.dev
   # 托盘/应用图标
   - from: build/icons/icon.ico
     to: icons/icon.ico

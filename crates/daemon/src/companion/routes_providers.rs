@@ -34,6 +34,8 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
             "/providers/opencode-free-models",
             get(fetch_opencode_free_models_route),
         )
+        .route("/providers/catalog/lookup", get(model_catalog_lookup_route))
+        .route("/providers/catalog/names", get(model_catalog_names_route))
 }
 
 async fn list_providers(
@@ -207,4 +209,49 @@ async fn fetch_opencode_free_models_route(
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(models)))
+}
+
+/// Model capability lookup (models.dev). Advisory only — a miss is a normal
+/// answer, not an error, because relay endpoints carry ids no catalog lists.
+async fn model_catalog_lookup_route(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<ModelCatalogQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    if query.model.trim().is_empty() {
+        return Err(ApiError::bad_request("缺少 model 参数".to_string()));
+    }
+    let lookup = crate::services::model_catalog::lookup_model(
+        &ctx.daemon.roots,
+        query.provider.as_deref(),
+        query.model.trim(),
+    )
+    .await;
+    Ok(Json(serde_json::json!(lookup)))
+}
+
+/// Display names for the models a provider template can offer, keyed
+/// `"<templateId>::<modelId>"`. Replaces the hand-written display-name table;
+/// an id the catalog does not carry falls back to prettifying it.
+async fn model_catalog_names_route(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let names =
+        crate::services::model_catalog::display_names_for_templates(&ctx.daemon.roots).await;
+    Ok(Json(serde_json::json!({
+        "names": names.names,
+        "source": names.source,
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct ModelCatalogQuery {
+    #[serde(default)]
+    provider: Option<String>,
+    model: String,
 }

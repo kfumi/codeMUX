@@ -53,6 +53,30 @@ impl PathRoots {
         }
         None
     }
+
+    /// 随包发布的 models.dev 模型能力快照:目录不可达(离线、上游故障)时的
+    /// 兜底。与 `web_static_dir` 同构——资源根优先,开发环境再回落源码树。
+    ///
+    /// 打包时由 `apps/desktop/electron-builder.yml` 的 extraResources 落到
+    /// 资源根的 `models.dev/`(与 `dist-web`、`sidecar`、`daemon` 同级)。
+    pub fn bundled_model_catalog(&self) -> Option<PathBuf> {
+        let relative = Path::new("models.dev").join("api.json");
+        if let Some(resource_dir) = &self.resource_dir {
+            let packaged = resource_dir.join(&relative);
+            if packaged.exists() {
+                return Some(packaged);
+            }
+        }
+        if cfg!(debug_assertions) {
+            let dev = repo_root_from_or_two_up(Path::new(env!("CARGO_MANIFEST_DIR")))
+                .join("apps/desktop/resources")
+                .join(&relative);
+            if dev.exists() {
+                return Some(dev);
+            }
+        }
+        None
+    }
 }
 
 /// 开发环境下的仓库根:从 crate 的 manifest 目录逐级向上,找同时含
@@ -132,6 +156,43 @@ mod tests {
         assert_eq!(
             roots.config_path(),
             std::path::Path::new(r"C:\app-data").join("config.json")
+        );
+    }
+
+    #[test]
+    fn bundled_model_catalog_reads_from_the_resource_root() {
+        // electron-builder 把快照放到资源根的 models.dev/（extraResources
+        // `from: resources/models.dev, to: models.dev`），daemon 由 Electron 壳
+        // 显式传入该资源根。debug 构建下源码树那份是回落项，所以这里只钉住
+        // 「资源根优先」——发布包里只有资源根那一份能命中。
+        let temp = tempfile::tempdir().expect("tempdir");
+        let roots = PathRoots {
+            app_data_dir: temp.path().join("data"),
+            resource_dir: Some(temp.path().to_path_buf()),
+        };
+        let packaged = temp.path().join("models.dev/api.json");
+        std::fs::create_dir_all(packaged.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&packaged, "{}").expect("write");
+
+        assert_eq!(
+            roots.bundled_model_catalog(),
+            Some(packaged),
+            "资源根里的快照应当优先于 debug 回落"
+        );
+    }
+
+    #[test]
+    fn bundled_model_catalog_ships_with_the_workspace() {
+        // 该快照必须真的在仓库里，否则发布包的离线兜底是死代码。
+        let dev = repo_root_from_or_two_up(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .join("apps/desktop/resources/models.dev/api.json");
+        assert!(dev.exists(), "缺少随包快照: {}", dev.display());
+        let document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dev).expect("read"))
+                .expect("valid json");
+        assert!(
+            document.is_object(),
+            "快照应是 {{ provider: {{ models }} }} 结构"
         );
     }
 

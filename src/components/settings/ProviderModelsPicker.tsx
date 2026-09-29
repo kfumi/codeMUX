@@ -12,6 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { resolveModelDisplayName } from '@/lib/providerModels';
 import { inferDefaultInputModalities } from '@/lib/inputModalities';
+import { useModelDisplayNames } from '@/hooks/useModelDisplayNames';
 import { cn } from '@/lib/utils';
 import type { InputModality, ProviderModel } from '@/types/provider';
 
@@ -42,6 +43,7 @@ export function ProviderModelsPicker({
   selected,
   onChangeSelected,
 }: ProviderModelsPickerProps) {
+  useModelDisplayNames();
   const [search, setSearch] = useState('');
   const selectedIds = useMemo(
     () => new Set(selected.map((model) => model.id.trim()).filter(Boolean)),

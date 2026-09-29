@@ -7,6 +7,7 @@ pub mod file;
 pub mod forge;
 pub mod git;
 pub mod mcp;
+pub mod model_catalog;
 pub mod model_provider;
 pub mod provider;
 pub mod runtime;

@@ -53,6 +53,7 @@ import {
   SelectValue,
 } from '../ui/select';
 import { TooltipHint } from '../ui/tooltip';
+import { useModelDisplayNames } from '../../hooks/useModelDisplayNames';
 import { AgentInstallRow } from './AgentInstallRow';
 import { AgentUpgradeConfirmDialog } from './AgentUpgradeConfirmDialog';
 
@@ -131,6 +132,7 @@ function codexPermissionConfigToExecutionMode(config: { workflowMode: CodexWorkf
 }
 
 export function AgentSettingsPanel() {
+  useModelDisplayNames();
   const config = useSettingsStore((state) => state.config);
   const getDefaultAgentKind = useSettingsStore((state) => state.getDefaultAgentKind);
   const setDefaultAgentKind = useSettingsStore((state) => state.setDefaultAgentKind);

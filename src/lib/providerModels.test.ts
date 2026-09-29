@@ -10,6 +10,7 @@ import {
   normalizeProviderModels,
   resolveModelDisplayName,
 } from './providerModels';
+import { __setModelDisplayNameIndexForTests } from './modelCatalog';
 
 const baseProvider: Provider = {
   id: 'provider-1',
@@ -28,17 +29,27 @@ describe('provider model helpers', () => {
     expect(formatModelDisplayName('glm-5.2')).toBe('GLM 5.2');
   });
 
-  it('uses registry curated names when resolving with or without provider context', () => {
-    expect(resolveModelDisplayName({ id: 'gpt-4o' })).toBe('GPT-4o');
-    expect(
-      resolveModelDisplayName({
-        id: 'deepseek-ai/DeepSeek-V3',
-        providerTemplateId: 'siliconflow',
-      }),
-    ).toBe('DeepSeek V3 0324');
-    expect(
-      resolveModelDisplayName({ id: 'custom-model', name: 'Provider Display Name' }),
-    ).toBe('Provider Display Name');
+  it('uses the catalog name when resolving with provider context', () => {
+    __setModelDisplayNameIndexForTests({
+      names: { 'siliconflow::deepseek-ai/DeepSeek-V3': 'DeepSeek V3' },
+      source: 'bundled',
+    });
+    try {
+      expect(
+        resolveModelDisplayName({
+          id: 'deepseek-ai/DeepSeek-V3',
+          providerTemplateId: 'siliconflow',
+        }),
+      ).toBe('DeepSeek V3');
+      // No provider template, so no catalog entry: prettified.
+      expect(resolveModelDisplayName({ id: 'gpt-4o' })).toBe('GPT 4o');
+      // Still honours a name the provider itself supplied.
+      expect(
+        resolveModelDisplayName({ id: 'custom-model', name: 'Provider Display Name' }),
+      ).toBe('Provider Display Name');
+    } finally {
+      __setModelDisplayNameIndexForTests(null);
+    }
   });
 
   it('uses models in order and keeps the first model as the default model', () => {

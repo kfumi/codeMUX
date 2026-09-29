@@ -1,5 +1,6 @@
+import { stripContext1mSuffix } from '@/components/agent/modelDisplay';
 import type { AgentKind } from '@/types/session';
-import type { ModelProvider, Protocol, ProtocolEndpoint } from '@/types/provider';
+import type { ModelProvider, Protocol, ProtocolEndpoint, ProviderModel } from '@/types/provider';
 
 export function requiredProtocol(agentKind: AgentKind): Protocol | null {
   switch (agentKind) {
@@ -92,4 +93,25 @@ export function getActiveModelProvider(
 ): ModelProvider | null {
   if (!providers?.length || !activeId) return null;
   return providers.find((provider) => provider.id === activeId) ?? null;
+}
+
+/**
+ * Find a provider's model record by provider id and model id.
+ *
+ * Provider scoping matters: the same model id can sit under two providers with
+ * different capabilities, so a lookup that matches on `modelId` alone can pick
+ * the wrong one. Ids are compared with the Claude Code `[1m]` marker stripped,
+ * matching how the daemon resolves the session model.
+ */
+export function getProviderModel(
+  providers: ModelProvider[] | undefined,
+  providerId: string | null | undefined,
+  modelId: string | null | undefined,
+): ProviderModel | null {
+  const base = modelId ? stripContext1mSuffix(modelId) : '';
+  if (!providers?.length || !providerId || !base) return null;
+  const provider = providers.find((item) => item.id === providerId);
+  return (
+    provider?.models.find((model) => stripContext1mSuffix(model.id.trim()) === base) ?? null
+  );
 }

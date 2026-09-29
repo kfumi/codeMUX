@@ -15,6 +15,11 @@ vi.mock('@assistant-ui/react', () => ({
 vi.mock('../../hooks/useAgentModels', () => ({
   useAgentModels: vi.fn(),
   encodeModelSelectorValue: (providerId: string, modelId: string) => `${providerId}::${modelId}`,
+  decodeModelSelectorValue: (value: string) => {
+    const separator = value.indexOf('::');
+    if (separator <= 0) return null;
+    return { providerId: value.slice(0, separator), modelId: value.slice(separator + 2) };
+  },
 }));
 
 vi.mock('@/components/settings/ProviderBrandIcon', () => ({
@@ -227,5 +232,96 @@ describe('AgentModelSelector', () => {
     );
 
     expect(screen.getByTestId('selector-value').getAttribute('data-hide-name')).toBe('true');
+  });
+
+  it('offers every thinking level when the model declares none', () => {
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false });
+
+    render(
+      <AgentModelSelector
+        agentKind="pi"
+        providers={sampleProviders}
+        activeProviderId="provider-1"
+        value="gpt-5"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: '思考强度' }));
+    for (const label of ['关闭', '低', '中', '高', '极高', '最高']) {
+      expect(screen.getByRole('option', { name: label })).toBeTruthy();
+    }
+  });
+
+  it('narrows the thinking levels to what the selected model declares', () => {
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false });
+
+    render(
+      <AgentModelSelector
+        agentKind="pi"
+        providers={[
+          {
+            ...sampleProviders[0],
+            models: [{ id: 'gpt-5', thinking_levels: ['none', 'low', 'high'] }],
+          },
+        ]}
+        activeProviderId="provider-1"
+        value="gpt-5"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: '思考强度' }));
+    expect(screen.getByRole('option', { name: '关闭' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '低' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '高' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: '极高' })).toBeNull();
+    expect(screen.queryByRole('option', { name: '最高' })).toBeNull();
+  });
+
+  it('scopes the level lookup to the selected provider', () => {
+    // The same model id can sit under two providers with different
+    // capabilities; a lookup by model id alone would pick the wrong one.
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({
+      models: [
+        { ...groupedModels[0] },
+        { ...groupedModels[0], id: 'provider-2::gpt-5', providerId: 'provider-2' },
+      ],
+      isLoading: false,
+    });
+
+    render(
+      <AgentModelSelector
+        agentKind="pi"
+        providers={[
+          {
+            ...sampleProviders[0],
+            models: [{ id: 'gpt-5', thinking_levels: ['none'] }],
+          },
+          {
+            ...sampleProviders[0],
+            id: 'provider-2',
+            models: [{ id: 'gpt-5', thinking_levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] }],
+          },
+        ]}
+        activeProviderId="provider-2"
+        value="gpt-5"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: '思考强度' }));
+    // provider-2 declares the full ladder, so 极高 must be present even though
+    // provider-1's copy of the same model id declares none.
+    expect(screen.getByRole('option', { name: '极高' })).toBeTruthy();
   });
 });

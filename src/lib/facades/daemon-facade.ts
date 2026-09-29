@@ -326,6 +326,10 @@ export const providersViaDaemon = {
     (await ensureDaemonClient()).providersFetchModels(apiKey, baseUrl),
   fetchOpenCodeFreeModels: async () =>
     (await ensureDaemonClient()).providersFetchOpenCodeFreeModels(),
+  lookupModelCatalog: async (model: string, provider?: string | null) =>
+    (await ensureDaemonClient()).providersLookupModelCatalog(model, provider),
+  fetchModelCatalogNames: async () =>
+    (await ensureDaemonClient()).providersFetchModelCatalogNames(),
 };
 
 export type { TerminalEvent } from '../daemon-client/terminal';
@@ -649,6 +653,9 @@ export const daemonFacade = {
   fetchProviderModels: async (apiKey: string, baseUrl: string) =>
     providersViaDaemon.fetchProviderModels(apiKey, baseUrl),
   fetchOpenCodeFreeModels: () => providersViaDaemon.fetchOpenCodeFreeModels(),
+  lookupModelCatalog: (model: string, provider?: string | null) =>
+    providersViaDaemon.lookupModelCatalog(model, provider),
+  fetchModelCatalogNames: () => providersViaDaemon.fetchModelCatalogNames(),
 
   readFile: async (path: string, basePath?: string) =>
     (await ensureDaemonClient()).readWorkspaceFile(path, basePath),

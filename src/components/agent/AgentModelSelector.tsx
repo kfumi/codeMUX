@@ -5,7 +5,10 @@ import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ReasoningEffortSelector } from './ReasoningEffortSelector';
 import { cn } from '@/lib/utils';
+import { getProviderModel } from '@/lib/modelProviders';
+import { effortOptionsForModel } from '@/lib/reasoningEffort';
 import {
+  decodeModelSelectorValue,
   encodeModelSelectorValue,
   useAgentModels,
 } from '../../hooks/useAgentModels';
@@ -87,6 +90,20 @@ export function AgentModelSelector({
   const contextModelSupportsEfforts = models.find(
     (model) => model.modelId === (contextModel ?? effectiveModelId),
   )?.efforts;
+  // 档位按**当前选中的模型**收窄，而不是 `contextModel`——后者是运行时会话
+  // 绑定的模型，可能和选择器显示的不同。
+  const selectedModel = useMemo(() => {
+    const decoded = decodeModelSelectorValue(selectorValue);
+    if (decoded) {
+      const found = getProviderModel(providers, decoded.providerId, decoded.modelId);
+      if (found) return found;
+    }
+    return getProviderModel(providers, activeProviderId, effectiveModelId);
+  }, [activeProviderId, effectiveModelId, providers, selectorValue]);
+  const effortOptions = useMemo(
+    () => effortOptionsForModel(selectedModel),
+    [selectedModel],
+  );
 
   useEffect(() => {
     // 脱离 AuiProvider 的宿主不注册（见 props 注释）——modelContext() 会直接抛错。
@@ -262,6 +279,7 @@ export function AgentModelSelector({
         onChange={onReasoningEffortChange}
         disabled={disabled || isLoading || models.length === 0}
         compact={compact}
+        options={effortOptions}
       />
     </div>
   );

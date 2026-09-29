@@ -5,6 +5,7 @@ import {
   isReasoningEffort,
   normalizeReasoningEffort,
   reasoningEffortLabel,
+  type ReasoningEffortOption,
 } from '../../lib/reasoningEffort';
 import { cn } from '../../lib/utils';
 import type { ReasoningEffort } from '../../types/session';
@@ -21,6 +22,15 @@ export interface ReasoningEffortSelectorProps {
   onChange: (effort: ReasoningEffort) => void;
   disabled?: boolean;
   compact?: boolean;
+  /**
+   * Levels this model offers, narrowed to the currently selected model.
+   * Omit to show the full vocabulary.
+   *
+   * When `value` is not among these, the selector shows the nearest supported
+   * level instead of a value the model cannot honour — otherwise the trigger
+   * would advertise a level the session will silently clamp away.
+   */
+  options?: readonly ReasoningEffortOption[];
 }
 
 export function ReasoningEffortSelector({
@@ -28,8 +38,10 @@ export function ReasoningEffortSelector({
   onChange,
   disabled,
   compact,
+  options,
 }: ReasoningEffortSelectorProps) {
-  const selected = normalizeReasoningEffort(value);
+  const available = options?.length ? options : REASONING_EFFORT_OPTIONS;
+  const selected = coerceToOptions(normalizeReasoningEffort(value), available);
   const selectedLabel = reasoningEffortLabel(selected);
 
   return (
@@ -64,7 +76,7 @@ export function ReasoningEffortSelector({
         align="end"
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        {REASONING_EFFORT_OPTIONS.map((option) => (
+        {available.map((option) => (
           <SelectItem key={option.id} value={option.id}>
             {option.name}
           </SelectItem>
@@ -72,4 +84,26 @@ export function ReasoningEffortSelector({
       </SelectContent>
     </Select>
   );
+}
+
+/**
+ * Snap a stored level onto the nearest level the model actually offers,
+ * searching downward first then upward — the same rule pi applies in
+ * `clampThinkingLevel`, so the label matches what the runtime will do.
+ */
+function coerceToOptions(
+  value: ReasoningEffort,
+  options: readonly ReasoningEffortOption[],
+): ReasoningEffort {
+  if (options.some((option) => option.id === value)) return value;
+  const index = REASONING_EFFORT_OPTIONS.findIndex((option) => option.id === value);
+  for (let i = index; i < REASONING_EFFORT_OPTIONS.length; i += 1) {
+    const candidate = REASONING_EFFORT_OPTIONS[i];
+    if (options.some((option) => option.id === candidate.id)) return candidate.id;
+  }
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const candidate = REASONING_EFFORT_OPTIONS[i];
+    if (options.some((option) => option.id === candidate.id)) return candidate.id;
+  }
+  return options[0].id;
 }

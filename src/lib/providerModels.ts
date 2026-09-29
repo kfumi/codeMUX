@@ -6,18 +6,19 @@ import {
 } from './modelRegistry';
 
 /**
- * Model display-name helpers aligned with Cherry Studio + CodeMUX lightweight registry.
- * See docs/research/cherry-studio-model-display-name-rules.md
+ * Model display-name helpers. Names come from the models.dev catalog when it has
+ * an entry for `(provider template, model id)`; everything else is prettified
+ * from the raw id. See docs/adr/0016-model-display-names-from-catalog.md
  */
 
-/** Format a raw model id (unmatched registry path / prettify). */
+/** Format a raw model id the catalog has no entry for (prettify). */
 export function formatModelDisplayName(modelId: string): string {
-  return deriveResolvedModelName(modelId.trim(), null, null);
+  return deriveResolvedModelName(modelId.trim());
 }
 
 /**
  * Resolve display name for a fetched or stored model.
- * Optional `providerTemplateId` enables catalog / provider-override curated names.
+ * Optional `providerTemplateId` scopes the catalog lookup to that provider.
  */
 export function resolveModelDisplayName(model: {
   id: string;

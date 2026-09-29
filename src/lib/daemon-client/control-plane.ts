@@ -1,5 +1,6 @@
 import type { DaemonConnectionConfig } from './client';
 import type { FetchedModelNameInput } from '../modelRegistry';
+import type { ModelCatalogLookup, ModelDisplayNameIndex } from '../modelCatalog';
 import type { BuiltinProviderTemplate } from '../../types/provider';
 
 type Fetcher = <T>(config: DaemonConnectionConfig, path: string, init?: RequestInit) => Promise<T>;
@@ -280,6 +281,13 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
       }),
     providersFetchOpenCodeFreeModels: () =>
       fetch<unknown[]>(config, '/providers/opencode-free-models'),
+    providersLookupModelCatalog: (model: string, provider?: string | null) => {
+      const query = new URLSearchParams({ model });
+      if (provider) query.set('provider', provider);
+      return fetch<ModelCatalogLookup>(config, `/providers/catalog/lookup?${query.toString()}`);
+    },
+    providersFetchModelCatalogNames: () =>
+      fetch<ModelDisplayNameIndex>(config, '/providers/catalog/names'),
 
     // Companion(移动伴侣配对):daemon 侧管理面路由(状态/开关/配对码/中继),
     // 限回环来源 + Local Daemon Token。

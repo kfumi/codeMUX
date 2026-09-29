@@ -667,6 +667,7 @@ mod tests {
                     max_output_tokens: None,
                     input_modalities: None,
                     supports_vision: None,
+                    thinking_levels: None,
                     supports_reasoning: None,
                 }],
                 default_model: "model".to_string(),

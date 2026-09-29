@@ -1,4 +1,4 @@
-import type { AgentKind } from './session';
+import type { AgentKind, ReasoningEffort } from './session';
 import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig, PiPermissionConfig } from '../lib/agentPermissions';
 import type { OpenTarget } from '../lib/openTargets';
 
@@ -89,7 +89,17 @@ export interface ProviderModel {
   input_modalities?: InputModality[] | null;
   /** @deprecated 由 input_modalities 是否包含 image 推导。 */
   supports_vision?: boolean | null;
-  /** 该模型原生支持思考/推理（pi 会话据此向 pi 声明 reasoning；未声明时 pi 会把思考档位钳回 off）。 */
+  /**
+   * 思考档位白名单（`ReasoningEffort` 词表，见 `src/lib/reasoningEffort.ts`）。
+   *
+   * - `undefined` / `null` = 未声明（目录未命中且用户未配置）
+   * - `[]` = 用户明确声明不支持
+   * - 非空 = 支持，且精确列出开放哪几档
+   *
+   * 这是 pi 声明 `reasoning` 的唯一依据：未声明时 pi 会把任何思考档位钳回 off。
+   */
+  thinking_levels?: ReasoningEffort[] | null;
+  /** @deprecated 已被 `thinking_levels` 取代，仅为读取旧配置保留。 */
   supports_reasoning?: boolean | null;
 }
 

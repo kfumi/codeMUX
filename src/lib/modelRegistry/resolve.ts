@@ -1,18 +1,5 @@
-import {
-  MODEL_CATALOG,
-  PROVIDER_MODEL_OVERRIDES,
-  type CatalogModel,
-  type ProviderModelOverride,
-} from './catalog';
-import {
-  colonVariantTagToHyphen,
-  normalizeModelId,
-  stripBedrockDottedVendorPrefix,
-  stripBedrockRevision,
-  stripDateSnapshot,
-  stripHostReprefix,
-  stripVariantQuantDateSuffixes,
-} from './normalize';
+import { stripDateSnapshot, stripBedrockDottedVendorPrefix } from './normalize';
+import { catalogDisplayName } from '../modelCatalog';
 
 /** Tokens that must stay upper-cased when a raw id is prettified. */
 const MODEL_NAME_ACRONYMS: Record<string, string> = {
@@ -30,82 +17,16 @@ const MODEL_NAME_ACRONYMS: Record<string, string> = {
 
 export type ResolvedRegistryModel = {
   apiModelId: string;
-  /** Set when a catalog / override entry matched. */
+  /**
+   * The id the display name came from — set only when the models.dev catalog
+   * had an entry for `(provider template, model id)`. `enrichFetchedModels`
+   * reads it to decide whether an upstream name may be kept.
+   */
   presetModelId: string | null;
   name: string;
+  /** The catalog's own display name, or `null` when it had no entry. */
   curatedName: string | null;
-  canonicalApiId: string | null;
 };
-
-type CatalogHit = {
-  presetModelId: string;
-  curatedName: string;
-  canonicalApiId: string;
-};
-
-type RegistryIndexes = {
-  catalogById: Map<string, CatalogModel>;
-  catalogByNormId: Map<string, CatalogModel>;
-  catalogBySizedNorm: Map<string, CatalogModel>;
-  overrideByApiKey: Map<string, ProviderModelOverride>;
-  overrideByNormApiKey: Map<string, ProviderModelOverride>;
-  overrideByModelKey: Map<string, ProviderModelOverride>;
-  overrideByNormModelKey: Map<string, ProviderModelOverride>;
-};
-
-let indexes: RegistryIndexes | null = null;
-
-function buildIndexes(): RegistryIndexes {
-  const catalogById = new Map<string, CatalogModel>();
-  const catalogByNormId = new Map<string, CatalogModel>();
-  const catalogBySizedNorm = new Map<string, CatalogModel>();
-
-  for (const entry of MODEL_CATALOG) {
-    catalogById.set(entry.id, entry);
-    const norm = normalizeModelId(entry.id);
-    if (!catalogByNormId.has(norm)) catalogByNormId.set(norm, entry);
-    const sized = normalizeModelId(entry.id, { keepParameterSize: true });
-    if (!catalogBySizedNorm.has(sized)) catalogBySizedNorm.set(sized, entry);
-  }
-
-  const overrideByApiKey = new Map<string, ProviderModelOverride>();
-  const overrideByNormApiKey = new Map<string, ProviderModelOverride>();
-  const overrideByModelKey = new Map<string, ProviderModelOverride>();
-  const overrideByNormModelKey = new Map<string, ProviderModelOverride>();
-
-  for (const entry of PROVIDER_MODEL_OVERRIDES) {
-    const modelKey = `${entry.providerId}::${entry.modelId}`;
-    const apiId = entry.apiModelId ?? entry.modelId;
-    const apiKey = `${entry.providerId}::${apiId}`;
-    if (!overrideByModelKey.has(modelKey)) overrideByModelKey.set(modelKey, entry);
-    if (!overrideByApiKey.has(apiKey)) overrideByApiKey.set(apiKey, entry);
-
-    const normModelKey = `${entry.providerId}::${normalizeModelId(entry.modelId)}`;
-    const normApiKey = `${entry.providerId}::${normalizeModelId(apiId)}`;
-    if (!overrideByNormModelKey.has(normModelKey)) overrideByNormModelKey.set(normModelKey, entry);
-    if (!overrideByNormApiKey.has(normApiKey)) overrideByNormApiKey.set(normApiKey, entry);
-  }
-
-  return {
-    catalogById,
-    catalogByNormId,
-    catalogBySizedNorm,
-    overrideByApiKey,
-    overrideByNormApiKey,
-    overrideByModelKey,
-    overrideByNormModelKey,
-  };
-}
-
-function getIndexes(): RegistryIndexes {
-  if (!indexes) indexes = buildIndexes();
-  return indexes;
-}
-
-/** Test helper — rebuild indexes after catalog mutations. */
-export function resetModelRegistryIndexesForTests(): void {
-  indexes = null;
-}
 
 function titleCaseIdToken(token: string): string {
   const acronym = MODEL_NAME_ACRONYMS[token.toLowerCase()];
@@ -126,31 +47,20 @@ function prettifyIdSegment(segment: string): string {
 }
 
 /**
- * Cherry `deriveResolvedModelName`: curated exact match stays verbatim;
- * fuzzy siblings get distinguishing suffix/prefix; unmatched ids are prettified.
+ * Display name for a model id the catalog has no entry for.
+ *
+ * Three layers, in order: the last path segment, the dotted Bedrock vendor
+ * prefix that normalization folds away (restored as decoration), and the
+ * date snapshot that `stripDateSnapshot` removed.
  */
-export function deriveResolvedModelName(
-  rawId: string,
-  curatedName: string | null,
-  canonicalApiId: string | null,
-): string {
-  if (curatedName && canonicalApiId && rawId === canonicalApiId) return curatedName;
-
+export function deriveResolvedModelName(rawId: string): string {
   const slashIdx = rawId.lastIndexOf('/');
   const afterSlash = slashIdx >= 0 ? rawId.slice(slashIdx + 1) : rawId;
-  // Normalization folds the dotted vendor prefix away; restore it as decoration.
   const tail = afterSlash.slice(
     afterSlash.length - stripBedrockDottedVendorPrefix(afterSlash.toLowerCase()).length,
   );
 
-  let name: string;
-  if (curatedName) {
-    const suffix = trailingRemainder(tail, stripBedrockRevision(stripVariantQuantDateSuffixes(tail)));
-    name = suffix ? `${curatedName} (${suffix})` : curatedName;
-  } else {
-    name = prettifyIdSegment(tail);
-  }
-
+  const name = prettifyIdSegment(tail);
   const namespaces = [
     ...(slashIdx >= 0 ? rawId.slice(0, slashIdx).split('/').map(titleCaseIdToken) : []),
     ...(tail.length < afterSlash.length
@@ -160,112 +70,34 @@ export function deriveResolvedModelName(
   return namespaces.length > 0 ? `${namespaces.join(': ')}: ${name}` : name;
 }
 
-function findCatalogModel(modelId: string): CatalogModel | undefined {
-  const { catalogById, catalogByNormId, catalogBySizedNorm } = getIndexes();
-  const exact = catalogById.get(modelId);
-  if (exact) return exact;
-
-  // Size-preserving colon tags (`gpt-oss:20b`) must not collapse onto a sibling size.
-  if (colonVariantTagToHyphen(modelId) !== modelId) {
-    return catalogBySizedNorm.get(normalizeModelId(modelId, { keepParameterSize: true }));
-  }
-
-  const byNorm = catalogByNormId.get(normalizeModelId(modelId));
-  if (byNorm) return byNorm;
-
-  // Host re-prefix: `databricks-gemini-…` → known catalog stem.
-  const strippedHost = stripHostReprefix(normalizeModelId(modelId), (id) => catalogByNormId.has(id));
-  if (strippedHost !== normalizeModelId(modelId)) {
-    return catalogByNormId.get(strippedHost);
-  }
-
-  return undefined;
-}
-
-function findProviderOverride(
-  providerId: string | null | undefined,
-  apiModelId: string,
-): ProviderModelOverride | undefined {
-  if (!providerId) return undefined;
-  const {
-    overrideByApiKey,
-    overrideByNormApiKey,
-    overrideByModelKey,
-    overrideByNormModelKey,
-  } = getIndexes();
-
-  const key = `${providerId}::${apiModelId}`;
-  const normKey = `${providerId}::${normalizeModelId(apiModelId)}`;
-
-  // Exact before normalized (Cherry registry-loader order).
-  return (
-    overrideByModelKey.get(key) ??
-    overrideByApiKey.get(key) ??
-    overrideByNormModelKey.get(normKey) ??
-    overrideByNormApiKey.get(normKey)
-  );
-}
-
-function lookupCatalogHit(
-  providerId: string | null | undefined,
-  rawId: string,
-): CatalogHit | null {
-  const override = findProviderOverride(providerId, rawId);
-  if (override) {
-    const preset = findCatalogModel(override.modelId) ?? findCatalogModel(rawId);
-    const curatedName = override.name?.trim() || preset?.name || override.modelId;
-    return {
-      presetModelId: override.modelId,
-      curatedName,
-      canonicalApiId: override.apiModelId ?? override.modelId,
-    };
-  }
-
-  const preset = findCatalogModel(rawId);
-  if (preset) {
-    return {
-      presetModelId: preset.id,
-      curatedName: preset.name,
-      canonicalApiId: preset.id,
-    };
-  }
-
-  return null;
-}
-
-/** Resolve one raw api model id against the lightweight registry. */
+/**
+ * Resolve one raw api model id to a display name.
+ *
+ * The catalog is keyed by `(provider template, model id)` — the same two-level
+ * key the hand-written override table used, which models.dev publishes natively
+ * and better (it already decorates dated snapshots, e.g. `GPT-4o-mini
+ * (2024-07-18)`). Ids it does not carry — a relay's own naming, a retired
+ * model, or any of the providers it doesn't list — are prettified instead.
+ */
 export function resolveModelFromRegistry(
   providerId: string | null | undefined,
   rawId: string,
 ): ResolvedRegistryModel {
   const apiModelId = rawId.trim();
   if (!apiModelId) {
-    return {
-      apiModelId: '',
-      presetModelId: null,
-      name: '',
-      curatedName: null,
-      canonicalApiId: null,
-    };
+    return { apiModelId: '', presetModelId: null, name: '', curatedName: null };
   }
 
-  const hit = lookupCatalogHit(providerId, apiModelId);
-  if (hit) {
-    return {
-      apiModelId,
-      presetModelId: hit.presetModelId,
-      curatedName: hit.curatedName,
-      canonicalApiId: hit.canonicalApiId,
-      name: deriveResolvedModelName(apiModelId, hit.curatedName, hit.canonicalApiId),
-    };
+  const curatedName = catalogDisplayName(providerId, apiModelId);
+  if (curatedName) {
+    return { apiModelId, presetModelId: apiModelId, curatedName, name: curatedName };
   }
 
   return {
     apiModelId,
     presetModelId: null,
     curatedName: null,
-    canonicalApiId: null,
-    name: deriveResolvedModelName(apiModelId, null, null),
+    name: deriveResolvedModelName(apiModelId),
   };
 }
 
@@ -275,10 +107,10 @@ export type FetchedModelNameInput = {
 };
 
 /**
- * Cherry `enrichFetchedModels` name rules:
- * - catalog hit (`presetModelId`) → registry curated/derived name
- * - no hit + upstream name ≠ id → keep upstream display name
- * - else → prettified id
+ * Name rules for a fetched `/models` list:
+ * - catalog entry → the catalog's name
+ * - no entry but upstream returns a name that differs from the id → keep it
+ * - otherwise → prettify the id
  */
 export function enrichFetchedModels(
   providerId: string | null | undefined,
@@ -294,16 +126,13 @@ export function enrichFetchedModels(
       const keepFetchedName =
         !resolved.presetModelId && !!upstreamName && upstreamName !== id;
 
-      return {
-        id,
-        name: keepFetchedName ? upstreamName : resolved.name,
-      };
+      return { id, name: keepFetchedName ? upstreamName : resolved.name };
     })
     .filter((item): item is { id: string; name: string } => item != null);
 }
 
 /**
- * Resolve a stored/fetched model display name with optional provider registry context.
+ * Resolve a stored/fetched model display name with optional provider context.
  */
 export function resolveModelDisplayName(model: {
   id: string;
@@ -313,9 +142,7 @@ export function resolveModelDisplayName(model: {
   const id = model.id.trim();
   if (!id) return '';
 
-  const enriched = enrichFetchedModels(model.providerTemplateId, [
-    { id, name: model.name },
-  ]);
+  const enriched = enrichFetchedModels(model.providerTemplateId, [{ id, name: model.name }]);
   return enriched[0]?.name || id;
 }
 

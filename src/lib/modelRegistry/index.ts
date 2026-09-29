@@ -1,5 +1,3 @@
-export { MODEL_CATALOG, PROVIDER_MODEL_OVERRIDES } from './catalog';
-export type { CatalogModel, ProviderModelOverride } from './catalog';
 export {
   normalizeModelId,
   stripAggregatorPrefixes,

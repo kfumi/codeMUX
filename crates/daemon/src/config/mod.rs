@@ -131,9 +131,10 @@ fn load_config_from_path(config_path: &Path) -> AppConfig {
                     let had_legacy = !config.agent_profile_registry.profiles.is_empty()
                         || !config.providers.is_empty();
                     let before_active = config.active_provider_id.clone();
-                    let config = discard_legacy_provider_config(config);
+                    let mut config = discard_legacy_provider_config(config);
                     let active_changed = before_active != config.active_provider_id;
-                    if had_legacy || active_changed {
+                    let thinking_changed = normalize_legacy_thinking_levels(&mut config);
+                    if had_legacy || active_changed || thinking_changed {
                         // Persist the cleaned shape so old registry/providers leave the on-disk file.
                         if let Err(error) = save_config_to_path(config_path, &config) {
                             warn!(
@@ -274,6 +275,20 @@ fn discard_legacy_provider_config(mut config: AppConfig) -> AppConfig {
     }
 
     config
+}
+
+/// 把遗留的 `supports_reasoning` 折叠进 `thinking_levels`（ADR 0015）。
+///
+/// 返回是否有改动；调用方据此决定是否把清洗后的形状回写磁盘，让这次迁移
+/// 只发生一次。
+fn normalize_legacy_thinking_levels(config: &mut AppConfig) -> bool {
+    // 刻意不用 `Iterator::any`：它会在第一个改动的 provider 后短路，
+    // 后面的 provider 就漏迁移了。
+    let mut changed = false;
+    for provider in &mut config.model_providers {
+        changed |= crate::model_providers::normalize_legacy_thinking_levels(provider);
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -593,6 +608,7 @@ mod tests {
                     max_output_tokens: None,
                     input_modalities: None,
                     supports_vision: None,
+                    thinking_levels: None,
                     supports_reasoning: None,
                 }],
                 default_model: "deepseek-v4-flash".to_string(),

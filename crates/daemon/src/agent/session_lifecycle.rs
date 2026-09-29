@@ -10,8 +10,9 @@ use crate::config::types::AgentKind;
 use crate::daemon::DaemonState;
 use crate::db::operations;
 use crate::model_providers::{
-    effective_api_key, is_provider_usable, required_protocol, select_agent_endpoint,
-    strip_context_1m_suffix, with_context_1m_suffix, Protocol, ProviderModel,
+    effective_api_key, is_provider_usable, pi_thinking_level, required_protocol,
+    resolve_thinking_levels, select_agent_endpoint, strip_context_1m_suffix,
+    with_context_1m_suffix, Protocol, ProviderModel,
 };
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
@@ -109,6 +110,13 @@ fn agent_timeouts(
         AgentKind::GeminiCli => None,
     }
 }
+
+/// pi 额外要求 `thinkingLevelMap` 有显式条目的档位（pi 词表）。
+///
+/// pi-ai `getSupportedThinkingLevels` 对 `xhigh` / `max` 的判定是
+/// `mapped !== undefined`——没有条目就不列为可用，请求会被静默降级到 `high`。
+/// 其余档位在 `reasoning: true` 下默认可用。
+const PI_LEVELS_REQUIRING_EXPLICIT_ENTRY: [&str; 2] = ["xhigh", "max"];
 
 fn resolve_model_input_modalities(provider_model: &ProviderModel) -> Vec<String> {
     let mut modalities = vec!["text".to_string()];
@@ -302,13 +310,30 @@ fn resolve_active_runtime_config(
             // `definition.reasoning ?? false`，于是可用档位只有 `off`，任何请求都被
             // 钳回 `off`，且不会向供应商发送 thinking 参数。只在用户明确声明支持时
             // 写，避免对非推理模型发出无效参数。
-            if provider_model.supports_reasoning == Some(true) {
+            if let Some(levels) = resolve_thinking_levels(provider_model) {
                 limits.insert("reasoning".to_string(), serde_json::Value::Bool(true));
-                // pi 对 `xhigh` / `max` 额外要求 thinkingLevelMap 有显式条目，否则这两
-                // 档不列为可用、请求会被降级到 `high`。其余档位沿用 pi 的默认映射。
+                // 逐档精确声明：勾选的档写自己的名字（pi 用它作为线路上的
+                // reasoning effort），未勾选的写 `null` —— pi 的
+                // `getSupportedThinkingLevels` 会把 `null` 档从可用列表剔除，于是
+                // 选择器只留下用户勾过的那几档。
+                //
+                // `xhigh` / `max` 是 pi 的硬要求：这两个档没有显式条目就不存在，
+                // 请求会被降级到 `high`。此前我们无条件给这两档补条目，等于对所有
+                // 声明支持的模型强行开到最高档；现在只在用户真的勾了它们时才写。
+                let thinking_level_map: serde_json::Map<String, serde_json::Value> =
+                    // 先把需要显式条目但未勾选的档写成 null，勾上的再覆盖回去。
+                    PI_LEVELS_REQUIRING_EXPLICIT_ENTRY
+                        .iter()
+                        .map(|name| (name.to_string(), serde_json::Value::Null))
+                        .chain(levels.iter().map(|level| {
+                            let name = pi_thinking_level(level)
+                                .expect("resolve_thinking_levels 只返回已归一化的档位");
+                            (name.to_string(), serde_json::Value::String(name.to_string()))
+                        }))
+                        .collect();
                 limits.insert(
                     "thinkingLevelMap".to_string(),
-                    serde_json::json!({ "xhigh": "xhigh", "max": "max" }),
+                    serde_json::Value::Object(thinking_level_map),
                 );
             }
             // pi 的模型条目默认 `input: ["text"]`，未声明图像的模型会被 pi 把图片块
@@ -1860,6 +1885,7 @@ mod tests {
                     max_output_tokens: None,
                     input_modalities: None,
                     supports_vision: None,
+                    thinking_levels: None,
                     supports_reasoning: None,
                 })
                 .collect(),
@@ -2338,9 +2364,10 @@ mod tests {
     }
 
     /// pi 的模型条目必须声明 `reasoning`，否则 pi 会把任何思考档位钳回 `off`；
-    /// `xhigh` / `max` 还需要 thinkingLevelMap 有显式条目才被列为可用档位。
+    /// 声明之后 `thinkingLevelMap` 逐档对应用户勾选的档位，未勾选的写 `null`
+    /// 让 pi 从可用列表里剔除（`xhigh` / `max` 另需显式条目才存在）。
     #[test]
-    fn pi_model_limits_declare_thinking_and_input_modalities() {
+    fn pi_model_limits_declare_selected_thinking_levels_and_input_modalities() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
         conn.execute(
@@ -2368,7 +2395,12 @@ mod tests {
             Some(false),
         );
         provider.models[0].input_modalities = Some(vec!["text".to_string(), "image".to_string()]);
-        provider.models[0].supports_reasoning = Some(true);
+        provider.models[0].thinking_levels = Some(vec![
+            "none".to_string(),
+            "low".to_string(),
+            "high".to_string(),
+            "xhigh".to_string(),
+        ]);
 
         let mut config = crate::config::types::AppConfig::default();
         config.model_providers.push(provider);
@@ -2383,9 +2415,10 @@ mod tests {
         let resolved = resolve_active_runtime_config(&state, "session-pi-reasoning").unwrap();
         let limits = resolved.model_limits.expect("model limits");
         assert_eq!(limits["reasoning"], serde_json::json!(true));
+        // 勾选的档写自己的名字；`max` 未勾选故被 `null` 剔除。
         assert_eq!(
             limits["thinkingLevelMap"],
-            serde_json::json!({ "xhigh": "xhigh", "max": "max" })
+            serde_json::json!({ "off": "off", "low": "low", "high": "high", "xhigh": "xhigh", "max": null })
         );
         assert_eq!(limits["input"], serde_json::json!(["text", "image"]));
     }
@@ -2436,6 +2469,54 @@ mod tests {
         assert!(limits.get("reasoning").is_none(), "{limits}");
         assert!(limits.get("thinkingLevelMap").is_none(), "{limits}");
         assert_eq!(limits["input"], serde_json::json!(["text"]));
+    }
+
+    /// 用户明确声明「不支持思考」（空白名单）时同样不写 `reasoning`——空与
+    /// 未声明对 pi 是同一件事。
+    #[test]
+    fn pi_model_limits_omit_reasoning_when_levels_declared_empty() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-pi-no-reasoning",
+                "Pi",
+                "pi",
+                "pi-provider",
+                "glm-5.3-flash",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let mut provider = test_model_provider(
+            "pi-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "glm-5.3-flash",
+            &["glm-5.3-flash"],
+            Some(false),
+        );
+        provider.models[0].thinking_levels = Some(Vec::new());
+
+        let mut config = crate::config::types::AppConfig::default();
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("pi-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-pi-no-reasoning").unwrap();
+        let limits = resolved.model_limits.expect("model limits");
+        assert!(limits.get("reasoning").is_none(), "{limits}");
+        assert!(limits.get("thinkingLevelMap").is_none(), "{limits}");
     }
 
     #[test]

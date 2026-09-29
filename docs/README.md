@@ -56,7 +56,7 @@
 | [2026-08-02-window-size-persistence-research.md](research/2026-08-02-window-size-persistence-research.md) | 桌面应用窗口尺寸持久化方案调研 |
 | [2026-08-05-opencode-session-deletion-research.md](research/2026-08-05-opencode-session-deletion-research.md) | OpenCode 会话删除方案研究 |
 | [2026-08-06-runtime-pack-build-dependencies-research.md](research/2026-08-06-runtime-pack-build-dependencies-research.md) | 托管 SDK Runtime 安装方案 |
-| [2026-08-09-cherry-studio-model-display-name-rules.md](research/2026-08-09-cherry-studio-model-display-name-rules.md) | Cherry Studio:模型服务获取列表后 UI「模型名字」展示规则 |
+| [2026-08-09-cherry-studio-model-display-name-rules.md](research/2026-08-09-cherry-studio-model-display-name-rules.md) | Cherry Studio:模型服务获取列表后 UI「模型名字」展示规则（展示名已改由 models.dev 目录提供，见 ADR 0016；本文保留作为 prettify 规则的来源） |
 | [2026-08-12-opencode-question-multiselect.md](research/2026-08-12-opencode-question-multiselect.md) | OpenCode 用户问题工具的多选语义调查 |
 | [2026-09-06-agent-desktop-busy-send.md](research/2026-09-06-agent-desktop-busy-send.md) | 主流 Agent 桌面 / TUI:忙时发送(queue / steer / interrupt) |
 | [2026-09-16-paseo-stream-smoothness-analysis.md](research/2026-09-16-paseo-stream-smoothness-analysis.md) | Paseo 流式对话流畅性归因分析 —— 及对 CodeMUX 的借鉴 |
@@ -190,6 +190,8 @@
 - [0012 — Daemon 独立进程与 Electron 桌面壳](adr/0012-daemon-process-electron-shell.md)
 - [0013 — 用户可配置键盘快捷键](adr/0013-user-configurable-keyboard-shortcuts.md)
 - [0014 — pi 项目资源默认不信任](adr/0014-pi-project-resources-untrusted-by-default.md)
+- [0015 — 模型能力目录只是建议，provider.models 始终是权威](adr/0015-model-catalog-is-advisory.md)
+- [0016 — 模型展示名来自目录，手写映射表退役](adr/0016-model-display-names-from-catalog.md)
 
 ### agents
 

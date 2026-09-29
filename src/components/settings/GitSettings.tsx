@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Cpu, GitCommitHorizontal, GitPullRequest } from 'lucide-react';
 
 import { resolveModelDisplayName } from '../../lib/providerModels';
+import { useModelDisplayNames } from '../../hooks/useModelDisplayNames';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
@@ -21,6 +22,7 @@ const textareaClass =
 
 /** 生成模型 + 提交说明 + 拉取请求指令。 */
 export function GitSettings() {
+  useModelDisplayNames();
   const config = useSettingsStore((state) => state.config);
   const setGitSettings = useSettingsStore((state) => state.setGitSettings);
   const [commitDraft, setCommitDraft] = useState<string | null>(null);

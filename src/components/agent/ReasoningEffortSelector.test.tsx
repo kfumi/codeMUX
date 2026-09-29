@@ -44,4 +44,56 @@ describe('ReasoningEffortSelector', () => {
     render(<ReasoningEffortSelector value={'mystery' as 'high'} onChange={vi.fn()} />);
     expect(screen.getByRole('combobox', { name: '思考强度' }).textContent).toContain('高');
   });
+
+  it('offers only the levels the model declares', () => {
+    render(
+      <ReasoningEffortSelector
+        value="high"
+        onChange={vi.fn()}
+        options={[
+          { id: 'none', name: '关闭' },
+          { id: 'low', name: '低' },
+          { id: 'high', name: '高' },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: '思考强度' }));
+    expect(screen.getByRole('option', { name: '关闭' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '低' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '高' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: '极高' })).toBeNull();
+    expect(screen.queryByRole('option', { name: '最高' })).toBeNull();
+  });
+
+  it('snaps a stored level the model does not offer onto the nearest one', () => {
+    // Switching models can leave the session holding a level the new model
+    // cannot honour; the trigger must not advertise it.
+    render(
+      <ReasoningEffortSelector
+        value="max"
+        onChange={vi.fn()}
+        options={[
+          { id: 'none', name: '关闭' },
+          { id: 'low', name: '低' },
+          { id: 'high', name: '高' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: '思考强度' }).textContent).toContain('高');
+  });
+
+  it('snaps upward when no lower level is offered', () => {
+    render(
+      <ReasoningEffortSelector
+        value="low"
+        onChange={vi.fn()}
+        options={[
+          { id: 'none', name: '关闭' },
+          { id: 'xhigh', name: '极高' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: '思考强度' }).textContent).toContain('极高');
+  });
 });

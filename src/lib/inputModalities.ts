@@ -43,9 +43,32 @@ export function modelSupportsVision(model?: ProviderModel | null): boolean | nul
   return model?.supports_vision;
 }
 
-export function inferDefaultInputModalities(modelId: string, templateModalities?: InputModality[] | null): InputModality[] {
+/**
+ * Best-guess input modalities for a model the user is adding.
+ *
+ * Order matters: an explicit template value wins, then the models.dev catalog,
+ * and only then the substring heuristics below. The heuristics exist because
+ * relay endpoints serve model ids no public catalog lists — but they are a
+ * guess, and the substring rules only cover a handful of families, so a vision
+ * model behind a relay used to be recorded as text-only and had its images
+ * silently dropped.
+ */
+export function inferDefaultInputModalities(
+  modelId: string,
+  templateModalities?: InputModality[] | null,
+  catalogModalities?: readonly string[] | null,
+): InputModality[] {
   if (templateModalities?.length) {
     return normalizeInputModalities(templateModalities);
+  }
+
+  const fromCatalog = normalizeInputModalities(
+    catalogModalities?.filter((modality): modality is InputModality =>
+      modality === 'image' || modality === 'audio' || modality === 'video',
+    ),
+  );
+  if (catalogModalities?.length) {
+    return fromCatalog;
   }
 
   const normalized = modelId.trim().toLowerCase();

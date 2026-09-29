@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { providerDisplayName } from '@/components/settings/ProviderBrandIcon';
 import { isProviderUsable } from '../lib/modelProviders';
+import { useModelDisplayNames } from './useModelDisplayNames';
 import { resolveModelDisplayName } from '../lib/providerModels';
 import type { ModelProvider } from '../types/provider';
 import type { AgentKind } from '../types/session';
@@ -64,6 +65,9 @@ export function useAgentModels(
   }, [providers]);
 
   const [tick, setTick] = useState(0);
+  // Display names come from the models.dev index, which arrives after the first
+  // render; without this the list would keep its prettified names.
+  useModelDisplayNames();
   useEffect(() => {
     setTick((value) => value + 1);
   }, [agentKind, providersFingerprint(providerList)]);

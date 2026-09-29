@@ -29,10 +29,17 @@ import {
   toggleOptionalInputModality,
 } from '@/lib/inputModalities';
 import { enrichFetchedModels, resolveModelDisplayName } from '@/lib/providerModels';
+import { mergeCatalogIntoModel, type CatalogEntry } from '@/lib/modelCatalog';
+import {
+  REASONING_EFFORT_OPTIONS,
+  normalizeThinkingLevels,
+  resolveThinkingLevels,
+} from '@/lib/reasoningEffort';
 import { daemonFacade } from '@/lib/facades/daemon-facade';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
+import type { ReasoningEffort } from '@/types/session';
 import type {
   BuiltinProviderTemplate,
   ModelProvider,
@@ -105,29 +112,6 @@ function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string 
   return ids[0] ?? '';
 }
 
-const DEFAULT_OPENAI_MODEL_LIMITS = {
-  context_window: 200_000,
-  max_output_tokens: 65_536,
-} as const;
-
-function hasOpenAiEndpoint(provider: ModelProvider): boolean {
-  return provider.endpoints.some(
-    (endpoint) => endpoint.protocol === 'openai_compatible' && endpoint.base_url.trim().length > 0,
-  );
-}
-
-function withDefaultOpenAiModelLimits(
-  model: ProviderModel,
-  applyDefaults: boolean,
-): ProviderModel {
-  if (!applyDefaults) return model;
-  return {
-    ...model,
-    context_window: model.context_window ?? DEFAULT_OPENAI_MODEL_LIMITS.context_window,
-    max_output_tokens: model.max_output_tokens ?? DEFAULT_OPENAI_MODEL_LIMITS.max_output_tokens,
-  };
-}
-
 function cleanProviderModel(
   model: ProviderModel,
   providerTemplateId?: string | null,
@@ -165,7 +149,11 @@ function cleanProviderModel(
   if (model.input_modalities?.length) {
     cleaned.input_modalities = normalizeInputModalities(model.input_modalities);
   }
-  cleaned.supports_reasoning = model.supports_reasoning ?? null;
+  // 保持三态：未声明 / 明确不支持（空）/ 精确白名单。归一化后写入，使同一份
+  // 配置反复保存得到逐字节相同的文件。
+  if (model.thinking_levels !== undefined && model.thinking_levels !== null) {
+    cleaned.thinking_levels = normalizeThinkingLevels(model.thinking_levels);
+  }
   return cleaned;
 }
 
@@ -361,6 +349,36 @@ export function ProviderConfigPanel() {
     }
   }, [draft, editingModelIndex]);
 
+  const setEditingThinkingLevels = (levels: ReasoningEffort[]) => {
+    if (!draft || editingModelIndex == null) return;
+    setDraft({
+      ...draft,
+      models: updateModelAt(draft.models, editingModelIndex, {
+        thinking_levels: levels,
+        supports_reasoning: null,
+      }),
+    });
+  };
+
+  const handleThinkingToggle = (checked: boolean) => {
+    // 关闭写成空数组（明确不支持），而不是 null —— null 的含义是「未声明」，
+    // 目录建议之后仍应能覆盖它。
+    setEditingThinkingLevels(checked ? ['none', 'low', 'medium', 'high'] : []);
+  };
+
+  const handleThinkingLevelToggle = (level: ReasoningEffort, locked: boolean) => {
+    if (locked) return;
+    if (editingThinkingLevels.includes(level)) {
+      // 取消最后一档就等于「这个模型不思考」——写成空数组，与关掉开关同义。
+      // 保留「开关开着但一档没勾」这个状态：它恰好是 pi 会静默钳回「关闭」的情形。
+      setEditingThinkingLevels(
+        editingThinkingLevels.length === 1 ? [] : editingThinkingLevels.filter((entry) => entry !== level),
+      );
+      return;
+    }
+    setEditingThinkingLevels(normalizeThinkingLevels([...editingThinkingLevels, level]));
+  };
+
   useEffect(() => {
     if (!selection) {
       setDraft(null);
@@ -406,8 +424,59 @@ export function ProviderConfigPanel() {
   const showModelMoreSettings = showClaudeContext1m || showOpenAiModelLimits;
   const editingModel =
     draft && editingModelIndex != null ? draft.models[editingModelIndex] ?? null : null;
-  const persisted = Boolean(draft && providers.some((item) => item.id === draft.id));
+  // 未声明（null/undefined）与「明确不支持」在 UI 上都表现为开关关闭：前者
+  // 还会由目录建议补上，后者是用户主动表达的「这个模型不思考」。
+  const editingThinkingLevels = resolveThinkingLevels(editingModel) ?? [];
+  const editingThinkingEnabled = editingThinkingLevels.length > 0;
+  const [catalogHit, setCatalogHit] = useState<CatalogEntry | null>(null);
+  const [catalogSource, setCatalogSource] = useState<'remote' | 'bundled' | null>(null);
+  const editingModelId = editingModel?.id.trim() ?? '';
   const draftTemplateId = draft?.builtin_template_id ?? null;
+  // Model id is read-only in this dialog, so a single lookup per open is
+  // enough; re-running on provider/template change covers switching suppliers.
+  useEffect(() => {
+    if (!editingModelId) {
+      setCatalogHit(null);
+      setCatalogSource(null);
+      return;
+    }
+    let cancelled = false;
+    daemonFacade
+      .lookupModelCatalog(editingModelId, draftTemplateId)
+      .then((lookup) => {
+        if (cancelled) return;
+        setCatalogHit(lookup.found ? lookup.entry ?? null : null);
+        setCatalogSource(lookup.source);
+      })
+      .catch(() => {
+        // The catalog is advisory; a failure just means no suggestion.
+        if (cancelled) return;
+        setCatalogHit(null);
+        setCatalogSource(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftTemplateId, editingModelId]);
+
+  // Only worth offering when the catalog would actually add something.
+  const catalogSuggestion = useMemo(() => {
+    if (!editingModel || !catalogHit) return null;
+    const merged = mergeCatalogIntoModel(editingModel, catalogHit);
+    const changed = (Object.keys(merged) as (keyof ProviderModel)[]).some(
+      (key) => merged[key] !== editingModel[key],
+    );
+    return changed ? merged : null;
+  }, [catalogHit, editingModel]);
+
+  const applyCatalogSuggestion = () => {
+    if (!draft || editingModelIndex == null || !catalogSuggestion) return;
+    setDraft({
+      ...draft,
+      models: updateModelAt(draft.models, editingModelIndex, catalogSuggestion),
+    });
+  };
+  const persisted = Boolean(draft && providers.some((item) => item.id === draft.id));
   const apiKeyUrl = resolveProviderApiKeyUrl(draftTemplateId);
   const codexNeedsProxy = Boolean(
     draft?.endpoints.find((item) => item.protocol === 'openai_compatible')?.codex_needs_proxy,
@@ -542,10 +611,7 @@ export function ProviderConfigPanel() {
 
   function addModelRow() {
     if (!draft) return;
-    const models = [
-      ...draft.models,
-      withDefaultOpenAiModelLimits({ id: '', name: '' }, hasOpenAiEndpoint(draft)),
-    ];
+    const models = [...draft.models, { id: '', name: '' } satisfies ProviderModel];
     setDraft({
       ...draft,
       models,
@@ -571,12 +637,7 @@ export function ProviderConfigPanel() {
   function applySelectedModels(models: ProviderModel[]) {
     setDraft((prev) => {
       if (!prev) return prev;
-      const existingIds = new Set(prev.models.map((model) => model.id.trim()).filter(Boolean));
-      const nextModels = models.map((model) => (
-        existingIds.has(model.id.trim())
-          ? model
-          : withDefaultOpenAiModelLimits(model, hasOpenAiEndpoint(prev))
-      ));
+      const nextModels = models;
       return {
         ...prev,
         models: nextModels,
@@ -1103,6 +1164,47 @@ export function ProviderConfigPanel() {
                 />
               </div>
 
+              {catalogSuggestion && (
+                <div className="grid gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm">模型目录建议</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={applyCatalogSuggestion}
+                    >
+                      应用
+                    </Button>
+                  </div>
+                  <ul className="text-xs text-muted-foreground">
+                    {catalogSuggestion.name && <li>名称：{catalogSuggestion.name}</li>}
+                    {catalogSuggestion.context_window && (
+                      <li>上下文窗口：{catalogSuggestion.context_window}</li>
+                    )}
+                    {catalogSuggestion.max_output_tokens && (
+                      <li>最大输出：{catalogSuggestion.max_output_tokens}</li>
+                    )}
+                    {catalogSuggestion.input_modalities && (
+                      <li>输入模态：{catalogSuggestion.input_modalities.join('、')}</li>
+                    )}
+                    {catalogSuggestion.thinking_levels && (
+                      <li>
+                        思考档位：
+                        {normalizeThinkingLevels(catalogSuggestion.thinking_levels)
+                          .map((level) => REASONING_EFFORT_OPTIONS.find((o) => o.id === level)?.name)
+                          .join('、')}
+                      </li>
+                    )}
+                  </ul>
+                  <p className="text-xs text-muted-foreground">
+                    来自 models.dev
+                    {catalogSource === 'bundled' ? ' 离线快照' : ''}
+                    ，仅补充你尚未填写的项。
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-3 border-t border-border/60 pt-4">
                 <p className="text-sm font-medium">输入模态</p>
                 <div className="flex flex-wrap gap-2">
@@ -1160,24 +1262,58 @@ export function ProviderConfigPanel() {
                       />
                     </div>
                   )}
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <p className="text-sm">支持思考（推理）</p>
-                      <p className="text-xs text-muted-foreground">
-                        仅 pi 会读取：未勾选时 pi 会把思考等级钳回 off
-                      </p>
+                  <div className="grid gap-2.5 rounded-md border border-border/60 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm">思考档位</p>
+                        <p className="text-xs text-muted-foreground">
+                          {editingThinkingEnabled
+                            ? '未勾选的档位不会出现在发送框的思考强度里'
+                            : '关闭时 pi 不会向供应商发送任何思考参数'}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={editingThinkingEnabled}
+                        onCheckedChange={handleThinkingToggle}
+                      />
                     </div>
-                    <Switch
-                      checked={editingModel.supports_reasoning === true}
-                      onCheckedChange={(checked) =>
-                        setDraft({
-                          ...draft,
-                          models: updateModelAt(draft.models, editingModelIndex, {
-                            supports_reasoning: checked ? true : null,
-                          }),
-                        })
-                      }
-                    />
+                    {editingThinkingEnabled && (
+                      <>
+                        <div className="flex flex-wrap gap-1.5">
+                          {REASONING_EFFORT_OPTIONS.map((option) => {
+                            const active = editingThinkingLevels.includes(option.id);
+                            // 「关闭」不可取消：pi 的 `thinkingLevelMap` 里把它标成
+                            // null 会让它从可用档位里消失，发送框选「关闭」反被钳到
+                            // 最低档（pi-ai `getSupportedThinkingLevels`）。
+                            const locked = active && option.id === 'none';
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                aria-pressed={active}
+                                title={locked ? '「关闭」必须保留' : undefined}
+                                onClick={() => handleThinkingLevelToggle(option.id, locked)}
+                                className={cn(
+                                  'rounded-full border px-2.5 py-1 text-ui-caption',
+                                  'transition-colors duration-fast ease-motion-out',
+                                  'cursor-pointer disabled:cursor-not-allowed disabled:opacity-50',
+                                  active
+                                    ? 'border-primary/40 bg-primary/10 text-foreground'
+                                    : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
+                                )}
+                              >
+                                {option.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {editingThinkingLevels.length === 0
+                            ? '请至少勾一档：一档都不勾的话 pi 会把所有档位钳回「关闭」。'
+                            : '发送框只会显示这里勾选的档位。'}
+                        </p>
+                      </>
+                    )}
                   </div>
                   {showOpenAiModelLimits && (
                     <div className="grid gap-3">
