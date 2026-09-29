@@ -153,6 +153,11 @@ type CodexSessionBootstrap = {
   effectiveBaseUrl?: string;
   codexNeedsProxy?: boolean;
   model?: string;
+  /**
+   * Provider the daemon bound this session to. Carried so a runtime-learned
+   * capability rejection can be scoped to the endpoint that produced it.
+   */
+  provider?: string;
   reasoningEffort?: ReasoningEffort;
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
@@ -508,6 +513,9 @@ export class CodexAppServerRuntime {
       this.emitEvent({
         type: 'vision_unsupported',
         model: this.config?.model || DEFAULT_CODEX_MODEL,
+        // Provider scope travels with the fact — see the Claude runtime's
+        // equivalent emit.
+        provider: this.config?.provider,
         message: String(error),
       });
       process.stderr.write(`[codex-app-server] Vision payload unsupported; retrying text-only: ${String(error)}\n`);

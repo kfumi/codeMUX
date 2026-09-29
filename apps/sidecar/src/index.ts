@@ -149,6 +149,12 @@ type SessionBootstrap = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  /**
+   * Provider the daemon bound this session to. Carried so a runtime-learned
+   * capability rejection can be scoped to the endpoint that produced it —
+   * the same model id behind another provider may well accept images.
+   */
+  provider?: string;
   reasoningEffort?: ReasoningEffort;
   skills?: string[];
   settingSources?: string[];
@@ -783,6 +789,7 @@ export class SessionRuntime {
       apiKey: cmd.apiKey,
       baseUrl: cmd.baseUrl,
       model: cmd.model,
+      provider: cmd.provider,
       reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       skills: cmd.skills,
       settingSources: cmd.settingSources,
@@ -1607,6 +1614,9 @@ export class SessionRuntime {
         emit({
           type: 'vision_unsupported',
           model: this.config?.model,
+          // 学到的结论是「这个供应商的这个模型不接受图片」，所以消费方必须
+          // 能按供应商限定这条记忆——同一个 id 在两个供应商下能力可以不同。
+          provider: this.config?.provider,
           message: String(err),
         });
         process.stderr.write(`[sidecar] Vision payload unsupported; retrying text-only: ${String(err)}\n`);

@@ -2001,7 +2001,14 @@ function createSessionEventHandler(
     }
 
     if (event.kind === 'raw' && event.data?.type === 'vision_unsupported') {
-      markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : visionModel);
+      // 记的是「这个供应商的这个模型拒绝图片」，所以供应商必须一并记下。
+      // sidecar 带的是它实际被配置的那个供应商（权威）；缺失时回落到会话绑定的。
+      markModelVisionUnsupported(
+        typeof event.data.model === 'string' ? event.data.model : visionModel,
+        typeof event.data.provider === 'string'
+          ? event.data.provider
+          : useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.provider_id,
+      );
       set((s) => ({
         events: {
           ...s.events,
@@ -2923,8 +2930,9 @@ function createSessionEventHandler(
     // 会话供应商优先：同一模型 ID 可能同时存在于多个供应商且模态配置不同，
     // 全局摊平查找会命中排在前面的那条（如智谱与 OpenCode Go 都有 glm-5.3-flash）。
     const modelMetadata = findSessionModelMetadata(modelForVision, providers, targetSession?.provider_id);
+    // 运行时学到的「不支持视觉」按会话供应商限定，避免一个端点的结论污染同名模型。
     const supportsVision = !payloadHasAttachments(originalPayload)
-      || resolveVisionCapability(modelForVision, modelMetadata, enrichmentEnabled);
+      || resolveVisionCapability(modelForVision, modelMetadata, enrichmentEnabled, targetSession?.provider_id);
     const shouldSendImages = attachments.length > 0 && supportsVision;
     let payloadForModel: AgentInputPayload = shouldSendImages
       ? originalPayload

@@ -7,7 +7,25 @@ const EXPLICIT_VISION_UNSUPPORTED_MODELS = new Set([
   'mimo-v2.5-pro',
 ]);
 
-const runtimeUnsupportedVisionModels = new Set<string>();
+/**
+ * Models a runtime has rejected an image payload for, keyed by
+ * `provider::model` and expiring on a TTL.
+ *
+ * The fact learned is "this provider's model rejects images" — never "this
+ * model id". Keying it by id alone collapsed the two together, so one
+ * endpoint that rejects images silently disabled them for the same id behind
+ * every other provider, in every session, for the rest of the process's life:
+ * a `Set` that only ever grows and is never invalidated, even after the user
+ * changes the endpoint's API key or the model's declared modalities.
+ *
+ * Entries are scoped by provider and expire, so a config change takes effect
+ * on its own. The cap keeps a long-lived window from accumulating one entry
+ * per id ever tried; `Map` preserves insertion order, so the oldest goes first.
+ */
+const VISION_UNSUPPORTED_TTL_MS = 30 * 60 * 1000;
+const VISION_UNSUPPORTED_MAX_ENTRIES = 200;
+
+const runtimeUnsupportedVisionModels = new Map<string, number>();
 
 function normalizeModelName(model: string | null | undefined): string {
   // Claude Code 的 1M 上下文会话在模型 ID 后追加 `[1m]`，能力判断与
@@ -15,16 +33,56 @@ function normalizeModelName(model: string | null | undefined): string {
   return (model ?? '').trim().toLowerCase().replace(/\s*\[1m\]\s*$/i, '').replace(/\s+/g, '-');
 }
 
-export function getCachedVisionSupport(model: string | null | undefined): boolean | undefined {
+/**
+ * Cache key for one learned rejection. Without a provider we cannot scope it,
+ * so it falls back to the bare id — still expiring, but no longer a permanent
+ * cross-provider verdict.
+ */
+function visionCacheKey(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+): string {
   const normalized = normalizeModelName(model);
-  if (!normalized) return undefined;
-  return runtimeUnsupportedVisionModels.has(normalized) ? false : undefined;
+  if (!normalized) return '';
+  const scope = (provider ?? '').trim().toLowerCase();
+  return scope ? `${scope}::${normalized}` : normalized;
 }
 
-export function markModelVisionUnsupported(model: string | null | undefined): void {
-  const normalized = normalizeModelName(model);
-  if (normalized) {
-    runtimeUnsupportedVisionModels.add(normalized);
+function isCachedUnsupported(key: string, now: number): boolean {
+  if (!key) return false;
+  const learnedAt = runtimeUnsupportedVisionModels.get(key);
+  if (learnedAt === undefined) return false;
+  if (now - learnedAt < VISION_UNSUPPORTED_TTL_MS) return true;
+  runtimeUnsupportedVisionModels.delete(key);
+  return false;
+}
+
+/** Test seam: drop everything the runtime taught us. */
+export function __resetVisionCacheForTests(): void {
+  runtimeUnsupportedVisionModels.clear();
+}
+
+export function getCachedVisionSupport(
+  model: string | null | undefined,
+  provider?: string | null,
+): boolean | undefined {
+  return isCachedUnsupported(visionCacheKey(provider, model), Date.now()) ? false : undefined;
+}
+
+export function markModelVisionUnsupported(
+  model: string | null | undefined,
+  provider?: string | null,
+): void {
+  const key = visionCacheKey(provider, model);
+  if (!key) return;
+  // Re-insert so the key moves to the end of the insertion order and the
+  // eviction below drops a genuinely older entry rather than this one.
+  runtimeUnsupportedVisionModels.delete(key);
+  runtimeUnsupportedVisionModels.set(key, Date.now());
+  while (runtimeUnsupportedVisionModels.size > VISION_UNSUPPORTED_MAX_ENTRIES) {
+    const oldest = runtimeUnsupportedVisionModels.keys().next();
+    if (oldest.done) break;
+    runtimeUnsupportedVisionModels.delete(oldest.value);
   }
 }
 
@@ -65,14 +123,19 @@ export function findSessionModelMetadata(
 /**
  * Resolve whether the session model supports native image input.
  * Priority: runtime learned → input modalities / supports_vision → legacy denylist → unknown default.
+ *
+ * `providerId` scopes the runtime-learned memo; pass the provider the session
+ * is actually bound to so a rejection behind one endpoint cannot disable
+ * images for the same model id behind another.
  */
 export function resolveVisionCapability(
   model: string | null | undefined,
   modelMetadata: ProviderModel | undefined,
   enrichmentEnabled: boolean,
+  providerId?: string | null,
 ): boolean {
   const normalized = normalizeModelName(model);
-  if (normalized && runtimeUnsupportedVisionModels.has(normalized)) {
+  if (isCachedUnsupported(visionCacheKey(providerId, model), Date.now())) {
     return false;
   }
 

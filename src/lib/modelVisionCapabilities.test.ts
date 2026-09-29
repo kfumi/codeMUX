@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelProvider } from '../types/provider';
 import {
+  __resetVisionCacheForTests,
   findProviderModelMetadata,
   findSessionModelMetadata,
   getCachedVisionSupport,
@@ -11,6 +12,13 @@ import {
 } from './modelVisionCapabilities';
 
 describe('modelVisionCapabilities', () => {
+  // The learned-rejection memo is process-wide, so every test starts clean.
+  beforeEach(() => __resetVisionCacheForTests());
+  afterEach(() => {
+    __resetVisionCacheForTests();
+    vi.useRealTimers();
+  });
+
   it('defaults unknown models to vision-capable', () => {
     expect(inferModelSupportsVision('future-model-7')).toBe(true);
   });
@@ -26,10 +34,40 @@ describe('modelVisionCapabilities', () => {
   });
 
   it('caches runtime unsupported decisions by normalized model name', () => {
-    markModelVisionUnsupported('Future Model 7');
+    markModelVisionUnsupported('Future Model 7', 'relay-a');
 
-    expect(getCachedVisionSupport('future-model-7')).toBe(false);
-    expect(inferModelSupportsVision('future-model-7')).toBe(false);
+    expect(getCachedVisionSupport('future-model-7', 'relay-a')).toBe(false);
+    expect(resolveVisionCapability('future-model-7', undefined, false, 'relay-a')).toBe(false);
+  });
+
+  it('does not let one provider rejection disable another provider', () => {
+    // Same model id behind two endpoints: one rejects images, the other may well
+    // accept them. Keying the memo by id alone silently disabled both.
+    markModelVisionUnsupported('glm-5.3-flash', 'zhipu');
+
+    expect(getCachedVisionSupport('glm-5.3-flash', 'zhipu')).toBe(false);
+    expect(getCachedVisionSupport('glm-5.3-flash', 'opencode-go')).toBeUndefined();
+    expect(resolveVisionCapability('glm-5.3-flash', undefined, false, 'opencode-go')).toBe(true);
+  });
+
+  it('stops consulting a learned rejection once it expires', () => {
+    // A rejection is a statement about one endpoint at one moment. Changing the
+    // API key or the declared modalities must be able to undo it.
+    vi.useFakeTimers();
+    markModelVisionUnsupported('glm-5.3-flash', 'zhipu');
+    expect(getCachedVisionSupport('glm-5.3-flash', 'zhipu')).toBe(false);
+
+    vi.advanceTimersByTime(31 * 60 * 1000);
+    expect(getCachedVisionSupport('glm-5.3-flash', 'zhipu')).toBeUndefined();
+  });
+
+  it('bounds how many rejections it retains', () => {
+    for (let index = 0; index < 260; index += 1) {
+      markModelVisionUnsupported(`model-${index}`, 'relay');
+    }
+    // The oldest entries are evicted; the newest is still remembered.
+    expect(getCachedVisionSupport('model-259', 'relay')).toBe(false);
+    expect(getCachedVisionSupport('model-0', 'relay')).toBeUndefined();
   });
 
   it('uses conservative enrichment default for unknown models when enrichment is enabled', () => {
@@ -47,8 +85,8 @@ describe('modelVisionCapabilities', () => {
     expect(resolveVisionCapability('glm-5.3-flash[1m]', metadata, false)).toBe(true);
     expect(findProviderModelMetadata('GLM-5.3-Flash [1m]', [metadata])).toBeDefined();
 
-    markModelVisionUnsupported('glm-5.3-flash [1m]');
-    expect(getCachedVisionSupport('glm-5.3-flash')).toBe(false);
+    markModelVisionUnsupported('glm-5.3-flash [1m]', 'zhipu');
+    expect(getCachedVisionSupport('glm-5.3-flash', 'zhipu')).toBe(false);
   });
 });
 
