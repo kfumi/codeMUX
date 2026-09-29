@@ -322,8 +322,8 @@ export const providersViaDaemon = {
     const result = await (await ensureDaemonClient()).providersUsable(providerId, agentKind);
     return result.usable;
   },
-  fetchProviderModels: async (apiKey: string, baseUrl: string) =>
-    (await ensureDaemonClient()).providersFetchModels(apiKey, baseUrl),
+  fetchProviderModels: async (apiKey: string, baseUrl: string, provider?: string | null) =>
+    (await ensureDaemonClient()).providersFetchModels(apiKey, baseUrl, provider),
   fetchOpenCodeFreeModels: async () =>
     (await ensureDaemonClient()).providersFetchOpenCodeFreeModels(),
   lookupModelCatalog: async (model: string, provider?: string | null) =>
@@ -650,8 +650,8 @@ export const daemonFacade = {
   setBrowserControl: async (settings: import('../../types/provider').BrowserControlSettings) => {
     await (await ensureDaemonClient()).patchAppConfig({ browser: settings });
   },
-  fetchProviderModels: async (apiKey: string, baseUrl: string) =>
-    providersViaDaemon.fetchProviderModels(apiKey, baseUrl),
+  fetchProviderModels: async (apiKey: string, baseUrl: string, provider?: string | null) =>
+    providersViaDaemon.fetchProviderModels(apiKey, baseUrl, provider),
   fetchOpenCodeFreeModels: () => providersViaDaemon.fetchOpenCodeFreeModels(),
   lookupModelCatalog: (model: string, provider?: string | null) =>
     providersViaDaemon.lookupModelCatalog(model, provider),

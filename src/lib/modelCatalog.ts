@@ -82,6 +82,23 @@ export function mergeCatalogIntoModel(
   return merged;
 }
 
+/**
+ * `mergeCatalogIntoModel` plus the "would it change anything?" check the UI
+ * needs: the merged model when the catalog has something to add, else `null`.
+ * Both the suggestion card and the one-shot auto-fill in ProviderConfig run
+ * on this, so they can never disagree about what the catalog offers.
+ */
+export function catalogSuggestionFor(
+  model: ProviderModel,
+  entry: CatalogEntry,
+): ProviderModel | null {
+  const merged = mergeCatalogIntoModel(model, entry);
+  const changed = (Object.keys(merged) as (keyof ProviderModel)[]).some(
+    (key) => merged[key] !== model[key],
+  );
+  return changed ? merged : null;
+}
+
 /** Thinking levels the catalog suggests, or `null` when it has no opinion. */
 export function catalogThinkingLevels(
   entry: CatalogEntry | undefined,

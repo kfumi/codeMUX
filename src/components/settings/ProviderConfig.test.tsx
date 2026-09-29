@@ -271,9 +271,44 @@ describe('ProviderConfigPanel', () => {
 
     expect(await screen.findByText(/深度求索 模型/)).toBeTruthy();
     await waitFor(() => {
-      expect(fetchProviderModels).toHaveBeenCalledWith('sk-test', 'https://api.deepseek.com');
+      expect(fetchProviderModels).toHaveBeenCalledWith(
+        'sk-test',
+        'https://api.deepseek.com',
+        'deepseek',
+      );
       expect(screen.getByText('deepseek-new')).toBeTruthy();
       expect(screen.getByText('来自接口')).toBeTruthy();
+    });
+  });
+
+  it('records catalog modalities from fetched picker rows', async () => {
+    fetchProviderModels.mockResolvedValueOnce([
+      { id: 'glm-5.3-flash', owned_by: 'zhipu', input_modalities: ['text', 'image'] },
+      { id: 'internal-text-only', owned_by: 'relay' },
+    ]);
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /获取模型列表/ })).toBeTruthy();
+    });
+
+    const keyInput = screen.getByPlaceholderText('保存可留空，启用时必填');
+    fireEvent.change(keyInput, { target: { value: 'sk-test' } });
+    fireEvent.click(screen.getByRole('button', { name: /获取模型列表/ }));
+
+    fireEvent.click(await screen.findByLabelText('添加 glm-5.3-flash'));
+    fireEvent.click(await screen.findByLabelText('添加 internal-text-only'));
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      const byId = new Map(saved.models.map((model) => [model.id, model]));
+      // The catalog's answer lands on the added row instead of a text-only guess.
+      expect(byId.get('glm-5.3-flash')?.input_modalities).toEqual(['text', 'image']);
+      // A row the catalog does not know stays at the plain default.
+      expect(byId.get('internal-text-only')?.input_modalities).toEqual(['text']);
     });
   });
 
@@ -827,7 +862,7 @@ describe('ProviderConfigPanel', () => {
     });
   });
 
-  it('offers a catalog suggestion and applies it on demand', async () => {
+  it('fills unset fields from the catalog automatically', async () => {
     lookupModelCatalog.mockResolvedValue({
       found: true,
       source: 'remote',
@@ -875,18 +910,15 @@ describe('ProviderConfigPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
-    const card = await screen.findByText('模型目录建议');
-    expect(card).toBeTruthy();
-    // Nothing is written before the user opts in: the dialog's name field still
-    // holds what the user typed, not the catalog's.
+    // No 应用 click: the suggestion lands in the form on arrival.
     const dialog = within(screen.getByRole('dialog'));
+    expect(await dialog.findByDisplayValue('400000')).toBeTruthy();
+    // The user's own name survives the merge.
     expect(dialog.getByDisplayValue('GPT-5')).toBeTruthy();
     expect(dialog.queryByDisplayValue('GPT-5 (from models.dev)')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '应用' }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('400000')).toBeTruthy();
-    });
+    // Everything the catalog could fill is now filled, so the card has
+    // nothing left to offer and stays hidden.
+    expect(screen.queryByText('模型目录建议')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
     await waitFor(() => {
@@ -895,10 +927,73 @@ describe('ProviderConfigPanel', () => {
       };
       expect(saved.models[0]?.thinking_levels).toEqual(['low', 'medium', 'high']);
       expect(saved.models[0]?.context_window).toBe(400_000);
+      expect(saved.models[0]?.max_output_tokens).toBe(128_000);
       expect(saved.models[0]?.input_modalities).toEqual(['text', 'image']);
       // The user had already named the model, so the catalog must not rename it.
       expect(saved.models[0]?.name).toBe('GPT-5');
     });
+  });
+
+  it('keeps user edits after the auto-fill; clearing a field offers the card to restore', async () => {
+    lookupModelCatalog.mockResolvedValue({
+      found: true,
+      source: 'remote',
+      entry: {
+        provider: 'openai',
+        model_id: 'gpt-5',
+        name: 'GPT-5 (from models.dev)',
+        reasoning: true,
+        reasoning_published: true,
+        thinking_levels: ['low', 'medium', 'high'],
+        context_window: 400_000,
+        max_input_tokens: undefined,
+        max_output_tokens: 128_000,
+        input_modalities: ['text', 'image'],
+      },
+    });
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    const contextInput = await dialog.findByDisplayValue('400000');
+
+    // A user overwrite sticks — the auto-fill must not loop back and reapply.
+    fireEvent.change(contextInput, { target: { value: '123' } });
+    expect(dialog.getByDisplayValue('123')).toBeTruthy();
+    expect(screen.queryByText('模型目录建议')).toBeNull();
+
+    // Clearing a filled field brings the suggestion card back; 应用 restores it.
+    fireEvent.change(dialog.getByDisplayValue('123'), { target: { value: '' } });
+    fireEvent.click(await screen.findByRole('button', { name: '应用' }));
+    expect(dialog.getByDisplayValue('400000')).toBeTruthy();
   });
 
   it('shows no suggestion card when the catalog has no opinion', async () => {

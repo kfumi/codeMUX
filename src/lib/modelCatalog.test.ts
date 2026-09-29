@@ -6,7 +6,7 @@ import {
   normalizeThinkingLevels,
   resolveThinkingLevels,
 } from './reasoningEffort';
-import { catalogThinkingLevels, mergeCatalogIntoModel, type CatalogEntry } from './modelCatalog';
+import { catalogSuggestionFor, catalogThinkingLevels, mergeCatalogIntoModel, type CatalogEntry } from './modelCatalog';
 import { inferDefaultInputModalities } from './inputModalities';
 import type { ProviderModel } from '../types/provider';
 
@@ -107,6 +107,39 @@ describe('mergeCatalogIntoModel', () => {
   });
 });
 
+describe('catalogSuggestionFor', () => {
+  const entry: CatalogEntry = {
+    provider: 'anthropic',
+    model_id: 'claude-sonnet-4-5',
+    name: 'Claude Sonnet 4.5',
+    reasoning: true,
+    reasoning_published: true,
+    thinking_levels: ['low', 'high'],
+    context_window: 200_000,
+    max_input_tokens: undefined,
+    max_output_tokens: 64_000,
+    input_modalities: ['text', 'image'],
+  };
+
+  it('returns the merge when the catalog would add something', () => {
+    const suggestion = catalogSuggestionFor({ id: 'claude-sonnet-4-5' }, entry);
+    expect(suggestion?.context_window).toBe(200_000);
+    expect(suggestion?.name).toBe('Claude Sonnet 4.5');
+  });
+
+  it('returns null when there is nothing left to fill', () => {
+    const configured: ProviderModel = {
+      id: 'claude-sonnet-4-5',
+      name: 'Mine',
+      thinking_levels: ['medium'],
+      context_window: 32_000,
+      max_output_tokens: 64_000,
+      input_modalities: ['text'],
+    };
+    expect(catalogSuggestionFor(configured, entry)).toBeNull();
+  });
+});
+
 describe('catalogThinkingLevels', () => {
   it('returns null when the catalog has no opinion', () => {
     expect(catalogThinkingLevels(undefined)).toBeNull();
@@ -124,26 +157,25 @@ describe('catalogThinkingLevels', () => {
 });
 
 describe('inferDefaultInputModalities', () => {
-  it('prefers an explicit template value over everything else', () => {
-    expect(inferDefaultInputModalities('gpt-5', ['audio'], ['text', 'image'])).toEqual([
+  it('prefers an explicit declared value over the catalog', () => {
+    expect(inferDefaultInputModalities(['audio'], ['text', 'image'])).toEqual([
       'text',
       'audio',
     ]);
   });
 
-  it('uses the catalog before falling back to substring guesses', () => {
-    // A vision model behind a relay used to be recorded as text-only here, and
-    // its images were silently dropped.
-    expect(inferDefaultInputModalities('my-proxy/vision-pro', null, ['text', 'image'])).toEqual([
-      'text',
-      'image',
-    ]);
+  it('uses the catalog before the default', () => {
+    // A vision model behind a relay used to be recorded as text-only here by a
+    // substring guess, and its images were silently dropped.
+    expect(inferDefaultInputModalities(null, ['text', 'image'])).toEqual(['text', 'image']);
+    // Family rules are gone: the catalog is the only opinion above the default.
+    expect(inferDefaultInputModalities(null, ['text', 'image', 'pdf'])).toEqual(['text', 'image']);
   });
 
-  it('still guesses when the catalog misses', () => {
-    expect(inferDefaultInputModalities('claude-sonnet-4-5', null, null)).toEqual(['text', 'image']);
-    expect(inferDefaultInputModalities('deepseek-v4-flash', null, null)).toEqual(['text']);
-    // Nothing matches: text-only is the safe default.
-    expect(inferDefaultInputModalities('my-proxy/internal-7', null, null)).toEqual(['text']);
+  it('falls back to the text-only default when nothing is known', () => {
+    // No guessing: an unknown id stays at the default, which the user can
+    // correct in the edit dialog instead of fighting a wrong declaration.
+    expect(inferDefaultInputModalities(null, null)).toEqual(['text']);
+    expect(inferDefaultInputModalities(null, [])).toEqual(['text']);
   });
 });

@@ -171,6 +171,18 @@ struct TestProviderRequest {
     base_url: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchProviderModelsRequest {
+    api_key: String,
+    base_url: String,
+    /// The provider's builtin template id, when it has one — scopes the
+    /// models.dev modality join to that provider before falling back to the
+    /// global id index (same precedence as the single-model lookup).
+    #[serde(default)]
+    provider: Option<String>,
+}
+
 async fn test_provider(
     State(ctx): State<ServerContext>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -189,13 +201,26 @@ async fn fetch_provider_models_route(
     State(ctx): State<ServerContext>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<TestProviderRequest>,
+    Json(body): Json<FetchProviderModelsRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let models =
+    let mut models =
         crate::services::provider::fetch_provider_models_for_companion(body.api_key, body.base_url)
             .await
             .map_err(ApiError::bad_request)?;
+    // Join models.dev's modalities onto the rows so the picker records the
+    // catalog's answer instead of guessing one. Advisory (ADR 0015): ids the
+    // catalog does not list stay undeclared.
+    let ids: Vec<String> = models.iter().map(|model| model.id.clone()).collect();
+    let modalities = crate::services::model_catalog::input_modalities_for_ids(
+        &ctx.daemon.roots,
+        body.provider.as_deref(),
+        &ids,
+    )
+    .await;
+    for model in &mut models {
+        model.input_modalities = modalities.get(&model.id).cloned();
+    }
     Ok(Json(serde_json::json!(models)))
 }
 

@@ -66,7 +66,7 @@ export function ProviderModelsPicker({
       {
         id: model.id,
         name: resolveModelDisplayName(model),
-        input_modalities: inferDefaultInputModalities(model.id, model.input_modalities),
+        input_modalities: inferDefaultInputModalities(model.input_modalities),
       },
     ]);
   }
@@ -86,7 +86,7 @@ export function ProviderModelsPicker({
         merged.set(model.id, {
           id: model.id,
           name: resolveModelDisplayName(model),
-          input_modalities: inferDefaultInputModalities(model.id, model.input_modalities),
+          input_modalities: inferDefaultInputModalities(model.input_modalities),
         });
       }
     }

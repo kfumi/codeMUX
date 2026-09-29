@@ -1,7 +1,6 @@
 import type { DaemonConnectionConfig } from './client';
-import type { FetchedModelNameInput } from '../modelRegistry';
 import type { ModelCatalogLookup, ModelDisplayNameIndex } from '../modelCatalog';
-import type { BuiltinProviderTemplate } from '../../types/provider';
+import type { BuiltinProviderTemplate, InputModality } from '../../types/provider';
 
 type Fetcher = <T>(config: DaemonConnectionConfig, path: string, init?: RequestInit) => Promise<T>;
 
@@ -274,10 +273,12 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
         method: 'POST',
         body: JSON.stringify({ apiKey, baseUrl }),
       }),
-    providersFetchModels: (apiKey: string, baseUrl: string) =>
-      fetch<FetchedModelNameInput[]>(config, '/providers/fetch-models', {
+    providersFetchModels: (apiKey: string, baseUrl: string, provider?: string | null) =>
+      fetch<
+        Array<{ id: string; name?: string | null; input_modalities?: InputModality[] | null }>
+      >(config, '/providers/fetch-models', {
         method: 'POST',
-        body: JSON.stringify({ apiKey, baseUrl }),
+        body: JSON.stringify({ apiKey, baseUrl, provider: provider ?? null }),
       }),
     providersFetchOpenCodeFreeModels: () =>
       fetch<unknown[]>(config, '/providers/opencode-free-models'),

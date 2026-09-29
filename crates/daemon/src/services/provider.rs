@@ -410,6 +410,11 @@ pub struct ModelInfo {
     /// Upstream display name when the provider returns one that differs from `id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// models.dev's input modalities when the catalog lists this id (advisory,
+    /// ADR 0015). `None` leaves the model undeclared — the picker must not
+    /// invent a text-only verdict for ids the catalog does not know.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_modalities: Option<Vec<String>>,
 }
 
 /// Pick the first non-empty display-name field from an OpenAI-compatible model object.
@@ -438,6 +443,7 @@ fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
             .unwrap_or("unknown")
             .to_string(),
         name: extract_model_display_name(model, &id),
+        input_modalities: None,
         id,
     })
 }
@@ -713,6 +719,7 @@ mod tests {
                 id: "gpt-4o".to_string(),
                 owned_by: "openai".to_string(),
                 name: Some("GPT-4o".to_string()),
+                input_modalities: None,
             })
         );
 
@@ -727,6 +734,7 @@ mod tests {
                 id: "deepseek-chat".to_string(),
                 owned_by: "deepseek".to_string(),
                 name: None,
+                input_modalities: None,
             })
         );
     }

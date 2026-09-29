@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Ear, Eye, EyeOff, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -29,7 +29,7 @@ import {
   toggleOptionalInputModality,
 } from '@/lib/inputModalities';
 import { enrichFetchedModels, resolveModelDisplayName } from '@/lib/providerModels';
-import { mergeCatalogIntoModel, type CatalogEntry } from '@/lib/modelCatalog';
+import { catalogSuggestionFor, type CatalogEntry } from '@/lib/modelCatalog';
 import {
   REASONING_EFFORT_OPTIONS,
   normalizeThinkingLevels,
@@ -425,7 +425,7 @@ export function ProviderConfigPanel() {
   const editingModel =
     draft && editingModelIndex != null ? draft.models[editingModelIndex] ?? null : null;
   // 未声明（null/undefined）与「明确不支持」在 UI 上都表现为开关关闭：前者
-  // 还会由目录建议补上，后者是用户主动表达的「这个模型不思考」。
+  // 会由目录建议自动补上，后者是用户主动表达的「这个模型不思考」。
   const editingThinkingLevels = resolveThinkingLevels(editingModel) ?? [];
   const editingThinkingEnabled = editingThinkingLevels.length > 0;
   const [catalogHit, setCatalogHit] = useState<CatalogEntry | null>(null);
@@ -462,12 +462,26 @@ export function ProviderConfigPanel() {
   // Only worth offering when the catalog would actually add something.
   const catalogSuggestion = useMemo(() => {
     if (!editingModel || !catalogHit) return null;
-    const merged = mergeCatalogIntoModel(editingModel, catalogHit);
-    const changed = (Object.keys(merged) as (keyof ProviderModel)[]).some(
-      (key) => merged[key] !== editingModel[key],
-    );
-    return changed ? merged : null;
+    return catalogSuggestionFor(editingModel, catalogHit);
   }, [catalogHit, editingModel]);
+
+  // 目录命中后自动把建议值补进尚未填写的字段，不必再手动点「应用」。
+  // 只在命中到达时补这一次：用户随后修改或清空的字段不会被填回——把
+  // draft 加进依赖会让「清空」立刻变回「自动补上」，字段就永远清不掉。
+  // 清掉的字段仍可点建议卡片里的「应用」恢复。
+  useLayoutEffect(() => {
+    if (!catalogHit || !draft || editingModelIndex == null) return;
+    const model = draft.models[editingModelIndex];
+    if (!model) return;
+    const suggestion = catalogSuggestionFor(model, catalogHit);
+    if (suggestion) {
+      setDraft({
+        ...draft,
+        models: updateModelAt(draft.models, editingModelIndex, suggestion),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogHit]);
 
   const applyCatalogSuggestion = () => {
     if (!draft || editingModelIndex == null || !catalogSuggestion) return;
@@ -710,11 +724,21 @@ export function ProviderConfigPanel() {
     }
 
     try {
-      const fetched = await daemonFacade.fetchProviderModels(apiKey, baseUrl);
+      const fetched = await daemonFacade.fetchProviderModels(
+        apiKey,
+        baseUrl,
+        current.builtin_template_id,
+      );
+      // The daemon joins models.dev's modalities onto the rows; keep them
+      // alongside the registry-resolved names so added models carry the
+      // catalog's answer instead of the text-only default.
+      const modalitiesById = new Map(
+        fetched.map((item) => [item.id.trim(), item.input_modalities ?? null] as const),
+      );
       const catalog = enrichFetchedModels(
         current.builtin_template_id,
         fetched.map((item) => ({ id: item.id, name: item.name })),
-      );
+      ).map((row) => ({ ...row, input_modalities: modalitiesById.get(row.id) ?? null }));
       if (catalog.length > 0) {
         setPickerCatalog(catalog);
         setPickerSource('api');
@@ -1200,7 +1224,7 @@ export function ProviderConfigPanel() {
                   <p className="text-xs text-muted-foreground">
                     来自 models.dev
                     {catalogSource === 'bundled' ? ' 离线快照' : ''}
-                    ，仅补充你尚未填写的项。
+                    ，仅补充你尚未填写的项；清空后可点「应用」恢复。
                   </p>
                 </div>
               )}

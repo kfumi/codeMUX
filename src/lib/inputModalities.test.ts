@@ -22,8 +22,11 @@ describe('inputModalities', () => {
     expect(modelSupportsVision({ id: 'deepseek-v4-flash', input_modalities: ['text'] })).toBe(false);
   });
 
-  it('infers default modalities from catalog or model id', () => {
-    expect(inferDefaultInputModalities('deepseek-v4-flash', ['text'])).toEqual(['text']);
-    expect(inferDefaultInputModalities('claude-sonnet-4')).toEqual(['text', 'image']);
+  it('infers default modalities from what is declared, never from the id', () => {
+    // A declared value wins as-is.
+    expect(inferDefaultInputModalities(['text'])).toEqual(['text']);
+    expect(inferDefaultInputModalities(['text', 'image'])).toEqual(['text', 'image']);
+    // No id-based guessing: an unknown model stays at the text-only default.
+    expect(inferDefaultInputModalities()).toEqual(['text']);
   });
 });

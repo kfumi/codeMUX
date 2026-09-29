@@ -402,6 +402,42 @@ pub async fn lookup_model(
     }
 }
 
+/// Input modalities for a batch of model ids, keyed by the id as given.
+///
+/// The fetch-models route joins this onto a freshly fetched `/models` list so
+/// rows added from the picker carry the catalog's answer instead of a guess.
+/// Same precedence as [`lookup_in`]: a scoped provider hit wins, then the
+/// global id fallback; ids the catalog does not list are simply absent — a
+/// miss stays "undeclared", never a fabricated text-only verdict.
+pub async fn input_modalities_for_ids(
+    roots: &PathRoots,
+    provider: Option<&str>,
+    ids: &[String],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let snapshot = ensure_snapshot(roots).await;
+    modalities_from_snapshot(&snapshot, provider, ids)
+}
+
+/// The synchronous join behind [`input_modalities_for_ids`], split out so the
+/// precedence rules are testable against a fixture without touching the
+/// network or the process-wide snapshot.
+fn modalities_from_snapshot(
+    snapshot: &Snapshot,
+    provider: Option<&str>,
+    ids: &[String],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut result = std::collections::BTreeMap::new();
+    for id in ids {
+        if id.trim().is_empty() || result.contains_key(id) {
+            continue;
+        }
+        if let Some(entry) = lookup_in(snapshot, provider, id) {
+            result.insert(id.clone(), entry.input_modalities);
+        }
+    }
+    result
+}
+
 /// Display names for the models a provider template can offer, keyed
 /// `"<templateId>::<modelId>"`.
 ///
@@ -567,6 +603,30 @@ mod tests {
         let snapshot = fixture_snapshot();
         assert!(lookup_in(&snapshot, Some("anthropic"), "my-proxy/internal-7").is_none());
         assert!(lookup_in(&snapshot, None, "  ").is_none());
+    }
+
+    #[test]
+    fn batch_modalities_join_scopes_then_falls_back_and_skips_misses() {
+        let snapshot = fixture_snapshot();
+        let ids = vec![
+            "claude-sonnet-4-5".to_string(),
+            "CLAUDE-SONNET-4-5".to_string(),
+            "anthropic/claude-sonnet-4-5".to_string(),
+            "my-proxy/internal-7".to_string(),
+            "  ".to_string(),
+        ];
+        let result = modalities_from_snapshot(&snapshot, Some("some-relay"), &ids);
+        // pdf is dropped and text is always seeded, matching the single lookup.
+        assert_eq!(
+            result.get("claude-sonnet-4-5"),
+            Some(&vec!["text".to_string(), "image".to_string()])
+        );
+        // All normalizations of the same id resolve, each keyed as given.
+        assert!(result.contains_key("CLAUDE-SONNET-4-5"));
+        assert!(result.contains_key("anthropic/claude-sonnet-4-5"));
+        // A miss is absent — the caller records "undeclared", not a guess.
+        assert!(!result.contains_key("my-proxy/internal-7"));
+        assert!(!result.contains_key("  "));
     }
 
     #[test]

@@ -44,22 +44,23 @@ export function modelSupportsVision(model?: ProviderModel | null): boolean | nul
 }
 
 /**
- * Best-guess input modalities for a model the user is adding.
+ * Input modalities to record for a model being added, from what is actually
+ * known: an explicit declaration (a builtin template's curated value, or the
+ * models.dev catalog joined onto the picker row) wins; anything else falls
+ * back to the text-only default.
  *
- * Order matters: an explicit template value wins, then the models.dev catalog,
- * and only then the substring heuristics below. The heuristics exist because
- * relay endpoints serve model ids no public catalog lists — but they are a
- * guess, and the substring rules only cover a handful of families, so a vision
- * model behind a relay used to be recorded as text-only and had its images
- * silently dropped.
+ * Deliberately no substring guessing any more. Family rules go stale — glm-5.x
+ * and DeepSeek grew vision — and a wrong guess written into config reads as a
+ * user declaration that the catalog suggestion must never override (ADR 0015),
+ * so the error was permanent. A catalog miss now stays at the plain default,
+ * which the user can correct in the edit dialog.
  */
 export function inferDefaultInputModalities(
-  modelId: string,
-  templateModalities?: InputModality[] | null,
+  declaredModalities?: InputModality[] | null,
   catalogModalities?: readonly string[] | null,
 ): InputModality[] {
-  if (templateModalities?.length) {
-    return normalizeInputModalities(templateModalities);
+  if (declaredModalities?.length) {
+    return normalizeInputModalities(declaredModalities);
   }
 
   const fromCatalog = normalizeInputModalities(
@@ -71,19 +72,5 @@ export function inferDefaultInputModalities(
     return fromCatalog;
   }
 
-  const normalized = modelId.trim().toLowerCase();
-  if (
-    normalized.includes('claude')
-    || normalized.includes('gpt-4o')
-    || normalized.includes('gpt-5')
-    || normalized.includes('gpt-4.1')
-    || normalized.includes('4v')
-    || normalized.includes('vision')
-  ) {
-    return ['text', 'image'];
-  }
-  if (normalized.includes('deepseek') || normalized.includes('glm-4.7') || normalized.includes('glm-5')) {
-    return ['text'];
-  }
   return ['text'];
 }
