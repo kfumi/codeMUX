@@ -260,6 +260,62 @@ export function piAskToolResultContent(toolName: string | null | undefined, resu
   return JSON.stringify({ answers: answers.map((answer) => [answer ?? '']) });
 }
 
+/**
+ * pi 的工具结果 → 拍平文本。pi 把工具输出放在 `content` 里（文本块数组
+ * `[{type:"text",text}]`，也可能是裸字符串），直接 `JSON.stringify` 整个
+ * result 会让终端面板渲染成 `{"content":[{"type":"text",...}]}` 的 JSON 转储。
+ * 只有非字符串、非对象的 result（如数字）拍不出文本，返回 undefined 交回调用方
+ * 走原来的 JSON 兜底。
+ *
+ * 本函数是历史/重放投影 `crates/daemon/src/agent/pi_history.rs` 的
+ * `flatten_pi_content_text` 的**孪生实现**：同一份 pi 会话既会实时投影、也会被
+ * 重放投影（导入 / 重开会话 / rewind），两侧对同一输入必须输出**逐字相同**的
+ * 字符串，否则「重开会话」会渲染出与当时不同的内容。故文本块分隔符同为 `"\n\n"`、
+ * 空块数组同落空串、非文本块的 `content` 同原样透传。
+ *
+ * 已知且刻意的差异：result 缺 `content`（或为 null）时本侧返回 undefined 走 JSON
+ * 兜底，Rust 侧拍成空串——见下面 null 分支的注释。
+ *
+ * 改任一侧时必须同步改另一侧，并同时更新两侧测试。
+ */
+function flattenPiResultText(result: unknown): string | undefined {
+  if (typeof result === 'string') {
+    return result;
+  }
+
+  if (!isRecord(result)) {
+    return undefined;
+  }
+
+  const content = result.content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((block) => isRecord(block) && block.type === 'text' && typeof block.text === 'string' && block.text.length > 0)
+      .map((block) => block.text as string)
+      .join('\n\n');
+  }
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (content == null) {
+    // 刻意与 Rust 侧不同：Rust 的 `unwrap_or(&Value::Null)` 会把缺失/null 的
+    // `content` 拍成空串，这里改回整个 result 的 JSON——空串会把
+    // `{"message":"boom"}` 这类没有 `content` 的工具结果整条吞掉。真实 pi 的
+    // toolResult 一定带 `content`，这条分支只兜住非标准返回值；两侧只在
+    // 「没有 content」这一种畸形输入上不同，真实会话不受影响。
+    return undefined;
+  }
+
+  // 非文本块的 content 原样透传（对齐 Rust 侧 `other => other.clone()`）。
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+}
+
 function projectToolEnd(event: PiRuntimeEvent, outputs: CodeMuxEvent[]): void {
   const toolCallId = readString(event.toolCallId);
   if (!toolCallId) return;
@@ -268,13 +324,17 @@ function projectToolEnd(event: PiRuntimeEvent, outputs: CodeMuxEvent[]): void {
   let content = '';
   if (askContent !== null) {
     content = askContent;
-  } else if (typeof event.result === 'string') {
-    content = event.result;
-  } else if (event.result !== undefined && event.result !== null) {
-    try {
-      content = JSON.stringify(event.result);
-    } catch {
-      content = String(event.result);
+  } else {
+    // 提问工具之外一律先拍平 pi 的 content 块，让命令输出与其他运行时一样是纯文本。
+    const flattened = flattenPiResultText(event.result);
+    if (flattened !== undefined) {
+      content = flattened;
+    } else if (event.result !== undefined && event.result !== null) {
+      try {
+        content = JSON.stringify(event.result);
+      } catch {
+        content = String(event.result);
+      }
     }
   }
   outputs.push({

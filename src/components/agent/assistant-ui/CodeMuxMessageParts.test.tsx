@@ -221,6 +221,27 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(container.textContent).not.toContain('"workdir"');
   });
 
+  it('pi 落盘前的工具结果按 content 文本块展开，不渲染成 JSON 转储', () => {
+    const command = 'cd /tmp && head -c 500 comments.txt';
+    // 实时投影已在 sidecar 拍平；这里覆盖**升级前落盘**的
+    // `{"content":[{"type":"text",...}]}` 形状（session 历史里仍是转储串）。
+    const legacy = JSON.stringify({
+      content: [{ type: 'text', text: ' = <decode err>\n = <decode err>' }],
+      details: {},
+    });
+
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart toolName="Bash" args={{ command }} result={legacy} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /运行|终端/ }));
+
+    const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+    expect(panel?.textContent).toContain('<decode err>');
+    expect(panel?.textContent).not.toContain('"type": "text"');
+    expect(panel?.textContent).not.toContain('"content"');
+  });
+
   it('Bash 展开面板展示真实命令而不是 header 里的 description', () => {
     const { container } = renderWithTooltip(
       <CodeMuxToolCallMessagePart

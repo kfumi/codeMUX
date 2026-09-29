@@ -219,7 +219,7 @@ describe('piEvents tool execution', () => {
     expect(blank[0]).toMatchObject({ content: '{"answers":[[""]]}' });
   });
 
-  it('keeps the raw result when the ask tool has no structured answers', () => {
+  it('flattens the result when the ask tool has no structured answers', () => {
     const ctx = createContext();
     const withoutDetails = toCodeMuxEvents(
       {
@@ -231,9 +231,11 @@ describe('piEvents tool execution', () => {
       },
       ctx,
     );
+    // 提问投影拿不到结构化答案时回落到拍平文本，而不是 JSON 转储。
+    // 与 `crates/daemon/src/agent/pi_history.rs` 的 `without_details` 用例逐字一致。
     expect(withoutDetails[0]).toMatchObject({
       type: 'tool_finished',
-      content: '{"content":[{"type":"text","text":"Q1: a"}],"details":{}}',
+      content: 'Q1: a',
     });
 
     // 空 answers 数组：本侧返回空 answers，Rust 侧返回拍平文本——双方注释里记录的
@@ -250,7 +252,9 @@ describe('piEvents tool execution', () => {
     );
     expect(emptyAnswers[0]).toMatchObject({ content: '{"answers":[]}' });
 
-    // 非提问工具即便碰巧带 details.answers 也不改写（避免误伤别的工具输出）。
+    // 非提问工具即便碰巧带 details.answers 也不套用提问投影（避免误伤别的工具输出）。
+    // 缺 `content` 时本侧保留整个 result 的 JSON（Rust 侧会拍成空串，见双方注释
+    // 记录的刻意差异），避免把非标准返回值的工具结果整条吞掉。
     const otherTool = toCodeMuxEvents(
       {
         type: 'tool_execution_end',
@@ -265,6 +269,100 @@ describe('piEvents tool execution', () => {
       type: 'tool_finished',
       content: '{"details":{"answers":[{"question":"Q","answer":"a"}]}}',
     });
+  });
+
+  it('flattens content text blocks for non-ask tools', () => {
+    const ctx = createContext();
+
+    // 命令输出按 "\n\n" 拼成纯文本，而不是 `{"content":[{"type":"text",...}]}` 转储。
+    // 与 `crates/daemon/src/agent/pi_history.rs` 的
+    // `flattens_error_tool_result_content` 逐字一致。
+    const failed = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-err',
+        toolName: 'bash',
+        result: {
+          content: [
+            { type: 'text', text: 'tree: command not found' },
+            { type: 'text', text: 'Command exited with code 127' },
+          ],
+          details: {},
+        },
+        isError: true,
+      },
+      ctx,
+    );
+    expect(failed[0]).toMatchObject({
+      type: 'tool_finished',
+      content: 'tree: command not found\n\nCommand exited with code 127',
+      is_error: true,
+    });
+
+    // 字符串 content 原样透传。
+    const stringContent = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-str',
+        toolName: 'bash',
+        result: { content: 'hello' },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(stringContent[0]).toMatchObject({ content: 'hello' });
+
+    // 非文本块被忽略。
+    const noText = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-img',
+        toolName: 'bash',
+        result: { content: [{ type: 'image', data: 'xx' }] },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(noText[0]).toMatchObject({ content: '' });
+
+    // 裸字符串 result 保持原样。
+    const plainString = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-plain',
+        toolName: 'read',
+        result: 'file contents',
+        isError: false,
+      },
+      ctx,
+    );
+    expect(plainString[0]).toMatchObject({ content: 'file contents' });
+
+    // 拍不出文本的 result（数字等非字符串非对象）仍走 JSON.stringify 兜底。
+    const numeric = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-num',
+        toolName: 'bash',
+        result: 42,
+        isError: false,
+      },
+      ctx,
+    );
+    expect(numeric[0]).toMatchObject({ content: '42' });
+
+    // 非文本块的 content 原样透传（对齐 Rust 侧 `other => other.clone()`）。
+    const passthrough = toCodeMuxEvents(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'call-obj',
+        toolName: 'bash',
+        result: { content: { stdout: 'x' } },
+        isError: false,
+      },
+      ctx,
+    );
+    expect(passthrough[0]).toMatchObject({ content: '{"stdout":"x"}' });
   });
 
   it('ignores lifecycle and unsupported events without output', () => {

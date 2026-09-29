@@ -769,9 +769,41 @@ function formatShellCommandOutput(result: unknown): string | undefined {
     if (parts.length > 0) {
       return parts.join('\n');
     }
+
+    // pi 把工具输出放在 `content` 块数组里。实时投影已在 sidecar 拍平
+    // （`piEvents.ts` 的 `flattenPiResultText`），但**升级前落盘的**工具结果
+    // 仍是 `{"content":[{"type":"text",...}]}` 的转储串，这里补一次拆包，
+    // 避免历史会话里的命令输出渲染成 JSON。
+    const content = flattenContentBlocks(result.content);
+    if (content !== undefined) {
+      return content;
+    }
   }
 
   return stringifyResult(result);
+}
+
+/**
+ * `[{type:"text",text}]` → 文本；`text` 字符串 → 原样；不可识别时返回 undefined。
+ * 与 `convertAgentEvents.ts` 的 `stringifyToolResultContent` 同口径。
+ */
+function flattenContentBlocks(content: unknown): string | undefined {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const textParts = content
+    .filter(
+      (block): block is Record<string, unknown> =>
+        isRecord(block) && block.type === 'text' && typeof block.text === 'string',
+    )
+    .map((block) => block.text as string);
+
+  return textParts.length > 0 ? textParts.join('\n') : undefined;
 }
 
 /**
