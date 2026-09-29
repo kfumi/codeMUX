@@ -73,8 +73,13 @@ function ToolFallbackRoot({
  * 工具行：动作图标 + 动作词 + 等宽摘要（由调用方通过 `children` 传入）+ 行尾状态 + 箭头。
  * 动作词与状态分离，是因为一行里「在做什么」和「做完没有」是两件事——参考实现里
  * 状态靠行尾的 spinner / 失败文字表达，图标只说明动作类别，读一列工具行时可以按形状扫读。
- * 动作词是 UI 字体、右侧摘要是等宽字体：两种字体的 ascent/descent 不同，按几何居中会让
- * 等宽摘要比动作词高出约 2px，所以这一组按**基线**对齐（图标、状态、箭头仍各自居中）。
+ *
+ * 垂直方向分两层：整行**几何居中**（`min-h-6` 的行内所有元素居中），文字区
+ * （动作词 + 摘要 + 状态徽标）作为居中的一组，组内**按基线对齐**。徽标必须落在
+ * 动作词的基线上，不能按几何居中——动作词是 UI 字体而摘要是等宽字体，两种字形
+ * 的行高不同，按几何居中会让「失败」比左边描述高约 1px，肉眼就是没在一个水平上。
+ * 整行**不能**改成 `items-baseline`：`min-h-6` 会把基线组顶到伸缩后行的首沿，
+ * 文字整体比居中的图标高约 3px。
  */
 function ToolFallbackTrigger({
   toolName,
@@ -106,16 +111,20 @@ function ToolFallbackTrigger({
       role="status"
       aria-live="polite"
       aria-label="运行中"
-      className="size-[11px] shrink-0 animate-spin rounded-full border-[1.5px] border-border border-t-muted-foreground motion-reduce:animate-none"
+      className="size-[11px] shrink-0 self-center animate-spin rounded-full border-[1.5px] border-border border-t-muted-foreground motion-reduce:animate-none"
     />
   ) : isError ? (
+    // 徽标刻意**不是** flex 容器：flex 容器的基线取自第一个 flex item，而 SVG 的
+    // 基线在底边，`items-baseline` 会把图标顶到「失败」上方。普通行内 span 的基线
+    // 就是它自己的文字基线，外层文字区的 `items-baseline` 才能把「失败」和动作词
+    // 对齐；图标退回行内元素、用 `align-middle` 在文字上做视觉居中。
     <span
       data-slot="tool-fallback-status"
       role="status"
       aria-live="polite"
-      className="inline-flex shrink-0 items-center gap-1 text-ui-caption text-destructive"
+      className="shrink-0 text-ui-caption text-destructive"
     >
-      <XCircleIcon className="size-3" aria-hidden />
+      <XCircleIcon className="mr-1 inline-block size-3 align-middle" aria-hidden />
       失败
     </span>
   ) : isCancelled ? (
@@ -132,7 +141,7 @@ function ToolFallbackTrigger({
       data-slot="tool-fallback-status"
       role="status"
       aria-live="polite"
-      className="inline-flex shrink-0 items-center text-[hsl(var(--warning))]"
+      className="inline-flex shrink-0 items-center self-center text-[hsl(var(--warning))]"
     >
       <AlertCircleIcon className="size-3.5" aria-hidden />
     </span>
@@ -149,19 +158,24 @@ function ToolFallbackTrigger({
       {...props}
     >
       <ToolActionIcon toolName={toolName} className="text-muted-foreground" />
-      <span
-        data-slot="tool-fallback-trigger-label"
-        className={cn(
-          'relative inline-flex min-w-0 items-baseline gap-1.5 overflow-hidden text-start',
-          isCancelled && 'text-muted-foreground line-through',
-        )}
-      >
-        <span data-slot="tool-fallback-trigger-name" className="shrink-0 font-medium">
-          {label}
+      {/* 文字区（动作词 + 摘要 + 状态徽标）整体在 24px 行里居中，内部按基线对齐。
+          整行不能用 `items-baseline`：`min-h-6` 会把基线组顶到伸缩后的行首沿，
+          文字整体比居中的图标高约 3px。 */}
+      <span data-slot="tool-fallback-trigger-body" className="inline-flex min-w-0 items-baseline gap-1 text-start">
+        <span
+          data-slot="tool-fallback-trigger-label"
+          className={cn(
+            'relative inline-flex min-w-0 items-baseline gap-1.5 overflow-hidden text-start',
+            isCancelled && 'text-muted-foreground line-through',
+          )}
+        >
+          <span data-slot="tool-fallback-trigger-name" className="shrink-0 font-medium">
+            {label}
+          </span>
+          {children}
         </span>
-        {children}
+        {statusNode}
       </span>
-      {statusNode}
       <ChevronDownIcon
         data-slot="tool-fallback-trigger-chevron"
         className={cn(
