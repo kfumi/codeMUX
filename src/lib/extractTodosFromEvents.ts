@@ -1,4 +1,5 @@
 import type { TodoItem } from '../types/agent';
+import { parseTodoItemsFromArgs } from './todoToolArgs';
 
 type AssistantToolUseBlock = {
   type?: string;
@@ -30,12 +31,6 @@ type PendingTaskCreate = {
   subject: string;
   activeForm?: string;
 };
-
-function normalizeTodoStatus(status: unknown): TodoItem['status'] {
-  return (['pending', 'in_progress', 'completed'].includes(String(status))
-    ? status
-    : 'pending') as TodoItem['status'];
-}
 
 function isTodoListReplacementTool(name: string): boolean {
   return name === 'todowrite' || name === 'update_plan';
@@ -112,13 +107,9 @@ export function extractTodosFromEvents(events: ReadonlyArray<{ kind: string; dat
 
         if (isTodoListReplacementTool(block.name)) {
           const input = block.input ?? {};
-          const inputTodos = block.name === 'update_plan' ? input.plan : input.todos;
-          if (Array.isArray(inputTodos)) {
-            const newTodos = inputTodos.map((t: Record<string, unknown>) => ({
-              content: String(t.content || t.step || ''),
-              status: normalizeTodoStatus(t.status),
-              activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
-            }));
+          // 字段名各家不同（`todos[].content` / `plan[].step` …），解析集中在 todoToolArgs。
+          const newTodos = parseTodoItemsFromArgs(input);
+          if (newTodos) {
             todos = newTodos;
             taskMap.clear();
             newTodos.forEach((t, i) => {

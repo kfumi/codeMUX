@@ -24,32 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { TooltipHint } from '../../ui/tooltip';
 import type { TodoItem } from '../../../types/agent';
 import { GitBranchDialog } from './GitBranchDialog';
-
-function getTodoStatusIcon(status: TodoItem['status']) {
-  switch (status) {
-    case 'completed':
-      return (
-        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="2 5.5 4 7.5 8 3" />
-          </svg>
-        </span>
-      );
-    case 'in_progress':
-      return (
-        <span className="relative flex h-4 w-4 items-center justify-center">
-          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning)/0.4)]" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning))]" />
-        </span>
-      );
-    case 'pending':
-      return (
-        <span className="flex h-4 w-4 items-center justify-center">
-          <span className="h-2 w-2 rounded-full bg-muted-foreground/20" />
-        </span>
-      );
-  }
-}
+import { TodoStatusIcon } from '../../agent/TodoStatusIcon';
 
 /** 超过该数量时折叠前面的条目，仅展示最后 N 条 */
 const MAX_VISIBLE_LIST_ITEMS = 3;
@@ -85,7 +60,7 @@ function TodoSection({ todos }: { todos: TodoItem[] }) {
       <div className="space-y-0.5 px-1.5 pb-1">
         {visibleTodos.map((todo, i) => (
           <div key={i} className="flex items-start gap-2.5 rounded-md px-1 py-1 text-xs leading-relaxed">
-            <span className="mt-0.5 shrink-0">{getTodoStatusIcon(todo.status)}</span>
+            <TodoStatusIcon status={todo.status} className="mt-0.5" />
             <span className={
               todo.status === 'completed'
                 ? 'text-muted-foreground/40 line-through'

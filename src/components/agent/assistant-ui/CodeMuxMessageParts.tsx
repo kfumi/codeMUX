@@ -17,6 +17,8 @@ import { useSubagentStore } from '../../../stores/subagentStore';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
+import { TodoToolList } from '../TodoToolList';
+import { getTodoListForTool, readTodoExplanation } from '../../../lib/todoToolArgs';
 import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -298,7 +300,12 @@ function CodeMuxToolCallMessagePartImpl({
   const codeChangeStats = codeFilePath ? getCodeChangeStats(args) : null;
   const shellCommand = isShellCommandTool(toolName) ? getShellCommand(args) : undefined;
   const isShellCommandPanel = Boolean(shellCommand) && !codeFilePath;
-  const displayableArgs = codeFilePath || isShellCommandPanel ? null : getToolDisplayableArgs(toolName, args, []);
+  // 待办类工具展开后渲染成一行行待办（`todos` / `plan` 各家字段名不同，解析在
+  // `getTodoListForTool`），因此参数 JSON 不再重复展示。返回空数组表示「是待办工具但没解析出条目」。
+  const todoItems = getTodoListForTool(toolName, args);
+  const displayableArgs = codeFilePath || isShellCommandPanel || todoItems
+    ? null
+    : getToolDisplayableArgs(toolName, args, []);
   const resolvedArgsText = argsText && displayableArgs
     ? JSON.stringify(displayableArgs, null, 2)
     : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined;
@@ -382,6 +389,8 @@ function CodeMuxToolCallMessagePartImpl({
             command={shellCommand}
             output={formatShellCommandOutput(result)}
           />
+        ) : todoItems ? (
+          <TodoToolList items={todoItems} explanation={readTodoExplanation(args)} />
         ) : (
           <>
             {resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}

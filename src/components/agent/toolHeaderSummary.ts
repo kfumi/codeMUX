@@ -72,7 +72,7 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
 
 const CODEX_MULTI_AGENT_TOOL_PATTERN = /^multi_agent_v\d+_+/;
 
-function normalizeToolName(toolName: string): string {
+export function normalizeToolName(toolName: string): string {
   if (toolName.startsWith('mcp__')) return toolName;
   const stripped = CODEX_MULTI_AGENT_TOOL_PATTERN.test(toolName)
     ? toolName.replace(CODEX_MULTI_AGENT_TOOL_PATTERN, '')

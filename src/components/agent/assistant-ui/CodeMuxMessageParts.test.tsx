@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { CheckSquare, SquareTerminal } from 'lucide-react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -112,6 +113,123 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('200ms');
     expect(toolContent.className).toContain('animate-collapsible-down');
     expect(toolContent.className).toContain('duration-(--animation-duration)');
+  });
+
+  it('待办工具展开后渲染成一行行待办，不再展示参数 JSON', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="TodoWrite"
+        args={{
+          todos: [
+            { content: '读取代码', status: 'completed' },
+            { content: '修改实现', status: 'in_progress', activeForm: '正在修改实现' },
+            { content: '补充测试', status: 'pending' },
+          ],
+        }}
+        result="Todos have been modified successfully."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /更新待办/ }));
+
+    const list = container.querySelector('[data-slot="tool-todo-list"]');
+    const rows = container.querySelectorAll('[data-slot="tool-todo-item"]');
+    expect(list).not.toBeNull();
+    expect(rows).toHaveLength(3);
+    expect(rows[0].getAttribute('data-status')).toBe('completed');
+    expect(rows[1].getAttribute('data-status')).toBe('in_progress');
+    expect(rows[2].getAttribute('data-status')).toBe('pending');
+
+    // 进行中且有 activeForm 时展示进行时文案
+    expect(rows[1].textContent).toContain('正在修改实现');
+    // 每行前面都有状态图标
+    expect(container.querySelectorAll('[data-slot="todo-status-icon"]')).toHaveLength(3);
+
+    // 参数 JSON 与原始结果都不再展示
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.textContent).not.toContain('"todos"');
+    expect(container.textContent).not.toContain('Todos have been modified');
+  });
+
+  it('Codex update_plan 用 plan[].step 渲染，并在列表上方显示 explanation', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="update_plan"
+        args={{
+          explanation: '计划已全部完成',
+          plan: [
+            { step: 'Step 1', status: 'completed' },
+            { step: 'Step 2', status: 'in_progress' },
+          ],
+        }}
+        result="plan updated"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /更新计划/ }));
+
+    const rows = container.querySelectorAll('[data-slot="tool-todo-item"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('Step 1');
+    expect(rows[1].textContent).toContain('Step 2');
+    expect(container.querySelector('[data-slot="tool-todo-list"]')?.textContent).toContain('计划已全部完成');
+    expect(container.textContent).not.toContain('"plan"');
+  });
+
+  it('未知工具名但带 todos 数组时也按待办渲染', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="some_future_todo_tool"
+        args={{ todos: [{ content: 'A', status: 'pending' }] }}
+        result="ok"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /some_future_todo_tool/ }));
+
+    expect(container.querySelectorAll('[data-slot="tool-todo-item"]')).toHaveLength(1);
+    expect(container.textContent).not.toContain('"todos"');
+  });
+
+  it('非待办工具即使带 plan 数组也不会被当成待办渲染', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Agent"
+        args={{ plan: [{ step: 'sub step', status: 'pending' }] }}
+        result="ok"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /子智能体/ }));
+
+    expect(container.querySelector('[data-slot="tool-todo-list"]')).toBeNull();
+  });
+
+  it('待办/计划工具行使用待办图标，而不是兜底的扳手图标', () => {
+    // lucide 会给图标加 `lucide-<name>` class，用它区分不同图标（名字随 lucide 版本变）。
+    const iconName = (root: HTMLElement) =>
+      root.querySelector('svg')?.getAttribute('class')?.match(/lucide-[a-z-]+/)?.[0];
+    const triggerIconName = (root: HTMLElement) =>
+      iconName(root.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLElement);
+
+    const todoIcon = iconName(render(<CheckSquare />).container);
+    const terminalIcon = iconName(render(<SquareTerminal />).container);
+    expect(todoIcon).toBeTruthy();
+    expect(todoIcon).not.toBe(terminalIcon);
+
+    for (const toolName of ['TodoWrite', 'todowrite', 'update_plan', 'TaskList']) {
+      const { container, unmount } = renderWithTooltip(
+        <CodeMuxToolCallMessagePart toolName={toolName} args={{}} result="ok" />,
+      );
+      expect(triggerIconName(container), toolName).toBe(todoIcon);
+      unmount();
+    }
+
+    // 其他工具不受影响，仍用各自的动作图标
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart toolName="Bash" args={{ command: 'ls' }} result="ok" />,
+    );
+    expect(triggerIconName(container)).toBe(terminalIcon);
   });
 
   it('工具标题行按内容收缩，参数可截断但不把折叠按钮和 diff 统计推到行尾', () => {
