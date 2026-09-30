@@ -24,8 +24,10 @@ import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
 import { buildConversationTurns } from '@/lib/conversationTurns';
 import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
+import { subagentLiveTail } from '@/lib/subagentStreamingTail';
 import { SUBAGENT_STATUS_TONES } from '@/lib/subagentStatusTone';
 import { cn } from '@/lib/utils';
+import { SubagentLiveTailView } from './SubagentLiveTail';
 
 interface SubagentPreviewPanelProps {
   sessionId: string;
@@ -159,6 +161,16 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
     return isRunning ? omitLatestTurnCollapse(map, parsedEvents) : map;
   }, [compactAiOutput, parsedEvents, timestamps, isRunning]);
 
+  /**
+   * 未提交的正文尾部。
+   *
+   * 时间线里同时存着「已提交正文」和「还在流式到达的增量」（daemon 为了历史可回放把
+   * 每条 delta 都落了库），而 `convertAgentEventsToAssistantMessages` 只投影已提交的那
+   * 一半。没有这一段时，子智能体正文要等 provider 的 `assistant_message` 信封到达才整段
+   * 出现 —— 也就是这条消息结束的那一刻。信封一到，尾部清空、文字挪进已提交消息。
+   */
+  const liveTail = useMemo(() => subagentLiveTail(parsedEvents), [parsedEvents]);
+
   const viewportRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
     viewportRef,
@@ -253,8 +265,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
              「回到底部」按钮：它 `bottom-4` + `h-8`，占住离底 16–48px 那条带，
              留白比它小时最后一行会被按钮压住。 */
           <div className="space-y-2 pb-14">
-            {displayMessages.map((message, messageIndex) => {
-              const collapseInfo = compactAiOutput
+            {displayMessages.map((message, messageIndex) => {              const collapseInfo = compactAiOutput
                 ? getCollapseInfoForSourceIndices(
                   message.metadata.sourceEventIndices,
                   collapseInfoByEventIndex,
@@ -297,6 +308,13 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                 />
               );
             })}
+            {/* 未提交正文尾部：已到达、但信封还没来的那段。门槛只看「尾部非空」而
+                不看 `isRunning`：终态却仍带着未提交 delta 是可能的（信封与终态之间
+                有竞态），此时正文只存在于 delta 里，按运行态过滤会把这段直接弄丢。
+                `streaming` 只影响光标与分帧绘制，不影响内容。 */}
+            {liveTail.streaming ? (
+              <SubagentLiveTailView tail={liveTail} streaming={isRunning} />
+            ) : null}
           </div>
         )}
       </div>

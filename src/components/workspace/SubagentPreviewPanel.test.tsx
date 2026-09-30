@@ -371,8 +371,114 @@ describe('SubagentPreviewPanel', () => {
     expect(container.querySelector('pre, code')).toBeTruthy();
   });
 
-  it('工具调用使用主会话同一套工具卡片', () => {
-    seedStore({
+  /**
+   * 实时尾部：daemon 为了历史可回放把每条 delta 都落了库，而消息投影只认已提交的那
+   * 一半。没有尾部时子智能体正文要等 `assistant_message` 信封到达才整段出现。
+   */
+  describe('未提交正文尾部', () => {
+    const prompt = {
+      type: 'user_message',
+      content: '探索前端技术栈',
+      event_id: 'e0',
+      timestamp: '2026-08-29T05:47:19.000Z',
+    };
+
+    it('运行中把已到达但未提交的正文显示出来', () => {
+      seedStore({
+        status: 'running',
+        events: [
+          prompt,
+          { type: 'content_started', index: 0, content_kind: 'text', event_id: 'd0', timestamp: '2026-08-29T05:47:20.000Z' },
+          { type: 'text_delta', index: 0, text: '结论：', event_id: 'd1', timestamp: '2026-08-29T05:47:20.100Z' },
+          { type: 'text_delta', index: 0, text: '用 Vite。', event_id: 'd2', timestamp: '2026-08-29T05:47:20.200Z' },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      expect(container.querySelector('[data-slot="subagent-live-tail"]')).toBeTruthy();
+      expect(container.textContent).toContain('结论：');
+      expect(container.textContent).toContain('用 Vite。');
+    });
+
+    it('信封到达后尾部消失，同一段文字不显示两次', () => {
+      seedStore({
+        status: 'running',
+        events: [
+          prompt,
+          { type: 'content_started', index: 0, content_kind: 'text', event_id: 'd0', timestamp: '2026-08-29T05:47:20.000Z' },
+          { type: 'text_delta', index: 0, text: '结论：用 Vite。', event_id: 'd1', timestamp: '2026-08-29T05:47:20.100Z' },
+          { type: 'content_finished', index: 0, event_id: 'd2', timestamp: '2026-08-29T05:47:20.200Z' },
+          {
+            type: 'assistant_message',
+            content: [{ type: 'text', text: '结论：用 Vite。' }],
+            event_id: 'e1',
+            timestamp: '2026-08-29T05:47:20.300Z',
+          },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      expect(container.querySelector('[data-slot="subagent-live-tail"]')).toBeNull();
+      const occurrences = (container.textContent ?? '').split('结论：用 Vite。').length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    it('终态但仍有未提交 delta 时照样显示（信封与终态之间有竞态，不能把正文弄丢）', () => {
+      seedStore({
+        status: 'completed',
+        events: [
+          prompt,
+          { type: 'text_delta', index: 0, text: '收尾正文', event_id: 'd1', timestamp: '2026-08-29T05:47:20.100Z' },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      expect(container.querySelector('[data-slot="subagent-live-tail"]')).toBeTruthy();
+      expect(container.textContent).toContain('收尾正文');
+    });
+
+    it('信封已到、尾部为空时不显示尾部', () => {
+      seedStore({
+        status: 'completed',
+        events: [
+          prompt,
+          { type: 'text_delta', index: 0, text: '收尾正文', event_id: 'd1', timestamp: '2026-08-29T05:47:20.100Z' },
+          {
+            type: 'assistant_message',
+            content: [{ type: 'text', text: '收尾正文' }],
+            event_id: 'e1',
+            timestamp: '2026-08-29T05:47:20.300Z',
+          },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      expect(container.querySelector('[data-slot="subagent-live-tail"]')).toBeNull();
+    });
+
+    it('思考增量走思考折叠组件，不混进正文', () => {
+      seedStore({
+        status: 'running',
+        events: [
+          prompt,
+          { type: 'reasoning_delta', index: 0, text: '先看入口文件', event_id: 'd0', timestamp: '2026-08-29T05:47:20.000Z' },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      const tail = container.querySelector('[data-slot="subagent-live-tail"]');
+      expect(tail).toBeTruthy();
+      expect(tail?.querySelector('[data-streaming-reasoning="true"]')).toBeTruthy();
+      expect(tail?.querySelector('[data-streaming-text="markdown"]')).toBeNull();
+    });
+  });
+
+  it('工具调用使用主会话同一套工具卡片', () => {    seedStore({
       status: 'completed',
       events: [
         {
