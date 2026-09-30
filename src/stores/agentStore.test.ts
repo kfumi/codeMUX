@@ -4759,7 +4759,7 @@ describe('agent store Codex history loading', () => {
     }
   });
 
-  it('reorders pi text-before-tools projection before turn completion', async () => {
+  it('keeps pi text-only narration before the tool that follows it', async () => {
     vi.useFakeTimers();
     let emitEvent: ((event: string) => void) | undefined;
     startSessionMock.mockImplementationOnce(async (_s: string, _p: string, _c: string, onEvent: (e: string) => void) => {
@@ -4772,9 +4772,9 @@ describe('agent store Codex history loading', () => {
 
       send({
         type: 'assistant_message',
-        event_id: 'final-1',
-        content: [{ type: 'text', text: '最终结论。' }],
-        provider_stop_reason: 'stop',
+        event_id: 'narration-1',
+        content: [{ type: 'text', text: '先看下代码。' }],
+        provider_stop_reason: 'tool_use',
       });
       send({
         type: 'tool_started',
@@ -4790,10 +4790,43 @@ describe('agent store Codex history loading', () => {
         content: 'ok',
         is_error: false,
       });
+      await vi.advanceTimersByTimeAsync(120);
+
+      // 实时阶段：工具到达时不得被提到叙述之上（用户实际看到的时序）。
+      const liveEvents = useAgentStore.getState().events[session.id] ?? [];
+      const liveNarrationIndex = liveEvents.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '先看下代码。',
+        )
+      ));
+      const liveToolIndex = liveEvents.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+      ));
+      expect(liveNarrationIndex).toBeGreaterThanOrEqual(0);
+      expect(liveToolIndex).toBeGreaterThanOrEqual(0);
+      expect(liveNarrationIndex).toBeLessThan(liveToolIndex);
+
+      send({
+        type: 'assistant_message',
+        event_id: 'final-1',
+        content: [
+          { type: 'thinking', thinking: 'reviewing' },
+          { type: 'text', text: '结论如下。' },
+        ],
+        provider_stop_reason: 'stop',
+      });
       send({ type: 'turn_finished', event_id: 'turn-1', outcome: 'completed' });
       await vi.advanceTimersByTimeAsync(120);
 
       const events = useAgentStore.getState().events[session.id] ?? [];
+      const narrationIndex = events.findIndex((event) => (
+        event.kind === 'assistant'
+        && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+          (block) => block.type === 'text' && block.text === '先看下代码。',
+        )
+      ));
       const toolAssistantIndex = events.findIndex((event) => (
         event.kind === 'assistant'
         && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
@@ -4801,12 +4834,16 @@ describe('agent store Codex history loading', () => {
       const finalTextIndex = events.findIndex((event) => (
         event.kind === 'assistant'
         && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
-          (block) => block.type === 'text' && block.text === '最终结论。',
+          (block) => block.type === 'text' && block.text === '结论如下。',
         )
       ));
 
+      // 落定后仍是「先叙述、后工具、再最终回答」的源码顺序。
+      expect(narrationIndex).toBeGreaterThanOrEqual(0);
       expect(toolAssistantIndex).toBeGreaterThanOrEqual(0);
-      expect(finalTextIndex).toBeGreaterThan(toolAssistantIndex);
+      expect(finalTextIndex).toBeGreaterThanOrEqual(0);
+      expect(narrationIndex).toBeLessThan(toolAssistantIndex);
+      expect(toolAssistantIndex).toBeLessThan(finalTextIndex);
     } finally {
       vi.useRealTimers();
     }

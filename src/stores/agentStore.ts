@@ -716,41 +716,6 @@ function appendPiNarrationFinalAfterTools(
   ];
 }
 
-function insertPiProcessEventBeforeTrailingNarration(
-  baseEvents: AgentMessage[],
-  event: AgentMessage,
-  sessionId: string,
-): AgentMessage[] {
-  if (getSessionAgentKind(sessionId) !== 'pi') {
-    return [...baseEvents, event];
-  }
-
-  if (event.kind !== 'assistant' || !isToolOnlyAssistantEvent(event)) {
-    if (event.kind !== 'tool_result') {
-      return [...baseEvents, event];
-    }
-  }
-
-  for (let index = baseEvents.length - 1; index >= 0; index -= 1) {
-    const candidate = baseEvents[index];
-    if (candidate?.kind === 'tool_result') {
-      continue;
-    }
-    if (candidate?.kind !== 'assistant') {
-      break;
-    }
-    if (isToolOnlyAssistantEvent(candidate)) {
-      continue;
-    }
-    if (isNarrationOnlyAssistantEvent(candidate) || isNarrationContinuationAssistantEvent(candidate)) {
-      return [...baseEvents.slice(0, index), event, ...baseEvents.slice(index)];
-    }
-    break;
-  }
-
-  return [...baseEvents, event];
-}
-
 function appendPiContinuationAssistantMessage(
   baseEvents: AgentMessage[],
   event: Extract<AgentMessage, { kind: 'assistant' }>,
@@ -2668,7 +2633,7 @@ function createSessionEventHandler(
           }
         }
       } else {
-        newEvents = insertPiProcessEventBeforeTrailingNarration(baseEvents, event, sessionId);
+        newEvents = [...baseEvents, event];
       }
       if (event.kind === 'result') {
         newEvents = normalizeTurnProcessEventOrder(newEvents);
