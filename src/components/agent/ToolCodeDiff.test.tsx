@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ToolCallCard } from './ToolCallCard';
-import { ToolCodeDiff } from './ToolCodeDiff';
+import { ToolCodeDiff, getCodeChangeStats } from './ToolCodeDiff';
 import { TooltipProvider } from '../ui/tooltip';
 
 function renderWithTooltip(ui: React.ReactElement) {
@@ -40,6 +40,38 @@ describe('ToolCodeDiff', () => {
 
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="del"]')?.textContent).toContain('target="8"');
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain('target="7"');
+  });
+
+  it('renders pi edit (path + edits array) as an inline diff', () => {
+    const { container } = render(
+      <ToolCodeDiff
+        toolName="edit"
+        input={{
+          path: 'D:\\project\\GitEnvironmentPopover.tsx',
+          edits: [
+            {
+              oldText: '                <ChevronDown className="h-3.5 w-3.5" />',
+              newText: '                <ChevronRight className="h-4 w-4" />',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="del"]')?.textContent).toContain('ChevronDown');
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain('ChevronRight');
+  });
+
+  it('counts additions and deletions across all pi edit hunks', () => {
+    const stats = getCodeChangeStats({
+      path: 'D:\\project\\GitEnvironmentPopover.tsx',
+      edits: [
+        { oldText: 'a', newText: 'b' },
+        { oldText: 'c', newText: 'd' },
+      ],
+    });
+
+    expect(stats).toEqual({ additions: 2, deletions: 2 });
   });
 
   it('renders write arguments as a new-file diff', () => {

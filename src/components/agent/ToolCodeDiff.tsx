@@ -20,6 +20,17 @@ type PatchDiff = {
   files: PatchFile[];
 };
 
+type EditHunk = {
+  oldText: string;
+  newText: string;
+};
+
+type EditsDiff = {
+  kind: 'edits';
+  filePath: string;
+  edits: EditHunk[];
+};
+
 type PatchFile = {
   operation: 'add' | 'update' | 'delete';
   path: string;
@@ -27,7 +38,7 @@ type PatchFile = {
 };
 
 export function getCodeChangeFilePath(input: Record<string, unknown>): string | undefined {
-  const filePath = input.file_path ?? input.filePath;
+  const filePath = input.file_path ?? input.filePath ?? input.path;
   if (typeof filePath === 'string' && filePath.trim()) {
     return getFileName(normalizePath(filePath));
   }
@@ -43,7 +54,7 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | null {
+export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | EditsDiff | null {
   const filePath = getCodeChangeFilePath(input);
   const oldString = input.old_string ?? input.oldString;
   const newString = input.new_string ?? input.newString;
@@ -56,10 +67,37 @@ export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff |
     return { kind: 'content', filePath, oldFile: '', newFile: content };
   }
 
+  const edits = getEditHunks(input);
+  if (filePath && edits.length) {
+    return { kind: 'edits', filePath, edits };
+  }
+
   const patchFiles = getApplyPatchFiles(input);
   if (patchFiles.length) return { kind: 'patch', files: patchFiles };
 
   return null;
+}
+
+/**
+ * Normalizes an edit tool's hunk list. Handles pi's `{ edits: [{ oldText, newText }] }`
+ * shape alongside the flat `old_string`/`new_string` (Claude/OpenCode) shape.
+ */
+function getEditHunks(input: Record<string, unknown>): EditHunk[] {
+  const edits = input.edits;
+  if (Array.isArray(edits)) {
+    const hunks: EditHunk[] = [];
+    for (const entry of edits) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      const oldText = record.oldText ?? record.old_string ?? record.oldString;
+      const newText = record.newText ?? record.new_string ?? record.newString;
+      if (typeof oldText !== 'string' || typeof newText !== 'string') continue;
+      hunks.push({ oldText, newText });
+    }
+    return hunks;
+  }
+
+  return [];
 }
 
 export function getCodeChangeStats(input: Record<string, unknown>): { additions: number; deletions: number } | null {
@@ -67,6 +105,16 @@ export function getCodeChangeStats(input: Record<string, unknown>): { additions:
   if (!diff) return null;
   if (diff.kind === 'content') {
     return countDiffLines(diff.oldFile, diff.newFile);
+  }
+  if (diff.kind === 'edits') {
+    let additions = 0;
+    let deletions = 0;
+    for (const edit of diff.edits) {
+      const stats = countDiffLines(edit.oldText, edit.newText);
+      additions += stats.additions;
+      deletions += stats.deletions;
+    }
+    return { additions, deletions };
   }
   let additions = 0;
   let deletions = 0;
@@ -92,18 +140,25 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
     );
   }
 
+  const hunks = diff.kind === 'edits' ? diff.edits : [{ oldText: diff.oldFile, newText: diff.newFile }];
+
   return (
-    <DiffViewer
-      oldFile={diff.oldFile}
-      newFile={diff.newFile}
-      oldFileName={diff.filePath}
-      newFileName={diff.filePath}
-      viewMode="unified"
-      showIcon={false}
-      showHunkHeaders={false}
-      showNoNewlineMarker={false}
-      className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
-    />
+    <>
+      {hunks.map((hunk, index) => (
+        <DiffViewer
+          key={index}
+          oldFile={hunk.oldText}
+          newFile={hunk.newText}
+          oldFileName={diff.filePath}
+          newFileName={diff.filePath}
+          viewMode="unified"
+          showIcon={false}
+          showHunkHeaders={false}
+          showNoNewlineMarker={false}
+          className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
+        />
+      ))}
+    </>
   );
 }
 

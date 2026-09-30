@@ -1500,6 +1500,38 @@ function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Re
   return rest;
 }
 
+/**
+ * Normalizes an edit tool's hunks. Handles pi's `{ edits: [{ oldText, newText }] }`
+ * shape alongside the flat `old_string`/`new_string` (Claude/OpenCode) shape.
+ */
+function extractEditHunks(
+  input: Record<string, unknown> | undefined,
+): Array<{ oldString: string; newString: string }> | null {
+  if (!input) return null;
+
+  const edits = input.edits;
+  if (Array.isArray(edits)) {
+    const hunks: Array<{ oldString: string; newString: string }> = [];
+    for (const entry of edits) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      const oldString = record.oldText ?? record.old_string ?? record.oldString;
+      const newString = record.newText ?? record.new_string ?? record.newString;
+      if (typeof oldString !== 'string' || typeof newString !== 'string') continue;
+      hunks.push({ oldString, newString });
+    }
+    return hunks.length ? hunks : null;
+  }
+
+  const oldString = input.old_string ?? input.oldString;
+  const newString = input.new_string ?? input.newString;
+  if (typeof oldString === 'string' && typeof newString === 'string') {
+    return [{ oldString, newString }];
+  }
+
+  return null;
+}
+
 export function extractChangedFilesFromEvents(
   events: AgentMessage[],
   acknowledged?: Set<string>,
@@ -1572,7 +1604,7 @@ export function extractChangedFilesFromEvents(
       const toolName = block.name.toLowerCase();
 
       if (toolName === 'write') {
-        const rawPath = (input?.file_path ?? input?.filePath) as string;
+        const rawPath = (input?.file_path ?? input?.filePath ?? input?.path) as string;
         const fileContent = input?.content as string;
         if (!rawPath || typeof fileContent !== 'string') continue;
         const filePath = normalizeFilePath(rawPath);
@@ -1603,38 +1635,38 @@ export function extractChangedFilesFromEvents(
       }
 
       if (toolName === 'edit') {
-        const rawPath = (input?.file_path ?? input?.filePath) as string;
-        const oldString = (input?.old_string ?? input?.oldString) as string;
-        const newString = (input?.new_string ?? input?.newString) as string;
-        if (!rawPath || typeof oldString !== 'string' || typeof newString !== 'string') continue;
+        const rawPath = (input?.file_path ?? input?.filePath ?? input?.path) as string;
+        const hunks = extractEditHunks(input);
+        if (!rawPath || !hunks) continue;
         const filePath = normalizeFilePath(rawPath);
         const toolUseId = block.id as string | undefined;
+
+        const applyHunks = (content: string) => {
+          let next = content;
+          for (const { oldString, newString } of hunks) {
+            const idx = next.indexOf(oldString);
+            if (idx !== -1) {
+              next = next.slice(0, idx) + newString + next.slice(idx + oldString.length);
+            }
+          }
+          return next;
+        };
 
         const existing = fileMap.get(filePath);
         if (existing) {
           if (existing.currentContent) {
-            const idx = existing.currentContent.indexOf(oldString);
-            if (idx !== -1) {
-              existing.currentContent =
-                existing.currentContent.slice(0, idx) +
-                newString +
-                existing.currentContent.slice(idx + oldString.length);
-            }
+            existing.currentContent = applyHunks(existing.currentContent);
             const orig = existing.originalContent ?? '';
             const { additions, deletions } = countDiffLines(orig, existing.currentContent);
             existing.additions = additions;
             existing.deletions = deletions;
           } else {
-            (existing._pendingEdits ||= []).push({ oldString, newString });
+            (existing._pendingEdits ||= []).push(...hunks);
           }
         } else {
           const snapshot = findSnapshot(rawPath, toolUseId);
           if (snapshot) {
-            let current = snapshot.content;
-            const idx = current.indexOf(oldString);
-            if (idx !== -1) {
-              current = current.slice(0, idx) + newString + current.slice(idx + oldString.length);
-            }
+            const current = applyHunks(snapshot.content);
             const { additions, deletions } = countDiffLines(snapshot.content, current);
             fileMap.set(filePath, {
               path: filePath,
@@ -1652,7 +1684,7 @@ export function extractChangedFilesFromEvents(
               currentContent: '',
               additions: 0,
               deletions: 0,
-              _pendingEdits: [{ oldString, newString }],
+              _pendingEdits: [...hunks],
             });
           }
         }

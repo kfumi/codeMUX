@@ -69,6 +69,38 @@ describe('TurnArtifactAggregator', () => {
     })]);
   });
 
+  it('matches pi edit path + edits array hunks', () => {
+    const aggregator = new TurnArtifactAggregator(CWD);
+    aggregator.observe({
+      type: 'file_snapshot',
+      file_path: 'D:/project/demo/src/app.ts',
+      original_content: 'alpha\nbeta\n',
+      is_new: false,
+      tool_use_id: 'edit-pi',
+    });
+    aggregator.observe({
+      type: 'tool_started',
+      tool_use_id: 'edit-pi',
+      name: 'edit',
+      input: {
+        path: 'src/app.ts',
+        edits: [{ oldText: 'alpha', newText: 'ALPHA' }],
+      },
+    });
+    aggregator.observe({
+      type: 'tool_finished',
+      tool_use_id: 'edit-pi',
+      is_error: false,
+      content: 'Successfully replaced 1 block(s)',
+    });
+
+    expect(aggregator.buildDiffs()).toEqual([expect.objectContaining({
+      file: 'D:/project/demo/src/app.ts',
+      additions: 1,
+      deletions: 1,
+    })]);
+  });
+
   it('includes multiple edited files in the same turn', () => {
     const aggregator = new TurnArtifactAggregator(CWD);
     aggregator.observe({

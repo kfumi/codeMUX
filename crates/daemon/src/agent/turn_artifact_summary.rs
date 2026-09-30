@@ -125,10 +125,7 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                         tool_use_id,
                         PendingTool::Edit {
                             file_path: read_file_path(&input)?,
-                            old_string: read_string(&input, "old_string")
-                                .or_else(|| read_string(&input, "oldString"))?,
-                            new_string: read_string(&input, "new_string")
-                                .or_else(|| read_string(&input, "newString"))?,
+                            hunks: extract_edit_hunks(&input)?,
                         },
                     );
                 }
@@ -180,11 +177,7 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                             files.insert(resolved, entry);
                         }
                     }
-                    PendingTool::Edit {
-                        file_path,
-                        old_string,
-                        new_string,
-                    } => {
+                    PendingTool::Edit { file_path, hunks } => {
                         let resolved = resolve_path(cwd, &file_path);
                         let snapshot = snapshot_content(
                             &snapshots,
@@ -194,20 +187,31 @@ fn build_turn_summary(events: &[Value], cwd: &str) -> Option<Value> {
                         );
                         let snapshot_is_empty = snapshot.is_empty();
                         let normalized_snapshot = normalize_line_endings(&snapshot);
-                        let normalized_old = normalize_line_endings(&old_string);
-                        let normalized_new = normalize_line_endings(&new_string);
                         let mut before = normalized_snapshot.clone();
                         let mut after = normalized_snapshot;
                         let mut applied = false;
-                        if let Some(index) = after.find(&normalized_old) {
-                            after.replace_range(
-                                index..index + normalized_old.len(),
-                                &normalized_new,
-                            );
-                            applied = true;
-                        } else if snapshot_is_empty {
-                            before = normalized_old;
-                            after = normalized_new;
+                        for (old_string, new_string) in &hunks {
+                            let normalized_old = normalize_line_endings(old_string);
+                            let normalized_new = normalize_line_endings(new_string);
+                            if let Some(index) = after.find(&normalized_old) {
+                                after.replace_range(
+                                    index..index + normalized_old.len(),
+                                    &normalized_new,
+                                );
+                                applied = true;
+                            }
+                        }
+                        if !applied && snapshot_is_empty {
+                            before = hunks
+                                .iter()
+                                .map(|(old_string, _)| normalize_line_endings(old_string))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            after = hunks
+                                .iter()
+                                .map(|(_, new_string)| normalize_line_endings(new_string))
+                                .collect::<Vec<_>>()
+                                .join("\n");
                             applied = true;
                         }
                         if applied {
@@ -248,8 +252,7 @@ enum PendingTool {
     },
     Edit {
         file_path: String,
-        old_string: String,
-        new_string: String,
+        hunks: Vec<(String, String)>,
     },
     ApplyPatch {
         patch_text: Option<String>,
@@ -270,7 +273,37 @@ fn read_string(value: &Value, key: &str) -> Option<String> {
 }
 
 fn read_file_path(input: &Value) -> Option<String> {
-    read_string(input, "file_path").or_else(|| read_string(input, "filePath"))
+    read_string(input, "file_path")
+        .or_else(|| read_string(input, "filePath"))
+        .or_else(|| read_string(input, "path"))
+}
+
+/// Normalizes an edit tool's hunks. Handles pi's `{ edits: [{ oldText, newText }] }`
+/// shape alongside the flat `old_string`/`new_string` (Claude/OpenCode) shape.
+fn extract_edit_hunks(input: &Value) -> Option<Vec<(String, String)>> {
+    if let Some(edits) = input.get("edits").and_then(Value::as_array) {
+        let mut hunks = Vec::new();
+        for entry in edits {
+            let old_string = read_string(entry, "oldText")
+                .or_else(|| read_string(entry, "old_string"))
+                .or_else(|| read_string(entry, "oldString"));
+            let new_string = read_string(entry, "newText")
+                .or_else(|| read_string(entry, "new_string"))
+                .or_else(|| read_string(entry, "newString"));
+            if let (Some(old_string), Some(new_string)) = (old_string, new_string) {
+                hunks.push((old_string, new_string));
+            }
+        }
+        if !hunks.is_empty() {
+            return Some(hunks);
+        }
+    }
+
+    let old_string =
+        read_string(input, "old_string").or_else(|| read_string(input, "oldString"))?;
+    let new_string =
+        read_string(input, "new_string").or_else(|| read_string(input, "newString"))?;
+    Some(vec![(old_string, new_string)])
 }
 
 fn resolve_path(cwd: &str, raw_path: &str) -> String {
@@ -545,6 +578,67 @@ mod tests {
             })
             .expect("turn finished should remain");
         assert!(summary_index < turn_finished_index);
+    }
+
+    #[test]
+    fn matches_pi_edit_path_and_edits_hunks() {
+        let mut events = vec![
+            json!({
+                "type": "system_event",
+                "subtype": "init",
+                "session_id": "session-1",
+                "cwd": "D:/project/demo",
+            }),
+            json!({
+                "type": "file_snapshot",
+                "session_id": "session-1",
+                "file_path": "D:/project/demo/src/app.ts",
+                "original_content": "alpha\nbeta\n",
+                "is_new": false,
+                "tool_use_id": "edit-pi",
+            }),
+            json!({
+                "type": "tool_started",
+                "session_id": "session-1",
+                "tool_use_id": "edit-pi",
+                "name": "edit",
+                "input": {
+                    "path": "src/app.ts",
+                    "edits": [{ "oldText": "alpha", "newText": "ALPHA" }],
+                },
+            }),
+            json!({
+                "type": "tool_finished",
+                "session_id": "session-1",
+                "tool_use_id": "edit-pi",
+                "is_error": false,
+                "content": "Successfully replaced 1 block(s)",
+            }),
+            json!({
+                "type": "turn_finished",
+                "session_id": "session-1",
+                "outcome": "completed",
+            }),
+        ];
+
+        inject_turn_artifact_summaries(&mut events);
+        let summary = events
+            .iter()
+            .find(|event| {
+                event.get("subtype").and_then(|value| value.as_str()) == Some("session_summary")
+            })
+            .expect("summary should be injected");
+        let diffs = summary
+            .get("diffs")
+            .and_then(Value::as_array)
+            .expect("diffs array");
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(
+            diffs[0].get("file").and_then(Value::as_str),
+            Some("D:/project/demo/src/app.ts")
+        );
+        assert_eq!(diffs[0].get("additions").and_then(Value::as_u64), Some(1));
+        assert_eq!(diffs[0].get("deletions").and_then(Value::as_u64), Some(1));
     }
 
     #[test]

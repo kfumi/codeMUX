@@ -18,8 +18,7 @@ type PendingWriteEdit = {
   toolUseId: string;
   filePath: string;
   content?: string;
-  oldString?: string;
-  newString?: string;
+  hunks?: Array<{ oldString: string; newString: string }>;
 };
 
 type PendingApplyPatch = {
@@ -142,7 +141,34 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function readFilePath(input: Record<string, unknown>): string | undefined {
-  return readString(input.file_path) ?? readString(input.filePath);
+  return readString(input.file_path) ?? readString(input.filePath) ?? readString(input.path);
+}
+
+/**
+ * Normalizes an edit tool's hunks. Handles pi's `{ edits: [{ oldText, newText }] }`
+ * shape alongside the flat `old_string`/`new_string` (Claude/OpenCode) shape.
+ */
+function extractEditHunks(
+  input: Record<string, unknown>,
+): Array<{ oldString: string; newString: string }> | undefined {
+  const edits = input.edits;
+  if (Array.isArray(edits)) {
+    const hunks: Array<{ oldString: string; newString: string }> = [];
+    for (const entry of edits) {
+      const record = readRecord(entry);
+      if (!record) continue;
+      const oldString = readString(record.oldText) ?? readString(record.old_string) ?? readString(record.oldString);
+      const newString = readString(record.newText) ?? readString(record.new_string) ?? readString(record.newString);
+      if (oldString === undefined || newString === undefined) continue;
+      hunks.push({ oldString, newString });
+    }
+    return hunks.length ? hunks : undefined;
+  }
+
+  const oldString = readString(input.old_string) ?? readString(input.oldString);
+  const newString = readString(input.new_string) ?? readString(input.newString);
+  if (oldString === undefined || newString === undefined) return undefined;
+  return [{ oldString, newString }];
 }
 
 function extractApplyPatchText(input: Record<string, unknown>): string | undefined {
@@ -436,15 +462,13 @@ export class TurnArtifactAggregator {
     }
 
     if (normalized === 'edit') {
-      const oldString = readString(input.old_string) ?? readString(input.oldString);
-      const newString = readString(input.new_string) ?? readString(input.newString);
-      if (oldString === undefined || newString === undefined) return;
+      const hunks = extractEditHunks(input);
+      if (!hunks) return;
       this.pendingWriteEdit.set(toolUseId, {
         kind: 'edit',
         toolUseId,
         filePath,
-        oldString,
-        newString,
+        hunks,
       });
     }
   }
@@ -487,23 +511,29 @@ export class TurnArtifactAggregator {
       }
     } else {
       const snapshotContent = snapshot?.content ?? '';
+      const hunks = pending.hunks ?? [];
       let before = snapshotContent;
       let after = snapshotContent;
       let applied = false;
-      if (pending.oldString !== undefined && pending.newString !== undefined) {
-        const normalizedSnapshot = normalizeLineEndings(snapshotContent);
-        const normalizedOld = normalizeLineEndings(pending.oldString);
-        const normalizedNew = normalizeLineEndings(pending.newString);
-        const index = normalizedSnapshot.indexOf(normalizedOld);
-        if (index !== -1) {
-          after = `${normalizedSnapshot.slice(0, index)}${normalizedNew}${normalizedSnapshot.slice(index + normalizedOld.length)}`;
-          before = normalizedSnapshot;
-          applied = true;
-        } else if (!snapshotContent) {
-          before = normalizedOld;
-          after = normalizedNew;
-          applied = true;
+      if (snapshotContent) {
+        let current = normalizeLineEndings(snapshotContent);
+        for (const hunk of hunks) {
+          const normalizedOld = normalizeLineEndings(hunk.oldString);
+          const normalizedNew = normalizeLineEndings(hunk.newString);
+          const index = current.indexOf(normalizedOld);
+          if (index !== -1) {
+            current = `${current.slice(0, index)}${normalizedNew}${current.slice(index + normalizedOld.length)}`;
+            applied = true;
+          }
         }
+        if (applied) {
+          before = normalizeLineEndings(snapshotContent);
+          after = current;
+        }
+      } else if (hunks.length) {
+        before = hunks.map((hunk) => normalizeLineEndings(hunk.oldString)).join('\n');
+        after = hunks.map((hunk) => normalizeLineEndings(hunk.newString)).join('\n');
+        applied = true;
       }
       if (!applied) {
         this.pendingWriteEdit.delete(toolUseId);
