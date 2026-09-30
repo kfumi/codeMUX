@@ -177,7 +177,10 @@ describe('GitEnvironmentPopover', () => {
   });
 
   it('shows the environment section with a hint when the project is not a git repo', async () => {
-    gitApiMock.getRepositoryState.mockRejectedValue('当前项目不是 Git 仓库');
+    // daemon 的错误响应体是 `{"error":"…"}`,界面不应把 JSON 原样展示出来。
+    gitApiMock.getRepositoryState.mockRejectedValue(
+      new Error(JSON.stringify({ error: '当前项目不是 Git 仓库' })),
+    );
 
     render(
       <GitEnvironmentPopover

@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { daemonFacade } from '../../../lib/facades/daemon-facade';
+import { formatErrorMessage } from '../../../lib/errorMessage';
 import {
   type CreatePullRequestResult,
   type GitPullRequestSuggestion,
@@ -100,7 +101,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       }
       lastBranchRef.current = nextState.currentBranch;
     } catch (err) {
-      setError(String(err));
+      setError(formatErrorMessage(err));
       setRepositoryState(null);
       setFiles([]);
       setStagedFiles([]);
@@ -145,7 +146,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       .catch((err) => {
         setFileDetails((current) => ({
           ...current,
-          [key]: { loading: false, error: String(err), change: null },
+          [key]: { loading: false, error: formatErrorMessage(err), change: null },
         }));
       });
   }, [area, fileDetails, projectPath]);
@@ -163,7 +164,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       }
       await load();
     } catch (err) {
-      setError(String(err));
+      setError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }
@@ -180,7 +181,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setExpandedPath(null);
       await load();
     } catch (err) {
-      setError(String(err));
+      setError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
       setRevertTarget(null);
@@ -195,7 +196,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       const suggestion = await daemonFacade.git.generateCommitMessage(projectPath);
       setCommitMessage(suggestion.message);
     } catch (err) {
-      setCommitError(String(err));
+      setCommitError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }
@@ -220,7 +221,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setCommitMessage('');
       await load();
     } catch (err) {
-      setCommitError(String(err));
+      setCommitError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }
@@ -234,7 +235,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       await daemonFacade.git.pushBranch(projectPath);
       await load();
     } catch (err) {
-      setCommitError(String(err));
+      setCommitError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }
@@ -249,7 +250,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setPrSuggestion(suggestion);
       setPrBase((current) => current || suggestion.base);
     } catch (err) {
-      setPrError(String(err));
+      setPrError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }
@@ -263,7 +264,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     try {
       setPrResult(await daemonFacade.git.createPullRequest({ projectPath, ...request }));
     } catch (err) {
-      setPrCreateError(String(err));
+      setPrCreateError(formatErrorMessage(err));
     } finally {
       setMutatingKey(null);
     }

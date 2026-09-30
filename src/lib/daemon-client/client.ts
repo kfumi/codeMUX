@@ -1,6 +1,7 @@
 import { createControlPlaneMethods, type ControlPlaneMethods } from './control-plane';
 import { createTerminalMethods, type TerminalMethods } from './terminal';
 import { usePerfStore } from '../../stores/perfStore';
+import { extractErrorText } from '../errorMessage';
 
 export interface DaemonConnectionConfig {
   baseUrl: string;
@@ -101,7 +102,7 @@ async function daemonFetch<T>(
   if (config.transport) {
     const result = await config.transport.request(path, init);
     if (result.status < 200 || result.status >= 300) {
-      throw new Error(result.body.trim() || `Daemon request failed: ${result.status}`);
+      throw new Error(extractErrorText(result.body, `Daemon request failed: ${result.status}`));
     }
     if (!result.body.trim()) {
       return undefined as T;
@@ -118,7 +119,7 @@ async function daemonFetch<T>(
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `Daemon request failed: ${response.status}`);
+    throw new Error(extractErrorText(body, `Daemon request failed: ${response.status}`));
   }
   if (response.status === 204 || response.status === 202) {
     return undefined as T;

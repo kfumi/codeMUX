@@ -264,6 +264,19 @@ describe('ReviewPanel git actions', () => {
     await waitFor(() => expect(screen.getByText('当前分支即基准分支，没有可生成 PR 的提交差异')).toBeTruthy());
   });
 
+  it('shows the plain daemon error message when the repo state cannot be loaded', async () => {
+    // daemon 的错误响应体是 `{"error":"…"}`,界面不应把 JSON 原样展示出来。
+    gitApiMock.getRepositoryState.mockRejectedValue(
+      new Error(JSON.stringify({ error: '当前项目不是 Git 仓库' })),
+    );
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await waitFor(() => expect(screen.getByText('当前项目不是 Git 仓库')).toBeTruthy());
+    expect(screen.queryByText(/Error:/)).toBeNull();
+    expect(screen.queryByText(/"error"/)).toBeNull();
+  });
+
   it('creates a pull request from the edited PR content', async () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 

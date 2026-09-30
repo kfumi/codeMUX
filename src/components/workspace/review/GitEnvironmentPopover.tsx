@@ -12,6 +12,7 @@ import {
 
 import type { SubagentStatus } from '../../../lib/codeMuxProtocol';
 import { daemonFacade } from '../../../lib/facades/daemon-facade';
+import { formatErrorMessage } from '../../../lib/errorMessage';
 import type { GitRepositoryState, GitStatusChange } from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
 import { useSessionStore } from '../../../stores/sessionStore';
@@ -430,7 +431,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
       setTotals(getTotals(files));
       setGitLoadState('ready');
     } catch (err) {
-      setUnavailableMessage(String(err));
+      setUnavailableMessage(formatErrorMessage(err));
       setRepositoryState(null);
       setTotals({ additions: 0, deletions: 0 });
       setGitLoadState('unavailable');
@@ -466,7 +467,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
       setBranchOpen(false);
       await load();
     } catch (err) {
-      setBranchError(String(err));
+      setBranchError(formatErrorMessage(err));
     } finally {
       setBranchLoading(false);
     }
@@ -482,7 +483,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
       setBranchOpen(false);
       await load();
     } catch (err) {
-      setBranchError(String(err));
+      setBranchError(formatErrorMessage(err));
     } finally {
       setBranchLoading(false);
     }
