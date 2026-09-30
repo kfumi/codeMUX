@@ -28,6 +28,29 @@ const PROJECTS_SECTION_KEY = 'codemux-projects-section-expanded';
 const CONVERSATIONS_SECTION_KEY = 'codemux-conversations-section-expanded';
 const PINNED_SECTION_KEY = 'codemux-pinned-section-expanded';
 
+/**
+ * 首屏骨架：会话/项目的首帧数据还没回来时占位。
+ *
+ * 为什么不用空态占位：空态是一块 `py-16` 的居中提示块,数据回来后被真实列表
+ * 顶掉 —— 侧边栏整块从「居中大块」跳成「顶对齐行列表」,视觉上就是一次闪烁。
+ * 骨架行的行高、图标位、右侧时间位都对着 SessionItem 摆,替换时几乎不跳。
+ * 纯静态色块(无扫光):扫光是装饰性循环动画,项目动效规范不允许。
+ */
+function SessionListSkeleton() {
+  return (
+    <div aria-hidden="true" className="space-y-1">
+      <div className="h-4 w-14 rounded-sm bg-[hsl(var(--sidebar-muted))]" />
+      {(['w-[68%]', 'w-[52%]', 'w-[60%]'] as const).map((width, index) => (
+        <div key={index} className="flex h-6 items-center gap-2.5 rounded-md px-1.5">
+          <span className="h-4 w-4 shrink-0 rounded-full bg-[hsl(var(--sidebar-muted))]" />
+          <span className={`h-3 min-w-0 flex-1 rounded-sm bg-[hsl(var(--sidebar-muted))] ${width}`} />
+          <span className="h-3 w-9 shrink-0 rounded-sm bg-[hsl(var(--sidebar-muted))]" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function loadSectionExpanded(storageKey: string): boolean {
   try {
     const stored = localStorage.getItem(storageKey);
@@ -102,6 +125,7 @@ export function SessionList({
     activeSessionId,
     error: sessionError,
     isLoading,
+    hasLoadedOnce: sessionsLoaded,
     fetchSessions,
     fetchArchivedSessions,
     archiveSession,
@@ -109,7 +133,14 @@ export function SessionList({
     deleteSession,
     updateSessionTitle,
   } = useSessionStore();
-  const { projects, activeProjectId, fetchProjects, deleteProject, renameProject } = useProjectStore();
+  const {
+    projects,
+    activeProjectId,
+    hasLoadedOnce: projectsLoaded,
+    fetchProjects,
+    deleteProject,
+    renameProject,
+  } = useProjectStore();
   const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
@@ -147,6 +178,12 @@ export function SessionList({
   }, [companionStatus, sessionError]);
 
   const showDaemonIssue = Boolean(daemonIssue) && !isLoading;
+  // 首帧三个来源(会话/归档/项目)都还没落定 —— 此时「空列表」只是「还没加载」,
+  // 不能当空态渲染,否则先闪一下「暂无对话」再换成真实列表。
+  // 任一来源失败即算加载结束(见 store 的 hasLoadedOnce),不会卡在骨架屏。
+  const showInitialSkeleton = !sessionsLoaded && !projectsLoaded && !showDaemonIssue;
+  const showEmptyState = sessions.length === 0 && projects.length === 0
+    && !showDaemonIssue && !showInitialSkeleton;
 
   const toggleProjectsExpanded = useCallback(() => {
     setProjectsExpanded((current) => {
@@ -189,7 +226,13 @@ export function SessionList({
   }, [fetchSessions]);
 
   return (
-    <div className="space-y-1 stagger-children">
+    <div className="space-y-1 stagger-children" aria-busy={showInitialSkeleton || undefined}>
+      {showInitialSkeleton && (
+        <>
+          <span className="sr-only" role="status">正在加载会话列表…</span>
+          <SessionListSkeleton />
+        </>
+      )}
       {showDaemonIssue && (
         <div
           role="alert"
@@ -304,7 +347,7 @@ export function SessionList({
         </div>
       )}
 
-      {sessions.length === 0 && projects.length === 0 && !showDaemonIssue && (
+      {showEmptyState && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/18 text-[hsl(var(--sidebar-accent))]">
             <MessageSquarePlus className="h-4 w-4" />

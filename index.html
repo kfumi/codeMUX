@@ -5,10 +5,21 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CodeMUX</title>
+    <!--
+      首帧前主题引导(必须在任何绘制之前同步执行,所以是经典内联脚本而不是
+      module —— module 会被 defer 到解析之后,那时首帧可能已经画完)。
+      主题真值在 daemon 配置里,要等 fetchConfig 往返才拿得到;没有这一步,
+      深色用户会先看到一帧亮色界面(白闪)再整体翻暗。
+      源码见 src/lib/themeBoot.ts 的 THEME_BOOT_SCRIPT:两处不一致时
+      src/lib/themeBoot.test.ts 的「逐字包含」断言会失败。
+    -->
+    <script>(function(){try{var r=document.documentElement;var s=null;try{s=window.localStorage.getItem('codemux:theme')}catch(e){}var q=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var d=s==='Dark'?true:s==='Light'?false:q;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';r.style.backgroundColor=d?'hsl(0 0% 9.4%)':'hsl(0 0% 100%)';r.style.setProperty('--boot-bg',d?'#111111':'#f2f2f2')}catch(e){}})();</script>
     <style>
       /* 启动加载态(与 Electron 主窗口同窗):JS bundle 解析期间 #root 为空,
          先展示 logo 扫光加载画面,React 挂载后由选择器自动隐藏并淡出。
          不再使用独立 splash 窗口 —— 任务栏/层级/焦点与真实窗口完全一致。 */
+      /* 底色跟随主题(--boot-bg 由上面的首帧引导脚本按深浅写入,失败时兜底深色):
+         固定深底会让浅色主题用户看到「深底 → 浅底」的一次跳色,与白闪同源。 */
       #boot {
         position: fixed;
         inset: 0;
@@ -16,7 +27,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #111111;
+        background: var(--boot-bg, #111111);
         transition: opacity 0.2s ease-out;
       }
 

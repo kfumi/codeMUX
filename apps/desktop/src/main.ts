@@ -225,8 +225,9 @@ function createMainWindow(): BrowserWindow {
     frame: false, // 与现 Tauri 窗口一致(自绘标题栏)。
     resizable: true,
     fullscreenable: true,
-    // 对齐主题暗色 --background(hsl(0 0% 6.7%));亮色主题切换由渲染层接管,
-    // 此色仅覆盖首帧与渲染层 #boot 加载态,统一可避免转场跳色。
+    // 窗口创建到渲染层首帧之间的底色。渲染层在 index.html <head> 里有一段同步的
+    // 主题引导(见 src/lib/themeBoot.ts),首帧就按用户主题上色并接管 #boot 加载画面,
+    // 所以这里取深色与深色主题无接缝;浅色主题只在这之前露一两帧,随后被浅色覆盖。
     backgroundColor: '#111111',
     webPreferences: {
       preload: path.join(moduleDir, 'preload.js'),

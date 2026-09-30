@@ -1,41 +1,30 @@
 import { useEffect } from 'react';
-import { useSettingsStore } from '../stores/settingsStore';
+import { applyThemeLocally, useSettingsStore } from '../stores/settingsStore';
 
-function applyTheme(theme: string) {
-  const root = document.documentElement;
-  if (theme === 'Dark') {
-    root.classList.add('dark');
-  } else if (theme === 'Light') {
-    root.classList.remove('dark');
-  } else {
-    // System: follow OS preference
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (prefersDark) {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }
-}
-
+/**
+ * 把 daemon 配置里的主题落到 `<html>`(并缓存给首帧引导脚本)。
+ *
+ * 实现复用 settingsStore 的 `applyThemeLocally`,而不是在这里重写一份:
+ * 两份实现漂移过一次 —— 缓存/底色同步只有 store 那份有,hook 这份没有。
+ */
 export function useTheme() {
-  const { config } = useSettingsStore();
+  const theme = useSettingsStore((state) => state.config?.theme);
 
   useEffect(() => {
-    if (config?.theme) {
-      applyTheme(config.theme);
+    if (theme) {
+      applyThemeLocally(theme);
     }
-  }, [config?.theme]);
+  }, [theme]);
 
   // Listen for OS theme changes when using System theme
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => {
-      if (config?.theme === 'System' || !config?.theme) {
-        applyTheme('System');
+      if (theme === 'System' || !theme) {
+        applyThemeLocally('System');
       }
     };
     mediaQuery.addEventListener('change', handler);
     return () => mediaQuery.removeEventListener('change', handler);
-  }, [config?.theme]);
+  }, [theme]);
 }

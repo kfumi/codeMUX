@@ -22,28 +22,22 @@ import { normalizeBrowserControl } from '../lib/browserControl';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 import { normalizeImmediateRunMode } from '../lib/agentSteer';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
+import { cacheBootTheme, syncThemeChrome } from '../lib/themeBoot';
 
-function applyThemeLocally(theme: Theme) {
+export function applyThemeLocally(theme: Theme) {
   if (typeof document === 'undefined') {
-    return;
-  }
-
-  const root = document.documentElement;
-
-  if (theme === 'Dark') {
-    root.classList.add('dark');
-    return;
-  }
-
-  if (theme === 'Light') {
-    root.classList.remove('dark');
     return;
   }
 
   const prefersDark = typeof window !== 'undefined'
     && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = theme === 'Dark' ? true : theme === 'Light' ? false : prefersDark;
 
-  root.classList.toggle('dark', prefersDark);
+  // `.dark` / color-scheme / html 与启动画面底色一起更新,避免 html 上留着上一次
+  // 的底色(切主题后滚动回弹会露出来);并把原始枚举缓存给 index.html 的首帧引导
+  // 脚本 —— 那是深色用户下一次冷启动不闪白的关键。见 src/lib/themeBoot.ts。
+  syncThemeChrome(isDark);
+  cacheBootTheme(theme);
 }
 
 interface SettingsState {
@@ -101,6 +95,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       };
       useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
       set({ config, isLoading: false });
+      // 在 store 里就落一次主题:useTheme() 的 effect 还要等一次 commit,
+      // 而这里正好是「配置到手」的时刻。幂等,重复调用无副作用。
+      applyThemeLocally(config.theme);
     } catch (error) {
       set({ error: String(error), isLoading: false });
     }

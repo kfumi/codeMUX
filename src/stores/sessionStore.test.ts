@@ -763,3 +763,32 @@ describe('session store createSession', () => {
     });
   });
 });
+
+describe('session store first load', () => {
+  // hasLoadedOnce 让侧边栏能区分「还没拉到」与「确实没有会话」:首屏据此渲染骨架,
+  // 不用空态占位(那会在数据回来时闪一下)。
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSessionStore.setState({ sessions: [], isLoading: false, hasLoadedOnce: false, error: null });
+  });
+
+  it('marks the first load as settled once sessions arrive', async () => {
+    listSessionsMock.mockResolvedValue([]);
+
+    expect(useSessionStore.getState().hasLoadedOnce).toBe(false);
+
+    await useSessionStore.getState().fetchSessions();
+
+    expect(useSessionStore.getState().hasLoadedOnce).toBe(true);
+    expect(useSessionStore.getState().isLoading).toBe(false);
+  });
+
+  it('also marks it as settled when the first load fails, so the skeleton cannot stick', async () => {
+    listSessionsMock.mockRejectedValue(new Error('daemon down'));
+
+    await useSessionStore.getState().fetchSessions();
+
+    expect(useSessionStore.getState().hasLoadedOnce).toBe(true);
+    expect(useSessionStore.getState().isLoading).toBe(false);
+  });
+});

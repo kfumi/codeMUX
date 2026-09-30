@@ -30,6 +30,8 @@ interface ProjectState {
   projects: Project[];
   activeProjectId: string | null;
   isLoading: boolean;
+  /** 见 sessionStore 的同名字段：区分「还没拉到」与「确实没有项目」。 */
+  hasLoadedOnce: boolean;
   error: string | null;
   collapsedProjects: Set<string>;
   fetchProjects: () => Promise<void>;
@@ -45,6 +47,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   activeProjectId: null,
   isLoading: false,
+  hasLoadedOnce: false,
   error: null,
   collapsedProjects: loadCollapsedProjects(),
   toggleProjectExpanded: (projectId: string) => {
@@ -75,9 +78,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const projects = await daemonFacade.listProjects();
-      set({ projects, isLoading: false });
+      set({ projects, isLoading: false, hasLoadedOnce: true });
     } catch (error) {
-      set({ error: String(error), isLoading: false });
+      // 失败同样算「加载结束」,避免侧边栏骨架屏永远停住。
+      set({ error: String(error), isLoading: false, hasLoadedOnce: true });
     }
   },
   createProject: async (name: string, path: string) => {

@@ -1,0 +1,158 @@
+// @vitest-environment jsdom
+
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  APP_BACKGROUND_DARK,
+  APP_BACKGROUND_LIGHT,
+  BOOT_BACKGROUND_DARK,
+  BOOT_BACKGROUND_LIGHT,
+  THEME_BOOT_SCRIPT,
+  THEME_BOOT_STORAGE_KEY,
+  cacheBootTheme,
+  isTheme,
+  readBootTheme,
+  resolveBootIsDark,
+  syncThemeChrome,
+} from './themeBoot';
+
+const indexHtml = readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+
+function stubPrefersDark(prefersDark: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    value: (query: string) => ({
+      matches: prefersDark,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+    writable: true,
+    configurable: true,
+  });
+}
+
+/** 执行 index.html 里那段内联脚本(与首帧同一条路径)。 */
+function runBootScript(): void {
+  // eslint-disable-next-line no-new-func
+  new Function(THEME_BOOT_SCRIPT)();
+}
+
+describe('themeBoot', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    document.documentElement.className = '';
+    document.documentElement.removeAttribute('style');
+    stubPrefersDark(false);
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    document.documentElement.className = '';
+    document.documentElement.removeAttribute('style');
+  });
+
+  it('resolves dark from the cached enum and falls back to the OS preference', () => {
+    expect(resolveBootIsDark('Dark', false)).toBe(true);
+    expect(resolveBootIsDark('Light', true)).toBe(false);
+    expect(resolveBootIsDark('System', true)).toBe(true);
+    expect(resolveBootIsDark('System', false)).toBe(false);
+    expect(resolveBootIsDark(null, true)).toBe(true);
+  });
+
+  it('round-trips the cached theme and ignores garbage values', () => {
+    cacheBootTheme('Dark');
+    expect(window.localStorage.getItem(THEME_BOOT_STORAGE_KEY)).toBe('Dark');
+    expect(readBootTheme()).toBe('Dark');
+
+    window.localStorage.setItem(THEME_BOOT_STORAGE_KEY, '深色');
+    expect(readBootTheme()).toBeNull();
+    expect(isTheme('System')).toBe(true);
+    expect(isTheme(null)).toBe(false);
+  });
+
+  it('paints the first frame dark when the user chose a dark theme', () => {
+    cacheBootTheme('Dark');
+    stubPrefersDark(false);
+
+    runBootScript();
+
+    const root = document.documentElement;
+    expect(root.classList.contains('dark')).toBe(true);
+    expect(root.style.colorScheme).toBe('dark');
+    expect(root.style.backgroundColor).toBeTruthy();
+    expect(root.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_DARK);
+  });
+
+  it('honors an explicit light theme even when the OS prefers dark', () => {
+    cacheBootTheme('Light');
+    stubPrefersDark(true);
+
+    runBootScript();
+
+    const root = document.documentElement;
+    expect(root.classList.contains('dark')).toBe(false);
+    expect(root.style.colorScheme).toBe('light');
+    expect(root.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_LIGHT);
+  });
+
+  it('falls back to the OS preference when no theme was cached yet', () => {
+    stubPrefersDark(true);
+
+    runBootScript();
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('survives a missing matchMedia and an unavailable localStorage', () => {
+    Object.defineProperty(window, 'matchMedia', { value: undefined, writable: true, configurable: true });
+    const getItem = vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('storage disabled');
+    });
+
+    expect(() => runBootScript()).not.toThrow();
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    getItem.mockRestore();
+  });
+
+  it('keeps the html chrome in sync when the theme changes at runtime', () => {
+    syncThemeChrome(true);
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_DARK);
+    expect(document.documentElement.style.backgroundColor).not.toBe('');
+
+    syncThemeChrome(false);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_LIGHT);
+  });
+
+  it('mirrors the app background tokens so the pre-CSS frame matches the app', () => {
+    // 浅色 --background: 0 0% 100%;深色 --background: 0 0% 9.4%(src/styles/globals.css)
+    expect(APP_BACKGROUND_LIGHT).toBe('hsl(0 0% 100%)');
+    expect(APP_BACKGROUND_DARK).toBe('hsl(0 0% 9.4%)');
+  });
+});
+
+describe('index.html pre-paint theme bootstrap', () => {
+  // 内联脚本与 themeBoot.ts 是同一份源码(脚本没法 import 模块)。任何一侧改动
+  // 而另一侧忘了跟,这条断言就会失败 —— 这是防漂移的唯一保障。
+  it('embeds the exact script generated by themeBoot', () => {
+    expect(indexHtml).toContain(`<script>${THEME_BOOT_SCRIPT}</script>`);
+  });
+
+  it('runs as the first, classic script in the document', () => {
+    // module 脚本会被 defer 到解析之后,那时首帧可能已经画完 —— 所以必须是经典脚本。
+    expect(indexHtml.indexOf('<script>')).toBeGreaterThan(-1);
+    expect(indexHtml.indexOf('<script>')).toBeLessThan(indexHtml.indexOf('<script type="module"'));
+    expect(indexHtml.indexOf('<script>')).toBeLessThan(indexHtml.indexOf('/src/main.tsx'));
+  });
+
+  it('paints the boot screen with the theme-aware background', () => {
+    expect(indexHtml).toContain('background: var(--boot-bg, #111111)');
+  });
+});

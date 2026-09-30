@@ -13,6 +13,12 @@ interface SessionState {
   activeSessionId: string | null;
   isLoading: boolean;
   isArchivedLoading: boolean;
+  /**
+   * 首屏列表加载是否已结束(成功或失败都算)。
+   * 用来区分「还没拉到数据」与「确实一条会话都没有」:侧边栏在两者之间切
+   * 换时会把空态(暂无对话)闪一下再换成真实列表。首屏改为渲染骨架行。
+   */
+  hasLoadedOnce: boolean;
   error: string | null;
   /** Session IDs that have unread status (completed or errored since last viewed) */
   unreadSessions: Set<string>;
@@ -147,6 +153,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeSessionId: null,
   isLoading: false,
   isArchivedLoading: false,
+  hasLoadedOnce: false,
   error: null,
   unreadSessions: new Set<string>(),
   fetchSessions: async () => {
@@ -163,7 +170,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return session;
       });
       if (requestGeneration !== sessionsRequestGeneration) return;
-      set({ sessions, isLoading: false });
+      set({ sessions, isLoading: false, hasLoadedOnce: true });
       for (const session of sessions) {
         const remembered = rememberedPaths[session.id]?.trim();
         if (isValidWorkingPath(remembered) && remembered !== session.working_path) {
@@ -172,7 +179,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     } catch (error) {
       if (requestGeneration !== sessionsRequestGeneration) return;
-      set({ error: String(error), isLoading: false });
+      // 失败同样算「加载结束」:否则请求失败/挂住时侧边栏会永远停在骨架屏。
+      set({ error: String(error), isLoading: false, hasLoadedOnce: true });
     }
   },
   fetchArchivedSessions: async () => {

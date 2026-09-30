@@ -17,9 +17,13 @@ import {
   savePrefs,
 } from '../lib/appearance';
 import { useSettingsStore } from './settingsStore';
+import { readBootTheme } from '../lib/themeBoot';
 
 function apply(prefs: AppearancePrefs): void {
-  applyAppearance(prefs, resolveIsDark(useSettingsStore.getState().config?.theme));
+  // 配置还没到手时用首帧引导脚本缓存的主题：否则 index.html 已经按深色把首帧画出来了，
+  // 而强调色/指令 chip 却按系统偏好算成亮色，出现「深底 + 亮强调色」的错配窗口。
+  const theme = useSettingsStore.getState().config?.theme ?? readBootTheme() ?? undefined;
+  applyAppearance(prefs, resolveIsDark(theme));
 }
 
 interface AppearanceState {

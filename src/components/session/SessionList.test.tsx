@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '../../types/project';
@@ -91,7 +91,17 @@ describe('SessionList', () => {
     onSelectSession: vi.fn(),
   };
 
+  // describe 体在所有 it() 之前求值,这里拿到的是真 action —— 「重试 daemon」用例
+  // 会把 fetchSessions 换成 mock,不还原的话后续用例的加载流程根本不会发生。
+  const realFetchSessions = useSessionStore.getState().fetchSessions;
+  const realFetchArchivedSessions = useSessionStore.getState().fetchArchivedSessions;
+  const realFetchProjects = useProjectStore.getState().fetchProjects;
+
   beforeEach(() => {
+    getDaemonStartupErrorMock.mockReturnValue(null);
+    vi.mocked(daemonFacade.listSessions).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(daemonFacade.listArchivedSessions).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(daemonFacade.listProjects).mockImplementation(() => Promise.resolve([]));
     useSessionStore.setState({
       sessions: [makeSession({ id: 'session-active', title: 'Active Session' })],
       archivedSessions: [
@@ -104,15 +114,20 @@ describe('SessionList', () => {
       activeSessionId: null,
       isLoading: false,
       isArchivedLoading: false,
+      hasLoadedOnce: true,
       error: null,
       unreadSessions: new Set<string>(),
+      fetchSessions: realFetchSessions,
+      fetchArchivedSessions: realFetchArchivedSessions,
     });
     useProjectStore.setState({
       projects: [],
       activeProjectId: null,
       isLoading: false,
+      hasLoadedOnce: true,
       error: null,
       collapsedProjects: new Set<string>(),
+      fetchProjects: realFetchProjects,
     });
   });
 
@@ -322,5 +337,56 @@ describe('SessionList', () => {
 
     expect(vi.mocked(daemonFacade.resetClient)).toHaveBeenCalled();
     expect(initDaemonClientMock).toHaveBeenCalled();
+  });
+
+  it('renders a skeleton instead of the empty state before the first list arrives', async () => {
+    // 回归用例：首屏「还没加载」被当成「确实没有会话」，会先闪一下空态再换成列表。
+    let resolveSessions: (sessions: Session[]) => void = () => {};
+    vi.mocked(daemonFacade.listSessions).mockImplementation(() => new Promise((resolve) => {
+      resolveSessions = resolve;
+    }));
+    useSessionStore.setState({ sessions: [], hasLoadedOnce: false });
+    useProjectStore.setState({ projects: [], hasLoadedOnce: false });
+
+    renderSessionList();
+
+    expect(screen.queryByText('暂无对话')).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('正在加载会话列表');
+
+    await act(async () => {
+      resolveSessions([makeSession({ id: 'session-loaded', title: 'Loaded Session' })]);
+    });
+
+    expect(screen.getByText('Loaded Session')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows the empty state once the first load settled with no sessions', async () => {
+    useSessionStore.setState({ sessions: [], hasLoadedOnce: true });
+    useProjectStore.setState({ projects: [], hasLoadedOnce: true });
+
+    renderSessionList();
+
+    expect(screen.getByText('暂无对话')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('leaves the skeleton when the first load fails so the alert can take over', async () => {
+    vi.mocked(daemonFacade.listSessions).mockImplementation(() => Promise.reject(new Error('daemon down')));
+    vi.mocked(daemonFacade.listProjects).mockImplementation(() => Promise.reject(new Error('daemon down')));
+    useSessionStore.setState({ sessions: [], hasLoadedOnce: false });
+    useProjectStore.setState({ projects: [], hasLoadedOnce: false });
+
+    renderSessionList();
+
+    expect(screen.getByRole('status')).toBeTruthy();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 失败也必须结束「首屏加载中」，否则骨架屏会永远停住。
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('alert')).toBeTruthy();
   });
 });
