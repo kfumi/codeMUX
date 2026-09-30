@@ -4,6 +4,8 @@ import {
   buildRunSubagentActivity,
   buildSubagentActivity,
   findSubagentIdByToolCallId,
+  runSubagentActivityEqual,
+  subagentActivityEqual,
   subagentActivityLabel,
   subagentIdsForToolCallIds,
   subagentModelFromEvents,
@@ -60,6 +62,21 @@ const timeline = [
 const T0 = Date.parse('2026-08-29T05:47:20.000Z');
 const T2 = Date.parse('2026-08-29T05:47:22.000Z');
 
+/**
+ * 纯流式增量：sidecar 在子智能体吐字时源源不断送来的这一组事件。
+ *
+ * 它们按 `activityRuns.rendersNoRow` 的口径「不画行」，又按 `classifyProcessEvent` 的口径
+ * 「不计步」，所以无论追加多少，步骤数与段结构都不该变——这正是步骤数缓存可以按「前缀同
+ * 引用 + 只追加流式增量」复用旧计数的前提。
+ */
+const deltas: Record<string, unknown>[] = [
+  { type: 'content_started', index: 0, content_kind: 'text', event_id: 'd1', timestamp: '2026-08-29T05:47:23.000Z' },
+  { type: 'text_delta', index: 0, text: '结', event_id: 'd2', timestamp: '2026-08-29T05:47:23.100Z' },
+  { type: 'text_delta', index: 0, text: '论：', event_id: 'd3', timestamp: '2026-08-29T05:47:23.200Z' },
+  { type: 'reasoning_delta', index: 1, text: '再确认一遍', event_id: 'd4', timestamp: '2026-08-29T05:47:23.300Z' },
+  { type: 'content_finished', index: 0, event_id: 'd5', timestamp: '2026-08-29T05:47:23.400Z' },
+];
+
 describe('buildSubagentActivity', () => {
   it('汇总计数：总数 / 已完成 / 运行中 / 失败，空列表给零值', () => {
     const activity = buildSubagentActivity({
@@ -90,7 +107,7 @@ describe('buildSubagentActivity', () => {
     expect(empty.summary.endedAt).toBeUndefined();
   });
 
-  it('时长取首末事件时间戳，运行中用 now', () => {
+  it('时长取首末事件时间戳；运行中不落时长，交给展示层按秒自走', () => {
     const completed = buildSubagentActivity({
       order: ['a'],
       descriptors: { a: descriptor({ subagentId: 'a', status: 'completed' }) },
@@ -100,13 +117,80 @@ describe('buildSubagentActivity', () => {
     expect(completed.summary.startedAt).toBe(T0);
     expect(completed.summary.endedAt).toBe(T2);
 
+    // 运行中的子智能体没有结束时刻：尾部源源不断的 text_delta 每来一个都会改掉
+    // 「最后一条事件时间戳」，落进投影就等于每吐一个字换掉整张卡片的活动对象，
+    // 进而让主线程每一行已挂载消息重新协调。
     const running = buildSubagentActivity({
       order: ['a'],
       descriptors: { a: descriptor({ subagentId: 'a', status: 'running' }) },
       events: { a: timeline },
-      now: T2 + 60_000,
     });
-    expect(running.nodes[0]?.durationMs).toBe(T2 - T0 + 60_000);
+    expect(running.nodes[0]?.durationMs).toBeUndefined();
+    expect(running.nodes[0]?.startedAt).toBe(T0);
+    expect(running.summary.endedAt).toBeUndefined();
+  });
+
+  it('纯流式 delta 追加不改变步骤数，投影始终渲染等价', () => {
+    const project = (events: Record<string, unknown>[]) => buildSubagentActivity({
+      order: ['a'],
+      descriptors: { a: descriptor({ subagentId: 'a', status: 'running' }) },
+      events: { a: events },
+    });
+    const events: Record<string, unknown>[] = [...timeline];
+    let previous = project(events);
+    const stepCount = previous.nodes[0]?.stepCount;
+    expect(stepCount).toBeGreaterThan(0);
+
+    for (const delta of deltas) {
+      events.push(delta);
+      const next = project(events);
+      expect(next.nodes[0]?.stepCount).toBe(stepCount);
+      expect(subagentActivityEqual(previous, next)).toBe(true);
+      previous = next;
+    }
+  });
+
+  it('终态后追加 delta 会改掉结束时刻，投影因此判为「变了」', () => {
+    const events: Record<string, unknown>[] = [...timeline];
+    const before = buildSubagentActivity({
+      order: ['a'],
+      descriptors: { a: descriptor({ subagentId: 'a', status: 'completed' }) },
+      events: { a: events },
+    });
+    events.push(deltas[0]);
+    const after = buildSubagentActivity({
+      order: ['a'],
+      descriptors: { a: descriptor({ subagentId: 'a', status: 'completed' }) },
+      events: { a: events },
+    });
+    expect(after.summary.endedAt).not.toBe(before.summary.endedAt);
+    expect(subagentActivityEqual(before, after)).toBe(false);
+  });
+
+  it('追加真正的步骤事件时步骤数必须跟着涨（缓存不得陈旧）', () => {
+    const events: Record<string, unknown>[] = [...timeline];
+    const project = () => buildSubagentActivity({
+      order: ['a'],
+      descriptors: { a: descriptor({ subagentId: 'a', status: 'running' }) },
+      events: { a: events },
+    });
+    const before = project().nodes[0]?.stepCount;
+    expect(before).toBeGreaterThan(0);
+
+    // 纯流式增量先来一轮：步骤数不动。
+    for (const delta of deltas) events.push(delta);
+    expect(project().nodes[0]?.stepCount).toBe(before);
+
+    // 接着来一次真正的工具调用：步骤数必须 +1。
+    events.push({
+      type: 'tool_started',
+      tool_use_id: 'c2',
+      name: 'Read',
+      input: {},
+      event_id: 'e4',
+      timestamp: '2026-08-29T05:47:24.000Z',
+    });
+    expect(project().nodes[0]?.stepCount).toBe((before ?? 0) + 1);
   });
 
   it('没有事件时不给时长', () => {

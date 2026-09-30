@@ -1158,11 +1158,35 @@ function simulateStreamingContent(
   entry.timer = window.setTimeout(tick, 30);
 }
 
+/**
+ * 按**事件对象身份**记忆解析结果。
+ *
+ * 子智能体时间线每来一个 delta 就换一个全新数组，但里面未被触碰的元素**保持同一个对象
+ * 引用**（`subagentStore.appendEvent` 只在末尾追加、或就地替换那一个工具帧）。预览面
+ * 板与委派卡片因此可以对整条时间线反复 `map(parseAgentEvent)`，而真正需要重新解析的只有
+ * 刚追加的那一条。没有这层记忆时那是 O(n) 次解析 × O(n) 次追加 = O(n²)。
+ *
+ * 用 `WeakMap` 而非 `Map`：条目随事件对象一起被回收，不会把整条时间线钉在内存里。
+ */
+const parsedAgentEventCache = new WeakMap<Record<string, unknown>, AgentMessage>();
+
 export function parseAgentEvent(raw: string | Record<string, unknown>): AgentMessage {
+  if (typeof raw !== 'string') {
+    const cached = parsedAgentEventCache.get(raw);
+    if (cached) return cached;
+    const parsed = parseAgentEventUncached(raw);
+    // 解析结果必须是不可变快照才能安全共享：下游 reducer 会持有它，而调用方传进来的是
+    // store 里的原始事件对象。`parseAgentEventUncached` 每次都新建对象，天然满足。
+    parsedAgentEventCache.set(raw, parsed);
+    return parsed;
+  }
+  return parseAgentEventUncached(raw);
+}
+
+function parseAgentEventUncached(raw: string | Record<string, unknown>): AgentMessage {
   try {
-    // The daemon WebSocket path already hands over a parsed event object, so
-    // only string producers (legacy sidecar streams, persisted timeline rows,
-    // tests) pay for a parse here.
+    // 字符串生产者（遗留 sidecar 流、持久化时间线行、测试）才付解析代价；对象生产者
+    // 已经在调用方解析过了。
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
 
     // Filter out sub-agent (sidechain) messages from the main event stream.

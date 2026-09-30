@@ -83,9 +83,11 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
   };
 });
 
+import { buildActivityRuns } from '../../../lib/activityRuns';
 import { buildConversationTurns } from '../../../lib/conversationTurns';
 import { buildLongSessionEvents } from '../../../lib/dev/longSessionFixture';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { useSubagentStore } from '../../../stores/subagentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import type { Session } from '../../../types/session';
 import { TooltipProvider } from '../../ui/tooltip';
@@ -95,7 +97,10 @@ import {
   assistantRowBindingsEqual,
   type AssistantRowBindings,
 } from './CodeMuxThread';
-import type { SubagentActivity } from '../../../lib/subagentActivity';
+import {
+  buildRunSubagentActivity,
+  type SubagentActivity,
+} from '../../../lib/subagentActivity';
 
 function toPlainMarkdownBlocks(children: ReactNode): ReactNode {
   if (typeof children !== 'string') return children ?? null;
@@ -549,4 +554,222 @@ describe('流式期间的 markdown 重画落在哪条路径', () => {
     expect(counts.liveMarkdown).toBeGreaterThan(0);
     expect(counts.committedMarkdown).toBe(0);
   }, 120_000);
+});
+
+/**
+ * 计数型守卫：**子智能体吐字不得让主线程任何一行重渲染**。
+ *
+ * 背景：子智能体时间线的每个 `text_delta` 都会让 `subagentStore` 换一次时间线数组身份，
+ * 而 `CodeMuxThreadRenderContext` 依赖由它投影出来的 `subagentRunActivity`。不等价就复用
+ * 的话，子智能体每吐一个字，主线程每一行已挂载消息都要重新协调（实测 24 行→41 次行渲染，
+ * 120 行→201 次）。主线程被占满后，两个每秒推进的计时器（`RunningElapsedTimer` 的
+ * `setInterval` 与委派卡片的 `useLiveNow`）一起停跳 —— 这正是"主智能体与子智能体计时
+ * 同时卡住"的成因。
+ *
+ * 纯流式增量按 `activityRuns.rendersNoRow` / `classifyProcessEvent` 的口径既不计步也不
+ * 断段，所以整条链路上没有任何字段会变，投影必须被判为渲染等价。
+ *
+ * 末尾那条「真步骤事件必须重渲染」是**反证**：没有它，本用例可能因为"根本没订阅到子智能体
+ * store"而假通过。
+ */
+describe('子智能体流式增量期间的主线程渲染计数', () => {
+  const SUBAGENT_ID = 'row-render-counts-subagent';
+  const TASK_TOOL_USE_ID = 'row-render-counts-task';
+  const DELTA_COUNT = 60;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    if (!globalsInstalled) {
+      globalsInstalled = true;
+      class MockResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+      vi.stubGlobal('ResizeObserver', MockResizeObserver);
+      Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
+    }
+    resetCounts();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** 父时间线里的一次 Task 委派 —— 没有它就找不到含委派的处理段，守卫会假通过。 */
+  function delegationEvent(): AgentMessage {
+    return {
+      kind: 'assistant',
+      data: {
+        type: 'assistant',
+        uuid: TASK_TOOL_USE_ID,
+        session_id: SESSION_ID,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: TASK_TOOL_USE_ID,
+            name: 'Task',
+            input: { subagent_type: 'explore', description: '查清前端技术栈' },
+          }],
+        },
+        parent_tool_use_id: null,
+      },
+    } as unknown as AgentMessage;
+  }
+
+  /** 一个已跑过几步、仍在运行的子智能体：一步思考 + 一次工具调用。 */
+  function seedRunningSubagent(): void {
+    useSubagentStore.setState({
+      sessions: {
+        [SESSION_ID]: {
+          order: [SUBAGENT_ID],
+          descriptors: {
+            [SUBAGENT_ID]: {
+              subagentId: SUBAGENT_ID,
+              provider: 'opencode',
+              title: 'explore',
+              description: '查清前端技术栈',
+              status: 'running',
+              toolCallId: TASK_TOOL_USE_ID,
+              subtitle: null,
+              updatedAt: 0,
+            },
+          },
+          events: {
+            [SUBAGENT_ID]: [
+              {
+                type: 'assistant_message',
+                content: [{ type: 'thinking', thinking: '先看入口' }],
+                event_id: 's1',
+                timestamp: '2026-08-29T05:47:20.000Z',
+              },
+              {
+                type: 'tool_started',
+                tool_use_id: 'sc1',
+                name: 'Grep',
+                input: {},
+                event_id: 's2',
+                timestamp: '2026-08-29T05:47:21.000Z',
+              },
+            ],
+          },
+          seenEventIds: { [SUBAGENT_ID]: new Set(['s1', 's2']) },
+        },
+      },
+      continuationPending: {},
+    });
+  }
+
+  /** 直接从两个 store 现算投影 —— 不去 DOM 里刨文案，断言的是数据本身。 */
+  function currentStepCount(): number {
+    const subagents = useSubagentStore.getState().sessions[SESSION_ID];
+    const events = useAgentStore.getState().events[SESSION_ID] ?? [];
+    const runs = buildActivityRuns(
+      events,
+      buildConversationTurns(events, { isRunning: false }),
+      events.map((_, index) => index + 1),
+      { isRunning: false },
+    );
+    const activity = buildRunSubagentActivity({
+      runs: runs.runs,
+      agentEvents: events,
+      order: subagents?.order ?? [],
+      descriptors: subagents?.descriptors ?? {},
+      subagentEvents: subagents?.events ?? {},
+    });
+    return [...activity.values()][0]?.nodes[0]?.stepCount ?? -1;
+  }
+
+  it('子智能体连续吐 60 个 delta，主线程一行都不重渲染，步骤数不变', async () => {
+    seed(8);
+    useAgentStore.setState((state) => {
+      const next = [...(state.events[SESSION_ID] ?? []), delegationEvent()];
+      return {
+        events: { ...state.events, [SESSION_ID]: next },
+        turns: { ...state.turns, [SESSION_ID]: buildConversationTurns(next, { isRunning: false }) },
+        eventTimestamps: { ...state.eventTimestamps, [SESSION_ID]: next.map((_, index) => index + 1) },
+      };
+    });
+    seedRunningSubagent();
+
+    render(
+      <TooltipProvider>
+        <CodeMuxAssistantRuntimeProvider
+          sessionId={SESSION_ID}
+          onSend={vi.fn(async () => {})}
+          onCommand={vi.fn(async () => {})}
+        >
+          <CodeMuxThread sessionId={SESSION_ID} />
+        </CodeMuxAssistantRuntimeProvider>
+      </TooltipProvider>,
+    );
+    await flushFrames(3);
+    resetCounts();
+    await flushFrames(1);
+    resetCounts();
+
+    // 前置条件：委派卡片真的挂上了，且步骤数不是 0（否则下面全是空断言）。
+    const card = document.querySelector('[data-slot="subagent-activity-card"]');
+    expect(card).not.toBeNull();
+    const mountedRows = document.querySelectorAll('[data-message-row]').length;
+    expect(mountedRows).toBeGreaterThan(20);
+    const stepCountBefore = currentStepCount();
+    expect(stepCountBefore).toBeGreaterThan(0);
+
+    for (let index = 0; index < DELTA_COUNT; index += 1) {
+      await act(async () => {
+        useSubagentStore.getState().appendEvent(
+          SESSION_ID,
+          SUBAGENT_ID,
+          {
+            type: 'text_delta',
+            index: 0,
+            text: `结论片段 ${index}。`,
+            event_id: `d${index}`,
+            timestamp: '2026-08-29T05:47:22.000Z',
+          },
+        );
+      });
+    }
+    await flushFrames(2);
+
+    if (process.env.CODEMUX_ROW_COUNT_TRACE) {
+      // eslint-disable-next-line no-console
+      console.log('SUBAGENT_DELTA_COUNTS', JSON.stringify({
+        mountedRows,
+        rowRenders: counts.rows,
+        leafRenders: counts.text + counts.tool + counts.data,
+        stepCountBefore,
+        stepCountAfter: currentStepCount(),
+      }));
+    }
+
+    expect(currentStepCount()).toBe(stepCountBefore);
+    // 核心不变量：子智能体吐字期间主线程零重渲染。
+    expect(counts.rows).toBe(0);
+    expect(counts.text + counts.tool + counts.data).toBe(0);
+
+    // 反证：真正的步骤事件（这里是一次新工具调用）**必须**让卡片重渲染。
+    // 没有这条，上面那个 0 可能只是"压根没订阅子智能体 store"。
+    resetCounts();
+    await act(async () => {
+      useSubagentStore.getState().appendEvent(
+        SESSION_ID,
+        SUBAGENT_ID,
+        {
+          type: 'tool_started',
+          tool_use_id: 'sc2',
+          name: 'Read',
+          input: {},
+          event_id: 's3',
+          timestamp: '2026-08-29T05:47:23.000Z',
+        },
+      );
+    });
+    await flushFrames(2);
+
+    expect(currentStepCount()).toBe(stepCountBefore + 1);
+    expect(counts.rows + counts.text + counts.tool + counts.data).toBeGreaterThan(0);
+  }, 180_000);
 });

@@ -29,6 +29,7 @@ import {
 } from '@/lib/activityRuns';
 import {
   buildRunSubagentActivity,
+  runSubagentActivityEqual,
   type SubagentActivity,
 } from '@/lib/subagentActivity';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
@@ -534,16 +535,26 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   // 委派（Task/Agent）：每个处理段里起了哪些子智能体、它们各自的进度。
   // 段头据此改画委派卡片；不含委派的段仍是普通组头。
   const sessionSubagents = useSubagentStore((state) => state.sessions[sessionId]);
-  const subagentRunActivity = useMemo(
-    () => buildRunSubagentActivity({
+  // 委派投影在渲染等价时复用上一张表。子智能体每吐一个 delta，store 就换一次时间线
+  // 数组身份；不比较的话 `threadRenderContextValue` 每来一个字换一次身份，主线程每一行
+  // 已挂载消息都要重新协调（实测 24 行→41 次行渲染，120 行→201 次），主线程被占满后
+  // 连两个每秒推进的计时器都跟着停跳。比较口径见 `subagentActivityEqual`。
+  const subagentActivityCacheRef = useRef<Map<string, SubagentActivity>>(new Map());
+  const subagentRunActivity = useMemo(() => {
+    const next = buildRunSubagentActivity({
       runs: activityRuns.runs,
       agentEvents: events,
       order: sessionSubagents?.order ?? EMPTY_SUBAGENT_ORDER,
       descriptors: sessionSubagents?.descriptors ?? EMPTY_SUBAGENT_DESCRIPTORS,
       subagentEvents: sessionSubagents?.events ?? EMPTY_SUBAGENT_EVENTS,
-    }),
-    [activityRuns, events, sessionSubagents],
-  );
+    });
+    const previous = subagentActivityCacheRef.current;
+    if (runSubagentActivityEqual(previous, next)) {
+      return previous;
+    }
+    subagentActivityCacheRef.current = next;
+    return next;
+  }, [activityRuns, events, sessionSubagents]);
 
   const threadRenderContextValue = useMemo(() => ({
     sessionId,

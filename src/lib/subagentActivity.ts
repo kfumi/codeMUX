@@ -29,6 +29,7 @@ export type SubagentActivityNode = {
   status: SubagentStatus;
   /** 描述（`description`，退回 `subtitle`）。 */
   detail: string;
+  /** 终态节点的时长（首末事件之差）。运行中不落该字段，由展示层按秒自走。 */
   durationMs?: number;
   /** 首条时间线事件的时间戳：运行中的节点据此每秒推进时长。 */
   startedAt?: number;
@@ -44,6 +45,7 @@ export type SubagentActivitySummary = {
   /** 失败 + 已取消：两者都是「有问题」的终态，用来决定卡片文案。 */
   failed: number;
   startedAt?: number;
+  /** 全部子智能体终态后的结束时刻。有子智能体仍在运行时**不落**该字段。 */
   endedAt?: number;
 };
 
@@ -57,8 +59,6 @@ export type SubagentActivityInput = {
   descriptors: Readonly<Record<string, SubagentDescriptor>>;
   /** 每个子智能体的原始时间线事件（按时间序）。 */
   events: Readonly<Record<string, readonly Record<string, unknown>[]>>;
-  /** 运行中节点的时长截止点。默认当前时间；测试传固定值。 */
-  now?: number;
 };
 
 export const SUBAGENT_UNNAMED_LABEL = '未命名子智能体';
@@ -155,15 +155,80 @@ function timelineBounds(timeline: readonly Record<string, unknown>[]): {
  * 步骤数：与子智能体预览面板同一套投影（`parseAgentEvent` + `buildActivityRuns`），
  * 把该子智能体时间线里所有处理段的步骤数加起来。
  *
- * 时间线数组由 store 在每次追加时整体替换，所以按数组身份缓存即可：没变化的子智能体
- * 不必在每来一个事件时重算整条时间线。
+ * 缓存按**子智能体 id** 记，而不是按时间线数组身份：store 每次追加都换一个全新数组
+ * （React 只能靠新身份感知变化），按身份命中的缓存于是每来一个 delta 就 miss 一次，
+ * 把整条时间线重新 `parseAgentEvent` + `buildConversationTurns` + `buildActivityRuns`
+ * 一遍。子智能体密集吐字时这条链是 O(n²) 次解析，主线程被占满、连计时器一起停跳。
+ *
+ * 所以条目里额外记住前缀数组本身：只要本次是「旧前缀逐位同引用 + 只追加了流式增量」，
+ * 就直接复用旧计数。指针比较同样 O(n) 但不做任何解析，比重新投影便宜两三个数量级。
  */
-const stepCountCache = new WeakMap<readonly Record<string, unknown>[], number>();
+type StepCountCacheEntry = {
+  /** 上次计数的数组，下次做前缀比对用。 */
+  array: readonly Record<string, unknown>[];
+  count: number;
+};
 
-function timelineStepCount(timeline: readonly Record<string, unknown>[]): number {
+/** 防呆上限：真正会密集吐字的只有当前这几个子智能体。 */
+const STEP_COUNT_CACHE_LIMIT = 32;
+const stepCountCache = new Map<string, StepCountCacheEntry>();
+
+function rememberStepCount(
+  subagentId: string,
+  array: readonly Record<string, unknown>[],
+  count: number,
+): void {
+  // 命中已有键时 delete 再 set，让插入顺序始终反映最近使用，淘汰时丢的是最老的。
+  stepCountCache.delete(subagentId);
+  stepCountCache.set(subagentId, { array, count });
+  while (stepCountCache.size > STEP_COUNT_CACHE_LIMIT) {
+    const oldest = stepCountCache.keys().next();
+    if (oldest.done) break;
+    stepCountCache.delete(oldest.value);
+  }
+}
+
+/**
+ * 纯流式增量事件：`rendersNoRow`（`activityRuns.ts:193-205`）已把这一组判为「不画行」，
+ * `classifyProcessEvent` 又只认 `assistant`，`buildConversationTurns` 对它们只 push 不开关
+ * 回合 —— 三者合起来保证：追加它们既不增加步骤、也不开段断段，步骤数必然不变。
+ *
+ * 判据刻意保守：不在名单里的一律当作「可能改变步骤数」，触发全量重算。工具入参的就地
+ * 刷新（`subagentStore` 的 `mergeToolRefresh` 会换掉中间某个元素的对象）也因此自动落到
+ * 全量重算那一侧。
+ */
+function isPureStreamEvent(event: Record<string, unknown> | undefined): boolean {
+  const type = event?.type;
+  return type === 'text_delta'
+    || type === 'reasoning_delta'
+    || type === 'content_started'
+    || type === 'content_finished';
+}
+
+/** 新数组是否是旧数组的纯流式追加：旧前缀逐位同引用，且新增项全是流式增量。 */
+function isPureStreamExtension(
+  timeline: readonly Record<string, unknown>[],
+  previous: readonly Record<string, unknown>[],
+): boolean {
+  if (timeline.length <= previous.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (timeline[index] !== previous[index]) return false;
+  }
+  for (let index = previous.length; index < timeline.length; index += 1) {
+    if (!isPureStreamEvent(timeline[index])) return false;
+  }
+  return true;
+}
+
+function timelineStepCount(
+  subagentId: string,
+  timeline: readonly Record<string, unknown>[],
+): number {
   if (timeline.length === 0) return 0;
-  const cached = stepCountCache.get(timeline);
-  if (cached !== undefined) return cached;
+  const cached = stepCountCache.get(subagentId);
+  if (cached && isPureStreamExtension(timeline, cached.array)) {
+    return cached.count;
+  }
   let stepCount = 0;
   try {
     const parsed = timeline.map((event) => parseAgentEvent(event));
@@ -179,7 +244,7 @@ function timelineStepCount(timeline: readonly Record<string, unknown>[]): number
     // 时间线里出现无法解析的事件时只丢步骤数，卡片的其余信息照常展示。
     stepCount = 0;
   }
-  stepCountCache.set(timeline, stepCount);
+  rememberStepCount(subagentId, timeline, stepCount);
   return stepCount;
 }
 
@@ -187,9 +252,7 @@ export function buildSubagentActivity({
   order,
   descriptors,
   events,
-  now,
 }: SubagentActivityInput): SubagentActivity {
-  const clock = now ?? Date.now();
   const nodes: SubagentActivityNode[] = [];
   let startedAt: number | undefined;
   let endedAt: number | undefined;
@@ -200,8 +263,13 @@ export function buildSubagentActivity({
     const timeline = events[subagentId] ?? [];
     const live = descriptor.status === 'running';
     const { startedAt: first, endedAt: last } = timelineBounds(timeline);
-    // 运行中的时长以「现在」为截止点，结束的用末条事件时间戳。
-    const end = live ? clock : (last ?? first);
+    // 运行中的子智能体**没有结束时刻**：时长由展示层按 `now - startedAt` 每秒自走
+    // （`subagent-activity.tsx` 的组头与节点卡都是这个口径），所以这里对 live 节点
+    // 既不落 `durationMs` 也不落 `endedAt`。这不是省事：尾部还在源源不断进来的
+    // `text_delta` 每来一个就会改掉「最后一条事件时间戳」，若把它算进投影，子智能体
+    // 每吐一个字都会换掉整张卡片的活动对象，进而让主线程每一行已挂载消息重新协调
+    // （`CodeMuxThread` 的 render context 换身份）。终态才落这两个字段。
+    const end = live ? undefined : last;
     const durationMs = first === undefined || end === undefined
       ? undefined
       : Math.max(0, end - first);
@@ -217,17 +285,17 @@ export function buildSubagentActivity({
       detail: subagentDetailText(descriptor),
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(first !== undefined ? { startedAt: first } : {}),
-      stepCount: timelineStepCount(timeline),
+      stepCount: timelineStepCount(subagentId, timeline),
       live,
     });
 
     if (first !== undefined) {
       startedAt = startedAt === undefined ? first : Math.min(startedAt, first);
     }
-    if (last !== undefined) {
+    // 同上：live 节点的「结束」时刻无意义，只有终态才参与汇总（见上面的说明）。
+    if (last !== undefined && !live) {
       endedAt = endedAt === undefined ? last : Math.max(endedAt, last);
     }
-
   }
   return {
     nodes,
@@ -302,7 +370,6 @@ export type SubagentActivityRunsInput = {
   order: readonly string[];
   descriptors: Readonly<Record<string, SubagentDescriptor>>;
   subagentEvents: Readonly<Record<string, readonly Record<string, unknown>[]>>;
-  now?: number;
 };
 
 /**
@@ -328,9 +395,77 @@ export function buildRunSubagentActivity(
       order: subagentIds,
       descriptors: input.descriptors,
       events: input.subagentEvents,
-      ...(input.now !== undefined ? { now: input.now } : {}),
     }));
   }
 
   return byRunKey;
+}
+
+/**
+ * 两个活动投影是否**渲染等价**。
+ *
+ * 存在的理由：`CodeMuxThread` 的 render context 里带着这张查找表，context 换身份就会让
+ * **每一行已挂载消息**重新协调（该文件里记着实测：24 行→41 次行渲染，120 行→201 次）。
+ * 子智能体吐字时每个 delta 都会换掉时间线数组身份，若不比较就等于每来一个字重渲整棵
+ * 消息树——这正是主线程被占满、连计时器都停跳的原因。
+ *
+ * 比较必须**逐字段覆盖**每个参与渲染的值：漏掉一个字段的后果是 UI 静默不更新，比多渲染
+ * 几次严重得多。`durationMs` 只在终态节点上有意义（live 节点由展示层按秒自走），
+ * `endedAt` 同理，所以运行中子智能体的时长推进不会让这张表被判为「变了」。
+ */
+export function subagentActivityEqual(a: SubagentActivity, b: SubagentActivity): boolean {
+  if (a === b) return true;
+  if (a.nodes.length !== b.nodes.length) return false;
+  const sa = a.summary;
+  const sb = b.summary;
+  if (
+    sa.total !== sb.total
+    || sa.finished !== sb.finished
+    || sa.running !== sb.running
+    || sa.failed !== sb.failed
+    || sa.startedAt !== sb.startedAt
+    || sa.endedAt !== sb.endedAt
+  ) {
+    return false;
+  }
+  for (let index = 0; index < a.nodes.length; index += 1) {
+    if (!subagentActivityNodeEqual(a.nodes[index], b.nodes[index])) return false;
+  }
+  return true;
+}
+
+function subagentActivityNodeEqual(
+  a: SubagentActivityNode,
+  b: SubagentActivityNode,
+): boolean {
+  return a.subagentId === b.subagentId
+    && a.name === b.name
+    && a.provider === b.provider
+    && a.model === b.model
+    && a.statusLabel === b.statusLabel
+    && a.status === b.status
+    && a.detail === b.detail
+    && a.durationMs === b.durationMs
+    && a.startedAt === b.startedAt
+    && a.stepCount === b.stepCount
+    && a.live === b.live;
+}
+
+/**
+ * 按 runKey 逐项比较两张活动查找表，供 `CodeMuxThread` 决定能否复用上一张。
+ *
+ * runKey 集合本身也参与比较：委派从一个处理段「迁移」到另一个（工具卡换位）时，
+ * 只有集合完全一致才谈得上复用。
+ */
+export function runSubagentActivityEqual(
+  a: ReadonlyMap<string, SubagentActivity>,
+  b: ReadonlyMap<string, SubagentActivity>,
+): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [runKey, activity] of a) {
+    const other = b.get(runKey);
+    if (!other || !subagentActivityEqual(activity, other)) return false;
+  }
+  return true;
 }
