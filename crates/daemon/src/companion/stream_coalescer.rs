@@ -1,4 +1,5 @@
 use serde_json::Value;
+use uuid::Uuid;
 
 /// WS 广播腿的 delta 合批器(最后一跳)。
 ///
@@ -14,6 +15,12 @@ use serde_json::Value;
 ///
 /// 合批器**无跨批状态**:每次 `handle_sidecar_event_for_companion` 调用结束时
 /// flush,不加延迟;窗口由上游 sidecar 的 50ms 批次天然界定。
+///
+/// **子智能体时间线**:子智能体帧(`subagent_timeline`)把 delta 包在 `event` 里,且
+/// sidecar 不对它们做批(见 `streamEventBatcher` —— 它的可批类型只认顶层 delta),所以
+/// 之前是「每 delta 一帧」。这里按 `(子智能体, 类型, index)` 合流:同一会话里多个子智能体
+/// 并行,不同子智能体的同号 `index` 不是同一条流,必须分开。合并只动广播腿,落库仍是
+/// 合帧前的每一条,所以重连时从 `GET /sessions/:id/subagents` 拉回的���史依旧完整。
 pub struct DeltaCoalescer {
     pending: Option<PendingDelta>,
 }
@@ -59,27 +66,48 @@ impl DeltaCoalescer {
     }
 }
 
-/// 一条挂起的合并流:同一 `(type, session_id, index)` 的连续 delta。
+/// 一条挂起的合并流:同一 `(类型, 会话, 子智能体, index)` 的连续 delta。
 /// 身份字段( event_id/timestamp 等)取首条,载荷字符串做拼接。
 struct PendingDelta {
     session_id: String,
+    /// 子智能体帧额外按 `subagent_id` 分流:同一会话里多个子智能体并行,不同子智能体
+    /// 的同号 `index` 不是同一条流。
+    subagent_id: Option<String>,
     event_type: String,
     index: Value,
+    site: PayloadSite,
     merged: Value,
+}
+
+/// delta 载荷在帧里的位置:父时间线帧就是帧本身,子智能体帧把它包在 `event` 里。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PayloadSite {
+    TopLevel,
+    Nested,
 }
 
 impl PendingDelta {
     fn new(event: &Value) -> Option<Self> {
-        let event_type = event.get("type")?.as_str()?;
-        let field = payload_field(event_type)?;
         let session_id = event.get("session_id")?.as_str()?.to_string();
-        let index = event.get("index")?.clone();
+        let (site, body, subagent_id) = match event.get("type").and_then(Value::as_str) {
+            Some("subagent_timeline") => (
+                PayloadSite::Nested,
+                event.get("event")?,
+                Some(event.get("subagent_id")?.as_str()?.to_string()),
+            ),
+            _ => (PayloadSite::TopLevel, event, None),
+        };
+        let event_type = body.get("type")?.as_str()?;
+        let field = payload_field(event_type)?;
+        let index = body.get("index")?.clone();
         // 首条载荷必须是字符串;畸形事件原样透传,不参与合并。
-        payload_as_str(event, field)?;
+        payload_as_str(event, site, field)?;
         Some(Self {
             session_id,
+            subagent_id,
             event_type: event_type.to_string(),
             index,
+            site,
             merged: event.clone(),
         })
     }
@@ -88,20 +116,60 @@ impl PendingDelta {
         let Some(field) = payload_field(&self.event_type) else {
             return false;
         };
-        event.get("type").and_then(Value::as_str) == Some(self.event_type.as_str())
+        if self.site != site_of(event) {
+            return false;
+        }
+        let body = match self.site {
+            PayloadSite::TopLevel => event,
+            PayloadSite::Nested => match event.get("event") {
+                Some(body) => body,
+                None => return false,
+            },
+        };
+        let other_subagent_id = match self.site {
+            PayloadSite::TopLevel => None,
+            PayloadSite::Nested => event.get("subagent_id").and_then(Value::as_str),
+        };
+        body.get("type").and_then(Value::as_str) == Some(self.event_type.as_str())
             && event.get("session_id").and_then(Value::as_str) == Some(self.session_id.as_str())
-            && event.get("index") == Some(&self.index)
-            && payload_as_str(event, field).is_some()
+            && other_subagent_id == self.subagent_id.as_deref()
+            && body.get("index") == Some(&self.index)
+            && payload_as_str(event, self.site, field).is_some()
     }
 
     fn absorb(&mut self, event: &Value) {
-        let field = payload_field(&self.event_type).unwrap_or("text");
-        if let (Some(Value::String(dst)), Some(src)) = (
-            self.merged.get_mut(field),
-            event.get(field).and_then(Value::as_str),
-        ) {
+        let Some(field) = payload_field(&self.event_type) else {
+            return;
+        };
+        let Some(src) = payload_as_str(event, self.site, field) else {
+            return;
+        };
+        if let Some(dst) = payload_str_mut(&mut self.merged, self.site, field) {
             dst.push_str(src);
         }
+        // 合并帧是一条**新的**投递，必须换 `event_id`。
+        //
+        // 父时间线的客户端按 `sequence` 去重而 delta 不带 sequence,换不换无所谓;但
+        // 子智能体帧不同——`subagentStore.appendEvent` 恰恰按 `event_id` 去重,而
+        // 落库时合帧前的每条 delta 都已各自持久化。若沿用首条的 id,会话中途打开
+        // (hydration 拉走已落库的整条时间线) 之后到达的合并帧会被当成重复**整帧丢弃**,
+        // 尾部文本凭空消失。`timestamp` 保持首条的:它只用于时间线边界,偏差上限一个
+        // 合帧窗口。
+        if self.site == PayloadSite::Nested {
+            if let Some(object) = self.merged.as_object_mut() {
+                object.insert(
+                    "event_id".to_string(),
+                    Value::String(Uuid::new_v4().to_string()),
+                );
+            }
+        }
+    }
+}
+
+fn site_of(event: &Value) -> PayloadSite {
+    match event.get("type").and_then(Value::as_str) {
+        Some("subagent_timeline") => PayloadSite::Nested,
+        _ => PayloadSite::TopLevel,
     }
 }
 
@@ -114,8 +182,27 @@ fn payload_field(event_type: &str) -> Option<&'static str> {
     }
 }
 
-fn payload_as_str<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
-    event.get(field).and_then(Value::as_str)
+fn payload_as_str<'a>(event: &'a Value, site: PayloadSite, field: &str) -> Option<&'a str> {
+    let body = match site {
+        PayloadSite::TopLevel => event,
+        PayloadSite::Nested => event.get("event")?,
+    };
+    body.get(field)?.as_str()
+}
+
+fn payload_str_mut<'a>(
+    event: &'a mut Value,
+    site: PayloadSite,
+    field: &str,
+) -> Option<&'a mut String> {
+    let body = match site {
+        PayloadSite::TopLevel => event,
+        PayloadSite::Nested => event.get_mut("event")?,
+    };
+    match body.get_mut(field)? {
+        Value::String(text) => Some(text),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -259,5 +346,129 @@ mod tests {
     fn 空输入不产生帧() {
         let mut coalescer = DeltaCoalescer::new();
         assert!(coalescer.flush().is_empty());
+    }
+
+    /// 子智能体时间线帧：delta 包在 `event` 里，身份还要带 `subagent_id`。
+    fn subagent_text_delta(session: &str, subagent: &str, index: i64, text: &str) -> Value {
+        json!({
+            "type": "subagent_timeline",
+            "session_id": session,
+            "subagent_id": subagent,
+            "event": {
+                "type": "text_delta",
+                "index": index,
+                "text": text,
+                "event_id": format!("se-{}-{}", index, text),
+                "sequence": 3,
+            },
+            "event_id": format!("w-{}-{}", index, text),
+            "timestamp": "2026-09-22T00:00:00Z",
+        })
+    }
+
+    #[test]
+    fn 子智能体连续文本增量合并且换新的外层event_id() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        for text in ["结", "论", "：ok"] {
+            frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, text)));
+        }
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["type"], json!("subagent_timeline"));
+        assert_eq!(frames[0]["subagent_id"], json!("sub-1"));
+        assert_eq!(frames[0]["event"]["type"], json!("text_delta"));
+        assert_eq!(frames[0]["event"]["text"], json!("结论：ok"));
+        // 合并帧必须换一个外层 id：客户端按 event_id 去重，而合帧前每条 delta 都已
+        // 各自落库，沿用首条 id 会让「中途打开会话」后的合并帧被整帧判为重复。
+        assert_ne!(frames[0]["event_id"], json!("w-0-结"));
+        // 外层身份与时间戳保持首条，子智能体帧不参与父时间线的 sequence 空间。
+        assert_eq!(frames[0]["timestamp"], json!("2026-09-22T00:00:00Z"));
+        assert!(frames[0].get("sequence").is_none());
+    }
+
+    #[test]
+    fn 只吸收一条的子智能体帧不换event_id() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "a")));
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 1);
+        // 没有发生合并，这一帧就是原帧：换 id 反而会让客户端把它当成新事件重复追加。
+        assert_eq!(frames[0]["event_id"], json!("w-0-a"));
+        assert_eq!(frames[0]["event"]["event_id"], json!("se-0-a"));
+    }
+
+    #[test]
+    fn 不同子智能体的同号index不合并() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "a")));
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-2", 0, "b")));
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0]["subagent_id"], json!("sub-1"));
+        assert_eq!(frames[1]["subagent_id"], json!("sub-2"));
+    }
+
+    #[test]
+    fn 子智能体帧与父时间线帧不合并() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        frames.extend(coalescer.push(text_delta("s1", 0, "parent")));
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "child")));
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0]["type"], json!("text_delta"));
+        assert_eq!(frames[0]["text"], json!("parent"));
+        assert_eq!(frames[1]["type"], json!("subagent_timeline"));
+    }
+
+    #[test]
+    fn 子智能体的状态帧前先冲出挂起增量() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "a")));
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "b")));
+        frames.extend(coalescer.push(json!({
+            "type": "subagent_upsert",
+            "session_id": "s1",
+            "subagent_id": "sub-1",
+            "status": "completed",
+            "event_id": "up-1",
+        })));
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 2);
+        // 顺序不能倒：文本必须排在状态变更之前，否则卡片会先终态再突然冒出正文。
+        assert_eq!(frames[0]["type"], json!("subagent_timeline"));
+        assert_eq!(frames[0]["event"]["text"], json!("ab"));
+        assert_eq!(frames[1]["type"], json!("subagent_upsert"));
+        assert_eq!(frames[1]["status"], json!("completed"));
+    }
+
+    #[test]
+    fn 子智能体工具帧不参与合并() {
+        let mut coalescer = DeltaCoalescer::new();
+        let mut frames = Vec::new();
+        frames.extend(coalescer.push(subagent_text_delta("s1", "sub-1", 0, "a")));
+        frames.extend(coalescer.push(json!({
+            "type": "subagent_timeline",
+            "session_id": "s1",
+            "subagent_id": "sub-1",
+            "event": { "type": "tool_started", "tool_use_id": "t1", "name": "Grep", "input": {} },
+            "event_id": "w-tool",
+        })));
+        frames.extend(coalescer.flush());
+
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0]["event"]["text"], json!("a"));
+        assert_eq!(frames[1]["event"]["type"], json!("tool_started"));
+        // 语义帧是原帧透传，外层 id 不该被动过。
+        assert_eq!(frames[1]["event_id"], json!("w-tool"));
     }
 }
