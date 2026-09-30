@@ -200,6 +200,28 @@ describe('CodeMuxMarkdownLink', () => {
     });
   });
 
+  it('keeps the file link baseline-aligned with surrounding prose instead of riding the icon baseline', () => {
+    render(
+      <CodeMuxMarkdownLink href="D:/project/ai-code/codeMUX/src/components/agent/TodoToolList.tsx">
+        TodoToolList.tsx
+      </CodeMuxMarkdownLink>,
+    );
+
+    const link = screen.getByRole('link', { name: 'TodoToolList.tsx' });
+
+    // `inline-flex` 会把整块链接的基线取成第一个 flex item（替换元素图标）的下边距，
+    // 比正文基线高，文件名因此整体偏上。必须是 inline-block（基线=最后一行文字基线）。
+    expect(link.className.split(/\s+/)).toContain('inline-block');
+    expect(link.className.split(/\s+/)).not.toContain('inline-flex');
+
+    // 图标必须显式 `inline-block`：Preflight 的 `svg { display: block }` 会让它
+    // 在 `inline-block` 锚点里独占一行（"图标飘到上一行"）；`align-middle` 让它按 x 高度中线居中。
+    const icon = link.querySelector('svg');
+    const iconClasses = icon?.getAttribute('class')?.split(/\s+/) ?? [];
+    expect(iconClasses).toContain('inline-block');
+    expect(iconClasses).toContain('align-middle');
+  });
+
   it('keeps external links opening through the shell bridge', async () => {
     openExternal.mockResolvedValue(undefined);
     render(<CodeMuxMarkdownLink href="https://example.com/docs">外部文档</CodeMuxMarkdownLink>);

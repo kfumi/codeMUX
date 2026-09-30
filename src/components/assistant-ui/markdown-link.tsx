@@ -75,8 +75,12 @@ export function CodeMuxMarkdownLink({
     <a
       {...props}
       href={href}
+      // 行内基线对齐的关键：这里不能用 `inline-flex`。`inline-flex` 的基线取自
+      // **第一个** flex item，而文件图标是替换元素（基线被合成为下外边距边），
+      // 于是整块链接的基线被拉到图标底部、比正文文字基线高，视觉上整个文件名偏上。
+      // 改成 `inline-block` 后基线回到最后一行文字的基线，与正文严格对齐。
       className={cn(
-        'aui-md-a inline-flex items-center gap-1 cursor-pointer text-primary no-underline hover:text-primary/80',
+        'aui-md-a inline-block cursor-pointer text-primary no-underline hover:text-primary/80',
         className,
       )}
       style={{
@@ -85,7 +89,14 @@ export function CodeMuxMarkdownLink({
       }}
       onClick={handleClick}
     >
-      {fileLink ? <FileTypeIcon filePath={fileLink.path} /> : null}
+      {/*
+        图标必须显式 `inline-block`：Tailwind Preflight 有 `svg { display: block }`，
+        在 `inline-flex` 下它是 flex item（block 化无害），换成 `inline-block` 锚点后
+        会变成块级子元素、被挤到独立一行。`align-middle` 让它按 x 高度中线居中。
+      */}
+      {fileLink ? (
+        <FileTypeIcon filePath={fileLink.path} className="mr-1 inline-block align-middle" />
+      ) : null}
       {fileLink?.label ?? children}
     </a>
   );
