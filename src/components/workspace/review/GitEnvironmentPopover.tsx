@@ -336,7 +336,7 @@ function EnvironmentSection({
                     <span className="block truncate text-xs text-foreground/88">{currentBranch}</span>
                   </TooltipHint>
                 </span>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/55" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
               </button>
             </PopoverTrigger>
             <PopoverContent
