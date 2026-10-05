@@ -40,16 +40,16 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
 /**
  * 工具行的动作图标。状态由行尾的 spinner / 失败文字表达，所以这里的图标只说明
  * 「这是哪一类动作」，读一列工具行时可以按形状扫读（对齐参考实现的 `ToolActionIcon`）。
+ * 尺寸用 em 跟随界面字号（1.08em ≈ 动作词 13px 时的 14px）：图标比文字略大半档有呼吸感，
+ * 但不能冒出文字行太多（视觉上像往下坠）；写死像素会跟丢设置里的界面字号。
  */
 export function ToolActionIcon({
   toolName,
   className,
-  size = 15,
 }: {
   toolName: string;
   className?: string;
-  size?: number;
 }) {
   const Icon = TOOL_ICONS[normalizeToolName(toolName)] ?? ICONS[getToolAction(toolName)];
-  return <Icon aria-hidden className={cn('shrink-0', className)} size={size} />;
+  return <Icon aria-hidden className={cn('shrink-0 size-[1.08em]', className)} />;
 }

@@ -67,9 +67,9 @@ export function ActivityStepThinking({
       >
         <span
           data-slot="reasoning-trigger-icon"
-          className="inline-flex size-[15px] shrink-0 items-center justify-center text-muted-foreground"
+          className="inline-flex size-[1.08em] shrink-0 items-center justify-center text-muted-foreground -translate-y-[0.035em]"
         >
-          <Brain aria-hidden size={15} />
+          <Brain aria-hidden className="size-full" />
         </span>
         <span
           data-slot="reasoning-trigger-label"

@@ -157,7 +157,10 @@ function ToolFallbackTrigger({
       )}
       {...props}
     >
-      <ToolActionIcon toolName={toolName} className="text-muted-foreground" />
+      {/* 光学对齐：CJK 字形在行盒里偏上（雅黑 ascent ≫ descent，字形带中心比盒中心高
+          ~0.75px@13px），图标按盒居中就会显得比右边的文字低；lucide 图形绘制中心又比自身
+          盒子高 ~0.31px，净差 ~0.44px（复现页实测）。用 em 微调补偿，随界面字号缩放。 */}
+      <ToolActionIcon toolName={toolName} className="text-muted-foreground -translate-y-[0.035em]" />
       {/* 文字区（动作词 + 摘要 + 状态徽标）整体在 24px 行里居中，内部按基线对齐。
           整行不能用 `items-baseline`：`min-h-6` 会把基线组顶到伸缩后的行首沿，
           文字整体比居中的图标高约 3px。 */}

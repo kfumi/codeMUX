@@ -103,6 +103,16 @@ describe('ActivityStepThinking', () => {
     expect(container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain('正在分析');
   });
 
+  it('动作图标带光学对齐微调（CJK 字形带比行盒中心偏上）', () => {
+    const { container } = render(<ActivityStepThinking text="正在分析" />);
+
+    // CJK 字形在行盒里偏上（雅黑 ascent ≫ descent），图标按盒居中会显得比右边文字低；
+    // 用 em 微调补偿，随界面字号缩放。尺寸同样用 em 跟随界面字号，不能写死像素。
+    const icon = container.querySelector('[data-slot="reasoning-trigger-icon"]');
+    expect(icon?.getAttribute('class')).toContain('-translate-y-[0.035em]');
+    expect(icon?.getAttribute('class')).toContain('size-[1.08em]');
+  });
+
   it('思考结束（streaming 由 true 变 false）后详情自动收起', () => {
     const { container, rerender } = render(<ActivityStepThinking text="正在分析" streaming />);
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeTruthy();
