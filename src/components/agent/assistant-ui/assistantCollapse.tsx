@@ -186,6 +186,13 @@ export function AssistantCollapseToggle({
     // 时间与「已处理」同字号，步骤数小一号。层次靠两档文字色拉开：「已处理 + 时长」是主文字
     // （`text-foreground`），步骤数是次级文字（`text-muted-foreground`，显式写死，hover 时不
     // 跟着按钮变亮，两级对比始终在）。
+    // 共享 Button 自带 `active:scale-[0.98]` 按压反馈，整行文字按下缩小、松开弹回，看起来像抖动：
+    // 文字标题不要缩放，这里显式覆盖为不缩放。
+    // 「已处理 + 时长」与「N 个步骤」字号不同（body/compact），flex 盒居中时小字段的行高盒
+    // 也跟着缩小（19.5px vs 21px），基线会比大字上浮 ~1.25px，读起来不在一条水平线上（实测）。
+    // 办法不是 items-baseline（文字组会贴行顶、图标反而偏下），而是给步骤数一个与主文字
+    // 等高的行高盒（`leading-[calc(var(--text-ui-body)*1.5)]`）：两盒等高后盒居中即基线对齐
+    // （基线差实测 0px），图标也随 items-center 回到几何中心。
     // 标题下始终留一条分隔线：展开与收起两种状态下「开关 → 下面内容」的距离必须一致，
     // 否则同一块内容会在两种状态之间跳动。
     <div>
@@ -197,7 +204,7 @@ export function AssistantCollapseToggle({
         aria-label={expanded ? '收起AI过程' : '展开AI过程'}
         aria-describedby={statusId}
         onClick={onClick}
-        className="group/trigger -mx-[3px] h-auto min-h-[26px] max-w-full items-center gap-[5px] rounded-sm px-[5px] py-0 text-ui-body font-medium text-muted-foreground hover:bg-[hsl(var(--surface-2))]/60 hover:text-foreground"
+        className="group/trigger -mx-[3px] h-auto min-h-[26px] max-w-full items-center gap-[5px] rounded-sm px-[5px] py-0 text-ui-body font-medium text-muted-foreground hover:bg-[hsl(var(--surface-2))]/60 hover:text-foreground active:scale-100"
       >
         <span
           data-slot="assistant-collapse-title"
@@ -216,7 +223,7 @@ export function AssistantCollapseToggle({
         {stepCount != null && stepCount > 0 ? (
           <span
             data-slot="assistant-collapse-steps"
-            className="min-w-0 truncate text-ui-compact tabular-nums text-muted-foreground"
+            className="min-w-0 truncate text-ui-compact tabular-nums leading-[calc(var(--text-ui-body)*1.5)] text-muted-foreground"
           >
             {stepCount} 个步骤
           </span>
