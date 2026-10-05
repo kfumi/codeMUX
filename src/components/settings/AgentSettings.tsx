@@ -36,6 +36,11 @@ import {
 import { cn } from '../../lib/utils';
 import { isProviderUsable } from '../../lib/modelProviders';
 import { resolveModelDisplayName } from '../../lib/providerModels';
+import {
+  OPENCODE_FREE_GROUP,
+  OPENCODE_FREE_PROVIDER_ID,
+  useOpenCodeFreeModelOptions,
+} from '../../hooks/useAgentModels';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentKind } from '../../types/session';
@@ -625,6 +630,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
   const config = useSettingsStore((state) => state.config);
   const updateAgentConfig = useSettingsStore((state) => state.updateAgentConfig);
   const providers = config?.model_providers ?? [];
+  const freeModels = useOpenCodeFreeModelOptions(agentKind);
   const agentConfig = config?.agent_configs[agentKind] as {
     default_provider_id?: string | null;
     default_model?: string;
@@ -634,6 +640,9 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
     ?? config?.active_provider_id
     ?? usableProviders[0]?.id
     ?? '';
+  // 免费模型默认绑定虚拟供应商 `opencode-free`(ADR 0017),不对应
+  // ModelProvider 记录;选中态与条目单独解析。
+  const isFreeSelection = providerId === OPENCODE_FREE_PROVIDER_ID;
   const provider = usableProviders.find((item) => item.id === providerId) ?? usableProviders[0];
   const modelId = agentConfig?.default_model
     ?? provider?.default_model
@@ -641,9 +650,16 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
     ?? '';
   const selectedModel = provider?.models.find((model) => model.id === modelId)
     ?? provider?.models[0];
-  const combinedValue = provider && selectedModel
-    ? `${provider.id}::${selectedModel.id}`
-    : '';
+  const selectedFreeModel = isFreeSelection
+    ? freeModels.find((model) => model.modelId === (agentConfig?.default_model ?? '').trim()) ?? null
+    : null;
+  const combinedValue = isFreeSelection
+    ? (selectedFreeModel
+      ? `${OPENCODE_FREE_PROVIDER_ID}::${selectedFreeModel.modelId}`
+      : '')
+    : (provider && selectedModel
+      ? `${provider.id}::${selectedModel.id}`
+      : '');
 
   const saveDefault = (value: string) => {
     const separator = value.indexOf('::');
@@ -658,11 +674,21 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
     <Select
       value={combinedValue}
       onValueChange={saveDefault}
-      disabled={usableProviders.length === 0}
+      disabled={usableProviders.length === 0 && freeModels.length === 0}
     >
       <SelectTrigger aria-label={`${getAgentDefinition(agentKind)?.label ?? agentKind} 默认供应商和模型`} className="h-9">
         <SelectValue placeholder="暂无可用供应商或模型">
-          {provider && selectedModel ? (
+          {isFreeSelection && selectedFreeModel ? (
+            <span className="flex min-w-0 items-center gap-2">
+              <ProviderBrandIcon
+                templateId={selectedFreeModel.providerTemplateId}
+                name={selectedFreeModel.group}
+                size={14}
+                className="h-5 w-5 rounded-[5px]"
+              />
+              <span className="truncate">{selectedFreeModel.name}</span>
+            </span>
+          ) : provider && selectedModel ? (
             <span className="flex min-w-0 items-center gap-2">
               <ProviderBrandIcon
                 templateId={provider.builtin_template_id}
@@ -706,6 +732,24 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
             ))}
           </SelectGroup>
         ))}
+        {freeModels.length > 0 && (
+          <SelectGroup>
+            <SelectLabel>{OPENCODE_FREE_GROUP}</SelectLabel>
+            {freeModels.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                <span className="flex items-center gap-2">
+                  <ProviderBrandIcon
+                    templateId={model.providerTemplateId}
+                    name={model.group}
+                    size={14}
+                    className="h-5 w-5 rounded-[5px]"
+                  />
+                  <span>{model.name}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
       </SelectContent>
     </Select>
   );

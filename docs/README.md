@@ -192,6 +192,7 @@
 - [0014 — pi 项目资源默认不信任](adr/0014-pi-project-resources-untrusted-by-default.md)
 - [0015 — 模型能力目录只是建议，provider.models 始终是权威](adr/0015-model-catalog-is-advisory.md)
 - [0016 — 模型展示名来自目录，手写映射表退役](adr/0016-model-display-names-from-catalog.md)
+- [0017 — OpenCode 免费模型以虚拟供应商进入选择器，发送走原生 opencode provider](adr/0017-opencode-free-models-virtual-provider.md)
 
 ### agents
 

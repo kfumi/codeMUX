@@ -27,6 +27,7 @@ const BRANDS: Record<string, BrandMeta> = {
   zhipu: { label: '智谱', svg: zhipuSvg },
   moonshot: { label: '月之暗面', svg: moonshotSvg },
   mimo: { label: 'Xiaomi MiMo', svg: xiaomimimoSvg },
+  opencode: { label: 'OpenCode', svg: opencodeSvg },
   'opencode-go': { label: 'OpenCode Go', svg: opencodeSvg },
   'amd-gpu-cloud': { label: 'AMD GPU Cloud', svg: amdSvg },
   custom: {

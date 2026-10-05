@@ -7,7 +7,6 @@ import "@fontsource-variable/jetbrains-mono";
 import "./styles/fonts.css";
 import App from "./App";
 import { HostBootstrapGate } from "./components/bootstrap/HostBootstrapGate";
-import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
 import { initDaemonLifecycleBridge } from "./lib/daemonLifecycleBridge";
 import { initScheduledTasksBridge } from "./lib/scheduledTasksBridge";
@@ -29,7 +28,6 @@ initWorkTasksBridge();
 initDaemonLifecycleBridge();
 initBrowserHostBridge();
 initBrowserVisibilitySync();
-void initializeOpenCodeFreeModels();
 // Shiki 高亮器预热：把"第一次遇到代码块"造成的 380–420ms 主线程阻塞（集中在流式开始后
 // 0.6–1.0 秒）挪到应用空闲期。实测依据、反面做法与取舍见 src/lib/codeHighlightWarmup.ts
 // 顶部注释与研究文档 5.12 / 5.13 节。

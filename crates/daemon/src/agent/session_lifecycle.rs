@@ -83,6 +83,10 @@ fn resolve_session_agent_kind(state: &crate::AppState, session_id: &str) -> Resu
     crate::agent_runtime::factory::session_runtime_kind_name(&db, session_id)
 }
 
+/// OpenCode 免费模型的虚拟供应商 id(sessions.provider_id)。不对应
+/// ModelProvider 记录,由 resolve_active_runtime_config 专门识别(ADR 0017)。
+const OPENCODE_FREE_PROVIDER_ID: &str = "opencode-free";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedRuntimeConfig {
     /// Model Provider id (sessions.provider_id).
@@ -185,6 +189,28 @@ fn resolve_active_runtime_config(
         .filter(|id| !id.is_empty())
         .or(config.active_provider_id.as_deref())
         .ok_or_else(|| "尚未配置可用的模型供应商".to_string())?;
+
+    // OpenCode 免费模型绑定虚拟供应商 `opencode-free`,不对应 ModelProvider
+    // 记录:发送直接落到 opencode 原生 `opencode` provider(Zen),凭据走本机
+    // opencode 登录态(credential_source=opencode),不注入 CodeMUX 供应商的
+    // key/baseUrl。免费层有「仅限 OpenCode 内使用」的客户端门禁,该路径天然
+    // 满足;见 ADR 0017。
+    if agent_kind == AgentKind::Opencode && provider_id == OPENCODE_FREE_PROVIDER_ID {
+        let model = session_model
+            .ok_or_else(|| "尚未选择模型，请重新选择免费模型".to_string())?
+            .to_string();
+        return Ok(ResolvedRuntimeConfig {
+            profile_id: OPENCODE_FREE_PROVIDER_ID.to_string(),
+            api_key: None,
+            base_url: None,
+            model: Some(model),
+            codex_needs_proxy: None,
+            provider: Some("opencode".to_string()),
+            credential_source: Some("opencode".to_string()),
+            timeouts: agent_timeouts(&config, agent_kind),
+            model_limits: None,
+        });
+    }
 
     let provider = config
         .model_providers
@@ -2264,6 +2290,88 @@ mod tests {
         assert_eq!(resolved.codex_needs_proxy, Some(true));
         assert_eq!(resolved.provider.as_deref(), Some("codemux-openai"));
         assert_eq!(resolved.credential_source.as_deref(), Some("codemux"));
+    }
+
+    #[test]
+    fn opencode_free_models_resolve_to_native_opencode_provider() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-opencode-free",
+                "OpenCode Free",
+                "opencode",
+                "opencode-free",
+                "big-pickle",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        // 即便存在可用的 active provider,虚拟供应商也必须短路,不能落回它。
+        let mut config = crate::config::types::AppConfig::default();
+        let mut provider = test_model_provider(
+            "responses-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-test",
+            &["gpt-test"],
+            Some(true),
+        );
+        provider.opencode_provider_key = Some("codemux-openai".to_string());
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("responses-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-opencode-free").unwrap();
+
+        assert_eq!(resolved.profile_id, "opencode-free");
+        assert_eq!(resolved.provider.as_deref(), Some("opencode"));
+        assert_eq!(resolved.credential_source.as_deref(), Some("opencode"));
+        assert_eq!(resolved.model.as_deref(), Some("big-pickle"));
+        assert!(resolved.api_key.is_none());
+        assert!(resolved.base_url.is_none());
+        assert!(resolved.model_limits.is_none());
+        assert_eq!(resolved.codex_needs_proxy, None);
+    }
+
+    #[test]
+    fn opencode_free_provider_requires_a_selected_model() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-opencode-free",
+                "OpenCode Free",
+                "opencode",
+                "opencode-free",
+                Option::<String>::None,
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        let config = crate::config::types::AppConfig::default();
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let error = resolve_active_runtime_config(&state, "session-opencode-free").unwrap_err();
+
+        assert!(error.contains("尚未选择模型"));
     }
 
     #[test]

@@ -9,6 +9,7 @@ import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
+import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
@@ -113,9 +114,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     [modelProviders, session?.provider_id],
   );
   const runtimeProvider = sessionProvider ?? activeProvider;
+  // 免费模型会话绑定虚拟供应商 `opencode-free`,不对应 ModelProvider 记录,
+  // 发送由 daemon 落到 opencode 原生 provider(ADR 0017),只需有模型即可发送。
+  const isFreeModelSession = agentKind === 'opencode'
+    && isOpenCodeFreeProviderId(session?.provider_id);
   const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
   const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode' || agentKind === 'pi'
-    ? getProfileModelContextWindow(runtimeProvider, model)
+    ? (isFreeModelSession
+      ? null
+      : getProfileModelContextWindow(runtimeProvider, model))
     : null;
   const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
   const prevSessionIdRef = useRef<string | null>(null);
@@ -141,7 +148,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     usesLargeContext: modelSupports1m(item),
   }), [agentKind, modelSupports1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
-  const hasUsableProvider = !usesProviderModel || Boolean(runtimeProvider && isProviderUsable(runtimeProvider, agentKind) && model);
+  const hasUsableProvider = !usesProviderModel
+    || (isFreeModelSession && Boolean(model))
+    || Boolean(runtimeProvider && isProviderUsable(runtimeProvider, agentKind) && model);
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {

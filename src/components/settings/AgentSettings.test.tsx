@@ -7,6 +7,15 @@ import { toast } from 'sonner';
 import { AgentPreferencesPanel, AgentSettingsPanel, RuntimeCard } from './AgentSettings';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { AgentInstallationReport, AgentRuntimeCheck } from '../../lib/desktop-bridge';
+import { resetOpenCodeFreeModelsCacheForTests } from '../../hooks/useAgentModels';
+
+const fetchOpenCodeFreeModelsMock = vi.fn();
+
+vi.mock('../../lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    fetchOpenCodeFreeModels: (...args: unknown[]) => fetchOpenCodeFreeModelsMock(...args),
+  },
+}));
 
 const checkAgentRuntimesMock = vi.fn();
 const upgradeAgentRuntimeMock = vi.fn();
@@ -121,6 +130,9 @@ describe('AgentSettingsPanel', () => {
       getDefaultAgentKind: () => 'codex',
       updateAgentConfig: vi.fn(async () => {}),
     }));
+    fetchOpenCodeFreeModelsMock.mockReset();
+    fetchOpenCodeFreeModelsMock.mockResolvedValue([]);
+    resetOpenCodeFreeModelsCacheForTests();
     checkAgentRuntimesMock.mockReset();
     upgradeAgentRuntimeMock.mockReset();
     probeAgentInstallationsMock.mockReset();
@@ -969,6 +981,9 @@ describe('AgentPreferencesPanel', () => {
       getDefaultAgentKind: () => 'codex',
       updateAgentConfig: vi.fn(async () => {}),
     }));
+    fetchOpenCodeFreeModelsMock.mockReset();
+    fetchOpenCodeFreeModelsMock.mockResolvedValue([]);
+    resetOpenCodeFreeModelsCacheForTests();
   });
 
   afterEach(() => {
@@ -1048,5 +1063,41 @@ describe('AgentPreferencesPanel', () => {
         permission_config: { kind: 'pi', executionMode: 'full_access' },
       });
     });
+  });
+
+  it('OpenCode 默认模型下拉包含 OpenCode 免费模型分组（无可用供应商时也可选）', async () => {
+    fetchOpenCodeFreeModelsMock.mockResolvedValue([
+      { id: 'big-pickle', owned_by: 'opencode' },
+      { id: 'space-bunny-free' },
+    ]);
+
+    render(<AgentPreferencesPanel />);
+
+    const select = screen.getByRole('combobox', { name: 'OpenCode 默认供应商和模型' }) as HTMLButtonElement;
+    // baseConfig 无 model_providers:免费模型加载完成前下拉保持禁用。
+    await waitFor(() => {
+      expect(select.disabled).toBe(false);
+    });
+    fireEvent.click(select);
+
+    await waitFor(() => {
+      expect(screen.getByText('OpenCode 免费模型')).toBeTruthy();
+    });
+    expect(screen.getByRole('option', { name: /pickle/i })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /space bunny free/i })).toBeTruthy();
+  });
+
+  it('pi 默认模型下拉不受 OpenCode 免费模型影响', async () => {
+    fetchOpenCodeFreeModelsMock.mockResolvedValue([{ id: 'big-pickle' }]);
+
+    render(<AgentPreferencesPanel />);
+
+    const select = screen.getByRole('combobox', { name: 'pi 默认供应商和模型' }) as HTMLButtonElement;
+    // 免费模型只追加给 opencode（同面板的 OpenCode 卡片会触发拉取）:
+    // pi 无可用供应商时下拉保持禁用。
+    await waitFor(() => {
+      expect(fetchOpenCodeFreeModelsMock).toHaveBeenCalled();
+    });
+    expect(select.disabled).toBe(true);
   });
 });
