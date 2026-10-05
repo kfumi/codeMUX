@@ -76,8 +76,8 @@ export function GeneralSettings() {
         <label className="text-ui-compact font-medium text-muted-foreground">对话</label>
         <SettingsRow
           surface
-          label="「立即」的行为"
-          description="运行中点排队消息的「立即」时，优先引导进当前轮，还是中断当前轮再发送。斜杠命令和不支持引导的智能体仍会中断。"
+          label="交互行为"
+          description="在 CodeMUX 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。"
           control={
             <Select
             value={immediateRunMode}
@@ -85,7 +85,7 @@ export function GeneralSettings() {
               void setImmediateRunMode(value as ImmediateRunMode);
             }}
           >
-            <SelectTrigger aria-label="立即的行为" className="h-9 w-full shrink-0 rounded-lg sm:w-28">
+            <SelectTrigger aria-label="交互行为" className="h-9 w-full shrink-0 rounded-lg sm:w-28">
               <SelectValue>
                 {immediateRunMode === 'interrupt' ? '中断' : '引导'}
               </SelectValue>

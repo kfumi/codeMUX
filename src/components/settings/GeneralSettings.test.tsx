@@ -72,10 +72,10 @@ describe('GeneralSettings', () => {
   it('renders and updates the immediate-run preference', () => {
     render(<GeneralSettings />);
 
-    expect(screen.getByText('「立即」的行为')).toBeTruthy();
+    expect(screen.getByText('交互行为')).toBeTruthy();
     expect(screen.getByText('引导')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('立即的行为'));
+    fireEvent.click(screen.getByLabelText('交互行为'));
     fireEvent.click(screen.getByText('中断'));
 
     expect(setImmediateRunModeMock).toHaveBeenCalledWith('interrupt');

@@ -320,7 +320,7 @@ export function McpSettingsPanel() {
   };
 
   const textareaClass =
-    "flex min-h-[80px] w-full resize-y rounded-md border border-transparent bg-muted/80 px-3 py-2 text-sm ring-offset-background break-all placeholder:text-muted-foreground transition-[background-color,border-color,color,box-shadow] duration-fast hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0";
+    "flex min-h-[80px] w-full resize-y rounded-md border border-input bg-muted/80 px-3 py-2 text-sm ring-offset-background break-all placeholder:text-muted-foreground transition-[background-color,border-color,color,box-shadow] duration-fast hover:bg-muted focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-0";
 
   const renderServerRow = (server: McpServer) => {
     const serverType = (server.server.type ?? 'stdio') as string;

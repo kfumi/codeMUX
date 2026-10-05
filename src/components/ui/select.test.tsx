@@ -63,4 +63,20 @@ describe('Select', () => {
     expect(screen.getByRole('combobox', { name: '排序' }).className).toContain('focus-visible:ring-1');
     expect(screen.getByRole('combobox', { name: '排序' }).className).toContain('focus:ring-0');
   });
+
+  it('trigger keeps a visible border on the quiet muted fill', () => {
+    // 触发器是「灰底安静」风格,但边框必须可见(border-input):无边框时设置页的
+    // 软瓦片上灰底几乎贴底色,下拉看起来没有轮廓(用户反馈过)。
+    render(
+      <Select>
+        <SelectTrigger aria-label="触发器边框">
+          <SelectValue />
+        </SelectTrigger>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: '触发器边框' }).className;
+    expect(trigger).toContain('border-input');
+    expect(trigger).not.toContain('border-transparent');
+  });
 });

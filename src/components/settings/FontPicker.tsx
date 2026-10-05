@@ -76,7 +76,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
           role="combobox"
           aria-expanded={open}
           aria-label="界面字体"
-          className="h-10 w-full max-w-md justify-between border-transparent bg-muted/80 font-normal hover:bg-muted focus-visible:bg-card"
+          className="h-10 w-full max-w-md justify-between border-input bg-muted/80 font-normal hover:bg-muted focus-visible:bg-card"
         >
           <span className="truncate" style={{ fontFamily: previewFamily }}>
             {displayLabel}
