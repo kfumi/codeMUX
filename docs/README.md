@@ -69,6 +69,7 @@
 | [2026-09-28-codeg-pi-integration-reference.md](research/2026-09-28-codeg-pi-integration-reference.md) | codeg 的 Pi 接入参考:ACP 适配器路线、项目信任门、历史解析纪律与对 CodeMUX 的启发 |
 | [2026-09-24-codeg-token-speed-reference.md](research/2026-09-24-codeg-token-speed-reference.md) | codeg 实时 TPS 方案参考与 CodeMUX 差异 |
 | [2026-09-24-opencode-storage-performance-audit.md](research/2026-09-24-opencode-storage-performance-audit.md) | OpenCode 存储性能审计 |
+| [2026-09-30-turn-artifact-summary-fact-check.md](research/2026-09-30-turn-artifact-summary-fact-check.md) | Turn 级产物汇总事实核查:各 Agent Kind 工具实测、Codex 与 CLI 同步兼容性、真实多卡片实例、两端行数分歧量化、回填否决 |
 
 ### specs
 
@@ -111,7 +112,7 @@
 | [2026-08-28-scheduled-tasks.md](specs/2026-08-28-scheduled-tasks.md) | 定时任务(Scheduled Task)(工单工作副本,含 Status/Comments) |
 | [2026-08-28-subagent-streaming-preview.md](specs/2026-08-28-subagent-streaming-preview.md) | 子智能体独立时间线与实时预览 |
 | [2026-09-01-shared-transcript-message-renderer.md](specs/2026-09-01-shared-transcript-message-renderer.md) | 主/子智能体共享消息行渲染 |
-| [2026-09-01-turn-artifact-summary.md](specs/2026-09-01-turn-artifact-summary.md) | Turn 级产物汇总(Agent Artifact Summary) |
+| [2026-09-01-turn-artifact-summary.md](specs/2026-09-01-turn-artifact-summary.md) | Turn 级产物汇总(Agent Artifact Summary)(已被 2026-09-30 v2 取代) |
 | [2026-09-02-built-in-browser.md](specs/2026-09-02-built-in-browser.md) | 内置浏览器(Side Panel Browser) |
 | [2026-09-03-pi-agent-integration.md](specs/2026-09-03-pi-agent-integration.md) | pi 接入为第四智能体 |
 | [2026-09-07-daemon-boundary.md](specs/2026-09-07-daemon-boundary.md) | 抽出 Daemon 边界(桌面改走 Companion 协议) |
@@ -120,6 +121,7 @@
 | [2026-09-18-long-session-render-scale.md](specs/2026-09-18-long-session-render-scale.md) | 长会话渲染规模:让开销只与"正在看的那一段"成正比 |
 | [2026-09-20-codex-collab-subagent-parity.md](specs/2026-09-20-codex-collab-subagent-parity.md) | Codex 协作子智能体:两种 spawn 变体的声明与轨道对等 |
 | [2026-09-21-agent-task-board.md](specs/2026-09-21-agent-task-board.md) | 工作任务看板(Work Task):agent 驱动的委派与验收 |
+| [2026-09-30-turn-artifact-summary-v2.md](specs/2026-09-30-turn-artifact-summary-v2.md) | Turn 级产物汇总 v2:跨 Agent Kind 的解析统一(取代 2026-09-01) |
 
 ### plans
 
@@ -178,6 +180,7 @@
 | [pi-agent-integration](tickets/pi-agent-integration/) | 12 | [2026-09-03](specs/2026-09-03-pi-agent-integration.md) |
 | [project-scoped-agent-skills](tickets/project-scoped-agent-skills/) | 3 | [2026-08-08](specs/2026-08-08-project-scoped-agent-skills.md) |
 | [rewind-any-message](tickets/rewind-any-message/) | 3 | [2026-08-23](specs/2026-08-23-rewind-to-any-user-message.md) |
+| [turn-artifact-summary](tickets/turn-artifact-summary/) | 3 | [2026-09-30](specs/2026-09-30-turn-artifact-summary-v2.md)(取代 [2026-09-01](specs/2026-09-01-turn-artifact-summary.md)) |
 | [unified-frontend](tickets/unified-frontend/) | 4 | [2026-09-13](specs/2026-09-13-unified-frontend.md) |
 
 ### adr

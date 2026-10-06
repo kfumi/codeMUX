@@ -1,6 +1,11 @@
 # Turn 级产物汇总（Agent Artifact Summary）
 
-**Status:** ready-for-agent
+**Status:** superseded by [2026-09-30-turn-artifact-summary-v2.md](2026-09-30-turn-artifact-summary-v2.md)
+
+> 本文档的「工具识别（MVP 白名单）」与「OpenCode 隔离」两节已与现状不符：
+> 统一汇总器实际上已接入 OpenCode，而 OpenCode 的原生 summary 已被主动停用；
+> MVP 明确排除的批量编辑与补丁类工具，经实测确认是用户可见的漏报来源。
+> 正文保留原样，仅作为决策历史。当前生效的决策见 v2。
 
 ## Problem Statement
 
