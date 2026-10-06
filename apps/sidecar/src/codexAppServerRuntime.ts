@@ -1355,11 +1355,12 @@ export class CodexAppServerRuntime {
   }
 
   private emitTurnOutcome(turn: ActiveTurnState, outcome: CodexTurnOutcome): void {
+    // 产物汇总按「轮」累积：一个 send 之内可有多次 turn 收尾（续跑轮），
+    // 只发射累计、不清空——aggregator 随下一次 runInput 新建，即新的一轮。
     const summary = turn.artifactAggregator.flushSummary(turn.sessionId);
     if (summary) {
       this.emitEvent(summary);
     }
-    turn.artifactAggregator.reset();
     for (const event of turn.normalizer.finish(outcome)) {
       this.emitEvent(event);
     }

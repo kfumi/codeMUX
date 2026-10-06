@@ -2366,6 +2366,99 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages.find((message) => message.role === 'system')).toBeUndefined();
   });
 
+  it('pins one artifact card per turn, attached to that turn final assistant message', () => {
+    const summary = (
+      uuid: string,
+      diffs: Array<{ file: string; additions: number; deletions: number; status: string }>,
+    ): AgentMessage => ({
+      kind: 'session_summary',
+      data: {
+        type: 'system',
+        subtype: 'session_summary',
+        diffs,
+        uuid,
+        session_id: 'session-1',
+      },
+    });
+    const assistant = (uuid: string, text: string): AgentMessage => ({
+      kind: 'assistant',
+      data: {
+        type: 'assistant',
+        uuid,
+        session_id: 'session-1',
+        message: { role: 'assistant', content: [{ type: 'text', text }] },
+        parent_tool_use_id: null,
+      },
+    });
+    const result = (uuid: string): AgentMessage => ({
+      kind: 'result',
+      data: {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid,
+        session_id: 'session-1',
+        duration_ms: 10,
+        duration_api_ms: 10,
+        num_turns: 1,
+        result: '',
+      },
+    });
+
+    // 第 1 轮：运行时为同一个提问收了三次尾（生产库里见过 6 次），
+    // 同一文件先改后改，最终统计必须取整轮净变化 —— 三次收尾里最后一次的结果。
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '请修改文件' } },
+      assistant('assistant-r1-a', '先看一下现状。'),
+      summary('summary-r1-1', [{ file: 'index.html', additions: 1, deletions: 0, status: 'modified' }]),
+      assistant('assistant-r1-final', '已完成修改。'),
+      summary('summary-r1-2', [
+        { file: 'index.html', additions: 5, deletions: 2, status: 'modified' },
+      ]),
+      summary('summary-r1-3', [
+        {
+          file: 'index.html',
+          additions: 9,
+          deletions: 4,
+          status: 'modified',
+          before: 'a\nb\nc',
+          after: 'a\nB\nc\nd',
+        },
+      ]),
+      result('result-r1'),
+      { kind: 'user', data: { content: '再改一个文件' } },
+      assistant('assistant-r2-final', '第二个文件也改好了。'),
+      summary('summary-r2-1', [{ file: 'other.ts', additions: 2, deletions: 1, status: 'modified' }]),
+      result('result-r2'),
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const carriers = messages.filter((message) =>
+      message.content.some(
+        (part) => part.type === 'data-codemux-event' && part.eventKind === 'session_summary',
+      ),
+    );
+
+    // 一轮一张卡，整条会话只有两张，且各自挂在该轮最后一条助手消息上。
+    expect(carriers).toHaveLength(2);
+    expect(carriers.map((message) => message.metadata.sourceUuid)).toEqual([
+      'assistant-r1-final',
+      'assistant-r2-final',
+    ]);
+
+    // 卡片内容是整轮净变化：同文件在整轮内被改多次时取最后一次成功结果。
+    const diffsOf = (message: (typeof carriers)[number]) => {
+      const part = message.content.find(
+        (candidate) =>
+          candidate.type === 'data-codemux-event' && candidate.eventKind === 'session_summary',
+      );
+      return (part as { event: { data: { diffs: Array<{ file: string }> } } }).event.data.diffs;
+    };
+    expect(diffsOf(carriers[0]).map((diff) => diff.file)).toEqual(['index.html']);
+    expect(diffsOf(carriers[0])[0]).toMatchObject({ additions: 9, deletions: 4 });
+    expect(diffsOf(carriers[1]).map((diff) => diff.file)).toEqual(['other.ts']);
+  });
+
   it('does not render Claude task notification XML if it reaches the UI converter', () => {
     const events: AgentMessage[] = [
       {

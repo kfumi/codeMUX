@@ -1155,7 +1155,7 @@ export class SessionRuntime {
           hooks: [async (input: any, toolUseID: string | undefined) => {
             const toolName = input.tool_name as string;
             const toolInput = input.tool_input as Record<string, unknown> | undefined;
-            if ((toolName === 'Write' || toolName === 'Edit') && toolInput) {
+            if ((toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') && toolInput) {
               const filePath = toolInput.file_path as string;
               if (filePath) {
                 try {
@@ -1827,11 +1827,12 @@ export class SessionRuntime {
 
   private emitTurnOutcome(outcome: TurnOutcome, flags?: { synthetic?: boolean }): void {
     const sessionId = this.config?.sessionId ?? '';
+    // 产物汇总按「轮」累积：一轮（一条 User Message）内可有多次内部 turn 收尾，
+    // 这里只发射当前累计、不清空——清空发生在下一次 sendInput 新建 aggregator 时。
     const summary = this.turnArtifactAggregator?.flushSummary(sessionId);
     if (summary) {
       emit(summary);
     }
-    this.turnArtifactAggregator?.reset();
     for (const event of (this.turnEventNormalizer ?? this.continuationNormalizer)?.finish(outcome, flags) ?? []) {
       emit(event);
     }

@@ -1,0 +1,473 @@
+{
+  "$comment": [
+    "Turn 产物汇总的共享期望值。sidecar(TypeScript) 与 Daemon(Rust) 两侧的测试都读这一份,",
+    "它是「什么算正确」的唯一定义处 —— 任何一侧的测试都不得自己写死期望数字。",
+    "",
+    "使用约定:",
+    "1. 新增用例先于改实现。要扩展覆盖时,先在这里加用例(此时测试应为红),再改两侧实现让它变绿。",
+    "2. 每个逻辑操作都要问一次「另一条来源长什么样」。工具事件有三条来源:实时、原生会话同步、",
+    "   库内既有时间线。同步来源保留上游原始拼写与大小写、且一律没有变更前快照。",
+    "3. lineCases 要求两端逐字节一致;eventCases 只断言可观察的产物条目,不断言实现细节。",
+    "4. 分三层:lineCases(行数语义)、eventCases(单轮之内的折算)、sessionCases(整段会话产出几张卡片)。",
+    "   只在一段会话被整体加载时才成立的规则(例如「库里已有产物事件的轮次不得再补一张」)",
+    "   只能放进 sessionCases —— 单轮用例表达不了它,而它恰恰是最容易在真实库上出问题的一类。",
+    "",
+    "事件形状(与 CodeMUX Event 一致,只保留汇总器消费的字段):",
+    "  { type: 'file_snapshot', file_path, original_content, is_new, tool_use_id }",
+    "  { type: 'tool_started', tool_use_id, name, input }",
+    "  { type: 'tool_finished', tool_use_id, is_error }",
+    "  { type: 'user_message', content }        // 轮次边界",
+    "  { type: 'turn_finished', outcome }       // 轮次收尾",
+    "  { type: 'system_event', subtype: 'session_summary', diffs }   // 库中已有的产物事件",
+    "",
+    "toolNames 是工具名归一化的唯一别名表,两侧实现都从这里读,所以新增一个上游工具名",
+    "只改这一处。canonical 取值:write(整文件写入) / edit(定位替换) / apply_patch(补丁)。",
+    "写法规则:先 canonicalize(小写、'-' 与空格转 '_'、去掉 '()'),再查表;未命中用",
+    "mutationPattern 兜底,但兜底命中的工具仍必须解析出文件路径才计入。"
+  ],
+
+  "toolNames": {
+    "canonical": {
+      "write": ["write", "write_file", "writefile", "write_to_file", "create_file", "save_file"],
+      "edit": ["edit", "edit_file", "editfile", "update_file", "replace_in_file", "str_replace", "multiedit", "multi_edit", "batch_edit"],
+      "apply_patch": ["apply_patch", "applypatch", "patch", "apply_diff"]
+    },
+    "mutationPattern": "^(write|edit|multi_?edit|apply[_\\s-]?patch|applypatch|patch|create_?file)$",
+    "excluded": ["read", "read_file", "bash", "shell_command", "grep", "glob", "ls", "todowrite", "task", "webfetch", "websearch"]
+  },
+
+  "lineCases": [
+    { "name": "empty-to-empty", "before": "", "after": "", "additions": 0, "deletions": 0 },
+    { "name": "empty-to-one-line-no-trailing-nl", "before": "", "after": "a", "additions": 1, "deletions": 0 },
+    { "name": "empty-to-one-line-with-trailing-nl", "before": "", "after": "a\n", "additions": 1, "deletions": 0 },
+    { "name": "identical-single-line", "before": "a", "after": "a", "additions": 0, "deletions": 0 },
+    { "name": "crlf-identical", "before": "a\r\nb\r\n", "after": "a\r\nb\r\n", "additions": 0, "deletions": 0 },
+    { "name": "crlf-vs-lf-same-text", "before": "a\r\nb\r\n", "after": "a\nb\n", "additions": 2, "deletions": 2 },
+    { "name": "lf-to-crlf", "before": "a\nb\n", "after": "a\r\nb\r\n", "additions": 2, "deletions": 2 },
+    { "name": "append-line-no-trailing-nl", "before": "a\n", "after": "a\nb", "additions": 1, "deletions": 0 },
+    { "name": "append-line-with-trailing-nl", "before": "a\n", "after": "a\nb\n", "additions": 1, "deletions": 0 },
+    { "name": "append-blank-line", "before": "a\n", "after": "a\n\n", "additions": 1, "deletions": 0 },
+    { "name": "remove-blank-line", "before": "a\n\n", "after": "a\n", "additions": 0, "deletions": 1 },
+    { "name": "append-two-blank-lines", "before": "a\n", "after": "a\n\n\n", "additions": 2, "deletions": 0 },
+    { "name": "replace-middle-line", "before": "a\nb\nc\n", "after": "a\nB\nc\n", "additions": 1, "deletions": 1 },
+    { "name": "only-newlines-append", "before": "\n", "after": "\n\n", "additions": 1, "deletions": 0 },
+    { "name": "bom-identical", "before": "\ufeffa\n", "after": "\ufeffa\n", "additions": 0, "deletions": 0 },
+
+    { "$comment": "以下四条曾是两个实现分歧的根源:一侧把「文件末尾换行的有无」当成真实的行变更,另一侧不当。现在两侧统一为「不当成变更」。", "name": "add-trailing-nl-is-not-a-change", "before": "a", "after": "a\n", "additions": 0, "deletions": 0 },
+    { "name": "remove-trailing-nl-is-not-a-change", "before": "a\n", "after": "a", "additions": 0, "deletions": 0 },
+    { "name": "drop-trailing-nl-multiline-is-not-a-change", "before": "a\nb\n", "after": "a\nb", "additions": 0, "deletions": 0 },
+    { "name": "keep-trailing-nl-with-content-change", "before": "a\nb\n", "after": "a\nB\n", "additions": 1, "deletions": 1 },
+    { "name": "add-trailing-nl-with-content-change", "before": "a\nb", "after": "a\nB\n", "additions": 1, "deletions": 1 },
+
+    { "$comment": "以下两条是两端一致但都「反直觉」的行为,刻意钉住以免被误当成 bug 顺手改掉。CRLF<->LF 整文件互转算全文件行数变更:Windows 上编辑器翻转一次换行符即触发。", "name": "crlf-to-lf-whole-file-counts-as-change", "before": "x\r\ny\r\nz\r\n", "after": "x\ny\nz\n", "additions": 3, "deletions": 3 },
+    { "$comment": "尾随换行之外的空白是真实内容:BOM 之外的差异照常计入。", "name": "trailing-spaces-are-content", "before": "a \n", "after": "a\n", "additions": 1, "deletions": 1 }
+  ],
+
+  "eventCases": [
+    {
+      "$comment": "实时来源:运行时钩子已发出变更前快照。",
+      "name": "edit-with-snapshot",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/app.ts", "original_content": "old line\n", "is_new": false, "tool_use_id": "edit-1" },
+        { "type": "tool_started", "tool_use_id": "edit-1", "name": "edit", "input": { "file_path": "src/app.ts", "old_string": "old line", "new_string": "new line" } },
+        { "type": "tool_finished", "tool_use_id": "edit-1", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/app.ts", "before": "old line\n", "after": "new line\n", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "实时来源:批量编辑,入参含多个编辑片段,无快照 —— 走退化基线。",
+      "name": "batch-edit-without-snapshot-degraded-baseline",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "edit-batch", "name": "edit", "input": { "path": "src/batch.ts", "edits": [{ "oldText": "alpha", "newText": "ALPHA" }, { "oldText": "beta", "newText": "BETA" }] } },
+        { "type": "tool_finished", "tool_use_id": "edit-batch", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/batch.ts", "before": "alpha\nbeta", "after": "ALPHA\nBETA", "additions": 2, "deletions": 2 }
+      ]
+    },
+    {
+      "$comment": "同一文件在同一轮内被多次修改:只保留最后一次成功修改的结果。",
+      "name": "same-file-twice-keeps-latest",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "write-1", "name": "write", "input": { "file_path": "src/app.ts", "content": "first\n" } },
+        { "type": "tool_finished", "tool_use_id": "write-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "write-2", "name": "write", "input": { "file_path": "src/app.ts", "content": "second\n" } },
+        { "type": "tool_finished", "tool_use_id": "write-2", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/app.ts", "before": "", "after": "second\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "失败或被拒绝的工具不计入产物。",
+      "name": "failed-tool-is-excluded",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "write-fail", "name": "write", "input": { "file_path": "src/app.ts", "content": "nope\n" } },
+        { "type": "tool_finished", "tool_use_id": "write-fail", "is_error": true }
+      ],
+      "expectedDiffs": []
+    },
+    {
+      "$comment": "读取类与终端类工具不产出产物条目。",
+      "name": "non-mutation-tools-are-excluded",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "read-1", "name": "read", "input": { "file_path": "src/app.ts" } },
+        { "type": "tool_finished", "tool_use_id": "read-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "bash-1", "name": "bash", "input": { "command": "sed -i 's/a/b/' src/app.ts" } },
+        { "type": "tool_finished", "tool_use_id": "bash-1", "is_error": false }
+      ],
+      "expectedDiffs": []
+    },
+    {
+      "$comment": "实时来源:补丁工具携带结构化的变更数组,每项带路径与差异文本。",
+      "name": "patch-structured-changes-add-file",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-1", "name": "apply_patch", "input": { "changes": [{ "path": "src/added.ts", "kind": "add", "diff": "brand new\n" }] } },
+        { "type": "tool_finished", "tool_use_id": "patch-1", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/added.ts", "after": "brand new\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "结构化变更数组的删除:删除后没有 after 内容,空侧省略而非发空串。",
+      "name": "patch-structured-changes-delete-file",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-del-2", "name": "apply_patch", "input": { "changes": [{ "path": "src/gone.ts", "kind": "delete", "diff": "old content\n" }] } },
+        { "type": "tool_finished", "tool_use_id": "patch-del-2", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/gone.ts", "before": "old content\n", "additions": 0, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "原生会话同步来源:补丁正文嵌在入参的嵌套字段里,相对路径按 cwd 解析。",
+      "name": "patch-freeform-text-nested-in-input",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-2", "name": "apply_patch", "input": { "input": "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch" } },
+        { "type": "tool_finished", "tool_use_id": "patch-2", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/README.md", "before": "old", "after": "new", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "实时来源(OpenCode):工具名是补丁类,入参键为 patchText,补丁内是 Windows 绝对路径。",
+      "name": "patch-opencode-patchtext-key-absolute-path",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-3", "name": "apply_patch", "input": { "patchText": "*** Begin Patch\n*** Update File: D:\\project\\demo\\src\\abs.ts\n@@\n-old line\n+new line\n*** End Patch" } },
+        { "type": "tool_finished", "tool_use_id": "patch-3", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/abs.ts", "before": "old line", "after": "new line", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "补丁新增文件:没有变更前内容,全部计入增行。",
+      "name": "patch-add-file",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-add", "name": "patch", "input": { "input": "*** Begin Patch\n*** Add File: docs/new.md\n+# Title\n+body\n*** End Patch" } },
+        { "type": "tool_finished", "tool_use_id": "patch-add", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/docs/new.md", "after": "# Title\nbody", "additions": 2, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "补丁删除文件:变更后为空,全部计入删行。",
+      "name": "patch-delete-file",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-del", "name": "apply_patch", "input": { "input": "*** Begin Patch\n*** Delete File: docs/gone.md\n-# Title\n-body\n*** End Patch" } },
+        { "type": "tool_finished", "tool_use_id": "patch-del", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/docs/gone.md", "before": "# Title\nbody", "additions": 0, "deletions": 2 }
+      ]
+    },
+    {
+      "$comment": "一段补丁触及多个文件:每个文件各产出一条条目。",
+      "name": "patch-multiple-files",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "patch-multi", "name": "apply_patch", "input": { "input": "*** Begin Patch\n*** Add File: a/one.txt\n+one\n*** Add File: b/two.txt\n+two\n*** End Patch" } },
+        { "type": "tool_finished", "tool_use_id": "patch-multi", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/a/one.txt", "after": "one", "additions": 1, "deletions": 0 },
+        { "file": "D:/project/demo/b/two.txt", "after": "two", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "参数分帧到达:第一帧不带参数,参数随后补上。必须与一次到齐产出完全相同的结果。",
+      "name": "write-with-late-arriving-arguments",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "write-late", "name": "write", "input": {} },
+        { "type": "tool_started", "tool_use_id": "write-late", "name": "write", "input": { "file_path": "src/late.ts", "content": "late content\n" } },
+        { "type": "tool_finished", "tool_use_id": "write-late", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/late.ts", "before": "", "after": "late content\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "参数始终缺失:安静跳过,既不产出也不报错。",
+      "name": "write-with-no-arguments-at-all-is-skipped",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "write-empty", "name": "write", "input": {} },
+        { "type": "tool_finished", "tool_use_id": "write-empty", "is_error": false }
+      ],
+      "expectedDiffs": []
+    },
+    {
+      "$comment": "路径嵌在更深一层:同步来源把工具入参包在 input 里,路径字段在其中。",
+      "name": "path-nested-inside-input-envelope",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "write-nested", "name": "write", "input": { "input": { "arguments": { "filePath": "src/nested.ts", "content": "nested\n" } } } },
+        { "type": "tool_finished", "tool_use_id": "write-nested", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/nested.ts", "before": "", "after": "nested\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "pi 的编辑形状:path + edits[{oldText,newText}],无快照,走退化基线。",
+      "name": "pi-edit-shape-degraded-baseline",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "pi-edit", "name": "edit", "input": { "path": "src/pi.ts", "edits": [{ "oldText": "alpha", "newText": "ALPHA" }] } },
+        { "type": "tool_finished", "tool_use_id": "pi-edit", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/pi.ts", "before": "alpha", "after": "ALPHA", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "工具名大小写不敏感:大写形态与上一条同一逻辑操作,必须产出相同条目。",
+      "name": "tool-name-matching-is-case-insensitive",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "pi-edit-upper", "name": "Edit", "input": { "path": "src/pi.ts", "edits": [{ "oldText": "alpha", "newText": "ALPHA" }] } },
+        { "type": "tool_finished", "tool_use_id": "pi-edit-upper", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/pi.ts", "before": "alpha", "after": "ALPHA", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "带 MCP 服务器前缀的写入工具名也要归一化命中,否则第三方 MCP 写文件永远不可见。",
+      "name": "mcp-prefixed-write-tool-name",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "mcp-write", "name": "mcp__fs__write_file", "input": { "file_path": "src/mcp.ts", "content": "via mcp\n" } },
+        { "type": "tool_finished", "tool_use_id": "mcp-write", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/mcp.ts", "before": "", "after": "via mcp\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "整轮内改回原样 => 净变化为零 => 该文件被过滤;若整轮只剩它,则该轮不产出卡片。这是「无成功变更的轮次不产出卡片」的最小用例。",
+      "name": "reverted-within-round-is-filtered-out",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/revert.ts", "original_content": "orig\n", "is_new": false, "tool_use_id": "revert-1" },
+        { "type": "tool_started", "tool_use_id": "revert-1", "name": "write", "input": { "file_path": "src/revert.ts", "content": "changed\n" } },
+        { "type": "tool_finished", "tool_use_id": "revert-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "revert-2", "name": "write", "input": { "file_path": "src/revert.ts", "content": "orig\n" } },
+        { "type": "tool_finished", "tool_use_id": "revert-2", "is_error": false }
+      ],
+      "expectedDiffs": []
+    },
+    {
+      "$comment": "净零只过滤「回到起点」的文件,同轮里真正改动的文件必须留下。基线是整轮开始时的快照,不是某次内部收尾的中间态。",
+      "name": "reverted-file-dropped-but-real-change-kept",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/revert.ts", "original_content": "orig\n", "is_new": false, "tool_use_id": "both-1" },
+        { "type": "tool_started", "tool_use_id": "both-1", "name": "write", "input": { "file_path": "src/revert.ts", "content": "changed\n" } },
+        { "type": "tool_finished", "tool_use_id": "both-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "both-2", "name": "write", "input": { "file_path": "src/revert.ts", "content": "orig\n" } },
+        { "type": "tool_finished", "tool_use_id": "both-2", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "both-3", "name": "write", "input": { "file_path": "src/kept.ts", "content": "kept\n" } },
+        { "type": "tool_finished", "tool_use_id": "both-3", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/kept.ts", "before": "", "after": "kept\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "退化基线(无快照)下的净零:两次编辑把文本还原,前后文本由编辑片段自身拼出,同样必须过滤。",
+      "name": "reverted-edit-without-snapshot-is-filtered-out",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "rev-edit-1", "name": "edit", "input": { "file_path": "src/rev.ts", "old_string": "alpha", "new_string": "BETA" } },
+        { "type": "tool_finished", "tool_use_id": "rev-edit-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "rev-edit-2", "name": "edit", "input": { "file_path": "src/rev.ts", "old_string": "BETA", "new_string": "alpha" } },
+        { "type": "tool_finished", "tool_use_id": "rev-edit-2", "is_error": false }
+      ],
+      "expectedDiffs": []
+    },
+    {
+      "$comment": "快照只做精确匹配:另一个目录下同名文件快照不得被绑到本次改动上,否则报出错误的变更前正文。匹配不上应走退化基线。",
+      "name": "snapshot-only-matches-the-same-file",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/other/app.ts", "original_content": "OTHER\n", "is_new": false, "tool_use_id": "other-snap" },
+        { "type": "tool_started", "tool_use_id": "edit-other", "name": "edit", "input": { "file_path": "src/app.ts", "old_string": "old line", "new_string": "new line" } },
+        { "type": "tool_finished", "tool_use_id": "edit-other", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/app.ts", "before": "old line", "after": "new line", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "快照按路径绑定(无 tool_use_id):工具入参是相对路径、快照是绝对路径,两边必须按同一个 cwd 解析后才比,否则查不到快照、基线从「本轮起点」退化成「hunk 自身」。",
+      "name": "snapshot-bound-by-path-without-tool-id",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/app.ts", "original_content": "old line\n", "is_new": false },
+        { "type": "tool_started", "tool_use_id": "edit-path-only", "name": "edit", "input": { "file_path": "src/app.ts", "old_string": "old line", "new_string": "new line" } },
+        { "type": "tool_finished", "tool_use_id": "edit-path-only", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/app.ts", "before": "old line\n", "after": "new line\n", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "前斜杠形态的 Windows 绝对路径必须被认成绝对路径。当成相对路径会在前面再拼一次 cwd,产物条目的 file 就变成重复路径,而卡片是按 file 去重的。",
+      "name": "absolute-forward-slash-tool-path",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "abs-edit", "name": "edit", "input": { "file_path": "D:/project/demo/src/abs.ts", "old_string": "alpha", "new_string": "ALPHA" } },
+        { "type": "tool_finished", "tool_use_id": "abs-edit", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/abs.ts", "before": "alpha", "after": "ALPHA", "additions": 1, "deletions": 1 }
+      ]
+    },
+    {
+      "$comment": "反斜杠形态的 cwd + 相对工具路径:拼出来的 file 必须统一成前斜杠。混拼(反斜杠 cwd + 正斜杠相对路径)会让同一个文件在实时侧与刷新后算成两个文件,卡片上出现两条。",
+      "name": "backslash-cwd-with-relative-path-normalizes",
+      "cwd": "D:\\project\\demo",
+      "events": [
+        { "type": "tool_started", "tool_use_id": "bs-write", "name": "write", "input": { "file_path": "src\\bs.ts", "content": "slash me\n" } },
+        { "type": "tool_finished", "tool_use_id": "bs-write", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/bs.ts", "before": "", "after": "slash me\n", "additions": 1, "deletions": 0 }
+      ]
+    },
+    {
+      "$comment": "一轮内对同一文件连续两次编辑(不还原):第二次的 hunk 是针对第一次编辑后的内容,条目必须给出整轮净变化 2/2。把每个 hunk 都套回本轮起点快照的实现会丢掉第二次编辑(报 1/1),这正是实测真实轮次里 119/2 与 120/2 那类偏差的来源。",
+      "name": "two-edits-in-one-round-compose",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "file_snapshot", "file_path": "D:/project/demo/src/compose.ts", "original_content": "alpha\nbeta\n", "is_new": false, "tool_use_id": "compose-1" },
+        { "type": "tool_started", "tool_use_id": "compose-1", "name": "edit", "input": { "file_path": "src/compose.ts", "old_string": "alpha", "new_string": "ALPHA" } },
+        { "type": "tool_finished", "tool_use_id": "compose-1", "is_error": false },
+        { "type": "tool_started", "tool_use_id": "compose-2", "name": "edit", "input": { "file_path": "src/compose.ts", "old_string": "beta", "new_string": "BETA" } },
+        { "type": "tool_finished", "tool_use_id": "compose-2", "is_error": false }
+      ],
+      "expectedDiffs": [
+        { "file": "D:/project/demo/src/compose.ts", "before": "alpha\nbeta\n", "after": "ALPHA\nBETA\n", "additions": 2, "deletions": 2 }
+      ]
+    }
+  ],
+  "sessionCases": [
+    {
+      "$comment": "整段会话的卡片数量:一轮一张。单轮用例表达不了这条 —— 它只在一段会话被整体加载时才成立。",
+      "name": "two-turns-produce-one-card-each",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "user_message", "content": "first" },
+        { "type": "tool_started", "tool_use_id": "t1-write", "name": "write", "input": { "file_path": "src/one.ts", "content": "one\n" } },
+        { "type": "tool_finished", "tool_use_id": "t1-write", "is_error": false },
+        { "type": "turn_finished", "outcome": "completed" },
+        { "type": "user_message", "content": "second" },
+        { "type": "tool_started", "tool_use_id": "t2-write", "name": "write", "input": { "file_path": "src/two.ts", "content": "two\n" } },
+        { "type": "tool_finished", "tool_use_id": "t2-write", "is_error": false },
+        { "type": "turn_finished", "outcome": "completed" }
+      ],
+      "expectedSummaries": [
+        { "diffs": [ { "file": "D:/project/demo/src/one.ts", "before": "", "after": "one\n", "additions": 1, "deletions": 0 } ] },
+        { "diffs": [ { "file": "D:/project/demo/src/two.ts", "before": "", "after": "two\n", "additions": 1, "deletions": 0 } ] }
+      ]
+    },
+    {
+      "$comment": "库里已经有产物事件的轮次不得被再补一张:实时侧写入的那张已经存在,加载历史时为它重新合成一张就是「一轮多卡片」本身。这条曾让真实库 232 轮里的 198 轮各多出一张。",
+      "name": "turn-with-persisted-summary-is-not-duplicated",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "user_message", "content": "change a file" },
+        { "type": "tool_started", "tool_use_id": "p-write", "name": "write", "input": { "file_path": "src/p.ts", "content": "content\n" } },
+        { "type": "tool_finished", "tool_use_id": "p-write", "is_error": false },
+        { "type": "system_event", "subtype": "session_summary", "session_id": "s1", "diffs": [ { "file": "D:/project/demo/src/p.ts", "before": "", "after": "content\n", "additions": 1, "deletions": 0 } ] },
+        { "type": "turn_finished", "outcome": "completed" }
+      ],
+      "expectedSummaries": [
+        { "diffs": [ { "file": "D:/project/demo/src/p.ts", "before": "", "after": "content\n", "additions": 1, "deletions": 0 } ] }
+      ]
+    },
+    {
+      "$comment": "上一轮已有产物事件、正常收尾,再来一轮:新一轮照常产出,旧的那张不得被复制。残余补发若只看「有没有改动过」而不看「这一轮是否已收尾/是否已有产物事件」,就会在 user_message 处再发一张。",
+      "name": "new-turn-after-a-summarized-turn-adds-exactly-one-card",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "user_message", "content": "first" },
+        { "type": "tool_started", "tool_use_id": "q-write-1", "name": "write", "input": { "file_path": "src/q1.ts", "content": "q1\n" } },
+        { "type": "tool_finished", "tool_use_id": "q-write-1", "is_error": false },
+        { "type": "system_event", "subtype": "session_summary", "session_id": "s1", "diffs": [ { "file": "D:/project/demo/src/q1.ts", "before": "", "after": "q1\n", "additions": 1, "deletions": 0 } ] },
+        { "type": "turn_finished", "outcome": "completed" },
+        { "type": "user_message", "content": "second" },
+        { "type": "tool_started", "tool_use_id": "q-write-2", "name": "write", "input": { "file_path": "src/q2.ts", "content": "q2\n" } },
+        { "type": "tool_finished", "tool_use_id": "q-write-2", "is_error": false },
+        { "type": "turn_finished", "outcome": "completed" }
+      ],
+      "expectedSummaries": [
+        { "diffs": [ { "file": "D:/project/demo/src/q1.ts", "before": "", "after": "q1\n", "additions": 1, "deletions": 0 } ] },
+        { "diffs": [ { "file": "D:/project/demo/src/q2.ts", "before": "", "after": "q2\n", "additions": 1, "deletions": 0 } ] }
+      ]
+    },
+    {
+      "$comment": "被中断的轮次(没有 turn_finished)仍要补一张:这正是「残余补发」存在的理由,别把它一起关掉。",
+      "name": "interrupted-turn-still-gets-a-card",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "user_message", "content": "start then die" },
+        { "type": "tool_started", "tool_use_id": "i-write", "name": "write", "input": { "file_path": "src/i.ts", "content": "interrupted\n" } },
+        { "type": "tool_finished", "tool_use_id": "i-write", "is_error": false }
+      ],
+      "expectedSummaries": [
+        { "diffs": [ { "file": "D:/project/demo/src/i.ts", "before": "", "after": "interrupted\n", "additions": 1, "deletions": 0 } ] }
+      ]
+    },
+    {
+      "$comment": "整段会话没有任何成功改动 => 一张卡片都不产出。",
+      "name": "session-with-no-successful-change-produces-no-card",
+      "cwd": "D:/project/demo",
+      "events": [
+        { "type": "user_message", "content": "just look" },
+        { "type": "tool_started", "tool_use_id": "r-read", "name": "read", "input": { "file_path": "src/r.ts" } },
+        { "type": "tool_finished", "tool_use_id": "r-read", "is_error": false },
+        { "type": "turn_finished", "outcome": "completed" }
+      ],
+      "expectedSummaries": []
+    }
+  ]
+}

@@ -23,6 +23,7 @@ import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { emit } from './streamEventBatcher.js';
 import { buildSessionTitleEvent } from './sessionTitleEvent.js';
+import { TurnArtifactAggregator } from './turnArtifactSummary.js';
 import type { PiSessionConfig, PiSessionMapping } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { setLogCtx, writeLog } from './writeLog.js';
@@ -183,6 +184,8 @@ export class PiRuntime {
   private pendingExtensionUi = new Map<string, PiPendingExtensionUi>();
   /** 本 turn 已见到的工具调用参数（审批卡/提问卡的 metadata 来源）。 */
   private trackedToolCalls = new Map<string, PiTrackedToolCall>();
+  /** 产物汇总：按「轮」累积（sendInput 重置基线，turn 收尾只发射不清空）。 */
+  private readonly turnArtifactAggregator: TurnArtifactAggregator;
   private activeAsk: PiActiveAsk | undefined;
   /** 最近一次已上报的原生会话名（变化才上报）。 */
   private lastEmittedSessionName: string | null = null;
@@ -197,6 +200,7 @@ export class PiRuntime {
       ...(config.agentSessionId ? { agentSessionId: config.agentSessionId } : {}),
       ...(options.eventIdFactory ? { eventIdFactory: options.eventIdFactory } : {}),
     });
+    this.turnArtifactAggregator = new TurnArtifactAggregator(config.cwd);
   }
 
   get isStarted(): boolean {
@@ -275,6 +279,9 @@ export class PiRuntime {
     this.turnError = undefined;
     this.retrying = false;
     this.clearFinishCheck();
+    // 新的一轮（一条 User Message）：产物基线从这里重置。steer 不经过这里，
+    // 注入当前轮的产物继续累积。
+    this.turnArtifactAggregator.reset();
     this.turnOpen = true;
     this.turnStartedAt = Date.now();
     this.turnFirstEventLogged = false;
@@ -655,6 +662,7 @@ export class PiRuntime {
   private project(event: PiRuntimeEvent): void {
     const projected = toCodeMuxEvents(event, this.ctx);
     for (const mapped of projected) {
+      this.turnArtifactAggregator.observe(mapped as Record<string, unknown>);
       (this.options.emitEvent ?? emit)(mapped);
     }
   }
@@ -932,6 +940,12 @@ export class PiRuntime {
     this.cancelAllInteractiveRequests();
     const startedAt = this.turnStartedAt;
     this.turnStartedAt = undefined;
+    // 产物汇总按「轮」累积：turn 收尾只发射当前累计，不清空（下一次
+    // sendInput 重置基线）。summary 必须先于 turn_finished 发出。
+    const summary = this.turnArtifactAggregator.flushSummary(this.config.sessionId);
+    if (summary) {
+      (this.options.emitEvent ?? emit)(summary);
+    }
     (this.options.emitEvent ?? emit)({
       type: 'turn_finished',
       outcome,
