@@ -19,6 +19,7 @@ import path from 'node:path';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
+import { parseByteRange } from './http-range';
 import { ensureNotificationIdentity } from './notification-identity';
 import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
@@ -154,13 +155,35 @@ function registerAppProtocol(): void {
       }
     }
     const ext = path.extname(filePath).toLowerCase();
+    const contentType = CONTENT_TYPES[ext]
+      ?? (isRootRequest ? 'text/html; charset=utf-8' : 'application/octet-stream');
+    // 媒体元素(设置页「试听」/ 任务提示音)会发 Range 请求,并依赖 Content-Length
+    // 决定能否缓冲;缺 Content-Length 时,超过 Chromium 缓冲阈值的 wav(实测 >26KB
+    // 的几个)会被判成 MEDIA_ELEMENT_ERROR: Format error,生产态哑火 —— dev 走 Vite
+    // 的 http 静态服务则正常。这里补齐 Content-Length 与 206 分段响应,语义对齐
+    // daemon 侧 tower-http 的 ServeDir。
+    const total = statSync(filePath).size;
+    const headers: Record<string, string> = {
+      'content-type': contentType,
+      'accept-ranges': 'bytes',
+      'cache-control': isRootRequest || missing ? 'no-cache' : 'public, max-age=3600',
+    };
+    const range = parseByteRange(request.headers.get('range'), total);
+    if (range) {
+      const body = readFileSync(filePath).subarray(range.start, range.end + 1);
+      return new Response(body, {
+        status: 206,
+        headers: {
+          ...headers,
+          'content-range': `bytes ${range.start}-${range.end}/${total}`,
+          'content-length': String(body.byteLength),
+        },
+      });
+    }
     const body = readFileSync(filePath);
     return new Response(body, {
       status: 200,
-      headers: {
-        'content-type': CONTENT_TYPES[ext] ?? (isRootRequest ? 'text/html; charset=utf-8' : 'application/octet-stream'),
-        'cache-control': isRootRequest || missing ? 'no-cache' : 'public, max-age=3600',
-      },
+      headers: { ...headers, 'content-length': String(body.byteLength) },
     });
   });
 }
