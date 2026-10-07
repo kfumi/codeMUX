@@ -98,7 +98,7 @@ function listLogFiles(logDir: string): Array<{ name: string; path: string; size:
 /** read_home_file 的安全校验(对齐 resolve_secure_home_path:拒绝绝对路径与 `..`)。 */
 function readHomeFile(relativePath: string): string {
   const relative = relativePath.trim();
-  if (path.isAbsolute(relative)) {
+  if (isAbsoluteFsPath(relative)) {
     throw new Error('Invalid home file path: path must be relative');
   }
   if (relative.split(/[\\/]/).includes('..')) {

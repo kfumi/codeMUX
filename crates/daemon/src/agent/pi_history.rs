@@ -371,7 +371,7 @@ pub(crate) fn resolve_pi_rewind_entry_id(
         let user = users
             .iter()
             .find(|user| user.entry_id == id)
-            .ok_or_else(&not_found)?;
+            .ok_or_else(not_found)?;
         // pi 树条目不可变，id 命中即目标：不校验指纹——展示层剥离（如附件
         // 富化包裹）会让时间线文本与原文产生合法差异。
         return Ok(user.entry_id.clone());
@@ -379,8 +379,8 @@ pub(crate) fn resolve_pi_rewind_entry_id(
 
     if let Some(ordinal) = turn_ordinal {
         let user = users
-            .get(ordinal.checked_sub(1).ok_or_else(&not_found)?)
-            .ok_or_else(&not_found)?;
+            .get(ordinal.checked_sub(1).ok_or_else(not_found)?)
+            .ok_or_else(not_found)?;
         verify_pi_rewind_fingerprint(user, text_fingerprint)?;
         return Ok(user.entry_id.clone());
     }
@@ -388,7 +388,7 @@ pub(crate) fn resolve_pi_rewind_entry_id(
     users
         .last()
         .map(|user| user.entry_id.clone())
-        .ok_or_else(&not_found)
+        .ok_or_else(not_found)
 }
 
 /// Pi JSONL records one assistant `message` per speak/tool step. A single user
