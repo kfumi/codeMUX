@@ -1,6 +1,7 @@
 import {
   Bot,
   CheckSquare,
+  CircleHelp,
   FileText,
   Folder,
   Globe,
@@ -35,6 +36,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   update_plan: CheckSquare,
   TaskList: CheckSquare,
   ExitPlanMode: CheckSquare,
+  AskUserQuestion: CircleHelp,
+  request_user_input: CircleHelp,
 };
 
 /**
