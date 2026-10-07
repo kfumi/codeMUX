@@ -33,7 +33,18 @@ use crate::companion::state::CompanionBroadcastEvent;
 pub const AUTOMATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 合法自动化操作集合(壳侧按 op 分发执行)。
-pub const AUTOMATION_OPS: [&str; 5] = ["eval", "screenshot", "input", "cdp", "list"];
+pub const AUTOMATION_OPS: [&str; 10] = [
+    "eval",
+    "screenshot",
+    "input",
+    "cdp",
+    "list",
+    "snapshot",
+    "click",
+    "type",
+    "scroll",
+    "select",
+];
 
 /// 一次自动化请求的终态(经 oneshot 送回挂起的 execute)。
 #[derive(Debug)]
@@ -323,6 +334,13 @@ mod tests {
         }
         for op in AUTOMATION_OPS {
             assert!(AUTOMATION_OPS.contains(&op));
+        }
+    }
+
+    #[test]
+    fn element_ops_are_accepted() {
+        for op in ["snapshot", "click", "type", "scroll", "select"] {
+            assert!(AUTOMATION_OPS.contains(&op), "op {op:?} 应为合法自动化操作");
         }
     }
 

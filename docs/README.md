@@ -69,6 +69,7 @@
 | [2026-09-28-codeg-pi-integration-reference.md](research/2026-09-28-codeg-pi-integration-reference.md) | codeg 的 Pi 接入参考:ACP 适配器路线、项目信任门、历史解析纪律与对 CodeMUX 的启发 |
 | [2026-09-24-codeg-token-speed-reference.md](research/2026-09-24-codeg-token-speed-reference.md) | codeg 实时 TPS 方案参考与 CodeMUX 差异 |
 | [2026-09-24-opencode-storage-performance-audit.md](research/2026-09-24-opencode-storage-performance-audit.md) | OpenCode 存储性能审计 |
+| [2026-10-07-computer-use-plugin-research.md](research/2026-10-07-computer-use-plugin-research.md) | Agent Computer Use 电脑控制调研与落地建议 |
 
 ### specs
 
@@ -120,6 +121,7 @@
 | [2026-09-18-long-session-render-scale.md](specs/2026-09-18-long-session-render-scale.md) | 长会话渲染规模:让开销只与"正在看的那一段"成正比 |
 | [2026-09-20-codex-collab-subagent-parity.md](specs/2026-09-20-codex-collab-subagent-parity.md) | Codex 协作子智能体:两种 spawn 变体的声明与轨道对等 |
 | [2026-09-21-agent-task-board.md](specs/2026-09-21-agent-task-board.md) | 工作任务看板(Work Task):agent 驱动的委派与验收 |
+| [2026-10-07-computer-use.md](specs/2026-10-07-computer-use.md) | 电脑控制（Computer Use） |
 
 ### plans
 

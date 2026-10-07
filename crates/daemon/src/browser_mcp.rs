@@ -42,7 +42,7 @@ pub fn builtin_server_entry(
     crate::mcp::types::McpServer {
         id: BROWSER_MCP_SERVER_NAME.to_string(),
         name: BROWSER_MCP_SERVER_NAME.to_string(),
-        description: "内置浏览器控制:让会话驱动内置浏览器(eval / 截图 / 输入 / CDP)。随「设置 → 浏览器控制」开关生效,内置提供,不可修改或删除。".to_string(),
+        description: "内置浏览器控制:让会话驱动内置浏览器(列表、求值、截图、键鼠输入、CDP、快照、元素点击、输入、滚动、选择)。随设置中浏览器控制开关生效,内置提供,不可修改或删除。".to_string(),
         server: builtin_server_spec(current_exe, app_data_dir),
         apps: crate::mcp::types::McpApps {
             claude: true,
@@ -176,6 +176,69 @@ fn tool_definitions() -> Value {
                 "required": ["method"],
             },
         },
+        {
+            "name": "browser_snapshot",
+            "description": "读取当前浏览器页的结构化快照：可交互元素列表（含编号、角色、名称与包围盒）与视口尺寸；截图随结果以图片形式返回。用元素编号驱动后续点击、输入等操作。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "browserId": { "type": "string", "description": "目标页面；省略时取最近打开的页面" },
+                },
+            },
+        },
+        {
+            "name": "browser_click",
+            "description": "点击快照中的元素（按元素编号，如 e3）；先调 browser_snapshot 拿最新列表。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "button": { "type": "string", "description": "left、middle 或 right，缺省 left" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId"],
+            },
+        },
+        {
+            "name": "browser_type",
+            "description": "在快照中的元素里输入文字（按元素编号）；聚焦后设值并派发输入事件，submit 为真且在表单内时提交。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "text": { "type": "string" },
+                    "submit": { "type": "boolean" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId", "text"],
+            },
+        },
+        {
+            "name": "browser_scroll",
+            "description": "滚动页面或快照中的元素：无元素编号时按增量滚屏，有编号时在元素中心滚轮。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "deltaX": { "type": "number" },
+                    "deltaY": { "type": "number" },
+                    "browserId": { "type": "string" },
+                },
+            },
+        },
+        {
+            "name": "browser_select",
+            "description": "在快照中的下拉框元素里按值选择（按元素编号），选择后派发变更事件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "value": { "type": "string" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId", "value"],
+            },
+        },
     ])
 }
 
@@ -257,10 +320,80 @@ async fn call_tool(
             }
             _ => Err("browser_cdp 缺少必填参数 method".to_string()),
         },
+        "browser_snapshot" => {
+            runtime
+                .call_execute("snapshot", browser_id, json!({}))
+                .await
+        }
+        "browser_click" => match args.get("elementId").and_then(|v| v.as_str()) {
+            Some(element_id) if !element_id.trim().is_empty() => {
+                runtime
+                    .call_execute("click", browser_id, json!({ "elementId": element_id }))
+                    .await
+            }
+            _ => Err("browser_click 缺少必填参数 elementId".to_string()),
+        },
+        "browser_type" => {
+            let element_id = args.get("elementId").and_then(|v| v.as_str()).unwrap_or("");
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if element_id.trim().is_empty() || text.is_empty() {
+                Err("browser_type 缺少必填参数 elementId 或 text".to_string())
+            } else {
+                let mut params = serde_json::Map::new();
+                params.insert(
+                    "elementId".to_string(),
+                    Value::String(element_id.to_string()),
+                );
+                params.insert("text".to_string(), Value::String(text.to_string()));
+                if let Some(submit) = args.get("submit") {
+                    params.insert("submit".to_string(), submit.clone());
+                }
+                runtime
+                    .call_execute("type", browser_id, Value::Object(params))
+                    .await
+            }
+        }
+        "browser_scroll" => {
+            let mut params = serde_json::Map::new();
+            for key in ["elementId", "deltaX", "deltaY"] {
+                if let Some(value) = args.get(key) {
+                    params.insert(key.to_string(), value.clone());
+                }
+            }
+            runtime
+                .call_execute("scroll", browser_id, Value::Object(params))
+                .await
+        }
+        "browser_select" => {
+            let element_id = args.get("elementId").and_then(|v| v.as_str()).unwrap_or("");
+            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            if element_id.trim().is_empty() || value.is_empty() {
+                Err("browser_select 缺少必填参数 elementId 或 value".to_string())
+            } else {
+                runtime
+                    .call_execute(
+                        "select",
+                        browser_id,
+                        json!({ "elementId": element_id, "value": value }),
+                    )
+                    .await
+            }
+        }
         other => Err(format!("未知工具: {}(见 tools/list)", other)),
     };
     Ok(match result {
         Ok(payload) => match (name, payload) {
+            ("browser_snapshot", Value::Object(map)) => {
+                let screenshot = map.get("screenshot").and_then(|v| v.as_str()).unwrap_or("");
+                let mut summary = map.clone();
+                summary.remove("screenshot");
+                json!({
+                    "content": [
+                        { "type": "image", "data": screenshot, "mimeType": "image/png" },
+                        { "type": "text", "text": serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string()) },
+                    ],
+                })
+            }
             ("browser_screenshot", Value::String(data)) if !data.is_empty() => json!({
                 "content": [{ "type": "image", "data": data, "mimeType": "image/png" }],
             }),
@@ -385,7 +518,12 @@ mod tests {
                 "browser_eval",
                 "browser_screenshot",
                 "browser_input",
-                "browser_cdp"
+                "browser_cdp",
+                "browser_snapshot",
+                "browser_click",
+                "browser_type",
+                "browser_scroll",
+                "browser_select",
             ]
         );
     }
@@ -407,6 +545,9 @@ mod tests {
             ("browser_eval", json!({})),
             ("browser_input", json!({ "event": "not-object" })),
             ("browser_cdp", json!({})),
+            ("browser_click", json!({})),
+            ("browser_type", json!({"elementId": "e1"})),
+            ("browser_select", json!({"elementId": "e1"})),
         ] {
             let result = handle_request(
                 &runtime,
