@@ -2555,9 +2555,9 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
       : {}),
     ...(cmd.modelLimits?.input?.length ? { modelInputModalities: cmd.modelLimits.input } : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
-    // COMPAT(piMcpConfigUnknownFlag)：pi 无原生 MCP，0.87 起未知 -- flag 会使
-    // RPC 进程启动即退出——daemon 下发的 mcpServers 不再传入 pi 会话配置
-    // （PiRuntime 接受该字段但忽略，见 piRuntime.ts start() 注释）。
+    // pi >= 0.99 原生 MCP：daemon 下发的 mcpServers 经 PiRuntime 同步进托管目录的
+    // mcp.json（用户级配置，无需项目信任；canReuse 比对触发变更后进程重建）。
+    ...(cmd.mcpServers ? { mcpServers: cmd.mcpServers } : {}),
   };
 }
 

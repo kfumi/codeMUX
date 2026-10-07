@@ -213,14 +213,31 @@ fn build_status_message(
     info: &crate::runtime::npm::NpmRuntimeStatusInfo,
 ) -> String {
     match status {
-        RuntimeStatus::NodeUnavailable => format!(
-            "Node.js 不可用或版本低于 18{}",
-            info.node
-                .error
-                .as_ref()
-                .map(|e| format!("：{}", e))
-                .unwrap_or_default()
-        ),
+        RuntimeStatus::NodeUnavailable => {
+            // 已安装的新版 pi 跑不动（Node < 22.19）时，状态也是 NodeUnavailable：
+            // 这时 Node 本身可用，沿用“低于 18”的文案会误导，改指引升级 Node。
+            if provider == Provider::Pi {
+                if let Some(current) = info.current_version.as_deref() {
+                    if crate::runtime::types::pi_requires_node_22(current)
+                        && !info.node.satisfies_pi_runtime(current)
+                    {
+                        return format!(
+                            "pi {} 需要 Node.js 22.19+（当前 Node：{}），请升级 Node 后重试；Node 20 用户可改装 legacy-node20 通道的 0.74.2",
+                            current,
+                            info.node.version.as_deref().unwrap_or("未知")
+                        );
+                    }
+                }
+            }
+            format!(
+                "Node.js 不可用或版本低于 18{}",
+                info.node
+                    .error
+                    .as_ref()
+                    .map(|e| format!("：{}", e))
+                    .unwrap_or_default()
+            )
+        }
         RuntimeStatus::Missing => format!("{} 尚未安装，点击安装按钮获取", provider.label()),
         RuntimeStatus::Corrupted => format!("{} Runtime 损坏，需要修复", provider.label()),
         RuntimeStatus::Outdated => format!(
