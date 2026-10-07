@@ -47,6 +47,16 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   close_agent: '关闭子智能体',
   resume_agent: '恢复子智能体',
   view_image: '查看图片',
+  browser_list: '浏览器页面',
+  browser_eval: '执行脚本',
+  browser_screenshot: '页面截图',
+  browser_input: '模拟输入',
+  browser_cdp: 'CDP 命令',
+  browser_snapshot: '读取页面快照',
+  browser_click: '点击元素',
+  browser_type: '输入文字',
+  browser_scroll: '滚动页面',
+  browser_select: '选择选项',
   js: '运行 JS',
   js_repl: '运行 JS',
   js_repl_reset: '重置 JS',
@@ -178,7 +188,42 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
       case 'WaitForMcpServers':
         return { consumedKeys: [] };
 
-      default:
+            case 'browser_list':
+      case 'browser_screenshot':
+      case 'browser_snapshot':
+      case 'browser_input':
+        return { consumedKeys: [] };
+
+      case 'browser_eval': {
+        const code = asDisplayText(input.code);
+        return {
+          text: code.length > 120 ? code.slice(0, 120) + '…' : code || undefined,
+          consumedKeys: [],
+        };
+      }
+
+      case 'browser_cdp': {
+        const method = asDisplayText(input.method);
+        return { text: method || undefined, consumedKeys: method ? ['method'] : [] };
+      }
+
+      case 'browser_click':
+      case 'browser_scroll':
+      case 'browser_select': {
+        const elementId = asDisplayText(input.elementId);
+        return { text: elementId || undefined, consumedKeys: elementId ? ['elementId'] : [] };
+      }
+
+      case 'browser_type': {
+        const elementId = asDisplayText(input.elementId);
+        const text = asDisplayText(input.text);
+        return {
+          text: elementId ? elementId + '（' + text.length + '字）' : undefined,
+          consumedKeys: elementId ? ['elementId'] : [],
+        };
+      }
+
+default:
         return fromFirstKey(input, ['description', 'pattern', 'query', 'url', 'file_path', 'path', 'prompt', 'command']);
     }
   })();

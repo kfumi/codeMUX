@@ -18,6 +18,8 @@ import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { TodoToolList } from '../TodoToolList';
+import { BrowserToolResult } from '../BrowserToolResult';
+import { isBrowserToolName } from '../../../lib/browserToolShots';
 import { getTodoListForTool, readTodoExplanation } from '../../../lib/todoToolArgs';
 import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
@@ -43,7 +45,10 @@ type CodeMuxToolCallPartProps = {
   isError?: boolean;
   durationMs?: number;
   status?: ToolCallMessagePartStatus;
-};
+
+  browserStep?: number;
+  beforeShot?: string;
+  afterShot?: string;};
 
 type CodeMuxDataPartProps = {
   name: string;
@@ -247,10 +252,14 @@ function CodeMuxToolCallMessagePartImpl({
   isError,
   durationMs,
   status,
+  browserStep,
+  beforeShot,
+  afterShot,
 }: CodeMuxToolCallPartProps) {
   // 参数规整必须在**组件内部**记住，见文件末尾三个 `memo` 导出的说明。
   const args = useMemo(() => asToolArgs(rawArgs), [rawArgs]);
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
+  const isBrowserTool = isBrowserToolName(toolName);
   const headerSummary = getToolHeaderSummary(toolName, args);
   // 委派（Task/Agent）工具行由委派卡片取代：一个段里的委派由卡片表达（组头 + 拓扑 + 步骤），
   // 工具行只会重复它的信息，卡片节点才是打开预览的入口。
@@ -395,9 +404,19 @@ function CodeMuxToolCallMessagePartImpl({
           <>
             {resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}
             {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
-            {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
+            {isBrowserTool ? (
+              <BrowserToolResult
+                toolName={toolName}
+                result={result}
+                step={browserStep}
+                beforeShot={beforeShot}
+                afterShot={afterShot}
+              />
+            ) : (
+              (!codeFilePath || resolvedStatus?.type === 'incomplete') && (
               <ToolFallbackResult result={stringifyResult(result)} />
-            )}
+              ))
+            }
           </>
         )}
       </ToolFallbackContent>

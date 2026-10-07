@@ -250,6 +250,16 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (task_id) REFERENCES work_tasks(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS browser_automation_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            op TEXT NOT NULL,
+            browser_id TEXT,
+            session_id TEXT,
+            ok INTEGER NOT NULL,
+            error TEXT
+        );
+
         CREATE INDEX IF NOT EXISTS idx_work_tasks_project ON work_tasks(project_id);
         CREATE INDEX IF NOT EXISTS idx_work_tasks_status ON work_tasks(status);
         CREATE INDEX IF NOT EXISTS idx_work_task_events_task ON work_task_events(task_id);

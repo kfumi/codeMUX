@@ -110,3 +110,27 @@ describe('tool header summaries', () => {
     expect(container.textContent).toContain('"items"');
   });
 });
+describe('浏览器工具 header 摘要', () => {
+  it('点击元素在标题显示编号，展开参数不再重复', () => {
+    const { container } = renderWithTooltip(
+      <ToolCallCard toolName={'browser_click'} input={{ elementId: 'e3', browserId: 'b-1' }} status={'done'} />,
+    );
+    expect(screen.getByText('点击元素')).toBeTruthy();
+    expect(screen.getByText('e3')).toBeTruthy();
+    fireEvent.click(within(container).getByRole('button'));
+    expect(container.textContent).not.toContain('elementId');
+  });
+  it('输入文字标题只显示编号与字数，不泄露内容', () => {
+    renderWithTooltip(
+      <ToolCallCard toolName={'browser_type'} input={{ elementId: 'e1', text: 'hello' }} status={'done'} />,
+    );
+    expect(screen.getByText('输入文字')).toBeTruthy();
+    expect(screen.queryByText('hello')).toBeNull();
+  });
+  it('快照工具显示中文名', () => {
+    renderWithTooltip(
+      <ToolCallCard toolName={'browser_snapshot'} input={{}} status={'done'} />,
+    );
+    expect(screen.getByText('读取页面快照')).toBeTruthy();
+  });
+});

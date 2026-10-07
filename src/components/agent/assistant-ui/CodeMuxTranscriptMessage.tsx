@@ -11,6 +11,7 @@ import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
 import { isActivityRunPart, type ActivityRun, type ActivityRunPlacement } from '@/lib/activityRuns';
 import { buildSubagentActivity } from '@/lib/subagentActivity';
+import { computeBrowserStepContext, type BrowserStepInfo } from '@/lib/browserToolShots';
 import { useSubagentStore } from '@/stores/subagentStore';
 import { cn } from '@/lib/utils';
 
@@ -160,21 +161,44 @@ export function CodeMuxTranscriptMessage({
     return null;
   }
 
+  const browserStepByIndex = useMemo<(BrowserStepInfo | null)[]>(() => {
+    const compact: Array<{ toolName: string; result: unknown }> = [];
+    const positions: number[] = [];
+    message.content.forEach((part, index) => {
+      if (part.type === 'tool-call') {
+        positions.push(index);
+        compact.push({ toolName: part.toolName, result: part.result });
+      }
+    });
+    const context = computeBrowserStepContext(compact);
+    const byIndex: (BrowserStepInfo | null)[] = message.content.map(() => null);
+    positions.forEach((position, order) => {
+      byIndex[position] = context[order] ?? null;
+    });
+    return byIndex;
+  }, [message.content]);
+
   const renderToolCall = (
     part: ToolCallPart,
     key: string | number,
-  ) => (
-    <CodeMuxToolCallMessagePart
-      key={key}
-      toolName={part.toolName}
-      toolCallId={part.toolCallId}
-      sessionId={sessionId}
-      args={part.args}
-      result={part.result}
-      isError={part.isError}
-      durationMs={typeof part.toolCallId === 'string' ? toolDurations?.[part.toolCallId] : undefined}
-    />
-  );
+  ) => {
+    const stepInfo = typeof key === 'number' ? browserStepByIndex[key] : null;
+    return (
+      <CodeMuxToolCallMessagePart
+        key={key}
+        toolName={part.toolName}
+        toolCallId={part.toolCallId}
+        sessionId={sessionId}
+        args={part.args}
+        result={part.result}
+        isError={part.isError}
+        durationMs={typeof part.toolCallId === 'string' ? toolDurations?.[part.toolCallId] : undefined}
+        browserStep={stepInfo?.step}
+        beforeShot={stepInfo?.beforeShot}
+        afterShot={stepInfo?.afterShot}
+      />
+    );
+  };
 
   return (
     <div className="group/message-row">

@@ -165,6 +165,10 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
             "/browser-automation/result",
             post(submit_browser_automation_result),
         )
+        .route(
+            "/browser-automation/audit",
+            axum::routing::get(list_browser_automation_audit),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +178,19 @@ struct AutomationExecuteRequest {
     op: String,
     #[serde(default)]
     params: serde_json::Value,
+}
+
+/// 审计记一笔（02 票）：失败吞掉，永不挡执行；401 鉴权失败不记（上下文不可信）。
+fn audit_attempt(
+    ctx: &ServerContext,
+    op: &str,
+    browser_id: Option<&str>,
+    ok: bool,
+    error: Option<&str>,
+) {
+    if let Ok(db) = ctx.daemon.app.db.lock() {
+        super::browser_audit::record_automation_audit(&db, op, browser_id, None, ok, error);
+    }
 }
 
 async fn execute_browser_automation(
@@ -189,12 +206,26 @@ async fn execute_browser_automation(
     {
         let config = ctx.daemon.app.config.lock().unwrap();
         if !config.browser.enabled {
+            audit_attempt(
+                &ctx,
+                &body.op,
+                body.browser_id.as_deref(),
+                false,
+                Some("gate: browser control disabled"),
+            );
             return Err(ApiError::forbidden(
                 "内置浏览器控制未开启:请在 设置 → 浏览器控制 中打开后重试",
             ));
         }
     }
     if !AUTOMATION_OPS.contains(&body.op.as_str()) {
+        audit_attempt(
+            &ctx,
+            &body.op,
+            body.browser_id.as_deref(),
+            false,
+            Some("gate: unknown op"),
+        );
         return Err(ApiError::bad_request(format!(
             "Unknown browser automation op: {}",
             body.op
@@ -223,6 +254,13 @@ async fn execute_browser_automation(
             .browser_automation
             .abandon(&request_id)
             .await;
+        audit_attempt(
+            &ctx,
+            &body.op,
+            body.browser_id.as_deref(),
+            false,
+            Some("no shell client"),
+        );
         return Err(ApiError::service_unavailable(
             "No shell browser-automation client is connected",
         ));
@@ -244,12 +282,31 @@ async fn execute_browser_automation(
             .browser_automation
             .abandon(&request_id)
             .await;
+        audit_attempt(
+            &ctx,
+            &body.op,
+            body.browser_id.as_deref(),
+            false,
+            Some("timeout waiting for shell result"),
+        );
         return Err(ApiError::gateway_timeout(format!(
             "Browser automation request timed out after {}ms",
             timeout.as_millis()
         )));
     };
 
+    match &outcome {
+        AutomationOutcome::Ok(_) => {
+            audit_attempt(&ctx, &body.op, body.browser_id.as_deref(), true, None)
+        }
+        AutomationOutcome::Failed(error) => audit_attempt(
+            &ctx,
+            &body.op,
+            body.browser_id.as_deref(),
+            false,
+            Some(error),
+        ),
+    }
     Ok(Json(match outcome {
         AutomationOutcome::Ok(payload) => serde_json::json!({
             "ok": true,
@@ -306,6 +363,33 @@ async fn submit_browser_automation_result(
         )));
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct AuditListQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn list_browser_automation_audit(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<AuditListQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let token = bearer_token_from_headers(&headers);
+    authorize_automation_request(&ctx.daemon.app.app_data_dir, token.as_deref(), Some(peer))?;
+    let entries = {
+        let db = ctx
+            .daemon
+            .app
+            .db
+            .lock()
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        super::browser_audit::list_automation_audit(&db, query.limit.unwrap_or(50))
+            .map_err(ApiError::internal)?
+    };
+    Ok(Json(serde_json::json!({ "ok": true, "entries": entries })))
 }
 
 #[cfg(test)]
@@ -439,5 +523,16 @@ mod tests {
         assert_eq!(event.event["browserId"], "browser-1");
         assert_eq!(event.event["op"], "eval");
         assert_eq!(event.event["params"]["code"], "1+1");
+    }
+    #[test]
+    fn audit_table_exists_after_initialize() {
+        let conn = rusqlite::Connection::open_in_memory().expect("内存库");
+        crate::db::schema::initialize_database(&conn).expect("建表");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM browser_automation_audit", [], |row| {
+                row.get(0)
+            })
+            .expect("审计表应存在");
+        assert_eq!(count, 0);
     }
 }
