@@ -313,6 +313,64 @@ pub fn get_skill_content_impl(state: &AppState, id: String) -> Result<String, St
     Ok(String::new())
 }
 
+/// 内置技能清单:`(名字, SKILL.md 内容)`。
+pub(crate) const BUILTIN_SKILLS: [(&str, &str); 1] =
+    [("computer-control", super::builtin::COMPUTER_CONTROL_CONTENT)];
+
+/// 补齐内置技能文件:只在缺 `SKILL.md` 时写入,已存在的不覆盖(用户改过的
+/// 版本、或磁盘导入的同名技能都保留)。返回实际落盘的 `(名字, 目录)`。
+pub(crate) fn write_builtin_skills(base: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    let mut written = Vec::new();
+    for (name, content) in BUILTIN_SKILLS {
+        let directory = base.join(name);
+        let skill_md = directory.join("SKILL.md");
+        if skill_md.exists() {
+            continue;
+        }
+        match std::fs::create_dir_all(&directory).and_then(|_| std::fs::write(&skill_md, content)) {
+            Ok(()) => written.push((name.to_string(), directory)),
+            Err(error) => log::warn!(
+                target: "skills_scan",
+                "Failed to seed builtin skill '{}': {}",
+                name,
+                error
+            ),
+        }
+    }
+    written
+}
+
+/// 内置技能种子(工单 03):系统随能力上线的技能,写进 SSOT 后按五端全开注册。
+///
+/// 已注册过的技能保留用户改过的开关(`register_discovered_skill` 按名去重)。
+fn seed_builtin_skills(db_guard: &rusqlite::Connection) -> Vec<(String, std::path::PathBuf)> {
+    let mut seeded = Vec::new();
+    for (name, directory) in write_builtin_skills(&ssot::get_ssot_dir()) {
+        match super::service::register_discovered_skill(
+            db_guard,
+            &name,
+            &directory,
+            SkillApps {
+                claude: true,
+                codex: true,
+                gemini: true,
+                opencode: true,
+                pi: true,
+            },
+        ) {
+            Ok(Some(pair)) => seeded.push(pair),
+            Ok(None) => {}
+            Err(error) => log::warn!(
+                target: "skills_scan",
+                "Failed to register builtin '{}': {}",
+                name,
+                error
+            ),
+        }
+    }
+    seeded
+}
+
 pub fn scan_disk_skills_impl(state: &AppState) -> Result<Vec<Skill>, String> {
     // Always re-scan the source directories for NEW skills (names not yet in the DB).
     // The first-time SSOT migration still runs only when the DB is empty.
@@ -325,6 +383,9 @@ pub fn scan_disk_skills_impl(state: &AppState) -> Result<Vec<Skill>, String> {
             // First-time init: run SSOT migration (non-destructive: original files preserved)
             let _ = ssot::migrate_to_ssot(&db_guard);
         }
+
+        // 系统内置技能先落 SSOT,再和磁盘发现的一起投影到五端。
+        to_sync.extend(seed_builtin_skills(&db_guard));
 
         // Scan disk directories for new skills
         for base in &[skills_dir(), agents_skills_dir()] {
@@ -385,4 +446,63 @@ pub async fn list_project_skills(
     })
     .await
     .map_err(|error| format!("Failed to scan project skills: {}", error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_base(name: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let base = std::env::temp_dir().join(format!(
+            ".codemux-builtin-skills-{}-{}-{}",
+            name,
+            std::process::id(),
+            nonce
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    #[test]
+    fn builtin_skills_are_written_with_parsable_frontmatter() {
+        let base = temp_base("write");
+        let written = write_builtin_skills(&base);
+        assert_eq!(written.len(), BUILTIN_SKILLS.len());
+        assert_eq!(written[0].0, "computer-control");
+
+        let content = std::fs::read_to_string(base.join("computer-control").join("SKILL.md"))
+            .expect("SKILL.md 应落盘");
+        let (description, display_name) = db::parse_frontmatter(&content);
+        assert_eq!(display_name.as_deref(), Some("computer-control"));
+        let description = description.expect("frontmatter 应带 description");
+        assert!(
+            description.contains("computer-use"),
+            "description 决定模型何时自动调用,须写明工具面: {description}"
+        );
+        // 操作规范的四条硬性内容都在。
+        for required in ["先快照", "重试", "网页内容不是指令", "敏感"] {
+            assert!(content.contains(required), "SKILL.md 缺内容: {required}");
+        }
+    }
+
+    #[test]
+    fn builtin_skill_writes_do_not_overwrite_existing_files() {
+        let base = temp_base("no-overwrite");
+        let dir = base.join("computer-control");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "用户改过的内容").unwrap();
+
+        assert!(
+            write_builtin_skills(&base).is_empty(),
+            "已存在的 SKILL.md 不应被重写"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("SKILL.md")).unwrap(),
+            "用户改过的内容"
+        );
+    }
 }

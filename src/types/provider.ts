@@ -178,6 +178,20 @@ export interface BrowserControlSettings {
   ignore_certificate_errors: boolean;
 }
 
+export interface ComputerUseSettings {
+  enabled: boolean;
+  system_execution_enabled: boolean;
+  /** 允许列表:空 = 除内置拒绝外全部可操作;逐行写应用名。 */
+  allowlist: string[];
+  /** 步数上限(循环护栏)。 */
+  max_steps: number;
+  /** 外部驱动命令(stdio MCP)。 */
+  driver_command?: string | null;
+  driver_args: string[];
+  /** 驱动升级命令(整行,经平台 shell 执行);无配置则不能一键更新。 */
+  driver_update_command?: string | null;
+}
+
 export interface AppConfig {
   model_providers: ModelProvider[];
   active_provider_id: string | null;
@@ -191,6 +205,7 @@ export interface AppConfig {
   git?: GitSettings;
   keybindings?: KeybindingsSettings;
   browser?: BrowserControlSettings;
+  computer_use?: ComputerUseSettings;
   theme: Theme;
   attachment_enrichment?: AttachmentEnrichmentConfig;
   /** Cleared on load; kept optional for transitional UI code. */

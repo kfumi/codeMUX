@@ -31,9 +31,36 @@ describe('getStreamStatusDisplay', () => {
     });
 
     expect(display.tone).toBe('warning');
-    expect(display.text).toContain('协作模式已阻止');
+    expect(display.text).toContain('权限门拦截');
     expect(display.text).toContain('request_user_input_blocked_in_default_mode');
     expect(display.text).not.toContain('连接断开');
+  });
+
+  it('names whose permission gate blocked a computer-use step', () => {
+    const display = getStreamStatusDisplay({
+      message: 'blocked',
+      is_reconnecting: false,
+      mode_blocked: {
+        blocked_method: 'item/tool/mcp__codemux-browser__browser_click',
+        effective_mode: 'code',
+        reason_code: 'permission_mode_blocked',
+        gate_agent_kind: 'codex',
+        gate_label: 'Codex 的权限门',
+      },
+    });
+
+    expect(display.text).toContain('Codex 的权限门拦截');
+    expect(display.text).toContain('permission_mode_blocked');
+  });
+
+  it('falls back to a generic label when the gate owner is unknown', () => {
+    const display = getStreamStatusDisplay({
+      message: 'blocked',
+      is_reconnecting: false,
+      mode_blocked: { reason_code: 'permission_mode_blocked' },
+    });
+
+    expect(display.text).toContain('智能体权限门拦截');
   });
 
   it('keeps non-reconnecting stream failures labeled as disconnected', () => {

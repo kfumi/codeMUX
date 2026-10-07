@@ -61,14 +61,17 @@ const USAGE: &str = "codemux-daemon — CodeMUX 权威 daemon(无壳运行)
   --managed-by    托管方标记,写入 run-state(壳 spawn 时传 desktop)
 ";
 
-/// `mcp-browser` 子命令旗标解析:`--app-data-dir <dir> [--port <n>]`。
-fn parse_mcp_browser_cli(
-    mut args: impl Iterator<Item = String>,
-) -> Result<(Option<std::path::PathBuf>, Option<u16>), String> {
+/// `mcp-browser` 子命令的旗标取值:`(app_data_dir, port, session_id)`。
+type McpBrowserCli = (Option<std::path::PathBuf>, Option<u16>, Option<String>);
+
+/// `mcp-browser` 子命令旗标解析:
+/// `--app-data-dir <dir> [--port <n>] [--session-id <id>]`。
+fn parse_mcp_browser_cli(mut args: impl Iterator<Item = String>) -> Result<McpBrowserCli, String> {
     let env = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
     let mut app_data_dir: Option<std::path::PathBuf> =
         env("CODEMUX_APP_DATA_DIR").map(std::path::PathBuf::from);
     let mut port: Option<u16> = env("CODEMUX_DAEMON_PORT").and_then(|value| value.parse().ok());
+    let mut session_id: Option<String> = env("CODEMUX_SESSION_ID");
     while let Some(arg) = args.next() {
         let mut value_for = |flag: &str| -> Result<String, String> {
             args.next().ok_or_else(|| format!("旗标 {} 缺少取值", flag))
@@ -82,14 +85,17 @@ fn parse_mcp_browser_cli(
                         .map_err(|e| format!("旗标 --port 的取值不是合法端口: {}", e))?,
                 )
             }
+            "--session-id" => session_id = Some(value_for(&arg)?),
             "--help" | "-h" => {
-                println!("用法: codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>]");
+                println!(
+                    "用法: codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>] [--session-id <id>]"
+                );
                 std::process::exit(0);
             }
             other => return Err(format!("未知旗标: {}(见 --help)", other)),
         }
     }
-    Ok((app_data_dir, port))
+    Ok((app_data_dir, port, session_id))
 }
 
 fn main() {
@@ -100,13 +106,15 @@ fn main() {
     let mut cli_args = std::env::args().skip(1);
     if cli_args.next().as_deref() == Some("mcp-browser") {
         match parse_mcp_browser_cli(cli_args) {
-            Ok((app_data_dir, port)) => {
+            Ok((app_data_dir, port, session_id)) => {
                 let app_data_dir = app_data_dir.unwrap_or_else(|| {
                     dirs::data_dir()
                         .expect("无法定位应用数据目录(请用 --app-data-dir 显式指定)")
                         .join("com.codemux.desktop")
                 });
-                if let Err(error) = codemux_lib::browser_mcp::run_subcommand(app_data_dir, port) {
+                if let Err(error) =
+                    codemux_lib::browser_mcp::run_subcommand(app_data_dir, port, session_id)
+                {
                     eprintln!("codemux-daemon mcp-browser: {}", error);
                     std::process::exit(1);
                 }

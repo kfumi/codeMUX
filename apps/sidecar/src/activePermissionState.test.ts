@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   applyPermissionElevation,
+  buildClaudeModeBlockedEvent,
   buildPermissionElevationResponse,
   clearActivePermissionState,
   getActivePermissionState,
+  permissionGateFor,
   resolveClaudeToolRuntimeDecision,
   setActivePermissionState,
 } from './activePermissionState.js';
@@ -147,5 +149,42 @@ describe('activePermissionState', () => {
       planMode: 'off',
       effectiveMode: 'code',
     });
+  });
+});
+
+describe('permission gate attribution', () => {
+  it('names each agent kind', () => {
+    expect(permissionGateFor('claude_code').label).toBe('Claude Code 的权限门');
+    expect(permissionGateFor('codex').label).toBe('Codex 的权限门');
+    expect(permissionGateFor('gemini_cli').label).toBe('Gemini 的权限门');
+    expect(permissionGateFor('opencode').label).toBe('OpenCode 的权限门');
+    expect(permissionGateFor('pi').label).toBe('pi 的权限门');
+  });
+
+  it('falls back to claude for unknown kinds (与运行时回退一致)', () => {
+    expect(permissionGateFor(undefined).agentKind).toBe('claude_code');
+    expect(permissionGateFor('some-future-agent').agentKind).toBe('claude_code');
+  });
+
+  it('carries the attribution into the mode-blocked event', () => {
+    const event = buildClaudeModeBlockedEvent({
+      toolName: 'mcp__codemux-browser__browser_click',
+      toolUseId: 'tool-1',
+      effectiveMode: 'plan',
+      reasonCode: 'permission_mode_blocked',
+      gate: permissionGateFor('codex'),
+    });
+    expect(event.mode_blocked.gate_label).toBe('Codex 的权限门');
+    expect(event.mode_blocked.gate_agent_kind).toBe('codex');
+    expect(event.message).toContain('Codex 的权限门');
+  });
+
+  it('defaults to the claude gate when the caller passes none', () => {
+    const event = buildClaudeModeBlockedEvent({
+      toolName: 'Bash',
+      effectiveMode: 'plan',
+      reasonCode: 'permission_mode_blocked',
+    });
+    expect(event.mode_blocked.gate_label).toBe('Claude Code 的权限门');
   });
 });

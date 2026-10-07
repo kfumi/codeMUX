@@ -33,7 +33,10 @@ use crate::companion::state::CompanionBroadcastEvent;
 pub const AUTOMATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 合法自动化操作集合(壳侧按 op 分发执行)。
-pub const AUTOMATION_OPS: [&str; 10] = [
+///
+/// 前十个是浏览器级(01 票);`desktop-*` 三个是桌面只读观测(04 票),
+/// 由 `computer_use.enabled` 单独闸门 —— 开浏览器控制不等于允许看桌面。
+pub const AUTOMATION_OPS: [&str; 13] = [
     "eval",
     "screenshot",
     "input",
@@ -44,7 +47,22 @@ pub const AUTOMATION_OPS: [&str; 10] = [
     "type",
     "scroll",
     "select",
+    "desktop-windows",
+    "desktop-screenshot",
+    "desktop-active-window",
 ];
+
+/// 桌面只读观测操作(04 票):与浏览器操作用不同开关。
+pub const DESKTOP_OPS: [&str; 3] = [
+    "desktop-windows",
+    "desktop-screenshot",
+    "desktop-active-window",
+];
+
+/// 是否为桌面只读操作。
+pub fn is_desktop_op(op: &str) -> bool {
+    DESKTOP_OPS.contains(&op)
+}
 
 /// 一次自动化请求的终态(经 oneshot 送回挂起的 execute)。
 #[derive(Debug)]
@@ -178,18 +196,38 @@ struct AutomationExecuteRequest {
     op: String,
     #[serde(default)]
     params: serde_json::Value,
+    /// 发起调用的会话(MCP server 经 `--session-id` 带入;缺省为无归属)。
+    #[serde(default)]
+    session_id: Option<String>,
+    /// MCP 工具名(面向审批卡与审计;缺省用 op 兜底)。
+    #[serde(default)]
+    tool: Option<String>,
 }
 
 /// 审计记一笔（02 票）：失败吞掉，永不挡执行；401 鉴权失败不记（上下文不可信）。
 fn audit_attempt(
     ctx: &ServerContext,
     op: &str,
+    tool: Option<&str>,
     browser_id: Option<&str>,
+    session_id: Option<&str>,
     ok: bool,
     error: Option<&str>,
 ) {
     if let Ok(db) = ctx.daemon.app.db.lock() {
-        super::browser_audit::record_automation_audit(&db, op, browser_id, None, ok, error);
+        super::browser_audit::record_audit(
+            &db,
+            &super::browser_audit::AuditRecord {
+                op,
+                tool,
+                browser_id,
+                session_id,
+                actor: "local",
+                ok,
+                decision: None,
+                error,
+            },
+        );
     }
 }
 
@@ -203,26 +241,49 @@ async fn execute_browser_automation(
     authorize_automation_request(&ctx.daemon.app.app_data_dir, token.as_deref(), Some(peer))?;
     // 设置闸门(设置 → 浏览器控制 → 开启内置浏览器控制):关闭时会话不得驱动
     // 内置浏览器。403 文案直接面向用户,工具层会原样转述进对话。
-    {
+    // 开关闸门:浏览器级操作看「浏览器控制」,桌面只读观测看「电脑控制」——
+    // 允许智能体操作内置页面不等于允许它看整个桌面。
+    let allowlist = {
         let config = ctx.daemon.app.config.lock().unwrap();
-        if !config.browser.enabled {
+        let desktop_op = is_desktop_op(&body.op);
+        let enabled = if desktop_op {
+            config.computer_use.enabled
+        } else {
+            config.browser.enabled
+        };
+        if !enabled {
+            let (detail, message) = if desktop_op {
+                (
+                    "gate: computer use disabled",
+                    "电脑控制未开启:请在 设置 → 电脑控制 中打开后重试",
+                )
+            } else {
+                (
+                    "gate: browser control disabled",
+                    "内置浏览器控制未开启:请在 设置 → 浏览器控制 中打开后重试",
+                )
+            };
+            drop(config);
             audit_attempt(
                 &ctx,
                 &body.op,
+                body.tool.as_deref(),
                 body.browser_id.as_deref(),
+                body.session_id.as_deref(),
                 false,
-                Some("gate: browser control disabled"),
+                Some(detail),
             );
-            return Err(ApiError::forbidden(
-                "内置浏览器控制未开启:请在 设置 → 浏览器控制 中打开后重试",
-            ));
+            return Err(ApiError::forbidden(message));
         }
-    }
+        config.computer_use.allowlist.clone()
+    };
     if !AUTOMATION_OPS.contains(&body.op.as_str()) {
         audit_attempt(
             &ctx,
             &body.op,
+            body.tool.as_deref(),
             body.browser_id.as_deref(),
+            body.session_id.as_deref(),
             false,
             Some("gate: unknown op"),
         );
@@ -230,6 +291,40 @@ async fn execute_browser_automation(
             "Unknown browser automation op: {}",
             body.op
         )));
+    }
+
+    // 电脑控制审批闸门(03 票):只读可「按会话记住」,输入动作一次一放行,
+    // 敏感场景(登录/支付/验证码/密码/删除/关防护)强制人工确认。输入动作
+    // 不吃权限档位 —— 闸门入参里根本没有档位可传。
+    let tool = body.tool.as_deref().unwrap_or(&body.op);
+    {
+        let app = ctx.daemon.app.clone();
+        let gate_input = crate::computer_use::approval::GateInput {
+            session_id: body.session_id.as_deref(),
+            tool,
+            op: &body.op,
+            params: &body.params,
+            browser_id: body.browser_id.as_deref(),
+        };
+        if let Err(denied) = crate::computer_use::approval::gate(
+            &app,
+            &ctx.daemon.companion,
+            &ctx.daemon.companion.inner.page_context,
+            &gate_input,
+        )
+        .await
+        {
+            audit_attempt(
+                &ctx,
+                &body.op,
+                Some(tool),
+                body.browser_id.as_deref(),
+                body.session_id.as_deref(),
+                false,
+                Some(&denied.message),
+            );
+            return Err(ApiError::forbidden(denied.message));
+        }
     }
 
     let companion_state = ctx.daemon.companion.clone();
@@ -257,7 +352,9 @@ async fn execute_browser_automation(
         audit_attempt(
             &ctx,
             &body.op,
+            Some(tool),
             body.browser_id.as_deref(),
+            body.session_id.as_deref(),
             false,
             Some("no shell client"),
         );
@@ -285,7 +382,9 @@ async fn execute_browser_automation(
         audit_attempt(
             &ctx,
             &body.op,
+            Some(tool),
             body.browser_id.as_deref(),
+            body.session_id.as_deref(),
             false,
             Some("timeout waiting for shell result"),
         );
@@ -295,14 +394,44 @@ async fn execute_browser_automation(
         )));
     };
 
+    // 桌面只读回包按可操作范围筛查(需求 14):不可操作的窗口既不截图也不列举。
+    let outcome = match outcome {
+        AutomationOutcome::Ok(payload) if is_desktop_op(&body.op) => {
+            match crate::computer_use::policy::screen_desktop_payload(
+                &body.op, &payload, &allowlist,
+            ) {
+                Ok(filtered) => AutomationOutcome::Ok(filtered),
+                Err(refusal) => AutomationOutcome::Failed(refusal),
+            }
+        }
+        other => other,
+    };
+
     match &outcome {
-        AutomationOutcome::Ok(_) => {
-            audit_attempt(&ctx, &body.op, body.browser_id.as_deref(), true, None)
+        AutomationOutcome::Ok(payload) => {
+            // snapshot 回包顺便喂页面上下文缓存(审批敏感判定用)。
+            if body.op == "snapshot" {
+                companion_state
+                    .inner
+                    .page_context
+                    .record_snapshot(body.browser_id.as_deref(), payload);
+            }
+            audit_attempt(
+                &ctx,
+                &body.op,
+                Some(tool),
+                body.browser_id.as_deref(),
+                body.session_id.as_deref(),
+                true,
+                None,
+            )
         }
         AutomationOutcome::Failed(error) => audit_attempt(
             &ctx,
             &body.op,
+            Some(tool),
             body.browser_id.as_deref(),
+            body.session_id.as_deref(),
             false,
             Some(error),
         ),

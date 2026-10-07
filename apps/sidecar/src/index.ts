@@ -44,6 +44,7 @@ import type { PiApprovalMode } from './piExtension.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
   buildClaudeModeBlockedEvent,
+  permissionGateFor,
   resolveClaudeToolRuntimeDecision,
   setActivePermissionState,
 } from './activePermissionState.js';
@@ -142,6 +143,8 @@ export function buildPiSessionMappingEvent(mapping: PiSessionMapping): {
 
 type SessionBootstrap = {
   sessionId?: string;
+  /** 会话的智能体类型:权限门归因(工单 07)与运行时回退的判断依据。 */
+  agentKind?: string;
   agentSessionId?: string;
   resumeOnly?: boolean;
   runtimeGeneration: number;
@@ -782,6 +785,7 @@ export class SessionRuntime {
     const cwd = ensureWorkingDirectory(cmd.cwd);
     return {
       sessionId: cmd.sessionId,
+      agentKind: cmd.agentKind,
       agentSessionId: cmd.agentSessionId,
       resumeOnly: cmd.resumeOnly,
       runtimeGeneration: cmd.runtimeGeneration ?? 0,
@@ -1305,6 +1309,7 @@ export class SessionRuntime {
             toolUseId,
             effectiveMode: runtimeDecision.effectiveMode,
             reasonCode: runtimeDecision.reasonCode ?? 'permission_mode_blocked',
+            gate: permissionGateFor(config.agentKind),
           }));
           return {
             behavior: 'deny',

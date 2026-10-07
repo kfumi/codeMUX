@@ -1348,11 +1348,16 @@ pub(crate) fn build_ensure_session_command(
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
-    // 内置浏览器工具(设置 → 浏览器控制):开启时随会话命令下发 stdio MCP
-    // server(daemon 二进制的 mcp-browser 子命令)。pi 在此合并用户 DB 配置,
-    // claude/codex/opencode 由 sidecar 各自落到 SDK/覆盖面;端点闸门对已在
-    // 途的会话兜底。
-    if matches!(agent_kind, "pi" | "claude_code" | "codex" | "opencode") {
+    // 内置电脑控制工具(设置 → 浏览器控制 / 电脑控制):开启时随会话命令下发
+    // stdio MCP server(daemon 二进制的 mcp-browser 子命令)。pi 在此合并用户
+    // DB 配置,claude/codex/opencode 由 sidecar 各自落到 SDK/覆盖面;端点闸门
+    // 对已在途的会话兜底。
+    //
+    // 条件是**运行时**而不是会话行里的 kind 字符串:`gemini_cli` 一类认不出的
+    // kind 由 factory 回退到 ClaudeCodeRuntime、sidecar 的 getRuntimeFlavor 也
+    // 回退到 claude —— 若这里按字符串排除,就会出现「按 claude 跑却拿不到内置
+    // MCP 工具」的静默缺失(工单 07 铺开时发现)。
+    if mcp_tooling_applies_to(agent_kind) {
         let mut mcp_map = serde_json::Map::new();
         if agent_kind == "pi" {
             let mcp_servers = {
@@ -1368,12 +1373,22 @@ pub(crate) fn build_ensure_session_command(
                 mcp_map.insert(server.name, server.server);
             }
         }
-        if state.config.lock().unwrap().browser.enabled {
+        // 浏览器控制或电脑控制任一开启即注入这一份内置 MCP server(04 票起
+        // 它同时承载桌面只读工具);关闭的开关在 daemon 端点按 op 分别闸门。
+        let builtin_enabled = {
+            let config = state.config.lock().unwrap();
+            config.browser.enabled || config.computer_use.enabled
+        };
+        if builtin_enabled {
             let current_exe = std::env::current_exe()
                 .unwrap_or_else(|_| std::path::PathBuf::from("codemux-daemon"));
             mcp_map.insert(
                 crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
-                crate::browser_mcp::builtin_server_spec(&current_exe, &state.app_data_dir),
+                crate::browser_mcp::builtin_server_spec_for_session(
+                    &current_exe,
+                    &state.app_data_dir,
+                    session_id,
+                ),
             );
         }
         if !mcp_map.is_empty() {
@@ -1382,6 +1397,19 @@ pub(crate) fn build_ensure_session_command(
     }
 
     Ok(cmd)
+}
+
+/// 会话 kind 是否吃 `mcpServers` 注入面。
+///
+/// 按**运行时**判而不是按 kind 字符串判:问 factory 这个 kind 最终由哪个运行时
+/// 承载,四个运行时都消费 `cmd["mcpServers"]`(pi 在此合并用户 DB 配置,
+/// claude/codex/opencode 由 sidecar 各自落地)。`gemini_cli` 与未知值回退到
+/// ClaudeCodeRuntime,因此同样拿到工具面 —— 这正是按字符串排除时静默丢工具
+/// 的那个缺口。新增运行时若不消费 `mcpServers`,这条断言会先失败。
+fn mcp_tooling_applies_to(agent_kind: &str) -> bool {
+    let runtime_kind =
+        crate::agent_runtime::factory::runtime_for_agent_kind(agent_kind).kind_name();
+    matches!(runtime_kind, "claude_code" | "codex" | "opencode" | "pi")
 }
 
 fn apply_permission_snapshot_to_command(
@@ -1873,7 +1901,7 @@ mod tests {
         build_update_permissions_command_from_snapshot, handle_agent_session_mapping_event,
         handle_agent_session_title_event, invalidate_session_generation,
         load_latest_token_usage_for_agent_session, mapping_generation_is_current,
-        parse_agent_session_mapping_event, parse_agent_session_title_event,
+        mcp_tooling_applies_to, parse_agent_session_mapping_event, parse_agent_session_title_event,
         persist_agent_session_mapping_event, resolve_active_runtime_config,
         resolve_agent_session_info, session_lifecycle_lock, AgentState,
     };
@@ -2956,6 +2984,33 @@ mod tests {
             !spec["command"].as_str().unwrap_or_default().is_empty(),
             "command 应指向 current_exe,got {spec:?}"
         );
+    }
+
+    /// 工单 07 铺开发现:`gemini_cli` 一类认不出的 kind 由运行时回退成 claude,
+    /// 若注入条件按 kind 字符串排除,这些会话会静默丢光内置 MCP 工具。
+    #[test]
+    fn builtin_mcp_injection_covers_every_runtime_kind() {
+        for kind in [
+            "claude_code",
+            "codex",
+            "opencode",
+            "pi",
+            "gemini_cli",
+            // 未知值同样回退到 ClaudeCodeRuntime,也要拿到工具面。
+            "some-future-agent",
+        ] {
+            assert!(
+                mcp_tooling_applies_to(kind),
+                "{kind} 会走 claude 回退运行时,必须吃到 mcpServers 注入"
+            );
+        }
+        // 与 factory 的回退保持一致:除 pi/codex/opencode 外都是 claude。
+        for kind in ["claude_code", "gemini_cli", "unknown"] {
+            assert_eq!(
+                crate::agent_runtime::factory::runtime_for_agent_kind(kind).kind_name(),
+                "claude_code"
+            );
+        }
     }
 
     #[test]

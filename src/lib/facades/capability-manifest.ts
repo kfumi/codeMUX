@@ -31,6 +31,8 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'agent.send', owner: 'daemon', companionRoute: 'POST /api/sessions/:id/messages', daemonMethod: 'sendMessageViaDaemon' },
   { id: 'agent.runtime-state', owner: 'daemon', companionRoute: 'GET /api/sessions/:id/state', daemonMethod: 'isSessionTurnActive' },
   { id: 'agent.permission', owner: 'daemon', companionRoute: 'POST /api/permissions/respond', daemonMethod: 'respondToPermissionViaDaemon' },
+  { id: 'agent.computer-use-approval', owner: 'daemon', companionRoute: 'POST /api/computer-use/approval', daemonMethod: 'respondToComputerUseApproval' },
+  { id: 'computer.control', owner: 'daemon', companionRoute: 'GET|POST /api/computer-use/*', daemonMethod: 'computerUse' },
   { id: 'agent.interactive', owner: 'daemon', companionRoute: 'POST /api/interactive/user-input', daemonMethod: 'respondToInteractiveViaDaemon' },
 
   // Bootstrap & projects
@@ -55,6 +57,9 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
 
   // Shell-only(dialog:工单 09 终态 —— lib/desktopDialogs.ts 直连壳桥,桥缺失显式报错)
   { id: 'browser.host', owner: 'shell', shellMethod: 'browser' },
+  // computer.capture(工单 04):手动贴屏截主屏,只读且由用户主动发起,
+  // 浏览器/移动形态没有桌面可截,入口据此隐藏。
+  { id: 'computer.capture', owner: 'shell', shellMethod: 'captureDesktopScreen' },
   { id: 'dialog.file', owner: 'shell', shellMethod: 'openDialog' },
   { id: 'dialog.directory', owner: 'shell', shellMethod: 'openDialog' },
   // window.manage(工单 09 终态):窗口命令在 shellFacade(minimizeWindow 等),
@@ -101,6 +106,7 @@ export const PROTOCOL_BACKED_DAEMON_METHODS = [
   'interruptViaDaemon',
   'isSessionTurnActive',
   'respondToPermissionViaDaemon',
+  'respondToComputerUseApproval',
   'respondToInteractiveViaDaemon',
   'updateSessionSettingsViaDaemon',
   'archiveViaDaemon',

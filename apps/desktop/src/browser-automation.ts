@@ -22,9 +22,17 @@ import http from 'node:http';
 import WebSocket from 'ws';
 
 import { parseDesktopUiEvent } from './desktop-events';
+import {
+  activeDesktopWindow,
+  captureDesktop,
+  listDesktopSources,
+  type DesktopCaptureDeps,
+} from './desktop-capture';
 
-/** 受控自动化操作。 */
-export type AutomationOp = 'eval' | 'screenshot' | 'input' | 'cdp' | 'snapshot' | 'click' | 'type' | 'scroll' | 'select';
+/** 受控自动化操作(浏览器级 + 桌面只读观测,工单 04)。 */
+export type AutomationOp =
+  | 'eval' | 'screenshot' | 'input' | 'cdp' | 'snapshot' | 'click' | 'type' | 'scroll' | 'select'
+  | 'desktop-windows' | 'desktop-screenshot' | 'desktop-active-window';
 
 /** automation 请求(daemon → 壳)的载荷形状。 */
 export interface AutomationRequest {
@@ -84,6 +92,11 @@ export interface BrowserAutomationDeps {
    * 以同名事件名转发渲染层(main 用 webContents.send)。缺省不转发。
    */
   onUiEvent?: (name: string, payload: unknown) => void;
+  /**
+   * 桌面只读观测(工单 04):窗口清单/截图/活动窗口。缺省表示该宿主没有
+   * 桌面捕获能力(纯浏览器形态),桌面 op 明确报错而不是静默失败。
+   */
+  desktop?: DesktopCaptureDeps;
 }
 
 export interface BrowserAutomationService {
@@ -165,12 +178,20 @@ export interface SnapshotElement {
   role: string;
   name: string;
   bounds: SnapshotElementBounds;
+  /**
+   * 密码框标记(工单 03 敏感判定用):daemon 据此强制人工确认,不允许
+   * 「本会话记住」。壳只报标记,不读值。
+   */
+  sensitive?: boolean;
 }
 /** snapshot 回填 payload 的形状 */
 export interface SnapshotPayload {
   elements: SnapshotElement[];
   viewport: { width: number; height: number };
   screenshot: string;
+  /** 页面 URL 与标题(审批敏感判定:登录/支付页整页都要人确认)。 */
+  url: string;
+  title: string;
 }
 /** 元素快照缓存：snapshot 写入，元素操作按同一键读取；全局 FIFO 串行保证先后序 */
 const snapshotCaches = new Map<string, SnapshotElement[]>();
@@ -194,10 +215,11 @@ const SNAPSHOT_ENUMERATE_SCRIPT = `(() => {
     if (rect.width <= 0 || rect.height <= 0) { continue; }
     const raw = el.getAttribute('aria-label') || el.textContent || '';
     const label = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+    const sensitive = el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'password';
     index += 1;
-    found.push({ id: 'e' + index, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: label, bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } });
+    found.push({ id: 'e' + index, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: label, sensitive, bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } });
   }
-  return { elements: found, viewport: { width: window.innerWidth, height: window.innerHeight } };
+  return { elements: found, viewport: { width: window.innerWidth, height: window.innerHeight }, url: location.href, title: document.title };
 })()`;
 
 
@@ -209,7 +231,7 @@ async function executeSnapshot(target: AutomationTarget, cacheKey: string): Prom
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-  const record = enumerated as { elements?: unknown; viewport?: unknown } | null | undefined;
+  const record = enumerated as { elements?: unknown; viewport?: unknown; url?: unknown; title?: unknown } | null | undefined;
   const elements = Array.isArray(record?.elements) ? (record?.elements as SnapshotElement[]) : null;
   if (!elements) {
     return { ok: false, error: 'snapshot：页面未返回元素列表' };
@@ -218,7 +240,14 @@ async function executeSnapshot(target: AutomationTarget, cacheKey: string): Prom
   try {
     const image = await target.capturePage();
     const viewport = (record?.viewport as { width: number; height: number } | undefined) ?? { width: 0, height: 0 };
-    const payload: SnapshotPayload = { elements, viewport, screenshot: image.toPNG().toString('base64') };
+    const pageRecord = record as { url?: unknown; title?: unknown } | null | undefined;
+    const payload: SnapshotPayload = {
+      elements,
+      viewport,
+      screenshot: image.toPNG().toString('base64'),
+      url: typeof pageRecord?.url === 'string' ? pageRecord.url : '',
+      title: typeof pageRecord?.title === 'string' ? pageRecord.title : '',
+    };
     return { ok: true, payload };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -325,12 +354,30 @@ async function executeElementOp(target: AutomationTarget, cacheKey: string, op: 
 }
 
 export async function executeAutomationRequest(
-  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets'>,
+  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets' | 'desktop'>,
   request: AutomationRequest,
 ): Promise<AutomationOutcome> {
   const op = request.op;
-  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'snapshot' && op !== 'click' && op !== 'type' && op !== 'scroll' && op !== 'select' && op !== 'list') {
+  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'snapshot' && op !== 'click' && op !== 'type' && op !== 'scroll' && op !== 'select' && op !== 'list'
+    && op !== 'desktop-windows' && op !== 'desktop-screenshot' && op !== 'desktop-active-window') {
     return { ok: false, error: `unknown automation op: ${op}` };
+  }
+  // 桌面只读观测(工单 04):不碰页面,走独立的捕获依赖面。
+  if (op === 'desktop-windows' || op === 'desktop-screenshot' || op === 'desktop-active-window') {
+    if (!deps.desktop) {
+      return { ok: false, error: '当前宿主不支持桌面截图(需要桌面壳)' };
+    }
+    try {
+      if (op === 'desktop-windows') {
+        return { ok: true, payload: await listDesktopSources(deps.desktop) };
+      }
+      if (op === 'desktop-screenshot') {
+        return await captureDesktop(deps.desktop, request.params ?? {});
+      }
+      return await activeDesktopWindow(deps.desktop);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
   // list 不需要目标页:直接报存活 guest 清单。
   if (op === 'list') {

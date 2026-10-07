@@ -33,6 +33,8 @@ import {
   upgradeAgentRuntime,
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
+import { capturePrimaryScreen } from './desktop-capture-host';
+import type { EmergencyStopService } from './emergency-stop';
 import { readLocalDaemonTokenOrThrow } from './daemon-token';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
@@ -55,6 +57,8 @@ export interface ShellBridgeDeps {
   sendToRenderer(channel: string, payload: unknown): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
+  /** 全局 Esc 急停服务(工单 06;main.ts 创建)。 */
+  emergencyStop: EmergencyStopService;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -418,6 +422,18 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
       throw new Error(`未知的清除范围: ${String(scope)}`);
     }
     await clearBrowserProfileData(scope);
+  });
+  // 手动贴屏(工单 04):用户点一下截主屏,渲染层把 PNG 贴进会话上下文。
+  // 这是用户主动发起的只读动作,不经 daemon 闸门(需求 17)。
+  handle('captureDesktopScreen', () => capturePrimaryScreen());
+  // 全局 Esc 急停(工单 06):渲染层按「系统级执行」开关武装/解除。
+  handle('setEmergencyStopArmed', (payload: unknown) => {
+    const { armed } = (payload ?? {}) as { armed?: unknown };
+    if (typeof armed !== 'boolean') {
+      throw new Error('armed must be a boolean');
+    }
+    deps.emergencyStop.setArmed(armed);
+    return deps.emergencyStop.isArmed();
   });
   // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
   // main 侧弹窗拒绝转发据此回填 sourceBrowserId。

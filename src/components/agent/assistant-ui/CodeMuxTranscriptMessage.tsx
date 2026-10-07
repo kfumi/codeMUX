@@ -135,6 +135,23 @@ export function CodeMuxTranscriptMessage({
     && (subagentActivity == null || delegationCardVisible || runOpen !== false);
   const footerVisible = showFooter && !shouldHideCollapsedContent;
 
+  const browserStepByIndex = useMemo<(BrowserStepInfo | null)[]>(() => {
+    const compact: Array<{ toolName: string; result: unknown }> = [];
+    const positions: number[] = [];
+    message.content.forEach((part, index) => {
+      if (part.type === 'tool-call') {
+        positions.push(index);
+        compact.push({ toolName: part.toolName, result: part.result });
+      }
+    });
+    const context = computeBrowserStepContext(compact);
+    const byIndex: (BrowserStepInfo | null)[] = message.content.map(() => null);
+    positions.forEach((position, order) => {
+      byIndex[position] = context[order] ?? null;
+    });
+    return byIndex;
+  }, [message.content]);
+
   const footer = footerVisible ? (
     <MessageFooter
       variant={footerVariant}
@@ -160,23 +177,6 @@ export function CodeMuxTranscriptMessage({
   if (!compactToggle && !delegationCardVisible && !partsVisible && !footer) {
     return null;
   }
-
-  const browserStepByIndex = useMemo<(BrowserStepInfo | null)[]>(() => {
-    const compact: Array<{ toolName: string; result: unknown }> = [];
-    const positions: number[] = [];
-    message.content.forEach((part, index) => {
-      if (part.type === 'tool-call') {
-        positions.push(index);
-        compact.push({ toolName: part.toolName, result: part.result });
-      }
-    });
-    const context = computeBrowserStepContext(compact);
-    const byIndex: (BrowserStepInfo | null)[] = message.content.map(() => null);
-    positions.forEach((position, order) => {
-      byIndex[position] = context[order] ?? null;
-    });
-    return byIndex;
-  }, [message.content]);
 
   const renderToolCall = (
     part: ToolCallPart,

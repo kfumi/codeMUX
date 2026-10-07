@@ -13,6 +13,10 @@ import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
+import type {
+  ComputerUseApprovalChoice,
+  ComputerUseApprovalRequest,
+} from '../../lib/computerUseApprovals';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useAgentStore } from '../../stores/agentStore';
 import type { AgentMessage } from '../../stores/agentStore';
@@ -43,6 +47,7 @@ interface AgentPanelProps {
 }
 
 const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
+const EMPTY_COMPUTER_USE_APPROVALS: ComputerUseApprovalRequest[] = [];
 const EMPTY_PROJECT_SKILLS: ProjectSkill[] = [];
 const EMPTY_SESSION_EVENTS: AgentMessage[] = [];
 
@@ -58,6 +63,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
   const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
+  const pendingComputerUseApprovals = useAgentStore(
+    (state) => state.pendingComputerUseApprovals[sessionId] ?? EMPTY_COMPUTER_USE_APPROVALS,
+  );
   const { config, getActiveProvider } = useSettingsStore();
   const setProjectPath = usePreviewStore((state) => state.setProjectPath);
   const previewProjectPath = usePreviewStore((state) => state.projectPath);
@@ -410,6 +418,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [isReadOnly, sessionId, updateSessionPermissions]);
 
+  // 电脑控制放行（工单 03）：裁决在 daemon，界面只负责把选择送回去。
+  const handleComputerUseApprovalResponse = useCallback(
+    async (requestId: string, choice: ComputerUseApprovalChoice) => {
+      await useAgentStore.getState().respondToComputerUseApproval(sessionId, requestId, choice);
+    },
+    [sessionId],
+  );
+
   const handlePermissionResponse = useCallback(async (requestId: string, response: AgentPermissionResponse) => {
     const request = (useAgentStore.getState().pendingPermissions[sessionId] ?? [])
       .find((item) => item.request_id === requestId);
@@ -558,6 +574,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   )}
                   pendingPermissions={pendingPermissions}
                   onPermissionResponse={handlePermissionResponse}
+                  pendingComputerUseApprovals={pendingComputerUseApprovals}
+                  onComputerUseApprovalResponse={handleComputerUseApprovalResponse}
                   onStop={() => interrupt(sessionId)}
                   planMode={planMode}
                   onTogglePlanMode={isReadOnly ? undefined : () => {

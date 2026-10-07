@@ -70,6 +70,7 @@
 | [2026-09-24-codeg-token-speed-reference.md](research/2026-09-24-codeg-token-speed-reference.md) | codeg 实时 TPS 方案参考与 CodeMUX 差异 |
 | [2026-09-24-opencode-storage-performance-audit.md](research/2026-09-24-opencode-storage-performance-audit.md) | OpenCode 存储性能审计 |
 | [2026-10-07-computer-use-plugin-research.md](research/2026-10-07-computer-use-plugin-research.md) | Agent Computer Use 电脑控制调研与落地建议 |
+| [2026-10-07-computer-use-capability-matrix.md](research/2026-10-07-computer-use-capability-matrix.md) | 电脑控制能力矩阵与铺开验收记录（工单 07） |
 
 ### specs
 

@@ -1,6 +1,33 @@
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 
 export type RuntimeEffectiveMode = 'code' | 'plan';
+
+/**
+ * 原生权限门的归属(工单 07):拦截电脑控制这类工具时,界面要能说出
+ * 「是哪一家的门」,用户才知道去哪儿开。
+ */
+export type ComputerUseGateAttribution = {
+  agentKind: 'claude_code' | 'codex' | 'gemini_cli' | 'opencode' | 'pi';
+  label: string;
+};
+
+/** 各智能体权限门的中文名(与前端展示文案同一份契约)。 */
+export const PERMISSION_GATE_LABELS: Record<ComputerUseGateAttribution['agentKind'], string> = {
+  claude_code: 'Claude Code 的权限门',
+  codex: 'Codex 的权限门',
+  gemini_cli: 'Gemini 的权限门',
+  opencode: 'OpenCode 的权限门',
+  pi: 'pi 的权限门',
+};
+
+/** 由会话 agentKind 得到权限门归属(未知值按 claude 记,与运行时回退一致)。 */
+export function permissionGateFor(agentKind?: string): ComputerUseGateAttribution {
+  const kind = (agentKind ?? 'claude_code') as ComputerUseGateAttribution['agentKind'];
+  if (kind in PERMISSION_GATE_LABELS) {
+    return { agentKind: kind, label: PERMISSION_GATE_LABELS[kind] };
+  }
+  return { agentKind: 'claude_code', label: PERMISSION_GATE_LABELS.claude_code };
+}
 export type RuntimeToolDecision = {
   behavior: 'allow' | 'ask' | 'deny';
   effectiveMode: RuntimeEffectiveMode;
@@ -176,6 +203,11 @@ export function buildClaudeModeBlockedEvent(input: {
   toolUseId?: string | null;
   effectiveMode: RuntimeEffectiveMode;
   reasonCode: string;
+  /**
+   * 拦截这一手的权限门归属(工单 07):界面要能说出「是哪一家的门」,
+   * 而不是只报一个 reasonCode。缺省按 claude_code 记。
+   */
+  gate?: ComputerUseGateAttribution;
 }): {
   type: 'sidecar_stream_status';
   message: string;
@@ -187,12 +219,16 @@ export function buildClaudeModeBlockedEvent(input: {
     reason: string;
     suggestion: string;
     request_id: string | null;
+    /** 门是谁家的:agentKind 原值 + 面向用户的名字。 */
+    gate_agent_kind: ComputerUseGateAttribution['agentKind'];
+    gate_label: string;
   };
 } {
   const blockedMethod = `item/tool/${input.toolName}`;
+  const gate = input.gate ?? { agentKind: 'claude_code' as const, label: 'Claude Code 的权限门' };
   return {
     type: 'sidecar_stream_status',
-    message: `Claude permission mode blocked ${blockedMethod}: ${input.reasonCode}. This operation is blocked while effective_mode=${input.effectiveMode}.`,
+    message: `${gate.label} blocked ${blockedMethod}: ${input.reasonCode}. This operation is blocked while effective_mode=${input.effectiveMode}.`,
     is_reconnecting: false,
     mode_blocked: {
       blocked_method: blockedMethod,
@@ -203,6 +239,8 @@ export function buildClaudeModeBlockedEvent(input: {
         ? 'Switch to full access mode and retry the write operation.'
         : 'Switch modes and retry the operation.',
       request_id: input.toolUseId ?? null,
+      gate_agent_kind: gate.agentKind,
+      gate_label: gate.label,
     },
   };
 }

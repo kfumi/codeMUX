@@ -11,6 +11,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useEmergencyStop } from './hooks/useEmergencyStop';
 import { useModelDisplayNames } from './hooks/useModelDisplayNames';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
@@ -348,6 +349,8 @@ function App() {
 
   // 全应用唯一的窗口 keydown 监听（见 ADR 0013）
   useKeyboardShortcuts(runShortcutCommand);
+  // 全局 Esc 强打断(工单 06):按「系统级执行」开关武装壳侧快捷键。
+  useEmergencyStop();
   const handleStartNewSession = async (input: AgentInputPayload) => {
     const {
       selectedAgentKind,

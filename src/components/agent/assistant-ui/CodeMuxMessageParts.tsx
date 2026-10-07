@@ -208,10 +208,15 @@ export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamSt
   if (data.mode_blocked) {
     const reasonCode = data.mode_blocked.reason_code || 'mode_blocked';
     const suggestion = data.mode_blocked.suggestion ? ` · ${data.mode_blocked.suggestion}` : '';
+    // 工单 07:说清是哪一家的权限门拦的(用户据此知道去哪儿开),老事件没有
+    // 归属字段时退回泛指,不编一个名字出来。
+    const gate = data.mode_blocked.gate_label
+      ? `${data.mode_blocked.gate_label}拦截`
+      : '智能体权限门拦截';
     return {
       tone: 'warning',
       icon: 'warning',
-      text: `协作模式已阻止: ${reasonCode}${suggestion}`,
+      text: `${gate}: ${reasonCode}${suggestion}`,
     };
   }
 
