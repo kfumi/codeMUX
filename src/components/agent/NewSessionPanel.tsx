@@ -37,6 +37,9 @@ const STARTER_PROMPTS: Record<string, string[]> = {
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
   const checkingRuntimeRef = useRef(false);
+  // hasUserSelectedModel: distinguish user explicit choice vs auto follow-config.
+  // Cold start free-model catalog arrives async; persisting fallback models[0] would shadow configured default forever.
+  const hasUserSelectedModelRef = useRef(false);
   const {
     selectedAgentKind,
     selectedModel,
@@ -76,6 +79,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         default_model?: string;
       } | undefined
     : undefined;
+  const configuredDefaultModelId = configuredAgentModel?.default_model?.trim() || null;
+  const configuredDefaultProviderId = configuredAgentModel?.default_provider_id ?? null;
   const preferredProviderId = selectedProviderId
     ?? configuredAgentModel?.default_provider_id
     ?? activeProviderId;
@@ -162,12 +167,35 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     setSelectedPlanMode,
   ]);
 
+  // Switch agent/new draft -> follow config again, wait for sync effect to refill.
+  useEffect(() => {
+    hasUserSelectedModelRef.current = false;
+  }, [selectedAgentKind, draftRevision]);
+
   useEffect(() => {
     if (!usesProviderModel) return;
-    if (!preferredModel) {
+    // Model list not ready (cold start config missing, free catalog pending): keep waiting.
+    // Do not clear user choice, do not persist fallback into store.
+    if (!preferredModel) return;
+    if (hasUserSelectedModelRef.current) {
+      // User chose explicitly: only fall back to config when choice is invalid now.
+      const stillValid = selectedModel && models.some((model) => model.modelId === selectedModel && (
+        !selectedProviderId || model.providerId === selectedProviderId
+      ));
+      if (stillValid) return;
+      hasUserSelectedModelRef.current = false;
       setSelectedModel(null);
       setSelectedProviderId(null);
       return;
+    }
+    // No user choice: follow agent config default model.
+    // If configured default exists but is not in current list yet (opencode free catalog async),
+    // do NOT persist fallback models[0]; otherwise selectedModel shadows configured default forever
+    // (first new chat after launch hits it, second works because free cache is warm).
+    if (configuredDefaultModelId || configuredDefaultProviderId) {
+      const matchesConfigured = (!configuredDefaultModelId || preferredModel.modelId === configuredDefaultModelId)
+        && (!configuredDefaultProviderId || preferredModel.providerId === configuredDefaultProviderId);
+      if (!matchesConfigured) return;
     }
     if (
       selectedModel !== preferredModel.modelId
@@ -179,13 +207,17 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [
     usesProviderModel,
     preferredModel,
+    models,
     selectedModel,
     selectedProviderId,
+    configuredDefaultModelId,
+    configuredDefaultProviderId,
     setSelectedModel,
     setSelectedProviderId,
   ]);
 
   const handleModelChange = (modelId: string, providerId: string) => {
+    hasUserSelectedModelRef.current = true;
     setSelectedModel(modelId);
     setSelectedProviderId(providerId);
   };
@@ -198,12 +230,26 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     if (currentStore.selectedAgentKind !== selectedAgentKind || !hasUsableProvider) {
       return;
     }
-    if (usesProviderModel && preferredModel) {
-      if (effectiveModel !== selectedModel) {
-        setSelectedModel(effectiveModel);
-      }
-      if (effectiveProviderId && effectiveProviderId !== selectedProviderId) {
-        setSelectedProviderId(effectiveProviderId);
+    if (usesProviderModel) {
+      if (!hasUserSelectedModelRef.current) {
+        // User sends before free catalog arrives with store still null: use configured default
+        // (free model id is valid for daemon too) instead of effective fallback (models[0]),
+        // otherwise the first message runs with the wrong model.
+        const targetModel = configuredDefaultModelId || effectiveModel || null;
+        const targetProvider = configuredDefaultProviderId ?? effectiveProviderId ?? null;
+        if (targetModel && targetModel !== selectedModel) {
+          setSelectedModel(targetModel);
+        }
+        if (targetProvider && targetProvider !== selectedProviderId) {
+          setSelectedProviderId(targetProvider);
+        }
+      } else if (preferredModel) {
+        if (effectiveModel !== selectedModel) {
+          setSelectedModel(effectiveModel);
+        }
+        if (effectiveProviderId && effectiveProviderId !== selectedProviderId) {
+          setSelectedProviderId(effectiveProviderId);
+        }
       }
     }
     const payload = typeof input === 'string' ? { text: input } : input;

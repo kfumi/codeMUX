@@ -270,6 +270,59 @@ describe('NewSessionPanel', () => {
     expect(screen.getByText(/请先在设置 → 模型配置/)).toBeTruthy();
   });
 
+  it('does not persist fallback when configured opencode free default is not in model list yet', () => {
+    // Cold start: free catalog async, provider list only. Old logic persisted models[0] into store,
+    // shadowing configured free default forever (first chat wrong, second correct via warm cache).
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+    // Must stay null (follow config), not fallback to provider-1 first model.
+    expect(useNewSessionStore.getState().selectedModel).toBeNull();
+    expect(useNewSessionStore.getState().selectedProviderId).toBeNull();
+  });
+
+  it('sends configured free default when user submits before free catalog arrives', async () => {
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const onSubmit = vi.fn(async () => {});
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const send = composerProps.find((entry) => typeof entry.onSend === 'function')?.onSend;
+    expect(send).toBeTypeOf('function');
+    await send?.({ text: 'hello' });
+    expect(onSubmit).toHaveBeenCalled();
+    // handleSend must correct store to configured default, not effective fallback.
+    expect(useNewSessionStore.getState().selectedModel).toBe('free-model-x');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('opencode-free');
+  });
+
   it('wires the + menu plan mode entry and active chip state into the draft', () => {
     useNewSessionStore.setState({ selectedAgentKind: 'codex' });
     render(<NewSessionPanel onSubmit={vi.fn()} />);
