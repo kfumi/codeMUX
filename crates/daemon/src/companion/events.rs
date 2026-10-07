@@ -38,19 +38,31 @@ pub fn handle_sidecar_event_for_companion(
         if !session_id.is_empty() {
             crate::work_tasks::handle_session_event(companion_state, &session_id, &event, app);
         }
+        // 顺序契约（2026-10 排队消息展示异常的根因）：终态事件必须**先广播**，再翻转
+        // `is_turn_active`。WS 订阅者在每个事件帧发出后按 `is_turn_active` 派生
+        // state 帧（见 server.rs `handle_socket`），因此若翻转先于广播，state 帧
+        // 会插在终态事件**之前**——客户端会按「服务端已空闲」先收尾并立刻派发排队
+        // 消息，随后迟到的终态事件被 append 到新回合用户消息之后：旧回合被判
+        // interrupted（footer 消失）、折叠配对也拿不到 result 下标（「已处理」消失）。
+        // 所以这里先广播，终态收尾（finish_turn + 队列派发）放进帧进 WS 队列之后。
+        let event_type = event
+            .get("type")
+            .and_then(|item| item.as_str())
+            .unwrap_or("")
+            .to_string();
+        if let Some(coalescer) = coalescer.as_mut() {
+            for frame in coalescer.push(event) {
+                broadcast_frame(companion_state, frame);
+            }
+        }
         maybe_finish_turn_and_drain_queue(
             app,
             agent_state,
             companion_state,
             roots,
             &session_id,
-            &event,
+            &event_type,
         );
-        if let Some(coalescer) = coalescer.as_mut() {
-            for frame in coalescer.push(event) {
-                broadcast_frame(companion_state, frame);
-            }
-        }
     }
 
     if let Some(coalescer) = coalescer.as_mut() {
@@ -103,15 +115,11 @@ fn maybe_finish_turn_and_drain_queue(
     companion_state: &Arc<CompanionState>,
     roots: &PathRoots,
     session_id: &str,
-    event: &serde_json::Value,
+    event_type: &str,
 ) {
     if session_id.is_empty() {
         return;
     }
-    let event_type = event
-        .get("type")
-        .and_then(|item| item.as_str())
-        .unwrap_or("");
     if event_type == "user_message" {
         companion_state.mark_turn_active(session_id);
     }

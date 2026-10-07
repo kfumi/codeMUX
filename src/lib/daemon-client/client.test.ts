@@ -104,7 +104,10 @@ describe('subscribeSessionByPolling', () => {
 
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(paths[0]).toBe('/api/sessions/s1/timeline?direction=after&cursor=2&limit=200');
+    // 顺序契约:state 先读、事件先于 onState 回调 —— running=false 只可能意味着
+    // 终态事件已持久化并在本 tick 里先回调,兜底收尾不会再抢跑。
+    expect(paths[0]).toBe('/api/sessions/s1/state');
+    expect(paths[1]).toBe('/api/sessions/s1/timeline?direction=after&cursor=2&limit=200');
     expect(events).toEqual([{ sequence: 3, type: 'assistant' }]);
     expect(states).toEqual([true]);
 

@@ -1183,7 +1183,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     // hundreds of events per second while the flag itself rarely changes, so
     // mirroring it on every event doubled the WS frame rate for no information
     // gain — and every extra frame costs the renderer a synchronous JSON.parse.
-    let mut last_sent_running = companion_state.is_turn_active(&session_id);
+    let last_sent_running = companion_state.is_turn_active(&session_id);
     let state_payload = serde_json::json!({
         "type": "state",
         "sessionId": session_id,
@@ -1215,25 +1215,19 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             event = rx.recv() => {
                 match event {
                     Ok(CompanionBroadcastEvent { session_id: event_session_id, event }) if event_session_id == session_id => {
-                        let payload = serde_json::json!({ "type": "event", "sessionId": session_id, "event": event });
+                        // 运行态帧是生产端显式广播的(companion/state.rs
+                        // `broadcast_turn_state`):翻转时沿 event_tx 发出一条
+                        // `type: state` 帧,这里原样转发。不能在订阅端按
+                        // `is_turn_active` 探测派生 —— 探测发生在订阅任务的
+                        // 唤醒轮询里,与事件帧队列的接收顺序没有全局保证,
+                        // state 帧可能被插到终态事件帧之前。
+                        let payload = if event.get("type").and_then(serde_json::Value::as_str) == Some("state") {
+                            event
+                        } else {
+                            serde_json::json!({ "type": "event", "sessionId": session_id, "event": event })
+                        };
                         if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
                             break;
-                        }
-                        let running = companion_state.is_turn_active(&session_id);
-                        if running != last_sent_running {
-                            last_sent_running = running;
-                            let state_payload = serde_json::json!({
-                                "type": "state",
-                                "sessionId": session_id,
-                                "running": running,
-                            });
-                            if socket
-                                .send(Message::Text(state_payload.to_string().into()))
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
                         }
                     }
                     Ok(_) => {}
@@ -2259,6 +2253,148 @@ pub(crate) mod server_tests {
         );
         drop(stream);
 
+        super::stop_daemon_for_state(&daemon.companion)
+            .await
+            .expect("stop daemon");
+    }
+
+    /// 顺序契约回归测试(2026-10 排队消息展示异常):
+    /// `turn_finished` 终态事件帧必须先于 `state(running=false)` 帧送达客户端。
+    ///
+    /// 终态事件的广播与 `is_turn_active` 翻转(companion/events.rs)之间的顺序,
+    /// 决定了 handle_socket 在「上一个事件帧 + 终态帧」之间是否插入 state 帧。
+    /// 若翻转先于广播,批内挂起的 text_delta(在终态事件 push 时才冲出)先于终态帧
+    /// 发出,订阅者随即看到已翻转的 running=false → state 帧插在终态事件**之前**:
+    /// 客户端会先收尾当前回合并立刻派发排队消息,迟到的终态事件落在新回合用户消息
+    /// 之后(旧回合被判 interrupted,折叠与 footer 消失)。
+    #[tokio::test]
+    async fn turn_finished_event_frame_precedes_the_state_idle_frame() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::connect_async;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let daemon = Arc::new(
+            DaemonState::assemble(
+                PathRoots {
+                    app_data_dir: temp.path().to_path_buf(),
+                    resource_dir: None,
+                },
+                Arc::new(crate::daemon::NullUiEventSink),
+            )
+            .expect("assemble"),
+        );
+
+        // 先建会话行(turn_finished 事件要持久化),再标记回合活跃,保证连接初帧 running=true。
+        let session_id = {
+            let db = daemon.app.db.lock().expect("db lock");
+            crate::db::operations::create_session_with_mode_and_permissions(
+                &db,
+                "Ws state ordering",
+                crate::config::types::AgentKind::Opencode,
+                "agent",
+                None,
+                None,
+                None,
+            )
+            .expect("create session")
+            .id
+        };
+        daemon.companion.mark_turn_active(&session_id);
+
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe");
+        let port = probe.local_addr().expect("addr").port();
+        drop(probe);
+
+        super::start_daemon_server(daemon.clone(), port, false, "127.0.0.1".to_string())
+            .await
+            .expect("start daemon server");
+        let token =
+            crate::companion::local_daemon_token::ensure_local_daemon_token(temp.path(), false)
+                .expect("ensure local daemon token");
+
+        let url = format!("ws://127.0.0.1:{port}/api/ws?token={token}&sessionId={session_id}");
+        let (mut ws, _response) = connect_async(url).await.expect("ws connect");
+        async fn read_frame(
+            ws: &mut (impl futures_util::Stream<
+                Item = Result<Message, tokio_tungstenite::tungstenite::Error>,
+            > + Unpin),
+        ) -> String {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+                .await
+                .expect("frame read timeout")
+                .expect("ws stream open")
+                .expect("ws frame");
+            Message::into_text(frame).expect("text frame").to_string()
+        }
+
+        // 连接初帧:tail 回放(空会话)后,直接是 state(running=true)。
+        let initial = read_frame(&mut ws).await;
+        let initial: serde_json::Value =
+            serde_json::from_str(&initial).expect("initial state json");
+        assert_eq!(initial["type"], "state", "连接首帧应为 state(回放为空)");
+        assert!(
+            initial["running"].as_bool().expect("running flag"),
+            "回合活跃时连接初帧应为 running=true"
+        );
+
+        // 注入与生产一致的批次形态:末批 = [text_delta(挂起), turn_finished(终态)]。
+        // 挂起 delta 在终态事件 push 时才冲出 —— 该帧与终态帧的窗口正是旧实现里
+        // state 帧抢跑的位置。
+        let batch = vec![
+            serde_json::json!({
+                "type": "text_delta",
+                "session_id": session_id,
+                "index": 0,
+                "text": "done.",
+                "event_id": "e-delta-1",
+            }),
+            serde_json::json!({
+                "type": "turn_finished",
+                "session_id": session_id,
+                "outcome": "completed",
+                "event_id": "e-turn-1",
+            }),
+        ];
+        crate::companion::handle_sidecar_event_for_companion(
+            &daemon.app,
+            &daemon.agent,
+            &daemon.companion,
+            &crate::paths::PathRoots {
+                app_data_dir: temp.path().to_path_buf(),
+                resource_dir: None,
+            },
+            batch,
+        );
+
+        // 期望:[delta 事件帧, turn_finished 事件帧, state(running=false)]。
+        // state 帧绝不能插在 turn_finished 之前。
+        let delta = read_frame(&mut ws).await;
+        let delta: serde_json::Value = serde_json::from_str(&delta).expect("delta frame json");
+        assert_eq!(delta["type"], "event", "第一帧应是事件帧");
+        assert_eq!(
+            delta["event"]["type"], "text_delta",
+            "挂起 delta 应先冲出,后续事件不得超车"
+        );
+
+        let terminal = read_frame(&mut ws).await;
+        let terminal: serde_json::Value =
+            serde_json::from_str(&terminal).expect("terminal frame json");
+        assert_eq!(terminal["type"], "event", "第二帧应是事件帧");
+        assert_eq!(
+            terminal["event"]["type"], "turn_finished",
+            "终态事件帧必须在 state(running=false) 之前送达"
+        );
+
+        let idle = read_frame(&mut ws).await;
+        let idle: serde_json::Value = serde_json::from_str(&idle).expect("idle frame json");
+        assert_eq!(idle["type"], "state", "终态事件帧之后才轮到 state 帧");
+        assert!(
+            !idle["running"].as_bool().expect("running flag"),
+            "收尾后 state 应为 running=false"
+        );
+
+        drop(ws);
         super::stop_daemon_for_state(&daemon.companion)
             .await
             .expect("stop daemon");

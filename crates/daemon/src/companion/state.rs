@@ -218,12 +218,37 @@ impl CompanionState {
         self.inner.e2ee_public_key_b64.read().await.clone()
     }
 
+    /// 把运行态变化作为**显式 state 帧**广播给全部订阅方。
+    ///
+    /// 运行态帧必须是生产端显式广播,而不是订阅端(server.rs `handle_socket`)
+    /// 在每个事件帧之后按 `is_turn_active` 探测派生:探测发生在订阅任务被唤醒
+    /// 之后,翻转与帧的送达之间没有全局顺序保证,`state(running=false)` 可能被
+    /// 插在终态事件帧**之前**(companion/events.rs 的顺序契约失去意义)。显式帧
+    /// 与事件帧走同一条 event_tx 播放,逐连接保序。
+    fn broadcast_turn_state(&self, session_id: &str, running: bool) {
+        if !self.inner.is_enabled() {
+            return;
+        }
+        let _ = self.inner.event_tx.send(CompanionBroadcastEvent {
+            session_id: session_id.to_string(),
+            event: serde_json::json!({
+                "type": "state",
+                "sessionId": session_id,
+                "running": running,
+            }),
+        });
+    }
+
     pub fn mark_turn_active(&self, session_id: &str) -> u64 {
-        self.inner
+        let inserted = self
+            .inner
             .turn_active
             .lock()
             .unwrap()
             .insert(session_id.to_string());
+        if inserted {
+            self.broadcast_turn_state(session_id, true);
+        }
         let mut epochs = self.inner.turn_epoch.lock().unwrap();
         let epoch = epochs.entry(session_id.to_string()).or_insert(0);
         *epoch += 1;
@@ -261,7 +286,10 @@ impl CompanionState {
     }
 
     pub fn finish_turn(&self, session_id: &str) -> Vec<QueuedCompanionMessage> {
-        self.inner.turn_active.lock().unwrap().remove(session_id);
+        let removed = self.inner.turn_active.lock().unwrap().remove(session_id);
+        if removed {
+            self.broadcast_turn_state(session_id, false);
+        }
         self.clear_continuation_pending(session_id);
         self.inner
             .message_queues

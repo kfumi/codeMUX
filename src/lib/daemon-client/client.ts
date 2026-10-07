@@ -165,6 +165,14 @@ export function subscribeSessionByPolling(
     if (closed) return;
     try {
       lastSequence = handlers.getInitialSequence?.() ?? lastSequence;
+      // 顺序契约与 daemon 端(companion/events.rs 的终态事件先于 finish_turn 广播)配套:
+      // 先读运行态,再拉事件页,最后才回调——`running=false` 意味着终态事件必然已持久化,
+      // 随后一次 timeline 拉取必然含该终态事件,保证客户端先处理终态、后回调 onState(false),
+      // 轮询回退不会在终态事件之前触发「兜底收尾 + 队列派发」。
+      const state = await daemonFetch<{ running: boolean }>(
+        config,
+        `/api/sessions/${sessionId}/state`,
+      );
       const query = lastSequence >= 0
         ? `?direction=after&cursor=${lastSequence}&limit=200`
         : '';
@@ -179,10 +187,6 @@ export function subscribeSessionByPolling(
         }
         handlers.onEvent(event);
       }
-      const state = await daemonFetch<{ running: boolean }>(
-        config,
-        `/api/sessions/${sessionId}/state`,
-      );
       handlers.onState?.(Boolean(state?.running));
       if (hadError) {
         hadError = false;
