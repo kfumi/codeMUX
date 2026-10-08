@@ -10,4 +10,5 @@ pub mod driver;
 pub mod guard;
 pub mod page_context;
 pub mod policy;
+pub mod probe;
 pub mod routes;

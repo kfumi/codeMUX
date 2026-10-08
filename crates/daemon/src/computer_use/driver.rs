@@ -198,7 +198,10 @@ impl DriverHost {
         }
         let spec = spec
             .cloned()
-            .ok_or_else(|| "未配置驱动命令(设置 → 电脑控制 → 驱动命令)".to_string())?;
+            .ok_or_else(|| {
+                "未检测到 cua-driver(官方安装位置与 PATH 都没有):可点「一键安装」,或在 设置 → 电脑控制 → 驱动命令 手动填写"
+                    .to_string()
+            })?;
 
         let mut child = match Command::new(&spec.command)
             .args(&spec.args)
@@ -473,7 +476,7 @@ mod tests {
     async fn start_without_spec_reports_a_clear_error() {
         let host = DriverHost::new();
         let error = host.start(None).await.expect_err("未配置必须报错");
-        assert!(error.contains("未配置驱动命令"), "{error}");
+        assert!(error.contains("未检测到"), "{error}");
     }
 
     #[tokio::test]

@@ -1,5 +1,7 @@
 //! 电脑控制治理接口(工单 06):驱动状态、一键诊断、启动/急停、更新确认、
 //! 允许范围与审计查询。
+//! 工单 08:零配置 —— `driver_command` 留空时自动探测官方安装位置与 PATH;
+//! 一键安装官方驱动,与升级一样在接口层强制确认。
 //!
 //! 鉴权与自动化接缝一致:仅回环 + Local Daemon Token(桌面渲染层用的就是
 //! 这个令牌;配对设备不参与驱动治理)。
@@ -26,13 +28,71 @@ use super::policy::BUILTIN_DENY;
 /// 驱动更新命令的等待上限。
 const UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// 一键安装(下载并执行官方脚本)的等待上限:下载可能慢,同样给足 5 分钟。
+const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// 配置 → 驱动启动方式(工单 08):显式命令优先;留空则用探测到的默认安装,
+/// 参数留空时取驱动的 `mcp` 子命令 —— 默认值不该让用户猜。
+pub(crate) fn driver_spec_with(
+    config: &crate::config::types::ComputerUseConfig,
+    detected: Option<String>,
+) -> Option<DriverSpec> {
+    if let Some(command) = config.driver_command.as_ref() {
+        return Some(DriverSpec::new(command.clone(), config.driver_args.clone()));
+    }
+    let command = detected?;
+    let args = if config.driver_args.is_empty() {
+        super::probe::DEFAULT_DRIVER_ARGS
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect()
+    } else {
+        config.driver_args.clone()
+    };
+    Some(DriverSpec::new(command, args))
+}
+
+/// 真实探测(文件系统)版;单测走 [`driver_spec_with`] 注入探测结果。
 pub(crate) fn driver_spec_from_config(
     config: &crate::config::types::ComputerUseConfig,
 ) -> Option<DriverSpec> {
-    config
-        .driver_command
-        .as_ref()
-        .map(|command| DriverSpec::new(command.clone(), config.driver_args.clone()))
+    driver_spec_with(config, super::probe::detect_default())
+}
+
+/// 给前端的解析结论:配置优先,其次自动探测,两者都没有才算缺失。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriverResolution {
+    /// `custom` = 用户显式配置;`auto` = 默认探测命中;`missing` = 都没有。
+    pub mode: &'static str,
+    /// 实际将使用的启动命令(缺失时为空)。
+    pub command: Option<String>,
+    /// 自动探测命中的路径(`auto` 时有)。
+    pub detected_path: Option<String>,
+}
+
+/// 与 [`driver_spec_with`] 同一套输入,产出展示用结论(探测结果同样注入)。
+pub(crate) fn driver_resolution_with(
+    config: &crate::config::types::ComputerUseConfig,
+    detected: Option<String>,
+) -> DriverResolution {
+    match (&config.driver_command, driver_spec_with(config, detected)) {
+        (Some(command), _) => DriverResolution {
+            mode: "custom",
+            command: Some(command.clone()),
+            detected_path: None,
+        },
+        (None, Some(spec)) => DriverResolution {
+            mode: "auto",
+            command: Some(spec.command.clone()),
+            detected_path: Some(spec.command),
+        },
+        (None, None) => DriverResolution {
+            mode: "missing",
+            command: None,
+            detected_path: None,
+        },
+    }
 }
 
 /// 一条诊断项。
@@ -63,12 +123,15 @@ pub fn diagnose(
         ok: status.configured,
         detail: match status.command.as_deref() {
             Some(command) => format!("驱动命令:{command}"),
-            None => "尚未配置驱动命令".to_string(),
+            None => "未检测到 cua-driver(官方安装位置与 PATH 都没有)".to_string(),
         },
         fix: if status.configured {
             None
         } else {
-            Some("在 设置 → 电脑控制 → 驱动命令 里填入驱动的可执行文件或启动命令".to_string())
+            Some(
+                "点「一键安装」装官方驱动,或在 设置 → 电脑控制 → 驱动命令 手动填写启动命令"
+                    .to_string(),
+            )
         },
     });
 
@@ -207,6 +270,7 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
         .route("/computer-use/driver/estop", post(estop_driver))
         .route("/computer-use/driver/diagnose", post(diagnose_driver))
         .route("/computer-use/driver/update", post(update_driver))
+        .route("/computer-use/driver/install", post(install_driver))
         .route("/computer-use/policy", get(policy_snapshot))
         .route("/computer-use/audit", get(list_computer_use_audit))
 }
@@ -231,7 +295,9 @@ async fn driver_status(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let config = config_snapshot(&ctx);
-    let spec = driver_spec_from_config(&config);
+    let detected = super::probe::detect_default();
+    let spec = driver_spec_with(&config, detected.clone());
+    let resolution = driver_resolution_with(&config, detected);
     let status = ctx
         .daemon
         .companion
@@ -247,6 +313,7 @@ async fn driver_status(
         "allowlist": config.allowlist,
         "maxSteps": config.max_steps,
         "updateCommandConfigured": config.driver_update_command.is_some(),
+        "driverResolution": resolution,
         "builtinDenyList": BUILTIN_DENY
             .iter()
             .map(|(needle, scope)| serde_json::json!({ "match": needle, "scope": scope }))
@@ -392,8 +459,16 @@ async fn run_shell_command(command: &str) -> Result<String, String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("执行更新命令失败: {}", error))?;
+    wait_command_output(child, UPDATE_TIMEOUT, "更新命令").await
+}
 
-    let waited = tokio::time::timeout(UPDATE_TIMEOUT, child.wait_with_output()).await;
+/// 等一个已拉起的子进程收尾并把输出归一化(升级与一键安装共用同一套语义)。
+async fn wait_command_output(
+    child: tokio::process::Child,
+    timeout: std::time::Duration,
+    label: &str,
+) -> Result<String, String> {
+    let waited = tokio::time::timeout(timeout, child.wait_with_output()).await;
     match waited {
         Ok(Ok(output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -401,13 +476,13 @@ async fn run_shell_command(command: &str) -> Result<String, String> {
             if output.status.success() {
                 let summary = stdout.trim();
                 Ok(if summary.is_empty() {
-                    "更新命令执行完成".to_string()
+                    format!("{label}执行完成")
                 } else {
                     summary.chars().take(500).collect()
                 })
             } else {
                 Err(format!(
-                    "更新命令退出码 {:?}: {}",
+                    "{label}退出码 {:?}: {}",
                     output.status.code(),
                     if stderr.trim().is_empty() {
                         stdout.trim().to_string()
@@ -417,8 +492,91 @@ async fn run_shell_command(command: &str) -> Result<String, String> {
                 ))
             }
         }
-        Ok(Err(error)) => Err(format!("等待更新命令失败: {}", error)),
-        Err(_) => Err(format!("更新命令超时({}s)", UPDATE_TIMEOUT.as_secs())),
+        Ok(Err(error)) => Err(format!("等待{label}失败: {}", error)),
+        Err(_) => Err(format!("{label}超时({}s)", timeout.as_secs())),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallDriverRequest {
+    #[serde(default)]
+    confirm: bool,
+}
+
+/// 一键安装官方驱动(工单 08):PowerShell 执行 cua.ai 官方安装脚本。
+///
+/// 与升级同一条铁律:接口层强制 `confirm: true`,审计留痕;完成后立即重新
+/// 探测,装没装成不靠感觉。脚本从 `probe::INSTALL_SCRIPT_URL` 下载,在用户
+/// 本机的 PowerShell 会话里执行,daemon 不代持任何凭据。
+async fn install_driver(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<InstallDriverRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    // 安装 = 从远端拉脚本执行:无确认的调用一律拒绝,与升级同一道闸门。
+    if !body.confirm {
+        return Err(ApiError::bad_request("安装驱动需要用户确认(confirm: true)"));
+    }
+    match run_install_script().await {
+        Ok(detail) => {
+            audit(&ctx, "driver-install", true, None);
+            let config = config_snapshot(&ctx);
+            let spec = driver_spec_from_config(&config);
+            if spec.is_none() {
+                return Err(ApiError::bad_request(format!(
+                    "安装脚本执行完成但没有检测到 cua-driver:{detail}"
+                )));
+            }
+            let status = ctx
+                .daemon
+                .companion
+                .inner
+                .driver
+                .status(spec.as_ref())
+                .await;
+            let resolution = driver_resolution_with(&config, super::probe::detect_default());
+            Ok(Json(serde_json::json!({
+                "ok": true,
+                "detail": detail,
+                "status": status,
+                "driverResolution": resolution,
+            })))
+        }
+        Err(error) => {
+            audit(&ctx, "driver-install", false, Some(&error));
+            Err(ApiError::bad_request(error))
+        }
+    }
+}
+
+/// 执行官方安装脚本(本期仅 Windows):`irm <INSTALL_SCRIPT_URL> | iex`。
+async fn run_install_script() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let script = format!("irm {} | iex", super::probe::INSTALL_SCRIPT_URL);
+        let child = tokio::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("拉起 PowerShell 失败: {}", error))?;
+        wait_command_output(child, INSTALL_TIMEOUT, "安装脚本").await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = INSTALL_TIMEOUT;
+        Err("一键安装本期只支持 Windows(系统级执行本期也只覆盖 Windows)".to_string())
     }
 }
 
@@ -585,5 +743,71 @@ mod tests {
         let platform = check(&checks, "platform");
         assert!(!platform.ok);
         assert!(platform.detail.contains("只做 Windows"));
+    }
+
+    #[test]
+    fn empty_config_with_a_detected_binary_builds_the_default_spec() {
+        let config = crate::config::types::ComputerUseConfig::default();
+        let spec = driver_spec_with(&config, Some("C:\\tools\\cua-driver.exe".to_string()))
+            .expect("探测命中就应可启动");
+        assert_eq!(spec.command, "C:\\tools\\cua-driver.exe");
+        assert_eq!(spec.args, vec!["mcp".to_string()], "参数留空 = mcp 子命令");
+    }
+
+    #[test]
+    fn auto_mode_keeps_user_args_when_present() {
+        let config = crate::config::types::ComputerUseConfig {
+            driver_args: vec!["--stdio".to_string()],
+            ..Default::default()
+        };
+        let spec = driver_spec_with(&config, Some("cua-driver".to_string())).expect("命中");
+        assert_eq!(spec.args, vec!["--stdio".to_string()]);
+    }
+
+    #[test]
+    fn explicit_config_still_wins_over_detection() {
+        let config = crate::config::types::ComputerUseConfig {
+            driver_command: Some("my-driver".to_string()),
+            driver_args: vec!["--stdio".to_string()],
+            ..Default::default()
+        };
+        let spec =
+            driver_spec_with(&config, Some("detected.exe".to_string())).expect("配置了就用配置");
+        assert_eq!(spec.command, "my-driver");
+        assert_eq!(spec.args, vec!["--stdio".to_string()]);
+    }
+
+    #[test]
+    fn missing_everything_is_missing_and_reports_no_command() {
+        let config = crate::config::types::ComputerUseConfig::default();
+        assert!(driver_spec_with(&config, None).is_none());
+        let resolution = driver_resolution_with(&config, None);
+        assert_eq!(resolution.mode, "missing");
+        assert!(resolution.command.is_none());
+        assert!(resolution.detected_path.is_none());
+    }
+
+    #[test]
+    fn auto_resolution_carries_the_detected_path() {
+        let config = crate::config::types::ComputerUseConfig::default();
+        let resolution = driver_resolution_with(&config, Some("C:\\cua\\driver.exe".to_string()));
+        assert_eq!(resolution.mode, "auto");
+        assert_eq!(resolution.command.as_deref(), Some("C:\\cua\\driver.exe"));
+        assert_eq!(
+            resolution.detected_path.as_deref(),
+            Some("C:\\cua\\driver.exe")
+        );
+    }
+
+    #[test]
+    fn custom_resolution_reports_the_user_command() {
+        let config = crate::config::types::ComputerUseConfig {
+            driver_command: Some("my-driver".to_string()),
+            ..Default::default()
+        };
+        let resolution = driver_resolution_with(&config, Some("detected.exe".to_string()));
+        assert_eq!(resolution.mode, "custom");
+        assert_eq!(resolution.command.as_deref(), Some("my-driver"));
+        assert!(resolution.detected_path.is_none());
     }
 }

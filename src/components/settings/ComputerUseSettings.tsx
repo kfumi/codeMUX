@@ -40,12 +40,21 @@ interface DriverSnapshot {
   status: DriverStatusView;
   updateCommandConfigured: boolean;
   builtinDenyList: Array<{ match: string; scope: string }>;
+  resolution: DriverResolutionView | null;
+}
+
+/** daemon 的解析结论(工单 08):配置优先,其次自动探测,都没有 = missing。 */
+interface DriverResolutionView {
+  mode: 'custom' | 'auto' | 'missing';
+  command?: string | null;
+  detectedPath?: string | null;
 }
 
 const EMPTY_SNAPSHOT: DriverSnapshot = {
   status: { configured: false, running: false, tools: [] },
   updateCommandConfigured: false,
   builtinDenyList: [],
+  resolution: null,
 };
 
 /**
@@ -62,8 +71,12 @@ export function ComputerUseSettings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [allowlistDraft, setAllowlistDraft] = useState<string | null>(null);
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
+  const [installConfirmOpen, setInstallConfirmOpen] = useState(false);
 
   const computerUse = normalizeComputerUse(config?.computer_use);
+
+  const resolution = snapshot.resolution;
+  const driverMissing = resolution?.mode === 'missing';
 
   const refresh = useCallback(async () => {
     try {
@@ -72,6 +85,9 @@ export function ComputerUseSettings() {
         status: result.status ?? EMPTY_SNAPSHOT.status,
         updateCommandConfigured: Boolean(result.updateCommandConfigured),
         builtinDenyList: Array.isArray(result.builtinDenyList) ? result.builtinDenyList : [],
+        resolution:
+          (result as unknown as { driverResolution?: DriverResolutionView | null })
+            .driverResolution ?? null,
       });
     } catch {
       // daemon 未就绪/浏览器形态:保持空快照,界面按「未知」展示而不是报错。
@@ -122,6 +138,12 @@ export function ComputerUseSettings() {
   const runUpdate = async () => {
     setUpdateConfirmOpen(false);
     await runAction('update', () => daemonFacade.computerUse.updateDriver(), '更新命令已执行');
+  };
+
+  /** 一键安装:确认对话框里点过「下载并安装」之后才真的调用(接口层强制 confirm)。 */
+  const runInstall = async () => {
+    setInstallConfirmOpen(false);
+    await runAction('install', () => daemonFacade.computerUse.installDriver(), '安装脚本已执行');
   };
 
   const allowlistText = allowlistDraft ?? formatAllowlistInput(computerUse.allowlist);
@@ -195,10 +217,17 @@ export function ComputerUseSettings() {
               {snapshot.status.running ? '运行中' : '未运行'}
             </span>
             <span className="text-muted-foreground">
-              {snapshot.status.configured
-                ? `${snapshot.status.command ?? ''}${snapshot.status.version ? ` · ${snapshot.status.version}` : ''}`
-                : '未配置驱动命令'}
+              {resolution?.command
+                ? `${resolution.command}${snapshot.status.version ? ` · ${snapshot.status.version}` : ''}`
+                : driverMissing
+                  ? '未检测到 cua-driver(官方安装位置与 PATH)'
+                  : '未配置驱动命令'}
             </span>
+            {resolution?.mode === 'auto' ? (
+              <span className="rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground">
+                自动检测
+              </span>
+            ) : null}
             {snapshot.status.tools.length > 0 ? (
               <span className="text-ui-caption text-muted-foreground">
                 {snapshot.status.tools.length} 个工具
@@ -207,6 +236,12 @@ export function ComputerUseSettings() {
           </div>
           {snapshot.status.lastError ? (
             <p className="text-ui-caption text-warning">{snapshot.status.lastError}</p>
+          ) : null}
+
+          {driverMissing ? (
+            <p className="text-ui-caption text-warning">
+              未检测到 cua-driver。可一键安装官方驱动,或手动填写驱动命令。
+            </p>
           ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
@@ -231,6 +266,17 @@ export function ComputerUseSettings() {
             >
               启动驱动
             </Button>
+            {driverMissing ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => setInstallConfirmOpen(true)}
+              >
+                一键安装
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -302,6 +348,17 @@ export function ComputerUseSettings() {
         loading={busy === 'update'}
       />
 
+      <ConfirmDialog
+        open={installConfirmOpen}
+        onOpenChange={setInstallConfirmOpen}
+        title="安装 cua-driver？"
+        description={`将从 ${INSTALL_SCRIPT_URL} 下载并运行官方安装脚本,装完点「启动驱动」。`}
+        confirmLabel="下载并安装"
+        cancelLabel="取消"
+        onConfirm={() => void runInstall()}
+        loading={busy === 'install'}
+      />
+
       <section className="flex flex-col gap-3">
         <label className="text-ui-compact font-medium text-muted-foreground">驱动配置</label>
         <div className="space-y-3 rounded-xl settings-tile p-4">
@@ -312,14 +369,20 @@ export function ComputerUseSettings() {
             <input
               id="computer-use-driver-command"
               value={computerUse.driver_command ?? ''}
-              placeholder="如 cua-driver 或 C:\\path\\to\\driver.exe"
+              placeholder={
+                resolution?.mode === 'auto' && resolution.command
+                  ? `留空 = 自动:${resolution.command}`
+                  : driverMissing
+                    ? '未检测到,可一键安装或手动填路径'
+                    : '如 cua-driver 或 C:\\path\\to\\driver.exe'
+              }
               onChange={(event) =>
                 update({ driver_command: event.target.value.trim() ? event.target.value : null })
               }
               className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-code text-foreground"
             />
             <p className="text-ui-caption text-muted-foreground">
-              驱动需支持 stdio MCP（initialize / tools/list / tools/call）。
+              留空 = 自动检测 cua-driver(官方安装位置与 PATH);驱动需支持 stdio MCP。
             </p>
           </div>
           <div className="flex flex-col gap-1">
@@ -329,7 +392,7 @@ export function ComputerUseSettings() {
             <Input
               id="computer-use-driver-args"
               value={computerUse.driver_args.join(' ')}
-              placeholder="如 --stdio"
+              placeholder="留空 = mcp(cua-driver 官方 MCP 子命令);自定义驱动才需要填,如 --stdio"
               onChange={(event) => update({ driver_args: parseArgsInput(event.target.value) })}
               className="h-8 font-mono text-code"
             />
@@ -424,6 +487,9 @@ const DEFAULT_DENY_SCOPES = [
   'Windows 安全中心',
   'CodeMUX 自身与安装更新器',
 ];
+
+/** 与 daemon 侧 probe::INSTALL_SCRIPT_URL 保持一致(一键安装的唯一下载源)。 */
+const INSTALL_SCRIPT_URL = 'https://cua.ai/driver/install.ps1';
 
 /** 参数输入:空格分隔(驱动参数不含空格的常见情形;含空格请写成多条)。 */
 function parseArgsInput(text: string): string[] {

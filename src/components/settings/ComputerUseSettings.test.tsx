@@ -10,6 +10,7 @@ const daemonFacadeMock = vi.hoisted(() => ({
     startDriver: vi.fn(),
     estopDriver: vi.fn(),
     updateDriver: vi.fn(),
+    installDriver: vi.fn(),
     audit: vi.fn(),
   },
   setComputerUse: vi.fn(),
@@ -137,5 +138,54 @@ describe('ComputerUseSettings', () => {
 
     fireEvent.click(screen.getByText('执行更新'));
     await waitFor(() => expect(daemonFacadeMock.computerUse.updateDriver).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers one-click install when the daemon reports no driver found', async () => {
+    daemonFacadeMock.computerUse.driverStatus.mockResolvedValue({
+      status: { configured: false, running: false, tools: [] },
+      updateCommandConfigured: false,
+      builtinDenyList: [],
+      driverResolution: { mode: 'missing', command: null, detectedPath: null },
+    });
+    render(<ComputerUseSettings />);
+
+    await waitFor(() => expect(screen.getByText('一键安装')).toBeTruthy());
+    expect(screen.getAllByText(/未检测到 cua-driver/).length).toBeGreaterThan(0);
+  });
+
+  it('requires an explicit confirmation before running the install script', async () => {
+    daemonFacadeMock.computerUse.driverStatus.mockResolvedValue({
+      status: { configured: false, running: false, tools: [] },
+      updateCommandConfigured: false,
+      builtinDenyList: [],
+      driverResolution: { mode: 'missing', command: null, detectedPath: null },
+    });
+    render(<ComputerUseSettings />);
+
+    fireEvent.click(await waitFor(() => screen.getByText('一键安装')));
+    await waitFor(() => expect(screen.getByText('安装 cua-driver？')).toBeTruthy());
+    expect(daemonFacadeMock.computerUse.installDriver).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('下载并安装'));
+    await waitFor(() =>
+      expect(daemonFacadeMock.computerUse.installDriver).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it('labels the auto-detected driver and defaults the placeholder to it', async () => {
+    const detected =
+      'C:\\Users\\me\\AppData\\Local\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe';
+    daemonFacadeMock.computerUse.driverStatus.mockResolvedValue({
+      status: { configured: true, running: false, tools: [] },
+      updateCommandConfigured: false,
+      builtinDenyList: [],
+      driverResolution: { mode: 'auto', command: detected, detectedPath: detected },
+    });
+    render(<ComputerUseSettings />);
+
+    await waitFor(() => expect(screen.getByText('自动检测')).toBeTruthy());
+    const commandInput = screen.getByLabelText('驱动命令') as HTMLInputElement;
+    expect(commandInput.placeholder).toContain('留空 = 自动:C:\\Users\\me');
+    expect(screen.queryByText('一键安装')).toBeNull();
   });
 });
