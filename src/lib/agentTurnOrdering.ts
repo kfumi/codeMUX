@@ -75,13 +75,15 @@ export function normalizeTurnProcessTimeline<T extends { event: AgentMessage; ts
 
   let normalized = [...timeline];
   for (const { userIndex, resultIndex, finalAssistantIndex } of turnRanges) {
-    const trailingProcess = normalized
-      .slice(finalAssistantIndex + 1, resultIndex)
-      .filter((entry) => isReorderableProcessEvent(entry.event));
+    const trailing = normalized.slice(finalAssistantIndex + 1, resultIndex);
+    const trailingProcess = trailing.filter((entry) => isReorderableProcessEvent(entry.event));
     if (trailingProcess.length === 0) {
       continue;
     }
-
+    // 区间内不可重排的帧（如 session_summary）必须原位保留:它们夹在最终
+    // assistant 与 result 之间是正常时序(sidecar 先发汇总再发 turn_finished)。
+    // 原实现重组时只拼 trailingProcess,把这些帧静默丢掉,产物卡片随之永久消失。
+    const others = trailing.filter((entry) => !isReorderableProcessEvent(entry.event));
     const beforeFinal = normalized.slice(userIndex, finalAssistantIndex);
     const finalAssistant = normalized[finalAssistantIndex]!;
     const result = normalized[resultIndex]!;
@@ -91,6 +93,7 @@ export function normalizeTurnProcessTimeline<T extends { event: AgentMessage; ts
       ...beforeFinal,
       ...trailingProcess,
       finalAssistant,
+      ...others,
       result,
       ...normalized.slice(resultIndex + 1),
     ];

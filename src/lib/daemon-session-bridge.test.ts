@@ -12,6 +12,7 @@ vi.mock('./facades/daemon-facade', () => ({
 }));
 
 import {
+  catchUpTimelineAfterSequence,
   getLastEventSequence,
   reconcileHistorySequence,
   registerDaemonSessionHandler,
@@ -107,5 +108,119 @@ describe('daemon session bridge', () => {
 
     resetLastEventSequence('session-3');
     expect(getLastEventSequence('session-3')).toBe(-1);
+  });
+
+  it('catch-up backfills a below-watermark hole and never re-feeds accepted frames', async () => {
+    // 生产实测(14:18 轮):乱序窗口里 summary(seq 86) 丢失,后续 result(seq 87)
+    // 照常抬水位线 —— cursor 补拉(after 87)永远拉不回 86。补拉改为拉尾部并按
+    // 「已接受序号集合」逐帧对账:洞补上,已接受的帧不重复投喂。
+    setLastEventSequence('session-1', 85);
+
+    let onEvent: ((event: unknown) => void) | undefined;
+    getTimelineMock.mockImplementation(async () => ({
+      events: [
+        { type: 'assistant_message', sequence: 85, session_id: 'session-1' },
+        { type: 'system_event', subtype: 'session_summary', sequence: 86, session_id: 'session-1' },
+        { type: 'turn_finished', sequence: 87, session_id: 'session-1' },
+      ],
+      seqEnd: 87,
+    }));
+    subscribeSessionMock.mockImplementation((_sessionId, handlers) => {
+      onEvent = handlers.onEvent;
+      return () => {};
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    registerDaemonSessionHandler('session-1', (event) => {
+      received.push(event as Record<string, unknown>);
+    });
+    await Promise.resolve();
+
+    // summary(86) 在乱序窗口里丢了;result(87) 正常到达并抬高水位线到 87。
+    onEvent?.({ type: 'turn_finished', sequence: 87, session_id: 'session-1' });
+    expect(received).toHaveLength(1);
+    expect(getLastEventSequence('session-1')).toBe(87);
+
+    await catchUpTimelineAfterSequence('session-1');
+
+    // 尾部对账返回 85-87:85/87 已接受必须跳过,86 是洞必须补喂。
+    expect(received).toHaveLength(2);
+    expect(received[1]).toMatchObject({ type: 'system_event', sequence: 86 });
+    // 洞补上后水位线保持 87,不会回退。
+    expect(getLastEventSequence('session-1')).toBe(87);
+
+    // 再跑一次补拉:86 已入接受集合,不得重复投喂。
+    await catchUpTimelineAfterSequence('session-1');
+    expect(received).toHaveLength(2);
+  });
+
+  it('clears the accepted-sequence set when the timeline is rebuilt', async () => {
+    // 时间线重建后序号空间回退:旧空间记录的「已接受」必须作废,
+    // 否则重建后复用的同号帧会被补拉误判为重复而丢弃。
+    getTimelineMock.mockImplementation(async () => ({
+      events: [{ type: 'user_message', sequence: 5, session_id: 'session-1' }],
+      seqEnd: 5,
+    }));
+    setLastEventSequence('session-1', 5);
+
+    let onEvent: ((event: unknown) => void) | undefined;
+    subscribeSessionMock.mockImplementation((_sessionId, handlers) => {
+      onEvent = handlers.onEvent;
+      return () => {};
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    registerDaemonSessionHandler('session-1', (event) => {
+      received.push(event as Record<string, unknown>);
+    });
+    // 冲刷订阅期触发的全部异步对账（reconcileSequenceAfterReconnect 等），
+    // 避免它们的落地时机影响后面 reset 的断言。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getLastEventSequence('session-1')).toBe(5);
+
+    // 重建:序号空间回退到 2,旧空间接受集合(含 5)必须作废。
+    onEvent?.({ type: 'timeline_reset', session_id: 'session-1', sequence_max: 2 });
+    expect(getLastEventSequence('session-1')).toBe(2);
+
+    await catchUpTimelineAfterSequence('session-1');
+
+    // seq 5 在重建后的新空间里是「未见过的帧」,必须补喂而不是被判重复。
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ type: 'user_message', sequence: 5 });
+  });
+
+  it('below-watermark replay frames never poison a hole for catch-up', async () => {
+    // 审查发现:水位线之下的 WS 回放帧若被标记「已接受」,而它恰是乱序窗口里
+    // 丢掉的洞,补拉会永远跳过它 → 卡片再次永久丢失。回放帧必须只去重、不标记。
+    setLastEventSequence('session-1', 87); // 87 已接受;86 是洞(未接受)
+
+    let onEvent: ((event: unknown) => void) | undefined;
+    getTimelineMock.mockImplementation(async () => ({
+      events: [{ type: 'system_event', subtype: 'session_summary', sequence: 86, session_id: 'session-1' }],
+      seqEnd: 87,
+    }));
+    subscribeSessionMock.mockImplementation((_sessionId, handlers) => {
+      onEvent = handlers.onEvent;
+      return () => {};
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    registerDaemonSessionHandler('session-1', (event) => {
+      received.push(event as Record<string, unknown>);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 重连回放把洞帧(86)又送了一遍:必须跳过投喂,但不得标记为已接受。
+    onEvent?.({ type: 'system_event', subtype: 'session_summary', sequence: 86, session_id: 'session-1' });
+    expect(received).toHaveLength(0);
+
+    // 尾部对账必须把洞补上(而不是被上面的回放毒化)。
+    await catchUpTimelineAfterSequence('session-1');
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ type: 'system_event', sequence: 86 });
+
+    // 再跑一次补拉:86 已入接受集合,不得重复投喂。
+    await catchUpTimelineAfterSequence('session-1');
+    expect(received).toHaveLength(1);
   });
 });

@@ -2230,6 +2230,84 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('renders session_summary for the exact claude live timeline shape (tool kind split + file_snapshot)', () => {
+    // 生产时间线实测形状（seq 41-47）：claude 实时把工具事件拆成独立事件，
+    // Edit 之前还有 file_snapshot。summary 夹在最终 assistant 与 result 之间。
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '把文件改一下' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'evt-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'call_edit', name: 'Edit', input: { file_path: 'D:/x/a.ts', old_string: 'a', new_string: 'b' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'file_snapshot',
+        data: { type: 'file_snapshot', file_path: 'D:/x/a.ts', original_content: 'a', is_new: false, tool_use_id: 'call_edit' },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'evt-fin-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'call_edit', content: 'ok', is_error: false }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'evt-asst-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: '已完成修改。' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'D:/x/a.ts', before: 'a', after: 'b', additions: 1, deletions: 1 }],
+          uuid: 'evt-summary-1',
+          session_id: 'session-1',
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'evt-result-1',
+          session_id: 'session-1',
+          duration_ms: 10000,
+          duration_api_ms: 9000,
+          num_turns: 1,
+          result: '',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const parts = messages
+      .flatMap((message) => message.content)
+      .filter((part) => part.type === 'data-codemux-event' && part.eventKind === 'session_summary');
+    expect(parts).toHaveLength(1);
+  });
+
   it('attaches session_summary to trailing text instead of the peeled process group', () => {
     const events: AgentMessage[] = [
       { kind: 'user', data: { content: '将About页面的Ztwo改为Ztwo123' } },
