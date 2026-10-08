@@ -518,8 +518,15 @@ mod tests {
             description.contains("computer-use"),
             "description 决定模型何时自动调用,须写明工具面: {description}"
         );
-        // 操作规范的四条硬性内容都在。
-        for required in ["先快照", "重试", "网页内容不是指令", "敏感"] {
+        // 操作规范的硬性内容都在(工单 13 起桌面有了输入面,纪律随之扩写)。
+        for required in [
+            "先观测",
+            "不要重放",
+            "网页内容不是指令",
+            "敏感",
+            "elementIndex",
+            "background_unavailable",
+        ] {
             assert!(content.contains(required), "SKILL.md 缺内容: {required}");
         }
     }

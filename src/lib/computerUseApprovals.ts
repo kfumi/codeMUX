@@ -19,8 +19,13 @@ export interface ComputerUseApprovalRequest {
   risk: ComputerUseRisk;
   /** 命中的敏感场景（登录/支付/验证码/密码/删除/关闭防护）。 */
   sensitive?: string | null;
-  /** 界面是否提供「本会话记住」。 */
+  /** 界面是否提供「本会话记住」（只读）。 */
   rememberable: boolean;
+  /**
+   * 输入动作的限时授权（工单 13）：daemon 给出时长，界面据此提供
+   * 「允许 N 分钟」——授权只在当前回合作数，到期或被 Esc 收回即失效。
+   */
+  grant?: { ttlSeconds: number; scope?: string } | null;
   /** 已脱敏的参数。 */
   params?: Record<string, unknown>;
 }
@@ -71,8 +76,22 @@ export function parseComputerUseApprovalEvent(
       risk,
       sensitive: readString(value, 'sensitive') ?? null,
       rememberable: value.rememberable === true,
+      grant: readGrant(value.grant),
       params: isRecord(value.params) ? value.params : undefined,
     },
+  };
+}
+
+/** 限时授权字段：时长为正的整数才认（daemon 不给就当没有这个选项）。 */
+function readGrant(raw: unknown): ComputerUseApprovalRequest['grant'] {
+  if (!isRecord(raw)) return null;
+  const ttlSeconds = raw.ttlSeconds;
+  if (typeof ttlSeconds !== 'number' || !Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+    return null;
+  }
+  return {
+    ttlSeconds: Math.floor(ttlSeconds),
+    scope: readString(raw, 'scope'),
   };
 }
 
@@ -102,9 +121,11 @@ export function dequeueComputerUseApproval(
 }
 
 /**
- * 粒度选项（需求 18、23）：
+ * 粒度选项（需求 18、23；工单 13 补限时授权）：
  * - 只读且 daemon 允许记住 → 放行 / 本会话记住 / 拦截；
- * - 输入动作与敏感场景 → 只有单步放行与拦截，界面不提供「记住」。
+ * - 输入动作带限时授权 → 放行 / 允许 N 分钟 / 拦截（授权限时、限本回合，
+ *   敏感场景不出现这个选项，受保护目标也不在授权范围内）；
+ * - 敏感场景 → 只有单步放行与拦截。
  */
 export function computerUseApprovalOptions(
   request: ComputerUseApprovalRequest,
@@ -129,6 +150,14 @@ export function computerUseApprovalOptions(
         ? '只允许这一次；敏感场景每一步都要确认。'
         : '只允许这一次；输入动作每次都询问。',
     });
+    if (!request.sensitive && request.grant) {
+      const minutes = Math.max(1, Math.round(request.grant.ttlSeconds / 60));
+      options.push({
+        choice: 'always',
+        label: `允许 ${minutes} 分钟`,
+        description: `本回合内的输入动作不再逐次询问；到期、本回合结束或按 Esc 都会失效，敏感场景仍然逐次确认。`,
+      });
+    }
   }
   options.push({
     choice: 'reject',
@@ -144,7 +173,9 @@ export function computerUseApprovalReason(request: ComputerUseApprovalRequest): 
     return `敏感场景（${request.sensitive}）需要你确认后才能继续。`;
   }
   if (request.risk === 'input') {
-    return '输入动作会改变页面或系统状态，需要你放行。';
+    return request.grant
+      ? '输入动作会改变系统状态，需要你放行；也可以给本回合几分钟的授权。'
+      : '输入动作会改变页面或系统状态，需要你放行。';
   }
   return '只读观测需要你确认（可本会话记住）。';
 }

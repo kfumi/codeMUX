@@ -68,6 +68,8 @@ pub struct CompanionInner {
     pub driver: crate::computer_use::driver::DriverHost,
     /// 步数护栏(工单 03/06):回合内的输入动作计数。
     pub step_budget: crate::computer_use::guard::StepBudget,
+    /// 限时控制会话(工单 13):人工给出的输入授权,按 (会话, 回合) 记账。
+    pub control_sessions: crate::computer_use::guard::ControlSessions,
     /// 回环浏览器简化配对(工单 02):同机浏览器的待确认配对请求表。
     pub local_pairing: crate::companion::local_pairing::LocalPairingRegistry,
 }
@@ -99,6 +101,7 @@ impl CompanionInner {
             page_context: crate::computer_use::page_context::PageContextCache::new(),
             driver: crate::computer_use::driver::DriverHost::new(),
             step_budget: crate::computer_use::guard::StepBudget::new(),
+            control_sessions: crate::computer_use::guard::ControlSessions::new(),
             local_pairing: crate::companion::local_pairing::LocalPairingRegistry::new(),
         }
     }

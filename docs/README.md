@@ -72,6 +72,7 @@
 | [2026-09-30-turn-artifact-summary-fact-check.md](research/2026-09-30-turn-artifact-summary-fact-check.md) | Turn 级产物汇总事实核查:各 Agent Kind 工具实测、Codex 与 CLI 同步兼容性、真实多卡片实例、两端行数分歧量化、回填否决 |
 | [2026-10-07-computer-use-plugin-research.md](research/2026-10-07-computer-use-plugin-research.md) | Agent Computer Use 电脑控制调研与落地建议 |
 | [2026-10-07-computer-use-capability-matrix.md](research/2026-10-07-computer-use-capability-matrix.md) | 电脑控制能力矩阵与铺开验收记录（工单 07） |
+| [2026-10-09-reference-plugin-method-inventory.md](research/2026-10-09-reference-plugin-method-inventory.md) | 参考插件方法面清单与 CodeMUX 差异（工单 13 附件） |
 
 ### specs
 
@@ -176,7 +177,7 @@
 | [codex-app-server-migration](tickets/codex-app-server-migration/) | 13 | [2026-08-22](specs/2026-08-22-codex-app-server-migration.md) |
 | [codex-collab-subagent-parity](tickets/codex-collab-subagent-parity/) | 3 | [2026-09-20](specs/2026-09-20-codex-collab-subagent-parity.md) |
 | [companion-pairing-evolution](tickets/companion-pairing-evolution/) | 9 | [2026-08-16](specs/2026-08-16-companion-pairing-evolution.md) + [map](plans/2026-08-16-companion-pairing-evolution-map.md) |
-| [computer-use](tickets/computer-use/) | 12 | [2026-10-07](specs/2026-10-07-computer-use.md) |
+| [computer-use](tickets/computer-use/) | 13 | [2026-10-07](specs/2026-10-07-computer-use.md) |
 | [daemon-boundary](tickets/daemon-boundary/) | 12 | [2026-09-07](specs/2026-09-07-daemon-boundary.md) |
 | [electron-shell-swap](tickets/electron-shell-swap/) | 9 | [2026-09-11](specs/2026-09-11-electron-shell-swap.md) |
 | [enhance-agent-runtime-detection](tickets/enhance-agent-runtime-detection/) | 2 | [2026-07-25](specs/2026-07-25-enhance-agent-runtime-detection.md) |

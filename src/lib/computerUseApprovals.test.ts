@@ -48,6 +48,8 @@ describe('parseComputerUseApprovalEvent', () => {
         risk: 'input',
         sensitive: null,
         rememberable: false,
+        // 这一帧没有 limit 授权字段:界面就不该出现「允许 N 分钟」。
+        grant: null,
         params: { elementId: 'e7', text: '<已脱敏 12 字>' },
       },
     });
@@ -110,10 +112,25 @@ describe('granularity options', () => {
     expect(options.map((option) => option.choice)).toEqual(['once', 'always', 'reject']);
   });
 
-  it('never offers session memory for input actions', () => {
+  it('never offers session memory for input actions without a grant', () => {
     const options = computerUseApprovalOptions(request({ risk: 'input' }));
     expect(options.map((option) => option.choice)).toEqual(['once', 'reject']);
     expect(options[0].description).toContain('每次都询问');
+  });
+
+  it('offers a time-boxed grant for input actions when the daemon allows one', () => {
+    const withGrant = request({
+      risk: 'input',
+      rememberable: true,
+      grant: { ttlSeconds: 180, scope: '本回合的输入动作' },
+    });
+    const options = computerUseApprovalOptions(withGrant);
+    expect(options.map((option) => option.choice)).toEqual(['once', 'always', 'reject']);
+    const grant = options.find((option) => option.choice === 'always');
+    expect(grant?.label).toBe('允许 3 分钟');
+    expect(grant?.description).toContain('本回合');
+    expect(grant?.description).toContain('Esc');
+    expect(computerUseApprovalReason(withGrant)).toContain('授权');
   });
 
   it('never offers session memory for sensitive scenarios', () => {
@@ -122,6 +139,37 @@ describe('granularity options', () => {
     );
     expect(options.map((option) => option.choice)).toEqual(['once', 'reject']);
     expect(computerUseApprovalReason(request({ sensitive: '支付' }))).toContain('敏感场景（支付）');
+  });
+
+  it('never offers a grant to sensitive scenarios even if the daemon sent one', () => {
+    // 敏感场景不给授权:daemon 已把它压成不 rememberable,界面这层再兜一次。
+    const options = computerUseApprovalOptions(
+      request({
+        risk: 'input',
+        sensitive: '支付',
+        rememberable: true,
+        grant: { ttlSeconds: 180 },
+      }),
+    );
+    expect(options.map((option) => option.choice)).toEqual(['once', 'reject']);
+  });
+
+  it('ignores a malformed grant frame instead of trusting the label', () => {
+    const parsed = parseComputerUseApprovalEvent({
+      type: 'computer-use-approval-request',
+      requestId: 'req-g',
+      risk: 'input',
+      rememberable: true,
+      grant: { ttlSeconds: '180' },
+    });
+    expect(parsed?.kind).toBe('request');
+    if (parsed?.kind === 'request') {
+      expect(parsed.request.grant).toBeNull();
+      expect(computerUseApprovalOptions(parsed.request).map((option) => option.choice)).toEqual([
+        'once',
+        'reject',
+      ]);
+    }
   });
 
   it('falls back to per-step approval when the daemon marks a read-only op unrememberable', () => {

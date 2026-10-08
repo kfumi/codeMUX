@@ -199,6 +199,8 @@ describe('窗口进程身份与矩形', () => {
         id: 'window:100:0',
         name: '记事本',
         kind: 'window',
+        // windowId 与来源 id 里的 hwnd 同值:桌面输入工具用它寻址。
+        windowId: 100,
         processId: 4242,
         parentProcessId: 100,
         processName: 'CodeMUX.exe',

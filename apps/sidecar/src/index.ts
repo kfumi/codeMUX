@@ -44,10 +44,12 @@ import type { PiApprovalMode } from './piExtension.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
   buildClaudeModeBlockedEvent,
+  getActivePermissionState,
   permissionGateFor,
   resolveClaudeToolRuntimeDecision,
   setActivePermissionState,
 } from './activePermissionState.js';
+import { detectShellInputSynthesis, shellInputSynthesisMessage } from './shellInputSynthesis.js';
 import {
   buildClaudeUserMessageContent,
   getDisplayPayloadAttachments,
@@ -1293,6 +1295,38 @@ export class SessionRuntime {
             message: answer || '用户未批准退出计划模式。',
             toolUseID: toolUseId,
           };
+        }
+
+        // shell 合成键鼠输入的预检(工单 13):刻意放在一切「自动放行」之前 ——
+        // 权限档位再宽松也不放行这一类命令。桌面操作有 computer_* 工具面:
+        // 那条路有审批、有目标裁决、有审计;`powershell -c mouse_event` 没有。
+        if (toolName === 'Bash') {
+          const hit = detectShellInputSynthesis(
+            typeof input.command === 'string' ? input.command : '',
+          );
+          if (hit) {
+            const message = shellInputSynthesisMessage(hit);
+            // 走既有的「工具被权限门拦下」事件形状(界面已会渲染),
+            // 换一个 reasonCode 说明是「绕过 GUI 闸门」这一类,不是权限档位。
+            emit(
+              buildClaudeModeBlockedEvent({
+                toolName,
+                toolUseId,
+                effectiveMode:
+                  getActivePermissionState({
+                    sessionId: config.sessionId,
+                    agentKind: 'claude_code',
+                  })?.effectiveMode ?? 'code',
+                reasonCode: 'shell_input_synthesis_blocked',
+                gate: permissionGateFor('claude_code'),
+              }),
+            );
+            writeLog(
+              'warn',
+              `[sidecar] blocked a shell command that synthesizes input (${hit.code}: ${hit.signal})`,
+            );
+            return { behavior: 'deny', message, toolUseID: toolUseId };
+          }
         }
 
         const filePath = typeof input.file_path === 'string' ? input.file_path : null;

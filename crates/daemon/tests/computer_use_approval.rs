@@ -167,6 +167,27 @@ where
     }
 }
 
+/// 读下一条带事件体的帧(用于断言「某类事件没有出现」)。
+async fn read_next_event<S>(read: &mut S) -> serde_json::Value
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let deadline = Duration::from_secs(5);
+    loop {
+        let message = tokio::time::timeout(deadline, read.next())
+            .await
+            .expect("event in time")
+            .expect("stream open")
+            .expect("message ok");
+        let text = message.to_string();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            if value.get("event").is_some() {
+                return value;
+            }
+        }
+    }
+}
+
 async fn execute(port: u16, token: &str, op: &str, tool: &str) -> (u16, serde_json::Value) {
     http_json(
         port,
@@ -201,7 +222,13 @@ async fn rejecting_an_approval_blocks_the_step_with_a_model_facing_message() {
     );
     let approval = read_event(&mut ws, "computer-use-approval-request").await;
     assert_eq!(approval["event"]["risk"], "input");
-    assert_eq!(approval["event"]["rememberable"], false, "输入动作不可记住");
+    // 输入动作不给「本会话记住」,给的是**限时授权**(工单 13):界面据此渲染
+    // 「允许 N 分钟」,而那个授权按 (会话, 回合) 记账、到期与 Esc 都会收回。
+    assert_eq!(
+        approval["event"]["grant"]["ttlSeconds"], 180,
+        "输入动作应带限时授权时长: {approval:?}"
+    );
+    assert_eq!(approval["event"]["grant"]["scope"], "本回合的输入动作");
 
     let request_id = approval["event"]["requestId"].as_str().expect("requestId");
     let (status, _) = http_json(
@@ -418,6 +445,102 @@ async fn step_budget_stops_the_loop_at_the_configured_limit() {
         .is_err(),
         "额度用尽后不该再弹放行请求"
     );
+
+    stop(&fixture).await;
+}
+
+/// 工单 13:输入动作上的「允许 N 分钟」是**限时授权**,不是「记住」——
+/// 授权内同一会话同一回合的后续输入不再弹卡;新回合不继承,到期与 Esc 收回。
+#[tokio::test]
+async fn a_time_boxed_grant_covers_later_input_actions_in_the_same_turn() {
+    const SESSION: &str = "session-control-grant";
+    let fixture = start_fixture().await;
+    // 两条流各司其职:审批请求走会话流(界面在看),自动化请求走控制面(壳在听)。
+    let mut session_ws = connect_session(fixture.port, &fixture.token, SESSION).await;
+    let mut control_ws = connect_control(fixture.port, &fixture.token).await;
+
+    // 第一步:审批卡选「允许 N 分钟」(always)。
+    let pending = tokio::spawn({
+        let token = fixture.token.clone();
+        let port = fixture.port;
+        async move { execute_in_session(port, &token, SESSION, "click", "browser_click").await }
+    });
+    let approval = read_event(&mut session_ws, "computer-use-approval-request").await;
+    assert_eq!(approval["event"]["grant"]["ttlSeconds"], 180);
+    let request_id = approval["event"]["requestId"].as_str().expect("requestId");
+    let (status, _) = http_json(
+        fixture.port,
+        "POST",
+        "/api/computer-use/approval",
+        Some(&fixture.token),
+        serde_json::json!({ "requestId": request_id, "choice": "always" }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let automation = read_event(&mut control_ws, "browser-automation-request").await;
+    let automation_id = automation["event"]["requestId"]
+        .as_str()
+        .expect("automation requestId");
+    let _ = http_json(
+        fixture.port,
+        "POST",
+        "/api/browser-automation/result",
+        Some(&fixture.token),
+        serde_json::json!({ "requestId": automation_id, "ok": true, "payload": null }),
+    )
+    .await;
+    let (status, body) = pending.await.expect("execute 应结束");
+    assert_eq!(status, 200, "授权后第一步应成功: {body:?}");
+
+    // 第二步:同一会话同一回合,授权内直接下到执行侧 —— 中间不该再出现审批卡。
+    let pending = tokio::spawn({
+        let token = fixture.token.clone();
+        let port = fixture.port;
+        async move { execute_in_session(port, &token, SESSION, "click", "browser_click").await }
+    });
+    let mut saw_approval = false;
+    let automation = loop {
+        let event = read_next_event(&mut control_ws).await;
+        match event["event"]["type"].as_str() {
+            Some("computer-use-approval-request") => saw_approval = true,
+            Some("browser-automation-request") => break event,
+            _ => {}
+        }
+    };
+    assert!(!saw_approval, "限时授权内不应再次弹审批卡");
+    let automation_id = automation["event"]["requestId"]
+        .as_str()
+        .expect("automation requestId");
+    let _ = http_json(
+        fixture.port,
+        "POST",
+        "/api/browser-automation/result",
+        Some(&fixture.token),
+        serde_json::json!({ "requestId": automation_id, "ok": true, "payload": null }),
+    )
+    .await;
+    let (status, body) = pending.await.expect("execute 应结束");
+    assert_eq!(status, 200, "授权内第二步应放行: {body:?}");
+
+    // 新回合(回合代次自增)不继承授权:又要问人。
+    let _epoch = fixture.daemon.companion.mark_turn_active(SESSION);
+    let pending = tokio::spawn({
+        let token = fixture.token.clone();
+        let port = fixture.port;
+        async move { execute_in_session(port, &token, SESSION, "click", "browser_click").await }
+    });
+    let approval = read_event(&mut session_ws, "computer-use-approval-request").await;
+    assert_eq!(approval["event"]["op"], "click", "新回合必须重新问人");
+    let request_id = approval["event"]["requestId"].as_str().expect("requestId");
+    let _ = http_json(
+        fixture.port,
+        "POST",
+        "/api/computer-use/approval",
+        Some(&fixture.token),
+        serde_json::json!({ "requestId": request_id, "choice": "reject" }),
+    )
+    .await;
+    let _ = pending.await;
 
     stop(&fixture).await;
 }

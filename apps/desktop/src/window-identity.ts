@@ -31,6 +31,13 @@ export interface WindowIdentity {
 
 /** 拼进 payload 的身份字段(身份缺失时不带任何字段,daemon 按标题回退裁决)。 */
 export interface WindowIdentityFields {
+  /**
+   * 窗口号(即 hwnd)——桌面输入工具(`computer_click` 等)的寻址字段。
+   *
+   * 与来源 id 里的 hwnd 是同一个值:模型在窗口清单里一次拿齐「截哪扇窗」
+   * 与「点哪扇窗」,不必自己去解析来源 id。
+   */
+  windowId?: number;
   processId?: number;
   parentProcessId?: number;
   processName?: string;
@@ -128,6 +135,7 @@ export function identityOfSource(
 export function identityFields(identity: WindowIdentity | undefined): WindowIdentityFields {
   if (!identity) return {};
   return {
+    windowId: identity.hwnd,
     processId: identity.processId,
     ...(identity.parentProcessId !== undefined
       ? { parentProcessId: identity.parentProcessId }

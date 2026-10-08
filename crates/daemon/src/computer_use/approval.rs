@@ -30,7 +30,8 @@ use super::page_context::PageContextCache;
 /// 参数里属于秘密的值:审计与审批卡只存/展示长度,不落原文(需求 19)。
 ///
 /// `keyCode` 也算:单个按键不敏感,但按键序列连起来就是输入内容。
-const SECRET_PARAM_KEYS: [&str; 3] = ["text", "keys", "keyCode"];
+/// `value` 是写进控件的内容,与 `text` 同类。
+const SECRET_PARAM_KEYS: [&str; 4] = ["text", "keys", "keyCode", "value"];
 
 /// 递归脱敏:秘密键的字符串值换成 `<已脱敏 N 字>`。
 pub fn redact_params(value: &serde_json::Value) -> serde_json::Value {
@@ -102,6 +103,65 @@ pub fn action_summary(op: &str, params: &serde_json::Value) -> String {
         "desktop-windows" => "列出桌面窗口".to_string(),
         "desktop-screenshot" => "截取桌面或窗口".to_string(),
         "desktop-active-window" => "读取活动窗口信息".to_string(),
+        "desktop-apps" => "列出桌面应用".to_string(),
+        "desktop-elements" => "读取窗口的可访问性元素".to_string(),
+        "desktop-wait" => "等待窗口里的某个条件成立".to_string(),
+        "desktop-click" => match params
+            .get("elementIndex")
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(index) => format!("在窗口里点击控件 #{index}"),
+            None => "在窗口里点击指定坐标".to_string(),
+        },
+        "desktop-type" => {
+            let chars = params
+                .get("text")
+                .and_then(|value| value.as_str())
+                .map(|text| text.chars().count())
+                .unwrap_or(0);
+            format!("向窗口输入 {chars} 个字符")
+        }
+        "desktop-key" => {
+            let key = params
+                .get("key")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            let modifiers = params
+                .get("modifiers")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .collect::<Vec<_>>()
+                        .join("+")
+                })
+                .filter(|text| !text.is_empty());
+            match modifiers {
+                Some(modifiers) => format!("向窗口发送组合键 {modifiers}+{key}"),
+                None => format!("向窗口发送按键 {key}"),
+            }
+        }
+        "desktop-paste" => {
+            let chars = params
+                .get("text")
+                .and_then(|value| value.as_str())
+                .map(|text| text.chars().count())
+                .unwrap_or(0);
+            format!("把剪贴板里的 {chars} 个字符粘贴进窗口(会覆盖系统剪贴板)")
+        }
+        "desktop-scroll" => "在窗口里滚动".to_string(),
+        "desktop-drag" => "在窗口里拖拽".to_string(),
+        "desktop-set-value" => "设置窗口里控件的值".to_string(),
+        "desktop-launch" => {
+            let name = params
+                .get("name")
+                .or_else(|| params.get("path"))
+                .or_else(|| params.get("launchPath"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            format!("启动应用 {name}")
+        }
         other => format!("执行 {other}"),
     }
 }
@@ -113,6 +173,11 @@ pub struct GateInput<'a> {
     pub op: &'a str,
     pub params: &'a serde_json::Value,
     pub browser_id: Option<&'a str>,
+    /// 这一步动作的目标(桌面动作是窗口标题/应用名;浏览器动作没有)。
+    ///
+    /// 敏感判定要看目标而不只看参数:往一个标题带「登录」的窗口里输入,
+    /// 参数里可能一个敏感词都没有。
+    pub target: Option<&'a str>,
 }
 
 /// 闸门裁决结果:Ok(()) 放行,Err(文案) 拦截(文案面向模型)。
@@ -129,7 +194,7 @@ impl GateDenied {
 }
 
 /// 敏感判定:浏览器级看快照留下的页面上下文(密码框/URL/标签),
-/// 再叠加参数原文(桌面与驱动级只有参数可看)。
+/// 再叠加参数原文与目标(桌面动作的目标是窗口标题/应用名)。
 fn detect_sensitive(
     page_context: &PageContextCache,
     input: &GateInput<'_>,
@@ -142,7 +207,12 @@ fn detect_sensitive(
         .sensitivity(input.browser_id, element_id)
         .or_else(|| {
             let params_text = input.params.to_string();
-            guard::sensitivity_of(&[input.tool, input.op, params_text.as_str()])
+            guard::sensitivity_of(&[
+                input.tool,
+                input.op,
+                params_text.as_str(),
+                input.target.unwrap_or(""),
+            ])
         })
 }
 
@@ -172,7 +242,17 @@ pub async fn gate(
         )
     });
 
-    let decision = guard::decide(class, sensitive, remembered);
+    // 限时控制会话(工单 13):只对输入动作且非敏感的那一格生效;键里带
+    // 回合代次,所以上一回合给的授权不会被本回合继承。
+    let granted = step_scope.as_ref().is_some_and(|(session_id, epoch)| {
+        companion
+            .inner
+            .control_sessions
+            .active(session_id, *epoch)
+            .is_some()
+    });
+
+    let decision = guard::decide_with_grant(class, sensitive, remembered, granted);
     let GateDecision::Ask { rememberable } = decision else {
         charge_step(app, companion, input, &step_scope, max_steps, class)?;
         return Ok(());
@@ -202,6 +282,10 @@ pub async fn gate(
         risk: class,
         sensitive,
         rememberable,
+        // 输入动作上给界面一次「限时授权」的选项(只读没有这个概念);
+        // 敏感场景不出这个选项(decide 已把 rememberable 压成 false)。
+        grant_seconds: (class == RiskClass::Input && rememberable)
+            .then_some(guard::CONTROL_SESSION_TTL.as_secs()),
     };
 
     let rx = companion.inner.approvals.register(&request_id).await;
@@ -277,9 +361,23 @@ pub async fn gate(
                 "用户拦截了「{summary}」。不要重试这一步;如确有必要,先向用户说明再等新指令。"
             )))
         }
+        ApprovalChoice::Always if class == RiskClass::Input => {
+            // 输入动作上的「always」不是「记住」,是**限时授权**(工单 13):
+            // 只在当前回合作数、到期自动失效、敏感场景不适用、Esc 可收回。
+            let Some((session_id, epoch)) = &step_scope else {
+                // 没有会话归属(手工直连)时退化成一放一步,不给跨调用的授权。
+                record_decision(app, input, sensitive, "allow-once", true, None);
+                return charge_step(app, companion, input, &step_scope, max_steps, class);
+            };
+            companion
+                .inner
+                .control_sessions
+                .grant(session_id, *epoch, guard::CONTROL_SESSION_TTL);
+            record_decision(app, input, sensitive, "allow-control-session", true, None);
+            charge_step(app, companion, input, &step_scope, max_steps, class)
+        }
         ApprovalChoice::Always => {
-            // 「按会话记住」只在 rememberable 时生效:输入动作与敏感场景
-            // 即便界面给了 always 也按单步放行处理。
+            // 「按会话记住」只覆盖只读:敏感场景的 always 也按单步放行处理。
             let remembered = rememberable;
             if remembered {
                 if let Some(session_id) = input.session_id {
@@ -383,6 +481,8 @@ pub struct ApprovalRequestSpec {
     pub risk: RiskClass,
     pub sensitive: Option<&'static str>,
     pub rememberable: bool,
+    /// 界面可提供的限时授权时长(输入动作有,只读没有)。
+    pub grant_seconds: Option<u64>,
 }
 
 pub fn build_approval_request_event(
@@ -401,6 +501,10 @@ pub fn build_approval_request_event(
             "risk": spec.risk,
             "sensitive": spec.sensitive,
             "rememberable": spec.rememberable,
+            "grant": spec.grant_seconds.map(|seconds| serde_json::json!({
+                "ttlSeconds": seconds,
+                "scope": "本回合的输入动作",
+            })),
             "params": redacted_params,
         }),
     }
@@ -551,6 +655,8 @@ mod tests {
             risk: RiskClass::Input,
             sensitive: None,
             rememberable: false,
+            // 输入动作会带上限时授权时长,界面据此给出「允许 N 分钟」。
+            grant_seconds: Some(guard::CONTROL_SESSION_TTL.as_secs()),
         };
         let event = build_approval_request_event(&spec, &json!({ "elementId": "e3" }));
         assert_eq!(event.session_id, "session-1");
@@ -559,6 +665,28 @@ mod tests {
         assert_eq!(event.event["risk"], "input");
         assert_eq!(event.event["rememberable"], false);
         assert_eq!(event.event["params"]["elementId"], "e3");
+        assert_eq!(event.event["grant"]["ttlSeconds"], json!(180));
+        assert_eq!(event.event["grant"]["scope"], "本回合的输入动作");
+    }
+
+    #[test]
+    fn a_read_only_request_carries_no_grant_option() {
+        let spec = ApprovalRequestSpec {
+            request_id: "req-2".to_string(),
+            session_id: Some("session-1".to_string()),
+            tool: "browser_snapshot".to_string(),
+            op: "snapshot".to_string(),
+            summary: "读取页面快照".to_string(),
+            risk: RiskClass::ReadOnly,
+            sensitive: None,
+            rememberable: true,
+            grant_seconds: None,
+        };
+        let event = build_approval_request_event(&spec, &json!({}));
+        assert!(
+            event.event["grant"].is_null(),
+            "只读没有限时授权这一说:它有「本会话记住」"
+        );
     }
 
     #[test]

@@ -171,6 +171,35 @@ impl BrowserMcpRuntime {
             .map_err(|e| format!("daemon 响应解析失败: {}", e))?;
         interpret_automation_response(status.is_success(), &body)
     }
+
+    /// 桌面工具(工单 13):转发到 daemon 的 `/api/computer-use/execute`。
+    ///
+    /// 与浏览器侧同一个鉴权(回环 + Local Daemon Token);闸门、动作前裁决与
+    /// 审计都在 daemon 侧,这里只做转达 —— 模型不该因为换了条通道就少一道关。
+    pub async fn call_desktop(&self, tool: &str, params: Value) -> Result<Value, String> {
+        let (port, token) = self.endpoint()?;
+        let response = self
+            .http
+            .post(format!(
+                "http://127.0.0.1:{}/api/computer-use/execute",
+                port
+            ))
+            .bearer_auth(&token)
+            .json(&json!({
+                "tool": tool,
+                "params": params,
+                "sessionId": self.session_id,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("连接 daemon 失败: {}", e))?;
+        let status = response.status();
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|e| format!("daemon 响应解析失败: {}", e))?;
+        interpret_automation_response(status.is_success(), &body)
+    }
 }
 
 /// 自动化回包 → 工具结果的映射(纯函数,便于逐例测试)。
@@ -331,6 +360,182 @@ fn tool_definitions() -> Value {
             "name": "computer_active_window",
             "description": "读取当前前台窗口(标题、进程、位置,以及可用于截图的来源 id)。读不到时明确报错,不会拿别的窗口冒充。",
             "inputSchema": { "type": "object", "properties": {} },
+        },
+        {
+            "name": "computer_apps",
+            "description": "列出桌面应用(运行中与已安装,含 pid、可执行文件与启动路径)。只读;宿主的进程与内置拒绝范围(密码管理器/终端/安全中心)不出现在清单里。判断某个应用是否装着、在跑,或取启动用的名字/路径时用它。",
+            "inputSchema": { "type": "object", "properties": {} },
+        },
+        {
+            "name": "computer_elements",
+            "description": "读取某个窗口的可访问性元素树(role/label/value/frame/element_index)并附窗口截图。**这是桌面动作的目标来源**:windowId 与 processId 从 computer_windows 取。任何用 elementIndex 的动作都必须先用本工具取一次(索引按窗口缓存,动作后失效,要重新取);像素坐标必须取本工具回图里的窗口内像素(左上角原点),不要拿整屏截图的坐标来算。回图与树可能自报不完整(truncated/degraded/escalation):树不完整时「没看到某个元素」不能当成不存在;树为空(ax_tree_empty)说明该窗口没有可访问性节点(画布/视频/自绘),按回图用像素坐标动作。readValue 可按控件名精确读一个值(唯一匹配才给;敏感控件拒绝读)。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number", "description": "目标进程号(computer_windows 的 processId)" },
+                    "windowId": { "type": "number", "description": "目标窗口号(computer_windows 的 windowId)" },
+                    "includeScreenshot": { "type": "boolean", "description": "是否附带截图(默认 true)" },
+                    "query": { "type": "string", "description": "只保留名字含该子串的元素及其祖先(树很大时用)" },
+                    "maxElements": { "type": "number", "description": "元素上限,默认 400" },
+                    "maxDepth": { "type": "number", "description": "树深上限,默认 20" },
+                    "maxImageDimension": { "type": "number", "description": "截图长边上限,默认 1280;0 = 原始分辨率" },
+                    "readValue": {
+                        "type": "object",
+                        "description": "精确读一个控件的值;name 必须与元素 label 完全一致,可用 role 消歧",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "role": { "type": "string" },
+                        },
+                        "required": ["name"],
+                    },
+                },
+                "required": ["processId", "windowId"],
+            },
+        },
+        {
+            "name": "computer_wait",
+            "description": "等待窗口里的一个条件成立(只读轮询):text_present / text_absent(按 label 或值的子串)、value_equals / value_changed(按控件名精确匹配,唯一命中才算)。超时不等于成功;返回 status=timeout 或 reason=incomplete_tree(树不完整,无法证明不存在)时都要先 computer_elements 看一眼再决定下一步,不要盲目重试。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "kind": { "type": "string", "description": "text_present、text_absent、value_equals、value_changed" },
+                    "text": { "type": "string", "description": "text_present/text_absent 要等的文本(子串,大小写不敏感)" },
+                    "name": { "type": "string", "description": "value_equals/value_changed 的控件名(与 label 完全一致)" },
+                    "value": { "type": "string", "description": "value_equals 的目标值" },
+                    "baseline": { "type": "string", "description": "value_changed 的基线值" },
+                    "timeoutMs": { "type": "number", "description": "默认 10000,上限 30000" },
+                    "pollIntervalMs": { "type": "number", "description": "默认 500,下限 100" },
+                },
+                "required": ["processId", "windowId", "kind"],
+            },
+        },
+        {
+            "name": "computer_click",
+            "description": "在窗口里点击:优先用 elementIndex(背景投递,不抢焦点、不移动鼠标,能点到最小化/被遮挡的窗口);只对画布/视频/自绘目标才用 x,y(窗口内截图像素,取 computer_elements 的回图)。先 computer_elements 取元素与图,动作后重新取一次看变化。默认 background;不要在没试过background 之前就用 foreground —— 驱动会在后台实在做不到时明确报 background_unavailable,那时才改用 foreground(会短暂抢焦点)。没有反应不要原样重放。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "elementIndex": { "type": "number", "description": "computer_elements 给的元素编号(与 x/y 二选一)" },
+                    "x": { "type": "number", "description": "窗口内截图像素 x(与 elementIndex 二选一)" },
+                    "y": { "type": "number" },
+                    "button": { "type": "string", "description": "left(默认)、right、middle" },
+                    "count": { "type": "number", "description": "点击次数,默认 1;双击用 2" },
+                    "deliveryMode": { "type": "string", "description": "background(默认)或 foreground" },
+                    "snapshotId": { "type": "string", "description": "computer_elements 回包里的 snapshot_id;带上可让驱动校验索引未过期" },
+                },
+                "required": ["processId", "windowId"],
+            },
+        },
+        {
+            "name": "computer_type",
+            "description": "向窗口输入文字(不抢焦点;XAML/UWP 目标必须给 elementIndex,驱动会走 Value 模式)。只输入文字,回车/Tab 这类按键用 computer_key。输入内容不进日志与审批历史。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "elementIndex": { "type": "number", "description": "目标输入控件;XAML/UWP 目标必填" },
+                    "text": { "type": "string" },
+                    "delayMs": { "type": "number", "description": "逐字符间隔,默认 30,上限 200" },
+                    "deliveryMode": { "type": "string" },
+                },
+                "required": ["processId", "text"],
+            },
+        },
+        {
+            "name": "computer_key",
+            "description": "向窗口发送一个按键或组合键(key + modifiers,如 key=return;key=s + modifiers=[ctrl])。目标不需要在前台。带 Ctrl/Win 的组合键在旧式 Win32 目标上会短暂切换前台后再还原。不确定结果时先 computer_elements 看状态,不要重放。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "elementIndex": { "type": "number" },
+                    "key": { "type": "string", "description": "return、tab、escape、up/down/left/right、space、delete、home、end、pageup、pagedown、f1-f12、字母或数字" },
+                    "modifiers": { "type": "array", "items": { "type": "string" }, "description": "ctrl、shift、alt、win 的组合" },
+                    "deliveryMode": { "type": "string" },
+                },
+                "required": ["processId", "key"],
+            },
+        },
+        {
+            "name": "computer_paste",
+            "description": "把文本经系统剪贴板粘贴进目标窗口的当前焦点控件(对话、原生保存框这类只认粘贴的控件用它)。**会覆盖系统剪贴板**;粘贴对象是窗口里当前有焦点的控件,所以先用 computer_elements 确认焦点位置。内容不落日志。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "text": { "type": "string" },
+                },
+                "required": ["processId", "text"],
+            },
+        },
+        {
+            "name": "computer_scroll",
+            "description": "滚动窗口或控件(direction + by + amount,默认按页滚一屏)。背景投递,不抢焦点。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "elementIndex": { "type": "number" },
+                    "direction": { "type": "string", "description": "up、down、left、right" },
+                    "by": { "type": "string", "description": "page(默认)或 line" },
+                    "amount": { "type": "number", "description": "滚动量,默认 1" },
+                    "deliveryMode": { "type": "string" },
+                },
+                "required": ["processId", "direction"],
+            },
+        },
+        {
+            "name": "computer_drag",
+            "description": "在窗口里按住拖动(窗口内截图像素,取 computer_elements 的回图)。从标题栏/边框起拖是移动/缩放窗口,后台做不到,会报 background_unavailable —— 那种情况才用 foreground。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "fromX": { "type": "number" },
+                    "fromY": { "type": "number" },
+                    "toX": { "type": "number" },
+                    "toY": { "type": "number" },
+                    "durationMs": { "type": "number", "description": "默认 500" },
+                    "deliveryMode": { "type": "string" },
+                },
+                "required": ["processId", "fromX", "fromY", "toX", "toY"],
+            },
+        },
+        {
+            "name": "computer_set_value",
+            "description": "直接设置控件值(走可访问性 Value 模式,后台完成、不模拟按键)。适合下拉框按文本选项、滑块、标准输入框;网页类自绘输入框可能忽略这种写法,那就改用 computer_type。elementIndex 必须来自最近一次 computer_elements。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "elementIndex": { "type": "number" },
+                    "value": { "type": "string" },
+                    "snapshotId": { "type": "string" },
+                },
+                "required": ["processId", "windowId", "elementIndex", "value"],
+            },
+        },
+        {
+            "name": "computer_launch",
+            "description": "启动一个应用(不需要它已经在跑;后台启动,不抢焦点)。给 name(应用名)、path(可执行文件路径)或 launchPath 之一。内置拒绝范围里应用(密码管理器、终端、安全中心)会被拒绝。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "path": { "type": "string" },
+                    "launchPath": { "type": "string" },
+                },
+            },
         },
     ])
 }
@@ -498,10 +703,21 @@ async fn call_tool(
                 .call_execute(name, "desktop-active-window", None, json!({}))
                 .await
         }
+        // 桌面输入与可访问性树(工单 13):驱动的窗口级能力,daemon 侧过闸门。
+        _ if crate::computer_use::desktop::op_for_tool(name).is_some() => {
+            runtime
+                .call_desktop(name, Value::Object(args.clone()))
+                .await
+        }
         other => Err(format!("未知工具: {}(见 tools/list)", other)),
     };
     Ok(match result {
         Ok(payload) => match (name, payload) {
+            // 桌面工具的回包已经是 MCP 形状(content 数组,可能带图):
+            // 原样带走,错误标志如实转达(措辞归驱动,见 shape_desktop_payload)。
+            (name, payload) if crate::computer_use::desktop::op_for_tool(name).is_some() => {
+                shape_desktop_payload(&payload)
+            }
             ("browser_snapshot", Value::Object(map)) => {
                 let screenshot = map.get("screenshot").and_then(|v| v.as_str()).unwrap_or("");
                 let mut summary = map.clone();
@@ -546,6 +762,28 @@ async fn call_tool(
             "isError": true,
         }),
     })
+}
+
+/// 桌面工具的回包已经是 MCP 形状(content 数组,可能带图):原样带走,只把
+/// 驱动的 isError 如实转成工具错误。
+///
+/// 为什么不能压成一句话:驱动给的是**写给模型的原文**(例如
+/// `background_unavailable` 的下一步该改用 foreground),压扁就等于把
+/// 「失败理由」这类信息又吞一次。
+pub(crate) fn shape_desktop_payload(payload: &Value) -> Value {
+    let is_error = payload
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let content = payload
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| json!([{ "type": "text", "text": "驱动没有返回内容" }]));
+    let mut shaped = json!({ "content": content });
+    if is_error {
+        shaped["isError"] = json!(true);
+    }
+    shaped
 }
 
 /// stdio 主循环:按行读 JSON-RPC,应答写 stdout(逐行 flush)。EOF 或致命
@@ -692,24 +930,25 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("工具名"))
             .collect();
-        assert_eq!(
-            names,
-            [
-                "browser_list",
-                "browser_eval",
-                "browser_screenshot",
-                "browser_input",
-                "browser_cdp",
-                "browser_snapshot",
-                "browser_click",
-                "browser_type",
-                "browser_scroll",
-                "browser_select",
-                "computer_windows",
-                "computer_screenshot",
-                "computer_active_window",
-            ]
-        );
+        // 工具面覆盖全部 op 面:浏览器 op 一一对应,桌面只读三件套(04 票)按
+        // 「覆盖」断言,工单 13 的桌面工具面另有一份自己的 op 表(不走 execute)。
+        let mut expected = vec![
+            "browser_list",
+            "browser_eval",
+            "browser_screenshot",
+            "browser_input",
+            "browser_cdp",
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_scroll",
+            "browser_select",
+            "computer_windows",
+            "computer_screenshot",
+            "computer_active_window",
+        ];
+        expected.extend(crate::computer_use::desktop::DESKTOP_TOOL_NAMES);
+        assert_eq!(names, expected);
         // 工具面覆盖全部 op 面:每个合法 op 至少有一个工具能到达它(01 票的
         // 一一对应在 04 票加了桌面只读三件套,这里按「覆盖」而非「同名」断言)。
         let ops_reachable = [
@@ -807,5 +1046,92 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("连接 daemon 失败"));
+    }
+
+    // ---- 桌面工具面(工单 13) ----
+
+    #[test]
+    fn every_desktop_tool_is_listed_with_its_disciplines() {
+        let tools = tool_definitions();
+        let tools = tools.as_array().cloned().unwrap_or_default();
+        for name in crate::computer_use::desktop::DESKTOP_TOOL_NAMES {
+            let entry = tools
+                .iter()
+                .find(|tool| tool["name"] == json!(name))
+                .unwrap_or_else(|| panic!("tools/list 缺 {name}"));
+            let description = entry["description"].as_str().unwrap_or_default();
+            assert!(!description.trim().is_empty(), "{name} 要有面向模型的描述");
+            assert!(
+                entry["inputSchema"]["type"] == json!("object"),
+                "{name} 要有 inputSchema"
+            );
+        }
+        // 关键纪律必须写在描述里:寻址先取快照、坐标来自本工具回图、不要重放。
+        let elements = tools
+            .iter()
+            .find(|tool| tool["name"] == json!("computer_elements"))
+            .expect("computer_elements");
+        let description = elements["description"].as_str().unwrap_or_default();
+        assert!(description.contains("elementIndex") || description.contains("element_index"));
+        assert!(description.contains("窗口内像素") || description.contains("窗口内截图"));
+        let click = tools
+            .iter()
+            .find(|tool| tool["name"] == json!("computer_click"))
+            .expect("computer_click");
+        let description = click["description"].as_str().unwrap_or_default();
+        assert!(
+            description.contains("background_unavailable"),
+            "要写明后台优先与升级信号"
+        );
+        assert!(description.contains("不要原样重放") || description.contains("不要重放"));
+    }
+
+    #[test]
+    fn the_desktop_face_and_the_browser_face_do_not_share_names() {
+        let tools = tool_definitions();
+        let tools = tools.as_array().cloned().unwrap_or_default();
+        let mut names: Vec<String> = tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect();
+        let total = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), total, "工具名不能重复");
+    }
+
+    #[test]
+    fn a_driver_payload_keeps_its_image_and_its_error_flag() {
+        // 成功:图与结构化文本都原样带走。
+        let payload = json!({
+            "content": [
+                { "type": "image", "data": "iVBORw0K", "mimeType": "image/png" },
+                { "type": "text", "text": "tree_markdown" },
+            ],
+            "structuredContent": { "elements": [] },
+        });
+        let shaped = shape_desktop_payload(&payload);
+        assert_eq!(shaped["content"][0]["type"], json!("image"));
+        assert_eq!(shaped["content"][0]["data"], json!("iVBORw0K"));
+        assert!(shaped.get("isError").is_none(), "成功不置 isError");
+
+        // 驱动拒绝:原文保留、isError 置真。
+        let refusal = json!({
+            "content": [{ "type": "text", "text": "background_unavailable: 改用 delivery_mode=foreground 再试" }],
+            "isError": true,
+        });
+        let shaped = shape_desktop_payload(&refusal);
+        assert_eq!(shaped["isError"], json!(true));
+        assert!(shaped["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("background_unavailable"));
+
+        // 没有 content 也不能给模型一个空壳。
+        let shaped = shape_desktop_payload(&json!({}));
+        assert!(shaped["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("没有返回内容"));
     }
 }

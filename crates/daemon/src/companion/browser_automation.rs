@@ -315,6 +315,8 @@ async fn execute_browser_automation(
             op: &body.op,
             params: &body.params,
             browser_id: body.browser_id.as_deref(),
+            // 浏览器侧的敏感判定看页面上下文与参数;桌面工具才带目标窗口。
+            target: None,
         };
         if let Err(denied) = crate::computer_use::approval::gate(
             &app,

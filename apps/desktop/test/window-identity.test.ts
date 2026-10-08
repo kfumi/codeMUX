@@ -103,6 +103,8 @@ describe('来源 id ↔ 窗口句柄', () => {
     expect(identityOfSource('window:999:0', identities)).toBeUndefined();
     expect(identityFields(undefined)).toEqual({});
     expect(identityFields(identities[1])).toEqual({
+      // windowId 是桌面输入工具的寻址字段(与来源 id 里的 hwnd 同值)。
+      windowId: 197_100,
       processId: 5150,
       parentProcessId: 4242,
       processName: 'CodeMUX.exe',

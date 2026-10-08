@@ -363,6 +363,37 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
         .route("/computer-use/driver/install", post(install_driver))
         .route("/computer-use/policy", get(policy_snapshot))
         .route("/computer-use/audit", get(list_computer_use_audit))
+        .route("/computer-use/execute", post(execute_desktop_tool))
+}
+
+/// 桌面工具调用请求(内置 MCP server 转发;闸门与裁决都在 daemon 侧)。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopExecuteRequest {
+    tool: String,
+    #[serde(default)]
+    params: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+/// 桌面工具面(工单 13):驱动是执行者,闸门与动作前裁决在 daemon 侧。
+///
+/// 成功与「驱动侧拒绝」都回 `ok: true`(后者在 payload 里带 `isError`):
+/// 驱动给的是**面向模型的原文**,不该被我们压成一句话;我们自己的拒绝
+/// (闸门/策略/参数)才走 4xx + `{ok:false,error}`。
+async fn execute_desktop_tool(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<DesktopExecuteRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    match super::desktop::execute(&ctx, body.session_id.as_deref(), &body.tool, &body.params).await
+    {
+        Ok(payload) => Ok(Json(serde_json::json!({ "ok": true, "payload": payload }))),
+        Err(error) => Err(ApiError::forbidden(error)),
+    }
 }
 
 /// 鉴权复用审批端点那一份:同一道门(仅回环 + Local Daemon Token)。
@@ -452,6 +483,9 @@ async fn estop_driver(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
+    // 急停同时收回限时授权:刹车要一次踩到底,不能留着「授权还在、随时能动」
+    // 的尾巴。
+    let revoked = ctx.daemon.companion.inner.control_sessions.revoke_all();
     let killed = ctx.daemon.companion.inner.driver.estop().await;
     audit(
         &ctx,
@@ -463,7 +497,11 @@ async fn estop_driver(
             Some("急停时没有在跑的驱动")
         },
     );
-    Ok(Json(serde_json::json!({ "ok": true, "killed": killed })))
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "killed": killed,
+        "revokedControlSessions": revoked,
+    })))
 }
 
 async fn diagnose_driver(

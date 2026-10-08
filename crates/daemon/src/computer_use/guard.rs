@@ -32,15 +32,27 @@ pub enum RiskClass {
 }
 
 /// 只读操作集合(其余一切按输入动作收口,含没见过的 op)。
-pub const READ_ONLY_OPS: [&str; 7] = [
+pub const READ_ONLY_OPS: [&str; 10] = [
     "list",
     "snapshot",
     "screenshot",
     "desktop-windows",
     "desktop-screenshot",
     "desktop-active-window",
+    "desktop-apps",
+    "desktop-elements",
+    "desktop-wait",
     "driver-status",
 ];
+
+/// 限时控制会话的时长(工单 13)。
+///
+/// 桌面任务动一次鼠标就是一步,逐次弹窗没人受得了;但「整轮免问」又会把
+/// 「输入动作一次一放行」掏空。折中是**人工给一次限时授权**:在当下点一次
+/// 「允许 N 分钟」,这段时间里输入动作不再逐次问 —— 且授权**只在给出的那
+/// 一回合里作数**(回合边界即失效,新回合要重新给),敏感场景照旧逐次确认,
+/// 受保护目标照旧硬拒,Esc 急停立即收回。
+pub const CONTROL_SESSION_TTL: Duration = Duration::from_secs(180);
 
 /// 敏感场景触发词表:`(匹配词, 面向用户的中文场景名)`。
 ///
@@ -128,13 +140,28 @@ pub enum GateDecision {
 
 /// 粒度决策。注意入参里没有权限档位 —— 输入动作与敏感场景的「必须人工
 /// 放行」不是靠校验某个模式实现的,而是无处可传,调用方换不到豁免。
+/// 粒度决策。注意入参里没有权限档位 —— 输入动作与敏感场景的「必须人工
+/// 放行」不是靠校验某个模式实现的,而是无处可传,调用方换不到豁免。
 pub fn decide(
     class: RiskClass,
     sensitive: Option<&str>,
     remembered_for_session: bool,
 ) -> GateDecision {
+    decide_with_grant(class, sensitive, remembered_for_session, false)
+}
+
+/// 带限时授权的粒度决策(工单 13)。
+///
+/// 授权只对**输入动作 × 非敏感**那一格生效:敏感场景永远逐次确认,只读
+/// 记忆只覆盖只读观测 —— 三条规矩互不覆盖,也不会互相借道。
+pub fn decide_with_grant(
+    class: RiskClass,
+    sensitive: Option<&str>,
+    remembered_for_session: bool,
+    granted_for_turn: bool,
+) -> GateDecision {
     if sensitive.is_some() {
-        // 敏感场景每一步都要人在当下确认,连只读的会话记忆也不认。
+        // 敏感场景每一步都要人在当下确认:只读记忆不认,限时授权也不认。
         return GateDecision::Ask {
             rememberable: false,
         };
@@ -142,9 +169,69 @@ pub fn decide(
     match class {
         RiskClass::ReadOnly if remembered_for_session => GateDecision::Auto,
         RiskClass::ReadOnly => GateDecision::Ask { rememberable: true },
-        RiskClass::Input => GateDecision::Ask {
-            rememberable: false,
-        },
+        // 授权由人给出、限时、随回合作废,不改变「输入动作默认要问」。
+        RiskClass::Input if granted_for_turn => GateDecision::Auto,
+        // 这里的 `rememberable` 对输入动作的含义是「界面可提供限时授权」,
+        // 不是「本会话记住」—— 分流在 approval.rs,落地为 ControlSessions。
+        RiskClass::Input => GateDecision::Ask { rememberable: true },
+    }
+}
+
+/// 会话内的限时输入授权:`(session_id, 回合代次)` → 到期时刻。
+///
+/// 键里带回合代次,于是「上一回合给的授权」不会被新回合继承;过期条目在取
+/// 用时顺手清理(惰性,不另起定时器)。
+#[derive(Default)]
+pub struct ControlSessions {
+    grants: RwLock<HashMap<(String, u64), std::time::Instant>>,
+}
+
+impl ControlSessions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 给某会话的当前回合开一个限时授权,返回时长。
+    pub fn grant(&self, session_id: &str, turn_epoch: u64, ttl: Duration) -> Duration {
+        self.grants.write().expect("control session lock").insert(
+            (session_id.to_string(), turn_epoch),
+            std::time::Instant::now() + ttl,
+        );
+        ttl
+    }
+
+    /// 该会话的当前回合是否还在授权内;在则返回剩余时间。
+    pub fn active(&self, session_id: &str, turn_epoch: u64) -> Option<Duration> {
+        let now = std::time::Instant::now();
+        let mut grants = self.grants.write().expect("control session lock");
+        grants.retain(|_, expires_at| *expires_at > now);
+        grants
+            .get(&(session_id.to_string(), turn_epoch))
+            .map(|expires_at| expires_at.saturating_duration_since(now))
+    }
+
+    /// 收回一个会话的全部授权(用户收回/会话结束)。
+    pub fn revoke(&self, session_id: &str) -> usize {
+        let mut grants = self.grants.write().expect("control session lock");
+        let before = grants.len();
+        grants.retain(|(session, _), _| session != session_id);
+        before - grants.len()
+    }
+
+    /// 收回全部授权(急停:不分会话)。
+    pub fn revoke_all(&self) -> usize {
+        let mut grants = self.grants.write().expect("control session lock");
+        let count = grants.len();
+        grants.clear();
+        count
+    }
+
+    /// 还活着的授权数(诊断/测试用)。
+    pub fn active_count(&self) -> usize {
+        let now = std::time::Instant::now();
+        let mut grants = self.grants.write().expect("control session lock");
+        grants.retain(|_, expires_at| *expires_at > now);
+        grants.len()
     }
 }
 
@@ -391,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn read_only_is_rememberable_but_input_is_not() {
+    fn read_only_is_rememberable_but_input_asks_every_step() {
         assert_eq!(
             decide(RiskClass::ReadOnly, None, false),
             GateDecision::Ask { rememberable: true }
@@ -399,15 +486,27 @@ mod tests {
         assert_eq!(decide(RiskClass::ReadOnly, None, true), GateDecision::Auto);
         assert_eq!(
             decide(RiskClass::Input, None, true),
-            GateDecision::Ask {
-                rememberable: false
-            },
-            "输入动作即便本会话「记住」过也必须再问一次"
+            GateDecision::Ask { rememberable: true },
+            "只读记忆对输入动作无效:界面在这里给的是限时授权,不是「记住」"
         );
     }
 
     #[test]
-    fn sensitive_scenarios_never_honour_session_memory() {
+    fn only_an_explicit_time_boxed_grant_skips_the_ask_for_input() {
+        assert_eq!(
+            decide_with_grant(RiskClass::Input, None, false, true),
+            GateDecision::Auto,
+            "人工给过限时授权,授权内不再逐次问"
+        );
+        assert_eq!(
+            decide_with_grant(RiskClass::Input, None, true, false),
+            GateDecision::Ask { rememberable: true },
+            "授权不是「记住」:没有授权,只读记忆也换不到输入豁免"
+        );
+    }
+
+    #[test]
+    fn sensitive_scenarios_never_honour_session_memory_nor_grant() {
         assert_eq!(
             decide(RiskClass::ReadOnly, Some("密码"), true),
             GateDecision::Ask {
@@ -415,10 +514,11 @@ mod tests {
             }
         );
         assert_eq!(
-            decide(RiskClass::Input, Some("支付"), true),
+            decide_with_grant(RiskClass::Input, Some("支付"), true, true),
             GateDecision::Ask {
                 rememberable: false
-            }
+            },
+            "限时授权也不能覆盖敏感场景:支付/密码这类永远逐次确认"
         );
     }
 
@@ -426,16 +526,42 @@ mod tests {
     fn input_actions_are_not_exempted_in_any_permission_mode() {
         for mode in PERMISSION_MODES {
             // 权限档位不是 decide 的入参:这里按「最宽松」的场景构造输入动作
-            // (本会话已记住),任何档位下都必须仍然是 Ask。
-            let decision = decide(RiskClass::Input, None, true);
+            // (本会话已记住 + 已有授权也只在授权内生效),没有授权时必须仍是 Ask。
+            let decision = decide_with_grant(RiskClass::Input, None, true, false);
             assert_eq!(
                 decision,
-                GateDecision::Ask {
-                    rememberable: false
-                },
+                GateDecision::Ask { rememberable: true },
                 "{mode} 下输入动作仍须人工放行"
             );
         }
+    }
+
+    #[test]
+    fn control_sessions_expire_and_do_not_cross_turns() {
+        let sessions = ControlSessions::new();
+        sessions.grant("s1", 1, Duration::from_secs(60));
+        assert!(sessions.active("s1", 1).is_some());
+        assert!(
+            sessions.active("s1", 2).is_none(),
+            "回合代次一变,上一回合的授权不再命中"
+        );
+        assert!(sessions.active("s2", 1).is_none(), "授权按会话隔离");
+
+        // 零时长即已过期:惰性清理要真的把它扔掉。
+        sessions.grant("s1", 1, Duration::ZERO);
+        assert!(sessions.active("s1", 1).is_none());
+        assert_eq!(sessions.active_count(), 0);
+
+        sessions.grant("s1", 1, Duration::from_secs(60));
+        sessions.grant("s2", 1, Duration::from_secs(60));
+        assert_eq!(sessions.revoke("s1"), 1);
+        assert!(sessions.active("s1", 1).is_none());
+        assert!(
+            sessions.active("s2", 1).is_some(),
+            "按会话收回不误伤别的会话"
+        );
+        assert_eq!(sessions.revoke_all(), 1, "急停收回全部");
+        assert_eq!(sessions.active_count(), 0);
     }
 
     #[test]
