@@ -157,7 +157,8 @@ pub struct ComputerUseConfig {
     pub driver_command: Option<String>,
     #[serde(default)]
     pub driver_args: Vec<String>,
-    /// 更新命令(整行,经平台 shell 执行);无配置则界面只能手动升级。
+    /// 更新命令(整行,经平台 shell 执行);留空 = 用驱动自带升级
+    /// (`cua-driver update --apply`,见工单 09)。
     #[serde(default)]
     pub driver_update_command: Option<String>,
 }

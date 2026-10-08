@@ -6,9 +6,11 @@
 //! 鉴权与自动化接缝一致:仅回环 + Local Daemon Token(桌面渲染层用的就是
 //! 这个令牌;配对设备不参与驱动治理)。
 //!
-//! 更新语义:驱动的升级通道由用户配置(`driver_update_command`),daemon 不
-//! 猜包管理器。接口层强制 `confirm: true` —— 「升级必须经我确认」不是界面
-//! 礼貌,是这一层拒绝无确认调用。
+//! 更新语义(工单 09):升级通道优先用用户配置的 `driver_update_command`;
+//! 留空且驱动是 cua-driver 本体时走驱动自带的 `update --apply`(查 GitHub 最新
+//! release,经官方安装器原地升级)—— 零配置也能一键升级,且不猜用户的包管理器。
+//! 接口层强制 `confirm: true` —— 「升级必须经我确认」不是界面礼貌,是这一层
+//! 拒绝无确认调用。
 
 use std::net::SocketAddr;
 use std::process::Stdio;
@@ -27,6 +29,9 @@ use super::policy::BUILTIN_DENY;
 
 /// 驱动更新命令的等待上限。
 const UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// 只读版本检查的等待上限(驱动侧 20h 缓存;首次要问一次 GitHub)。
+const CHECK_UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// 一键安装(下载并执行官方脚本)的等待上限:下载可能慢,同样给足 5 分钟。
 const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -107,13 +112,79 @@ pub struct DiagnosticCheck {
     pub fix: Option<String>,
 }
 
+/// 升级通道(工单 09):显式配置的命令优先;留空且驱动是 cua-driver 本体时用
+/// 驱动自带的 `update --apply`。`None` = 两个都没有(得先装驱动)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateChannel {
+    /// 用户配置的整行命令(经平台 shell 执行)。
+    Command(String),
+    /// 驱动本体自更新(直接执行该二进制,不经 shell)。
+    SelfUpdate(String),
+}
+
+/// 与 [`driver_spec_with`] 同一套输入,产出升级通道(探测结果同样注入)。
+pub(crate) fn update_channel_with(
+    config: &crate::config::types::ComputerUseConfig,
+    detected: Option<String>,
+) -> Option<UpdateChannel> {
+    if let Some(command) = config.driver_update_command.as_ref() {
+        return Some(UpdateChannel::Command(command.clone()));
+    }
+    // 自更新只对 cua-driver 本体成立:别的 stdio MCP 驱动没有 `update` 子命令,
+    // 别替用户跑一条注定失败的命令。
+    let spec = driver_spec_with(config, detected)?;
+    super::probe::is_cua_driver(&spec.command).then_some(UpdateChannel::SelfUpdate(spec.command))
+}
+
+/// 真实探测(文件系统)版;单测走 [`update_channel_with`] 注入探测结果。
+pub(crate) fn update_channel_from_config(
+    config: &crate::config::types::ComputerUseConfig,
+) -> Option<UpdateChannel> {
+    update_channel_with(config, super::probe::detect_default())
+}
+
+/// 驱动自报的版本检查结果(`cua-driver check-update --json`)。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DriverUpdateCheck {
+    pub current_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub channel: Option<String>,
+}
+
+/// 解析 `check-update --json` 的载荷(纯函数)。检查自身失败(字段 `error` 非空,
+/// 例如 GitHub 不通)时返回 `None`:不知道最新版,不等于「已是最新」。
+pub(crate) fn parse_update_check(payload: &str) -> Option<DriverUpdateCheck> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    if text("error").is_some() {
+        return None;
+    }
+    Some(DriverUpdateCheck {
+        current_version: text("current_version"),
+        latest_version: text("latest_version"),
+        update_available: value
+            .get("update_available")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        channel: text("selected_channel").or_else(|| text("current_channel")),
+    })
+}
+
 /// 一键诊断:驱动在不在、权限够不够、链路通不通(需求 11)。
 ///
-/// 纯函数(状态 + 平台 → 检查项),便于逐项测试。
+/// 纯函数(状态 + 平台 + 升级通道 → 检查项),便于逐项测试。
 pub fn diagnose(
     status: &DriverStatus,
     platform_supported: bool,
-    update_command_configured: bool,
+    update_channel: Option<&UpdateChannel>,
+    update_check: Option<&DriverUpdateCheck>,
 ) -> Vec<DiagnosticCheck> {
     let mut checks = Vec::new();
 
@@ -233,19 +304,38 @@ pub fn diagnose(
         },
     });
 
+    // 升级通道(工单 09):显式命令优先,否则驱动自带 `update --apply` ——
+    // 零配置也能一键升级,不该让用户为了「用什么升级」先去写一条命令。
     checks.push(DiagnosticCheck {
         id: "update-channel",
-        label: "升级通道已配置",
-        ok: update_command_configured,
-        detail: if update_command_configured {
-            "已配置更新命令,可一键升级(每次升级都会先问你)".to_string()
-        } else {
-            "未配置更新命令:只能手动升级驱动".to_string()
+        label: "升级通道就绪",
+        ok: update_channel.is_some(),
+        detail: match update_channel {
+            Some(UpdateChannel::Command(_)) => {
+                "已配置更新命令,可一键升级(每次升级都会先问你)".to_string()
+            }
+            Some(UpdateChannel::SelfUpdate(_)) => match update_check {
+                Some(check) if check.update_available => format!(
+                    "驱动自带升级(cua-driver update --apply):{} → {}(可一键升级)",
+                    check.current_version.as_deref().unwrap_or("当前版本未知"),
+                    check.latest_version.as_deref().unwrap_or("有新版本")
+                ),
+                Some(check) => format!(
+                    "驱动自带升级(cua-driver update --apply);{} 已是最新",
+                    check.current_version.as_deref().unwrap_or("当前版本")
+                ),
+                None => "驱动自带升级(cua-driver update --apply),可一键升级(每次升级都会先问你)"
+                    .to_string(),
+            },
+            None => "未检测到 cua-driver,也没有配置更新命令".to_string(),
         },
-        fix: if update_command_configured {
+        fix: if update_channel.is_some() {
             None
         } else {
-            Some("如需一键升级,在 设置 → 电脑控制 → 更新命令 里填入升级命令".to_string())
+            Some(
+                "点「一键安装」装官方驱动,或确认 设置 → 电脑控制 → 更新命令 里的升级方式可用"
+                    .to_string(),
+            )
         },
     });
 
@@ -297,7 +387,8 @@ async fn driver_status(
     let config = config_snapshot(&ctx);
     let detected = super::probe::detect_default();
     let spec = driver_spec_with(&config, detected.clone());
-    let resolution = driver_resolution_with(&config, detected);
+    let resolution = driver_resolution_with(&config, detected.clone());
+    let update_channel = update_channel_with(&config, detected);
     let status = ctx
         .daemon
         .companion
@@ -312,7 +403,15 @@ async fn driver_status(
         "systemExecutionEnabled": config.system_execution_enabled,
         "allowlist": config.allowlist,
         "maxSteps": config.max_steps,
-        "updateCommandConfigured": config.driver_update_command.is_some(),
+        // 界面据此决定「更新驱动」按钮可用性与升级前确认文案(工单 09)。
+        "updateChannel": update_channel.as_ref().map(|channel| match channel {
+            UpdateChannel::Command(command) => {
+                serde_json::json!({ "kind": "command", "command": command })
+            }
+            UpdateChannel::SelfUpdate(command) => {
+                serde_json::json!({ "kind": "self", "command": command })
+            }
+        }),
         "driverResolution": resolution,
         "builtinDenyList": BUILTIN_DENY
             .iter()
@@ -374,7 +473,8 @@ async fn diagnose_driver(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let config = config_snapshot(&ctx);
-    let spec = driver_spec_from_config(&config);
+    let detected = super::probe::detect_default();
+    let spec = driver_spec_with(&config, detected.clone());
     let status = ctx
         .daemon
         .companion
@@ -382,10 +482,17 @@ async fn diagnose_driver(
         .driver
         .status(spec.as_ref())
         .await;
+    let update_channel = update_channel_with(&config, detected);
+    // 只有自更新通道才查版本(问的是驱动自己,带 20h 缓存);查不成不影响结论。
+    let update_check = match update_channel.as_ref() {
+        Some(UpdateChannel::SelfUpdate(exe)) => probe_update_check(exe).await,
+        _ => None,
+    };
     let checks = diagnose(
         &status,
         cfg!(target_os = "windows"),
-        config.driver_update_command.is_some(),
+        update_channel.as_ref(),
+        update_check.as_ref(),
     );
     Ok(Json(serde_json::json!({ "ok": true, "checks": checks })))
 }
@@ -409,16 +516,19 @@ async fn update_driver(
         return Err(ApiError::bad_request("升级驱动需要用户确认(confirm: true)"));
     }
     let config = config_snapshot(&ctx);
-    let Some(update_command) = config.driver_update_command.clone() else {
+    let Some(channel) = update_channel_from_config(&config) else {
         return Err(ApiError::bad_request(
-            "未配置驱动更新命令:在 设置 → 电脑控制 → 更新命令 里填上升级方式",
+            "没有可用的升级通道:未检测到 cua-driver,也没配置更新命令;先「一键安装」,或在 设置 → 电脑控制 → 更新命令 里填上升级方式",
         ));
     };
 
     // 升级期间先把驱动停下:避免升级替换二进制时有进程占着文件。
     let _ = ctx.daemon.companion.inner.driver.estop().await;
 
-    let output = run_shell_command(&update_command).await;
+    let output = match &channel {
+        UpdateChannel::Command(command) => run_shell_command(command).await,
+        UpdateChannel::SelfUpdate(exe) => run_driver_self_update(exe).await,
+    };
     match output {
         Ok(detail) => {
             audit(&ctx, "driver-update", true, None);
@@ -460,6 +570,40 @@ async fn run_shell_command(command: &str) -> Result<String, String> {
         .spawn()
         .map_err(|error| format!("执行更新命令失败: {}", error))?;
     wait_command_output(child, UPDATE_TIMEOUT, "更新命令").await
+}
+
+/// 跑驱动自带升级 `cua-driver update --apply`:直接执行二进制,不经 shell ——
+/// 路径里的空格与元字符不进命令行,也不依赖用户机器上的 shell 方言。
+async fn run_driver_self_update(exe: &str) -> Result<String, String> {
+    let child = tokio::process::Command::new(exe)
+        .args(super::probe::UPDATE_ARGS)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("执行驱动自更新失败: {}", error))?;
+    wait_command_output(child, UPDATE_TIMEOUT, "驱动自更新").await
+}
+
+/// 只读跑一次 `cua-driver check-update --json`。这里不走
+/// [`wait_command_output`](输出会被截断),要完整 stdout 才能解析 JSON。
+async fn probe_update_check(exe: &str) -> Option<DriverUpdateCheck> {
+    let child = tokio::process::Command::new(exe)
+        .args(super::probe::CHECK_UPDATE_ARGS)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let output = tokio::time::timeout(CHECK_UPDATE_TIMEOUT, child.wait_with_output())
+        .await
+        .ok()?
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| parse_update_check(&String::from_utf8_lossy(&output.stdout)))
+        .flatten()
 }
 
 /// 等一个已拉起的子进程收尾并把输出归一化(升级与一键安装共用同一套语义)。
@@ -673,9 +817,23 @@ mod tests {
             .expect("检查项存在")
     }
 
+    fn cua_driver_path() -> String {
+        "C:\\Users\\me\\AppData\\Local\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe".to_string()
+    }
+
+    fn self_update_channel() -> UpdateChannel {
+        UpdateChannel::SelfUpdate(cua_driver_path())
+    }
+
     #[test]
     fn a_started_driver_with_tools_passes_the_chain_checks() {
-        let checks = diagnose(&status(true, vec!["click", "screenshot"]), true, true);
+        let channel = self_update_channel();
+        let checks = diagnose(
+            &status(true, vec!["click", "screenshot"]),
+            true,
+            Some(&channel),
+            None,
+        );
         assert!(check(&checks, "configured").ok);
         assert!(check(&checks, "running").ok);
         assert!(check(&checks, "handshake").ok);
@@ -689,7 +847,7 @@ mod tests {
 
     #[test]
     fn unconfigured_driver_fails_with_actionable_guidance() {
-        let checks = diagnose(&DriverStatus::default(), true, false);
+        let checks = diagnose(&DriverStatus::default(), true, None, None);
         let configured = check(&checks, "configured");
         assert!(!configured.ok);
         assert!(configured
@@ -704,7 +862,7 @@ mod tests {
     fn handshake_failure_surfaces_the_last_error_and_a_fix() {
         let mut failing = status(false, Vec::new());
         failing.last_error = Some("拉起驱动失败(cua-driver): 系统找不到指定的文件。".to_string());
-        let checks = diagnose(&failing, true, false);
+        let checks = diagnose(&failing, true, None, None);
         let running = check(&checks, "running");
         assert!(!running.ok);
         assert!(running.detail.contains("系统找不到指定的文件"));
@@ -713,7 +871,7 @@ mod tests {
 
     #[test]
     fn running_driver_without_tools_is_a_broken_chain_not_a_pass() {
-        let checks = diagnose(&status(true, vec![]), true, false);
+        let checks = diagnose(&status(true, vec![]), true, None, None);
         assert!(check(&checks, "running").ok);
         let handshake = check(&checks, "handshake");
         assert!(!handshake.ok);
@@ -724,7 +882,7 @@ mod tests {
     fn permission_failures_are_translated_into_a_fix() {
         let mut failing = status(false, Vec::new());
         failing.last_error = Some("Access is denied. (os error 5)".to_string());
-        let checks = diagnose(&failing, true, false);
+        let checks = diagnose(&failing, true, None, None);
         let permissions = check(&checks, "permissions");
         assert!(!permissions.ok);
         assert!(permissions
@@ -733,16 +891,157 @@ mod tests {
             .unwrap_or_default()
             .contains("管理员"));
 
-        let healthy = diagnose(&status(true, vec!["click"]), true, true);
+        let healthy = diagnose(&status(true, vec!["click"]), true, None, None);
         assert!(check(&healthy, "permissions").ok);
     }
 
     #[test]
     fn unsupported_platform_is_reported_honestly() {
-        let checks = diagnose(&status(true, vec!["click"]), false, true);
+        let checks = diagnose(&status(true, vec!["click"]), false, None, None);
         let platform = check(&checks, "platform");
         assert!(!platform.ok);
         assert!(platform.detail.contains("只做 Windows"));
+    }
+
+    // ---- 升级通道(工单 09):零配置也能一键升级 ----
+
+    #[test]
+    fn the_upgrade_channel_is_ready_without_any_user_configuration() {
+        let channel = self_update_channel();
+        let checks = diagnose(&status(true, vec!["click"]), true, Some(&channel), None);
+        let update = check(&checks, "update-channel");
+        assert!(update.ok, "驱动本体在 = 自带升级可用,不该再要求用户填命令");
+        assert!(update.detail.contains("update --apply"));
+        assert!(update.fix.is_none());
+    }
+
+    #[test]
+    fn a_known_outdated_driver_reports_the_available_version() {
+        let channel = self_update_channel();
+        let known = DriverUpdateCheck {
+            current_version: Some("0.30.1".to_string()),
+            latest_version: Some("0.34.0".to_string()),
+            update_available: true,
+            channel: Some("stable".to_string()),
+        };
+        let checks = diagnose(
+            &status(true, vec!["click"]),
+            true,
+            Some(&channel),
+            Some(&known),
+        );
+        let update = check(&checks, "update-channel");
+        assert!(update.ok);
+        assert!(update.detail.contains("0.30.1"));
+        assert!(update.detail.contains("0.34.0"));
+    }
+
+    #[test]
+    fn an_up_to_date_driver_says_so_instead_of_offering_false_hope() {
+        let channel = self_update_channel();
+        let known = DriverUpdateCheck {
+            current_version: Some("0.34.0".to_string()),
+            latest_version: Some("0.34.0".to_string()),
+            update_available: false,
+            channel: Some("stable".to_string()),
+        };
+        let checks = diagnose(
+            &status(true, vec!["click"]),
+            true,
+            Some(&channel),
+            Some(&known),
+        );
+        let update = check(&checks, "update-channel");
+        assert!(update.ok);
+        assert!(update.detail.contains("已是最新"));
+    }
+
+    #[test]
+    fn no_driver_and_no_command_leaves_the_upgrade_channel_unready() {
+        let checks = diagnose(&DriverStatus::default(), true, None, None);
+        let update = check(&checks, "update-channel");
+        assert!(!update.ok);
+        assert!(update
+            .fix
+            .as_deref()
+            .unwrap_or_default()
+            .contains("一键安装"));
+    }
+
+    #[test]
+    fn a_user_command_wins_over_the_builtin_self_update() {
+        let config = crate::config::types::ComputerUseConfig {
+            driver_update_command: Some("npm i -g cua-driver@latest".to_string()),
+            ..Default::default()
+        };
+        let channel =
+            update_channel_with(&config, Some(cua_driver_path())).expect("配置了就用配置");
+        assert_eq!(
+            channel,
+            UpdateChannel::Command("npm i -g cua-driver@latest".to_string())
+        );
+    }
+
+    #[test]
+    fn a_detected_cua_driver_self_updates_and_a_foreign_driver_does_not() {
+        let config = crate::config::types::ComputerUseConfig::default();
+        assert_eq!(
+            update_channel_with(&config, Some(cua_driver_path())),
+            Some(self_update_channel())
+        );
+
+        // 别的 stdio MCP 驱动没有 `update` 子命令,别替用户跑一条注定失败的命令。
+        assert_eq!(
+            update_channel_with(&config, Some("C:\\tools\\my-mcp-driver.exe".to_string())),
+            None
+        );
+        assert_eq!(update_channel_with(&config, None), None);
+    }
+
+    #[test]
+    fn a_foreign_custom_driver_can_still_bring_its_own_update_command() {
+        let config = crate::config::types::ComputerUseConfig {
+            driver_command: Some("my-mcp-driver".to_string()),
+            driver_update_command: Some("my-updater --latest".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            update_channel_with(&config, None),
+            Some(UpdateChannel::Command("my-updater --latest".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_the_real_check_update_payload() {
+        // 真机 `cua-driver check-update --json`(0.30.1)的实测载荷。
+        let payload = r#"{
+          "cache_hit": true,
+          "checked_at": "2026-10-08T12:34:03Z",
+          "current_channel": "stable",
+          "current_version": "0.30.1",
+          "error": null,
+          "install_command": "irm https://cua.ai/driver/install.ps1 | iex",
+          "latest_version": "0.34.0",
+          "release_notes_url": "https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.34.0",
+          "selected_channel": "stable",
+          "source": "github_releases",
+          "update_available": true
+        }"#;
+        let parsed = parse_update_check(payload).expect("载荷可解析");
+        assert_eq!(parsed.current_version.as_deref(), Some("0.30.1"));
+        assert_eq!(parsed.latest_version.as_deref(), Some("0.34.0"));
+        assert!(parsed.update_available);
+        assert_eq!(parsed.channel.as_deref(), Some("stable"));
+    }
+
+    #[test]
+    fn a_failed_check_is_unknown_not_up_to_date() {
+        // 检查自身失败(GitHub 不通)不能被说成「已是最新」。
+        assert_eq!(
+            parse_update_check(r#"{"current_version":"0.30.1","error":"请求 GitHub 失败"}"#),
+            None
+        );
+        assert_eq!(parse_update_check("不是 JSON"), None);
     }
 
     #[test]

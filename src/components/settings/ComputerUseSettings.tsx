@@ -36,9 +36,18 @@ interface DriverStatusView {
   lastError?: string | null;
 }
 
+/**
+ * 生效的升级通道(工单 09):`command` = 用户在下面填的更新命令;
+ * `self` = 驱动自带升级(cua-driver update --apply)。null = 没驱动也没命令。
+ */
+interface UpdateChannelView {
+  kind: 'command' | 'self';
+  command: string;
+}
+
 interface DriverSnapshot {
   status: DriverStatusView;
-  updateCommandConfigured: boolean;
+  updateChannel: UpdateChannelView | null;
   builtinDenyList: Array<{ match: string; scope: string }>;
   resolution: DriverResolutionView | null;
 }
@@ -52,7 +61,7 @@ interface DriverResolutionView {
 
 const EMPTY_SNAPSHOT: DriverSnapshot = {
   status: { configured: false, running: false, tools: [] },
-  updateCommandConfigured: false,
+  updateChannel: null,
   builtinDenyList: [],
   resolution: null,
 };
@@ -77,13 +86,15 @@ export function ComputerUseSettings() {
 
   const resolution = snapshot.resolution;
   const driverMissing = resolution?.mode === 'missing';
+  // 升级通道(工单 09):更新命令留空时用驱动自带升级,按钮不再要求用户先填命令。
+  const updateChannel = snapshot.updateChannel ?? null;
 
   const refresh = useCallback(async () => {
     try {
       const result = (await daemonFacade.computerUse.driverStatus()) as DriverSnapshot;
       setSnapshot({
         status: result.status ?? EMPTY_SNAPSHOT.status,
-        updateCommandConfigured: Boolean(result.updateCommandConfigured),
+        updateChannel: result.updateChannel ?? null,
         builtinDenyList: Array.isArray(result.builtinDenyList) ? result.builtinDenyList : [],
         resolution:
           (result as unknown as { driverResolution?: DriverResolutionView | null })
@@ -298,7 +309,7 @@ export function ComputerUseSettings() {
             >
               急停
             </Button>
-            {snapshot.updateCommandConfigured ? (
+            {updateChannel ? (
               <Button
                 type="button"
                 variant="outline"
@@ -309,8 +320,8 @@ export function ComputerUseSettings() {
                 更新驱动
               </Button>
             ) : (
-              // 未配置更新通道时不留一个必然失败的控件:按钮禁用 + 说明为什么。
-              <TooltipHint content="未配置更新命令：在下方「更新命令」里填上升级方式">
+              // 没有可用升级通道时不留一个必然失败的控件:按钮禁用 + 说明为什么。
+              <TooltipHint content="没有可用升级通道:先「一键安装」装官方驱动,或在下方「更新命令」里填升级方式">
                 <Button type="button" variant="outline" size="sm" disabled>
                   更新驱动
                 </Button>
@@ -341,7 +352,11 @@ export function ComputerUseSettings() {
         open={updateConfirmOpen}
         onOpenChange={setUpdateConfirmOpen}
         title="更新驱动？"
-        description={`将执行更新命令：${computerUse.driver_update_command ?? ''}。升级前会先停下正在运行的驱动。`}
+        description={
+          updateChannel?.kind === 'self'
+            ? `将执行驱动自带升级：${updateChannel.command} update --apply（查最新版并走官方安装器原地升级）。升级前会先停下正在运行的驱动。`
+            : `将执行更新命令：${updateChannel?.command ?? ''}。升级前会先停下正在运行的驱动。`
+        }
         confirmLabel="执行更新"
         cancelLabel="取消"
         onConfirm={() => void runUpdate()}
@@ -404,7 +419,7 @@ export function ComputerUseSettings() {
             <Input
               id="computer-use-driver-update"
               value={computerUse.driver_update_command ?? ''}
-              placeholder="如 npm i -g cua-driver@latest"
+              placeholder="留空 = 驱动自带升级（cua-driver update --apply）"
               onChange={(event) =>
                 update({
                   driver_update_command: event.target.value.trim() ? event.target.value : null,
@@ -413,7 +428,7 @@ export function ComputerUseSettings() {
               className="h-8 font-mono text-code"
             />
             <p className="text-ui-caption text-muted-foreground">
-              一键更新执行的就是这条命令（每次都会先问过你）；留空则只能手动升级。
+              留空时用驱动自带升级（cua-driver update --apply，查最新版并走官方安装器原地升级）；npm、Homebrew 等包管理器装的才需要在这里覆盖。每次升级都会先问过你。
             </p>
           </div>
         </div>

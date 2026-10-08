@@ -10,6 +10,15 @@ use std::path::{Path, PathBuf};
 /// `driver_command` 与 `driver_args` 都留空时的默认启动参数。
 pub const DEFAULT_DRIVER_ARGS: &[&str] = &["mcp"];
 
+/// 驱动自带升级:0.30.1 实测(`cua-driver --help` 与 manifest 的 subcommands)
+/// `update --apply` = 查 GitHub 最新 release,经官方安装器原地升级;只读变体是
+/// `check-update --json`(带 20h 磁盘缓存)。这是官方给的升级通道,不需要用户
+/// 知道驱动当初是 npm、官方脚本还是包管理器装的。
+pub const UPDATE_ARGS: &[&str] = &["update", "--apply"];
+
+/// 只读版本检查(不装任何东西),用于诊断里报「当前 x → 可升级到 y」。
+pub const CHECK_UPDATE_ARGS: &[&str] = &["check-update", "--json"];
+
 /// 官方安装脚本地址(一键安装与界面提示共用同一份事实)。
 pub const INSTALL_SCRIPT_URL: &str = "https://cua.ai/driver/install.ps1";
 
@@ -20,6 +29,16 @@ pub fn binary_name() -> &'static str {
     } else {
         "cua-driver"
     }
+}
+
+/// 这条命令是不是 cua-driver 本体 —— 自更新(`update --apply`)只对本体成立,
+/// 别的 stdio MCP 驱动没有这个子命令。
+pub fn is_cua_driver(command: &str) -> bool {
+    Path::new(command)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.eq_ignore_ascii_case("cua-driver"))
+        .unwrap_or(false)
 }
 
 /// 默认候选路径(纯函数):`local_app_data` 与 `home` 由调用方注入,便于测试。
@@ -147,6 +166,22 @@ mod tests {
             &["mcp"],
             "与 manifest 的 mcp_invocation 一致"
         );
+    }
+
+    #[test]
+    fn self_update_args_are_the_drivers_own_upgrade_verb() {
+        assert_eq!(UPDATE_ARGS, &["update", "--apply"]);
+        assert_eq!(CHECK_UPDATE_ARGS, &["check-update", "--json"]);
+    }
+
+    #[test]
+    fn only_the_cua_driver_binary_counts_as_self_updatable() {
+        assert!(is_cua_driver("cua-driver"));
+        assert!(is_cua_driver("C:\\Users\\me\\Cua\\cua-driver.exe"));
+        assert!(is_cua_driver("/usr/local/bin/cua-driver"));
+        assert!(is_cua_driver("Cua-Driver.EXE"), "大小写不敏感");
+        assert!(!is_cua_driver("my-stdio-mcp-driver"));
+        assert!(!is_cua_driver(""));
     }
 
     fn path_delimiter() -> char {

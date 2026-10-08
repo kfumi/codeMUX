@@ -17,6 +17,6 @@
 
 - **探测**(`computer_use::probe`):候选路径 = `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin`(官方安装脚本落点,排第一)→ 同目录上级 → `~/.local/bin`、`~/.cua/bin` → 包管理器惯例位置 → PATH。只做存在性 stat(无子进程),真正的可用性由启动时的 MCP 握手验证。
 - **为什么默认参数是 `mcp`**:cua-driver 0.34.0 的 `manifest` 自报 `mcp_invocation = {command: <exe>, args: ["mcp"]}`;参考实现(cn.star.computer-use 插件)同样默认 `["mcp"]`。配置了 `driver_args` 则原样使用(显式配置永远赢)。
-- **安装与升级分开**:升级通道仍由用户配置(`driver_update_command`,工单 06「daemon 不猜包管理器」的原则不动);一键安装是独立动作,每次都要面板确认 —— 从远端拉脚本执行,确认必须是硬闸门而不是界面礼貌。
+- **安装与升级分开**:升级通道仍由用户配置(`driver_update_command`,工单 06「daemon 不猜包管理器」的原则不动);一键安装是独立动作,每次都要面板确认 —— 从远端拉脚本执行,确认必须是硬闸门而不是界面礼貌。（2026-10-08 工单 09 更新:升级通道改为「留空 = 驱动自带 `cua-driver update --apply`」,零配置即可一键升级;安装与升级仍是两个独立动作。）
 - **单一事实来源**:daemon 的 `driverResolution` 是前端展示与按钮显隐的唯一依据;前端常量 `INSTALL_SCRIPT_URL` 与 Rust 侧 `probe::INSTALL_SCRIPT_URL` 保持一致(注释标注同步要求)。
 - **已知边界**:一键安装本期仅 Windows(与系统级执行的平台范围一致);非 Windows 留空驱动命令仍可探测(候选含 `~/.local/bin`、`/usr/local/bin`、Homebrew),只是装不了、需手动放置。
