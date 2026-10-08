@@ -811,6 +811,19 @@ where
             }
             (Some(_), true) => RuntimeStatus::Ready,
         };
+        // 已安装的 pi >= 0.75 在 Node < 22.19 的机器上无法运行：宁可亮红灯
+        //（Node 不可用），也不显示绿灯“已就绪”。未安装时保持 Missing，
+        // 安装按钮走 install_spec 的门禁报错指引。
+        let status = match (&status, &current_version) {
+            (RuntimeStatus::Ready | RuntimeStatus::Outdated, Some(current))
+                if provider == Provider::Pi
+                    && super::types::pi_requires_node_22(current)
+                    && !node.satisfies_pi_runtime(current) =>
+            {
+                RuntimeStatus::NodeUnavailable
+            }
+            _ => status,
+        };
 
         Ok(NpmRuntimeStatusInfo {
             provider,
@@ -934,6 +947,23 @@ where
     ) -> Result<InstallOutcome, RuntimeError> {
         let _guard = self.acquire_lock(spec.provider).await?;
         let node = self.node_resolver.detect().await;
+        // pi >= 0.75.0 起 engines 要求 Node >= 22.19：全局 Node 18 门槛拦不住，
+        // 这里按目标版本二次校验，不满足时指引升级 Node 或改装 legacy-node20 的 0.74.2。
+        if spec.provider == Provider::Pi
+            && super::types::pi_requires_node_22(&spec.version)
+            && !node.satisfies_pi_runtime(&spec.version)
+        {
+            return Err(RuntimeError::new(
+                crate::runtime::RuntimeErrorKind::NodeUnavailable,
+                Some(Provider::Pi),
+                None,
+                format!(
+                    "pi {} 需要 Node.js 22.19+（当前 Node：{}），请升级 Node 后重试；仍在用 Node 20 可改装 legacy-node20 通道的 0.74.2",
+                    spec.version,
+                    node.version.as_deref().unwrap_or("未知")
+                ),
+            ));
+        }
         if !node.satisfies_minimum {
             return Err(RuntimeError::node_unavailable(format!(
                 "Node.js 不可用或版本低于 18：{}",
@@ -1460,6 +1490,116 @@ mod tests {
             parse_npm_versions(r#""1.1.0""#),
             Some(vec!["1.1.0".to_string()])
         );
+    }
+
+    fn test_manager_with_node(
+        fs: Arc<TempRuntimeFileSystem>,
+        installer: Arc<TestInstaller>,
+        spec: NpmRuntimeSpec,
+        node_version: &str,
+    ) -> NpmRuntimeManager<TestSource, TestInstaller, FixedNodeResolver, TempRuntimeFileSystem>
+    {
+        NpmRuntimeManager::new(
+            Arc::new(TestSource {
+                versions: vec![spec.version.clone()],
+                spec,
+            }),
+            installer,
+            Arc::new(FixedNodeResolver::new(NodeDetection::from_version(
+                Some(node_version.to_string()),
+                Some("/usr/bin/node".to_string()),
+            ))),
+            fs,
+            "0.2.0",
+        )
+    }
+
+    #[tokio::test]
+    async fn pi_install_blocks_new_versions_on_old_node_with_guidance() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "1.0.4").unwrap();
+        let manager = test_manager_with_node(
+            fs,
+            Arc::new(TestInstaller { fail: false }),
+            spec,
+            "v20.19.0",
+        );
+        let error = manager
+            .install_version(Provider::Pi, "1.0.4", &NoopProgressReporter)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.kind,
+            crate::runtime::RuntimeErrorKind::NodeUnavailable
+        );
+        assert_eq!(error.provider, Some(Provider::Pi));
+        assert!(
+            error.message.contains("22.19"),
+            "指引应包含版本下限：{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("0.74.2"),
+            "指引应提及 legacy 通道：{}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn pi_install_allows_new_versions_on_node_22() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "1.0.4").unwrap();
+        let manager = test_manager_with_node(
+            fs.clone(),
+            Arc::new(TestInstaller { fail: false }),
+            spec,
+            "v22.20.0",
+        );
+        manager
+            .install_version(Provider::Pi, "1.0.4", &NoopProgressReporter)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs.read_current_version(Provider::Pi).as_deref(),
+            Some("1.0.4")
+        );
+    }
+
+    #[tokio::test]
+    async fn pi_install_allows_old_versions_on_node_20() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "0.73.1").unwrap();
+        let manager = test_manager_with_node(
+            fs.clone(),
+            Arc::new(TestInstaller { fail: false }),
+            spec,
+            "v20.19.0",
+        );
+        manager
+            .install_version(Provider::Pi, "0.73.1", &NoopProgressReporter)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs.read_current_version(Provider::Pi).as_deref(),
+            Some("0.73.1")
+        );
+    }
+
+    #[tokio::test]
+    async fn pi_status_reports_node_unavailable_when_node_too_old_for_installed_pi() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let spec = NpmRuntimeSpec::for_version(Provider::Pi, "1.0.4").unwrap();
+        let dir = fs.version_dir(Provider::Pi, "1.0.4");
+        write_runtime_layout(&spec, &dir).unwrap();
+        fs.write_current_version(Provider::Pi, "1.0.4").unwrap();
+        let manager = test_manager_with_node(
+            fs,
+            Arc::new(TestInstaller { fail: false }),
+            spec,
+            "v20.19.0",
+        );
+        let status = manager.check_status(Provider::Pi).await.unwrap();
+        assert_eq!(status.status, RuntimeStatus::NodeUnavailable);
     }
 
     #[test]

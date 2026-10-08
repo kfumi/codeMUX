@@ -47,6 +47,11 @@ interface OpenCodeFreeModelPayloadRow {
 
 const FREE_MODELS_CACHE_TTL_MS = 60_000;
 let freeModelsCache: { at: number; rows: OpenCodeFreeModelRow[] } | null = null;
+
+/** 免费目录缓存是否新鲜：新鲜时新建面板首屏就能解析配置默认值，无需等待网络。 */
+export function hasFreshOpenCodeFreeModelsCache(): boolean {
+  return !!freeModelsCache && Date.now() - freeModelsCache.at < FREE_MODELS_CACHE_TTL_MS;
+}
 let freeModelsInFlight: Promise<OpenCodeFreeModelRow[]> | null = null;
 
 /** 测试专用：清空免费模型模块缓存，保证用例之间互不影响。 */
@@ -179,7 +184,7 @@ export function useAgentModels(
   agentKind: AgentKind,
   providers: ModelProvider[] | ModelProvider | null,
   _activeProviderId: string | null = null,
-): { models: ModelOption[]; isLoading: boolean } {
+): { models: ModelOption[]; isLoading: boolean; freePending: boolean } {
   const providerList = useMemo(() => {
     if (!providers) return [] as ModelProvider[];
     return Array.isArray(providers) ? providers : [providers];
@@ -187,6 +192,26 @@ export function useAgentModels(
 
   const [tick, setTick] = useState(0);
   const freeModels = useOpenCodeFreeModelOptions(agentKind);
+  // 首屏直达默认值的关键：opencode 且免费缓存未命中时，免费目录在途，此时用供应商列表算出的
+  // preferredModel 只是兜底（models[0]），调用方据此把发送门槛挂起，等目录回来再按配置默认值展示/发送。
+  // 与 useOpenCodeFreeModelOptions 共用模块级在途去重，不会多发一次网络请求；isLoading 保持 false，
+  // 避免其他调用方（自动化编辑器等）的转圈逻辑被误触。
+  const [freePending, setFreePending] = useState(
+    () => agentKind === 'opencode' && !hasFreshOpenCodeFreeModelsCache(),
+  );
+  useEffect(() => {
+    if (agentKind !== 'opencode' || hasFreshOpenCodeFreeModelsCache()) {
+      setFreePending(false);
+      return;
+    }
+    let cancelled = false;
+    setFreePending(true);
+    fetchOpenCodeFreeModelRows().then(
+      () => { if (!cancelled) setFreePending(false); },
+      () => { if (!cancelled) setFreePending(false); },
+    );
+    return () => { cancelled = true; };
+  }, [agentKind]);
   // Display names come from the models.dev index, which arrives after the first
   // render; without this the list would keep its prettified names.
   useModelDisplayNames();
@@ -224,5 +249,5 @@ export function useAgentModels(
     return [...providerModels, ...freeModels];
   }, [agentKind, providerList, freeModels, tick]);
 
-  return { models, isLoading: false };
+  return { models, isLoading: false, freePending };
 }

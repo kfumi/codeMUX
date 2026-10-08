@@ -21,6 +21,13 @@ import {
   resetLastEventSequence,
 } from '../lib/daemon-session-bridge';
 import { isSteerBlockedPrompt, normalizeImmediateRunMode } from '../lib/agentSteer';
+import {
+  dequeueComputerUseApproval,
+  enqueueComputerUseApproval,
+  parseComputerUseApprovalEvent,
+  type ComputerUseApprovalChoice,
+  type ComputerUseApprovalRequest,
+} from '../lib/computerUseApprovals';
 import { supportsCapability } from '../components/agent/agentCapabilities';
 import { createLogger, serializeError } from '../lib/logger';
 import { isDevDiagnosticsEnabled } from '../lib/dev/devDiagnostics';
@@ -142,6 +149,9 @@ type ModeBlockedDiagnostic = {
   reason?: string;
   suggestion?: string;
   request_id?: string | null;
+  /** 权限门归属(工单 07):哪一家的门拦下了这一步。 */
+  gate_agent_kind?: string;
+  gate_label?: string;
 };
 
 interface AgentState {
@@ -213,6 +223,13 @@ interface AgentState {
   queuePaused: Record<string, boolean>;
   pendingPermissions: Record<string, AgentPermissionRequest[]>;
   respondToPermission: (sessionId: string, requestId: string, response: AgentPermissionResponse) => Promise<void>;
+  /** 电脑控制审批（工单 03）：daemon 闸门挂起的放行请求，按会话分组。 */
+  pendingComputerUseApprovals: Record<string, ComputerUseApprovalRequest[]>;
+  respondToComputerUseApproval: (
+    sessionId: string,
+    requestId: string,
+    choice: ComputerUseApprovalChoice,
+  ) => Promise<void>;
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string, fromQueue?: boolean) => Promise<void>;
   /** Interrupt the current query for a specific session */
@@ -440,6 +457,38 @@ function enqueuePendingPermission(
     ? [...current, request]
     : current.map((item, index) => index === existingIndex ? request : item);
   return { ...pendingPermissions, [sessionId]: next };
+}
+
+/**
+ * 电脑控制审批（工单 03）：入队/出队按会话分组。daemon 是唯一裁决方，
+ * 本地只镜像「还在等放行」的卡片；重连回放同一 requestId 不重复入队。
+ */
+function enqueueComputerUseApprovals(
+  pending: Record<string, ComputerUseApprovalRequest[]>,
+  sessionId: string,
+  request: ComputerUseApprovalRequest,
+): Record<string, ComputerUseApprovalRequest[]> {
+  const current = pending[sessionId] ?? [];
+  const next = enqueueComputerUseApproval(current, request);
+  return next === current ? pending : { ...pending, [sessionId]: next };
+}
+
+function dequeueComputerUseApprovals(
+  pending: Record<string, ComputerUseApprovalRequest[]>,
+  sessionId: string,
+  requestId: string,
+): Record<string, ComputerUseApprovalRequest[]> {
+  const current = pending[sessionId] ?? [];
+  const next = dequeueComputerUseApproval(current, requestId);
+  return next === current ? pending : { ...pending, [sessionId]: next };
+}
+
+function clearComputerUseApprovals(
+  pending: Record<string, ComputerUseApprovalRequest[]>,
+  sessionId: string,
+): Record<string, ComputerUseApprovalRequest[]> {
+  if (!(sessionId in pending)) return pending;
+  return { ...pending, [sessionId]: [] };
 }
 
 /**
@@ -1996,6 +2045,26 @@ function createSessionEventHandler(
     })) {
       return;
     }
+    // 电脑控制审批（工单 03）：daemon 闸门的放行请求与「已决」通知走同一条
+    // 会话流，但不进时间线 —— 只镜像成输入框上方的待放行卡片。
+    const computerUseApproval = parseComputerUseApprovalEvent(raw);
+    if (computerUseApproval) {
+      set((s) => ({
+        pendingComputerUseApprovals:
+          computerUseApproval.kind === 'resolved'
+            ? dequeueComputerUseApprovals(
+                s.pendingComputerUseApprovals,
+                sessionId,
+                computerUseApproval.requestId,
+              )
+            : enqueueComputerUseApprovals(
+                s.pendingComputerUseApprovals,
+                sessionId,
+                computerUseApproval.request,
+              ),
+      }));
+      return;
+    }
     let event = parseAgentEvent(raw);
     const now = Date.now();
     const forceStoppedNow = get().forceStopped[sessionId] ?? false;
@@ -2867,6 +2936,7 @@ function createSessionEventHandler(
   sessionWorkingPaths: loadSessionWorkingPaths(),
   queuePaused: {},
   pendingPermissions: {},
+  pendingComputerUseApprovals: {},
 
   setSessionWorkingPath: (sessionId, cwd) => {
     const trimmed = cwd.trim();
@@ -3288,10 +3358,34 @@ function createSessionEventHandler(
       set((state) => ({ error: { ...state.error, [sessionId]: String(error) } }));
     }
   },
+  respondToComputerUseApproval: async (
+    sessionId: string,
+    requestId: string,
+    choice: ComputerUseApprovalChoice,
+  ) => {
+    try {
+      await daemonFacade.respondToComputerUseApproval(requestId, choice);
+      set((state) => ({
+        pendingComputerUseApprovals: dequeueComputerUseApprovals(
+          state.pendingComputerUseApprovals,
+          sessionId,
+          requestId,
+        ),
+      }));
+    } catch (error) {
+      set((state) => ({ error: { ...state.error, [sessionId]: String(error) } }));
+    }
+  },
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
-    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
+    set((state) => ({
+      pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] },
+      pendingComputerUseApprovals: clearComputerUseApprovals(
+        state.pendingComputerUseApprovals,
+        sessionId,
+      ),
+    }));
     clearSimulatedStream(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;

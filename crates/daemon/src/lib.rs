@@ -16,6 +16,7 @@ mod agent;
 mod agent_runtime;
 pub mod browser_mcp;
 pub mod companion;
+pub mod computer_use;
 mod config;
 pub mod daemon;
 mod db;

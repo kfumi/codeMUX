@@ -70,6 +70,8 @@
 | [2026-09-24-codeg-token-speed-reference.md](research/2026-09-24-codeg-token-speed-reference.md) | codeg 实时 TPS 方案参考与 CodeMUX 差异 |
 | [2026-09-24-opencode-storage-performance-audit.md](research/2026-09-24-opencode-storage-performance-audit.md) | OpenCode 存储性能审计 |
 | [2026-09-30-turn-artifact-summary-fact-check.md](research/2026-09-30-turn-artifact-summary-fact-check.md) | Turn 级产物汇总事实核查:各 Agent Kind 工具实测、Codex 与 CLI 同步兼容性、真实多卡片实例、两端行数分歧量化、回填否决 |
+| [2026-10-07-computer-use-plugin-research.md](research/2026-10-07-computer-use-plugin-research.md) | Agent Computer Use 电脑控制调研与落地建议 |
+| [2026-10-07-computer-use-capability-matrix.md](research/2026-10-07-computer-use-capability-matrix.md) | 电脑控制能力矩阵与铺开验收记录（工单 07） |
 
 ### specs
 
@@ -122,6 +124,7 @@
 | [2026-09-20-codex-collab-subagent-parity.md](specs/2026-09-20-codex-collab-subagent-parity.md) | Codex 协作子智能体:两种 spawn 变体的声明与轨道对等 |
 | [2026-09-21-agent-task-board.md](specs/2026-09-21-agent-task-board.md) | 工作任务看板(Work Task):agent 驱动的委派与验收 |
 | [2026-09-30-turn-artifact-summary-v2.md](specs/2026-09-30-turn-artifact-summary-v2.md) | Turn 级产物汇总 v2:跨 Agent Kind 的解析统一(取代 2026-09-01) |
+| [2026-10-07-computer-use.md](specs/2026-10-07-computer-use.md) | 电脑控制（Computer Use） |
 
 ### plans
 

@@ -138,6 +138,48 @@ fn default_listen_address() -> String {
     "0.0.0.0".to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputerUseConfig {
+    /// 桌面只读观测总开关(窗口清单/截图/活动窗口)。
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// 系统级执行开关(第三级:驱动键入与点击)。
+    #[serde(default = "default_false")]
+    pub system_execution_enabled: bool,
+    /// 允许列表:空 = 除内置拒绝外全部可操作;逐行写应用名。
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// 步数上限(循环护栏)。
+    #[serde(default = "default_computer_use_max_steps")]
+    pub max_steps: u32,
+    /// 外部驱动命令(概念验证与外部托管驱动);None = 用托管目录里的驱动。
+    #[serde(default)]
+    pub driver_command: Option<String>,
+    #[serde(default)]
+    pub driver_args: Vec<String>,
+    /// 更新命令(整行,经平台 shell 执行);无配置则界面只能手动升级。
+    #[serde(default)]
+    pub driver_update_command: Option<String>,
+}
+
+pub fn default_computer_use_max_steps() -> u32 {
+    40
+}
+
+impl Default for ComputerUseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            system_execution_enabled: false,
+            allowlist: Vec::new(),
+            max_steps: default_computer_use_max_steps(),
+            driver_command: None,
+            driver_args: Vec::new(),
+            driver_update_command: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BrowserControlConfig {
     #[serde(default = "default_false")]
@@ -471,6 +513,8 @@ pub struct AppConfig {
     pub companion: CompanionConfig,
     #[serde(default)]
     pub browser: BrowserControlConfig,
+    #[serde(default)]
+    pub computer_use: ComputerUseConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -501,6 +545,7 @@ impl Default for AppConfig {
             attachment_enrichment: AttachmentEnrichmentConfig::default(),
             companion: CompanionConfig::default(),
             browser: BrowserControlConfig::default(),
+            computer_use: ComputerUseConfig::default(),
         }
     }
 }

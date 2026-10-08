@@ -54,6 +54,14 @@ interface DaemonClientCore {
   sendMessage(sessionId: string, prompt: string, inputPayload?: unknown, options?: { delivery?: 'steer'; requestId?: string }): Promise<void>;
   interruptSession(sessionId: string): Promise<void>;
   respondToPermission(sessionId: string, requestId: string, response: unknown): Promise<void>;
+  /** 电脑控制放行裁决（工单 03）：choice 与既有审批同一套词 once/always/reject。 */
+  respondToComputerUseApproval(
+    requestId: string,
+    choice: 'once' | 'always' | 'reject',
+  ): Promise<void>;
+  /** 电脑控制治理面(工单 06):固定路径的 GET/POST,鉴权与审批端点同源。 */
+  computerUseGet(path: string): Promise<unknown>;
+  computerUsePost(path: string, body: Record<string, unknown>): Promise<unknown>;
   respondToInteractive(sessionId: string, toolUseId: string, response: unknown): Promise<void>;
   updateSessionSettings(sessionId: string, settings: Record<string, unknown>): Promise<unknown>;
   archiveSession(sessionId: string): Promise<void>;
@@ -259,6 +267,15 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         body: JSON.stringify({ sessionId, requestId, response }),
       });
     },
+    respondToComputerUseApproval: async (requestId, choice) => {
+      await daemonFetch(config, '/api/computer-use/approval', {
+        method: 'POST',
+        body: JSON.stringify({ requestId, choice }),
+      });
+    },
+    computerUseGet: async (path) => daemonFetch(config, path),
+    computerUsePost: async (path, body) =>
+      daemonFetch(config, path, { method: 'POST', body: JSON.stringify(body) }),
     respondToInteractive: async (sessionId, toolUseId, response) => {
       await daemonFetch(config, '/api/interactive/user-input', {
         method: 'POST',

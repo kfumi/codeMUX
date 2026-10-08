@@ -29,6 +29,7 @@ const {
   loadLatestTokenUsageMock,
   rewindSessionMock,
   respondToAgentPermissionMock,
+  respondToComputerUseApprovalMock,
   sessionHandlers,
   sessionStateHandlers,
   sessionTimelineResetHandlers,
@@ -98,6 +99,7 @@ const {
     loadLatestTokenUsageMock: vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>(),
     rewindSessionMock: vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, mode?: string) => Promise<{ filesChanged?: number }>>(),
     respondToAgentPermissionMock: vi.fn(),
+    respondToComputerUseApprovalMock: vi.fn(),
     sendMessageViaDaemonMock,
     interruptViaDaemonMock,
     getTimelineMock,
@@ -149,6 +151,7 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     getTimeline: getTimelineMock,
     interruptViaDaemon: interruptViaDaemonMock,
     respondToPermissionViaDaemon: respondToAgentPermissionMock,
+    respondToComputerUseApproval: respondToComputerUseApprovalMock,
     respondToInteractiveViaDaemon: vi.fn(),
     rewindSession: rewindSessionMock,
     resyncSessionFromNative: resyncSessionFromNativeMock,
@@ -259,6 +262,7 @@ describe('agent store Codex history loading', () => {
     getEventsMock.mockClear();
     respondToAgentPermissionMock.mockClear();
     catchUpTimelineAfterSequenceMock.mockClear();
+    respondToComputerUseApprovalMock.mockClear();
     enrichAttachmentsMock.mockResolvedValue({
       blocks: [{ attachment_name: 'screen.png', markdown: 'Visible terminal error.', ok: true }],
     });
@@ -2341,6 +2345,70 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().pendingPermissions[session.id]).toMatchObject([
       { request_id: 'permission-local' },
     ]);
+  });
+
+  it('mirrors computer-use approval requests and settles them through the daemon', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'computer-use-approval-request',
+        requestId: 'cu-1',
+        sessionId,
+        tool: 'browser_snapshot',
+        op: 'snapshot',
+        summary: '读取页面快照(编号截图加元素列表)',
+        risk: 'readOnly',
+        sensitive: null,
+        rememberable: true,
+        params: {},
+      }));
+      onEvent(JSON.stringify({
+        type: 'computer-use-approval-request',
+        requestId: 'cu-1',
+        sessionId,
+        tool: 'browser_snapshot',
+        op: 'snapshot',
+        summary: '读取页面快照(编号截图加元素列表)',
+        risk: 'readOnly',
+        sensitive: null,
+        rememberable: true,
+        params: {},
+      }));
+      onEvent(JSON.stringify({
+        type: 'computer-use-approval-request',
+        requestId: 'cu-2',
+        sessionId,
+        tool: 'browser_type',
+        op: 'type',
+        summary: '在元素 e7 输入 12 个字符',
+        risk: 'input',
+        sensitive: null,
+        rememberable: false,
+        params: { elementId: 'e7' },
+      }));
+    });
+
+    const session = await primeSession('claude_code');
+    await useAgentStore.getState().startQuery(session.id, '填表', 'D:\project\ai-code\codeMUX');
+
+    const pending = useAgentStore.getState().pendingComputerUseApprovals[session.id];
+    expect(pending.map((item) => item.request_id)).toEqual(['cu-1', 'cu-2']);
+    expect(pending[1]).toMatchObject({ op: 'type', risk: 'input', rememberable: false });
+    // 审批事件不进时间线。
+    expect((useAgentStore.getState().events[session.id] ?? []).some((message) => (
+      message.kind === 'raw' && (message.data as { type?: string }).type === 'computer-use-approval-request'
+    ))).toBe(false);
+
+    await useAgentStore.getState().respondToComputerUseApproval(session.id, 'cu-2', 'reject');
+
+    expect(respondToComputerUseApprovalMock).toHaveBeenCalledWith('cu-2', 'reject');
+    expect(
+      useAgentStore.getState().pendingComputerUseApprovals[session.id].map((item) => item.request_id),
+    ).toEqual(['cu-1']);
+
+    sessionHandlers.get(session.id)?.(
+      JSON.stringify({ type: 'computer-use-approval-resolved', requestId: 'cu-1', decision: 'always' }),
+    );
+    expect(useAgentStore.getState().pendingComputerUseApprovals[session.id]).toEqual([]);
   });
 
   it('replaces superseded assistant events in place to keep timeline order', async () => {

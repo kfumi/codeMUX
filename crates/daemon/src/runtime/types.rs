@@ -231,6 +231,11 @@ impl SemverVersion {
     pub fn is_newer_than(&self, other: &SemverVersion) -> bool {
         (self.major, self.minor, self.patch) > (other.major, other.minor, other.patch)
     }
+
+    /// 是否不低于指定版本（major.minor.patch 三段比较）。
+    pub fn is_at_least(&self, major: u64, minor: u64, patch: u64) -> bool {
+        (self.major, self.minor, self.patch) >= (major, minor, patch)
+    }
 }
 
 impl fmt::Display for SemverVersion {
@@ -298,6 +303,20 @@ impl NpmDetection {
     }
 }
 
+/// pi >= 0.75.0 起的 Node engines 下限。
+///
+/// `@earendil-works/pi-coding-agent` 自 0.75.0 起声明 `engines: node >= 22.19.0`
+///（旧 `@mariozechner` 包无 engines 声明）；`legacy-node20` 通道的 0.74.2 面向 Node 20。
+pub const PI_NODE_22_MINIMUM: (u64, u64, u64) = (22, 19, 0);
+
+/// 指定 pi 版本是否需要 Node 22.19+（>= 0.75.0，含 1.x）。
+/// 版本解析失败时放行（fail open），由后续安装行为本身报错。
+pub fn pi_requires_node_22(version: &str) -> bool {
+    SemverVersion::parse(version)
+        .map(|v| v.is_at_least(0, 75, 0))
+        .unwrap_or(false)
+}
+
 impl NodeDetection {
     /// Node 最低主版本号。
     pub const MINIMUM_MAJOR: u64 = 18;
@@ -330,6 +349,27 @@ impl NodeDetection {
                 Some("无法解析 Node.js 版本".to_string())
             },
         }
+    }
+
+    /// 本机 Node 是否满足任意版本下限（major.minor.patch 三段比较）。
+    pub fn satisfies_version(&self, major: u64, minor: u64, patch: u64) -> bool {
+        self.version
+            .as_deref()
+            .and_then(SemverVersion::parse)
+            .map(|v| v.is_at_least(major, minor, patch))
+            .unwrap_or(false)
+    }
+
+    /// 本机 Node 能否运行指定版本的 pi（< 0.75.0 只需全局 Node 18+ 门槛）。
+    pub fn satisfies_pi_runtime(&self, pi_version: &str) -> bool {
+        if !pi_requires_node_22(pi_version) {
+            return self.satisfies_minimum;
+        }
+        self.satisfies_version(
+            PI_NODE_22_MINIMUM.0,
+            PI_NODE_22_MINIMUM.1,
+            PI_NODE_22_MINIMUM.2,
+        )
     }
 }
 
@@ -576,6 +616,40 @@ mod tests {
         assert!(!d.available);
         assert!(!d.satisfies_minimum);
         assert_eq!(d.error.as_deref(), Some("node not found in PATH"));
+    }
+
+    #[test]
+    fn pi_requires_node_22_starts_at_0_75() {
+        assert!(!pi_requires_node_22("0.73.1"));
+        assert!(!pi_requires_node_22("0.74.2"));
+        assert!(pi_requires_node_22("0.75.0"));
+        assert!(pi_requires_node_22("0.87.1"));
+        assert!(pi_requires_node_22("1.0.4"));
+        assert!(!pi_requires_node_22("not-a-version"));
+    }
+
+    #[test]
+    fn node_satisfies_pi_runtime_checks_engines_floor() {
+        let node22 = NodeDetection::from_version(
+            Some("v22.20.0".to_string()),
+            Some("/usr/bin/node".to_string()),
+        );
+        assert!(node22.satisfies_pi_runtime("1.0.4"));
+
+        let node20 = NodeDetection::from_version(
+            Some("v20.19.0".to_string()),
+            Some("/usr/bin/node".to_string()),
+        );
+        assert!(!node20.satisfies_pi_runtime("1.0.4"));
+        assert!(!node20.satisfies_pi_runtime("0.75.0"));
+        // 旧 pi 只需全局门槛，Node 20 照常可用。
+        assert!(node20.satisfies_pi_runtime("0.73.1"));
+
+        let node22_18 = NodeDetection::from_version(
+            Some("v22.18.0".to_string()),
+            Some("/usr/bin/node".to_string()),
+        );
+        assert!(!node22_18.satisfies_pi_runtime("1.0.4"));
     }
 
     #[test]

@@ -123,8 +123,8 @@ async fn execute_automation(
     .await
 }
 
-/// 收 automation 请求事件(5s 兜底),返回事件 JSON。
-async fn read_automation_request<S>(read: &mut S) -> serde_json::Value
+/// 从控制面 WS 上取下一帧事件(5s 兜底)。
+async fn read_control_event<S>(read: &mut S) -> serde_json::Value
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
 {
@@ -132,14 +132,44 @@ where
     loop {
         let message = tokio::time::timeout(deadline, read.next())
             .await
-            .expect("automation request in time")
+            .expect("control event in time")
             .expect("stream open")
             .expect("message ok");
         let text = message.to_string();
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
-            if value["event"]["type"] == "browser-automation-request" {
+            if value["event"]["type"].is_string() {
                 return value;
             }
+        }
+    }
+}
+
+/// 收 automation 请求事件;途中的电脑控制审批请求(工单 03 闸门)一律按
+/// 「单步放行」应答 —— 这条测试关心的是审批之后的执行链路,审批本身由
+/// `computer_use_approval` 系列用例覆盖。
+async fn read_automation_request<S>(read: &mut S, port: u16, token: &str) -> serde_json::Value
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    loop {
+        let value = read_control_event(read).await;
+        match value["event"]["type"].as_str() {
+            Some("browser-automation-request") => return value,
+            Some("computer-use-approval-request") => {
+                let request_id = value["event"]["requestId"]
+                    .as_str()
+                    .expect("审批请求带 requestId");
+                let (status, body) = http_json(
+                    port,
+                    "POST",
+                    "/api/computer-use/approval",
+                    Some(token),
+                    Some(serde_json::json!({ "requestId": request_id, "choice": "once" })),
+                )
+                .await;
+                assert_eq!(status, 200, "单步放行应被闸门接受: {body:?}");
+            }
+            _ => {}
         }
     }
 }
@@ -207,15 +237,39 @@ async fn execute_blocked_with_403_when_browser_control_disabled() {
         "403 文案应引导用户开开关,got {body:?}"
     );
 
-    // 开启后同一请求走到既有链路(无壳客户端 → 503 快速失败,证明闸门放行)。
+    // 开启后不再被开关拦下:请求走到审批闸门(工单 03)。此处没有界面订阅,
+    // 闸门按 fail closed 收口 —— 错误文案不再是「未开启」,而是「没人应答」。
     enable_browser_control(&fixture);
-    let (status, _) = execute_automation(
+    let (status, body) = execute_automation(
         fixture.port,
         Some(&fixture.token),
         serde_json::json!({"browserId": "b1", "op": "eval", "params": {"code": "1"}}),
     )
     .await;
-    assert_eq!(status, 503, "开启后闸门应放行(503=无壳客户端)");
+    assert_eq!(status, 403, "过闸门后由审批裁决,got {body:?}");
+    assert!(
+        !body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("浏览器控制未开启"),
+        "开关已开,不应再报未开启: {body:?}"
+    );
+
+    // 无人应答的放行请求一律拒绝(超时/无界面都算拒绝,不给「静默放行」留缝)。
+    let (status, body) = execute_automation(
+        fixture.port,
+        Some(&fixture.token),
+        serde_json::json!({"browserId": "b1", "op": "list", "params": {}}),
+    )
+    .await;
+    assert_eq!(status, 403, "只读操作同样要人放行,got {body:?}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("没有订阅该会话的界面"),
+        "拒绝文案要说明为什么没人应答: {body:?}"
+    );
 
     stop_daemon(&fixture).await;
 }
@@ -225,8 +279,8 @@ async fn execute_with_local_token_passes_auth_then_fails_fast_without_client() {
     let fixture = start_daemon_fixture().await;
     enable_browser_control(&fixture);
 
-    // 回环 + Local Daemon Token:鉴权放行;无壳 WS 客户端(零订阅者)→ 503 快速失败,
-    // 而不是挂 15s。503 即证明通过了鉴权与 op 校验。
+    // 回环 + Local Daemon Token:鉴权放行、op 校验放行,随后由审批闸门收口
+    // (无界面订阅 → fail closed)。这里断言的是「不是 401、也不是 op 400」。
     let (status, body) = execute_automation(
         fixture.port,
         Some(&fixture.token),
@@ -234,18 +288,32 @@ async fn execute_with_local_token_passes_auth_then_fails_fast_without_client() {
     )
     .await;
     assert_eq!(
-        status, 503,
-        "有 token 回环应过鉴权(503=无客户端),got {body:?}"
+        status, 403,
+        "有 token 回环应过鉴权(403=审批无人应答),got {body:?}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("没有订阅该会话的界面"),
+        "got {body:?}"
     );
 
-    // list 操作同样在合法 op 集合内(不需要目标页)。
-    let (status, _) = execute_automation(
+    // list 操作同样在合法 op 集合内(不需要目标页),同样走到审批闸门。
+    let (status, body) = execute_automation(
         fixture.port,
         Some(&fixture.token),
         serde_json::json!({"op": "list", "params": {}}),
     )
     .await;
-    assert_eq!(status, 503, "list 应被 op 校验接受(503=无客户端)");
+    assert_eq!(status, 403, "list 应被 op 校验接受,停在审批,got {body:?}");
+    assert!(
+        !body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Unknown browser automation op"),
+        "list 是合法 op: {body:?}"
+    );
 
     stop_daemon(&fixture).await;
 }
@@ -311,7 +379,7 @@ async fn execute_roundtrip_via_ws_client_result() {
         .await
     });
 
-    let event = read_automation_request(&mut read).await;
+    let event = read_automation_request(&mut read, fixture.port, &fixture.token).await;
     assert_eq!(event["event"]["browserId"], "browser-1");
     assert_eq!(event["event"]["op"], "eval");
     assert_eq!(event["event"]["params"]["code"], "1+1");
@@ -378,7 +446,7 @@ async fn shell_error_result_is_forwarded_as_ok_false() {
         .await
     });
 
-    let event = read_automation_request(&mut read).await;
+    let event = read_automation_request(&mut read, fixture.port, &fixture.token).await;
     let request_id = event["event"]["requestId"]
         .as_str()
         .expect("requestId")
@@ -464,7 +532,7 @@ async fn execute_times_out_with_injected_short_timeout() {
     });
 
     // 收到请求但不回 result → execute 必须按注入的超时(300ms)返回 504。
-    let event = read_automation_request(&mut read).await;
+    let event = read_automation_request(&mut read, fixture.port, &fixture.token).await;
     let request_id = event["event"]["requestId"]
         .as_str()
         .expect("requestId")

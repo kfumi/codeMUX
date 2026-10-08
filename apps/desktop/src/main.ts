@@ -12,13 +12,16 @@
 //! 由 scripts/copy-renderer-dist.mjs 从仓库根 dist/ 拷入)。更新器经
 //! electron-updater + GitHub Releases(工单 06)。
 
-import { app, BrowserWindow, Menu, protocol, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, globalShortcut, Menu, protocol, Tray, nativeImage } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
+import { createDesktopCaptureHost } from './desktop-capture-host';
+import { createEmergencyStopService, type EmergencyStopService } from './emergency-stop';
 import { parseByteRange } from './http-range';
 import { ensureNotificationIdentity } from './notification-identity';
 import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
@@ -210,8 +213,48 @@ let unregisterBridge: (() => void) | null = null;
 let browserGuests: BrowserGuestTracker | null = null;
 /** 浏览器自动化接缝(工单 08):daemon → 壳内页面的自动化执行客户端。 */
 let automation: BrowserAutomationService | null = null;
+/** 全局 Esc 急停(工单 06):系统级执行开启期间武装。 */
+let emergencyStop: EmergencyStopService | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
+
+/**
+ * 壳直连 daemon 的 JSON POST(工单 06 急停):与自动化回包同一套回环 +
+ * Local Daemon Token。失败返回 rejected,由调用方决定是否吞掉。
+ */
+function postDaemonJson(path: string, body: Record<string, unknown>): Promise<void> {
+  const port = supervisor?.getPort() ?? null;
+  const token = readLocalDaemonToken(resolveAppDataDir());
+  if (!port || !token) {
+    return Promise.reject(new Error('daemon 未就绪'));
+  }
+  const payload = JSON.stringify(body);
+  return new Promise<void>((resolve, reject) => {
+    const request = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          authorization: `Bearer ${token}`,
+        },
+      },
+      (response) => {
+        response.resume();
+        if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+          resolve();
+        } else {
+          reject(new Error(`daemon 返回 ${response.statusCode}`));
+        }
+      },
+    );
+    request.on('error', reject);
+    request.end(payload);
+  });
+}
 
 function getRendererLog(): RendererLogRecorder {
   rendererLog ??= createRendererLogRecorder(resolveLogDir());
@@ -437,6 +480,9 @@ async function quitApplication(): Promise<void> {
   // 自动化客户端先行断开(不重连),再停自有 daemon。
   automation?.stop();
   automation = null;
+  // 解除全局 Esc:退出后不该再占着这个键(也避免重入时残留注册)。
+  emergencyStop?.setArmed(false);
+  emergencyStop = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
     await supervisor?.stopManaged();
@@ -512,8 +558,24 @@ if (!gotLock) {
       resolveMostRecent: () => guests.resolveMostRecent(),
       listTargets: () => guests.list(),
       onUiEvent: (name, payload) => sendToRenderer(name, payload),
+      // 桌面只读观测(工单 04):窗口清单/截图/活动窗口。
+      desktop: createDesktopCaptureHost(),
     });
     automation.start();
+    // 全局 Esc 急停(工单 06):系统级执行开启期间武装。触发时先通知渲染层
+    // 打断当前回合,再让 daemon 杀掉驱动子进程 —— 两件事都不经模型。
+    const emergencyStopService = createEmergencyStopService({
+      registerShortcut: (accelerator, handler) => globalShortcut.register(accelerator, handler),
+      unregisterShortcut: (accelerator) => globalShortcut.unregister(accelerator),
+      estopDriver: () => postDaemonJson('/api/computer-use/driver/estop', {}),
+      notifyRenderer: () => sendToRenderer('emergency-stop', {}),
+      log: (level, message) => {
+        if (level === 'error') console.error(message);
+        else if (level === 'warn') console.warn(message);
+        else console.log(message);
+      },
+    });
+    emergencyStop = emergencyStopService;
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);
     // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
     const updater = createUpdaterService({
@@ -523,6 +585,7 @@ if (!gotLock) {
       logDir: resolveLogDir(),
     });
     unregisterBridge = registerShellBridge({
+      emergencyStop: emergencyStopService,
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,

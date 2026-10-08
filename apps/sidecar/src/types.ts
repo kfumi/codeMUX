@@ -85,7 +85,7 @@ export interface PiSessionConfig {
   modelInputModalities?: string[];
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
-  /** CodeMUX 为 pi 启用的 MCP 服务器。pi 无原生 MCP（0.87 起未知 -- flag 会阻断启动），PiRuntime 接受但忽略；将来 pi 提供原生 MCP 时经 piMcp.ts 接入。 */
+  /** CodeMUX 为 pi 启用的 MCP 服务器。pi >= 0.99 原生支持 MCP：PiRuntime 在启动时经 piMcp.ts 同步进托管目录的 mcp.json（用户级配置，无需项目信任）。 */
   mcpServers?: PiMcpServers;
 }
 

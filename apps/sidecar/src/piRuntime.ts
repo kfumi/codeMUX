@@ -19,6 +19,7 @@ import {
   type PiApprovalMode,
   type PiExtensionFile,
 } from './piExtension.js';
+import { syncPiMcpJson } from './piMcp.js';
 import { isUnknownPiRpcCommand, PiRpcProcess } from './piRpcTransport.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { emit } from './streamEventBatcher.js';
@@ -522,10 +523,8 @@ export class PiRuntime {
       extensionFile = createPiExtensionFile(spawnConfig.approvalMode);
       this.extensionFile = extensionFile;
     }
-    // COMPAT(piMcpConfigUnknownFlag): pi 无原生 MCP（上游明确立场，0.87 README 仍
-    // "No MCP"），且 0.87 起未知 -- flag 会产生 error diagnostic 使 RPC 进程启动即
-    // 退出——不再向 pi 传 --mcp-config。mcpServers 参数接受但不落盘（将来 pi 提
-    // 供原生 MCP 时经 piMcp.ts 立项接入）。
+    // pi >= 0.99 原生 MCP：mcpServers 经 createDefaultPiTransport 同步进托管目录的
+    // mcp.json（用户级配置，无需项目信任；原生不需要任何启动 flag）。详见 piMcp.ts。
     const transport = this.options.transportFactory
       ? this.options.transportFactory(spawnConfig)
       : createDefaultPiTransport(spawnConfig, extensionFile?.path);
@@ -1238,6 +1237,30 @@ export function createDefaultPiTransport(
     env.PI_CODING_AGENT_DIR = config.piConfigDir;
   }
 
+  // pi >= 0.99 原生 MCP：把 CodeMUX 为 pi 启用的服务器同步进托管目录的 mcp.json
+  //（用户级配置，无需项目信任；原生不需要 --mcp-config 之类的启动 flag）。
+  // piConfigDir 对 pi 会话恒有设置，与凭据来源无关。同步失败只记日志、不阻断启动。
+  if (config.piConfigDir) {
+    try {
+      const mcpResult = syncPiMcpJson(config.piConfigDir, config.mcpServers ?? {});
+      if (
+        mcpResult.applied.length > 0 ||
+        mcpResult.pruned.length > 0 ||
+        mcpResult.skipped.length > 0
+      ) {
+        writeLog(
+          '[pi-task]',
+          `mcp sync applied=[${mcpResult.applied.join(',')}] pruned=[${mcpResult.pruned.join(',')}] skipped=[${mcpResult.skipped.join(',')}]`,
+        );
+      }
+    } catch (error) {
+      writeLog(
+        '[pi-task]',
+        `mcp sync FAILED error=${error instanceof Error ? error.message : String(error)}; continuing without managed MCP servers`,
+      );
+    }
+  }
+
   return PiRpcProcess.start({
     command,
     args,
@@ -1272,8 +1295,9 @@ export function buildPiLaunchArgs(config: PiSessionConfig, extensionPath?: strin
   if (extensionPath) {
     args.push('--extension', extensionPath);
   }
-  // COMPAT(piMcpConfigUnknownFlag)：pi 无原生 MCP，0.87 起未知 -- flag 会产生
-  // error diagnostic 使 RPC 进程启动即退出——不传 --mcp-config（见 start()）。
+  // MCP 不需要启动 flag：pi >= 0.99 原生从托管目录的 mcp.json 读取服务器
+  //（见 createDefaultPiTransport 的同步逻辑）。未知 -- flag 仍可能产生
+  // error diagnostic 使 RPC 进程启动即退出，所以这里只传已知稳定的 flag。
   if (config.thinkingLevel) {
     args.push('--thinking', config.thinkingLevel);
   }

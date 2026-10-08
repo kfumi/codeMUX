@@ -561,3 +561,80 @@ describe('browser-automation 纯函数', () => {
     expect(outcome.payload).toEqual(guests);
   });
 });
+
+
+
+describe('browser-automation 元素级操作(snapshot/click/type/scroll/select)', () => {
+  function snapshotTarget() {
+    const target = makeTarget({
+      executeJavaScript: async (code: string) => {
+        target.calls.execute.push(code);
+        return {
+          elements: [{ id: 'e1', tag: 'button', role: '', name: '确定', bounds: { x: 10, y: 20, width: 100, height: 30 } }],
+          viewport: { width: 800, height: 600 },
+        };
+      },
+    });
+    return target;
+  }
+  function depsFor(target: AutomationTarget) {
+    return {
+      resolveTarget: () => target,
+      listTargets: () => [] as Array<{ browserId: string; url: string; title: string }>,
+    };
+  }
+  it('snapshot:返回元素列表+视口+截图,并建立元素缓存', async () => {
+    const target = snapshotTarget();
+    const outcome = await executeAutomationRequest(depsFor(target), { requestId: 's-1', browserId: 'b-1', op: 'snapshot', params: {} });
+    expect(outcome.ok).toBe(true);
+    const payload = outcome.payload as { elements: Array<{ id: string }>; screenshot: string };
+    expect(payload.elements.map((e) => e.id)).toEqual(['e1']);
+    expect(payload.screenshot).toBe(Buffer.from([137, 80, 78, 71]).toString('base64'));
+  });
+  it('click:未知 elementId 回 ok:false', async () => {
+    const target = snapshotTarget();
+    const outcome = await executeAutomationRequest(depsFor(target), { requestId: 'c-0', browserId: 'b-x', op: 'click', params: { elementId: 'e9' } });
+    expect(outcome.ok).toBe(false);
+  });
+  it('click:命中缓存元素,在中心点按下弹起', async () => {
+    const target = snapshotTarget();
+    const deps = depsFor(target);
+    await executeAutomationRequest(deps, { requestId: 's-1', browserId: 'b-1', op: 'snapshot', params: {} });
+    const outcome = await executeAutomationRequest(deps, { requestId: 'c-1', browserId: 'b-1', op: 'click', params: { elementId: 'e1' } });
+    expect(outcome.ok).toBe(true);
+    const types = target.calls.input.map((e) => (e as Record<string, unknown>).type);
+    expect(types).toEqual(['mouseMove', 'mouseDown', 'mouseUp']);
+    expect(target.calls.input[0]).toMatchObject({ x: 60, y: 35 });
+  });
+  it('type:缺 text 回 ok:false', async () => {
+    const target = snapshotTarget();
+    const deps = depsFor(target);
+    await executeAutomationRequest(deps, { requestId: 's-1', browserId: 'b-1', op: 'snapshot', params: {} });
+    const outcome = await executeAutomationRequest(deps, { requestId: 't-0', browserId: 'b-1', op: 'type', params: { elementId: 'e1' } });
+    expect(outcome.ok).toBe(false);
+  });
+  it('type:聚焦后经页面脚本设值并派发事件', async () => {
+    const target = snapshotTarget();
+    const deps = depsFor(target);
+    await executeAutomationRequest(deps, { requestId: 's-1', browserId: 'b-1', op: 'snapshot', params: {} });
+    const before = target.calls.execute.length;
+    const outcome = await executeAutomationRequest(deps, { requestId: 't-1', browserId: 'b-1', op: 'type', params: { elementId: 'e1', text: 'hello' } });
+    expect(outcome.ok).toBe(true);
+    const scripts = target.calls.execute.slice(before);
+    expect(scripts.length).toBeGreaterThan(0);
+    expect(scripts.join('\n')).toContain('hello');
+  });
+  it('scroll:无元素时按增量滚屏', async () => {
+    const target = snapshotTarget();
+    const outcome = await executeAutomationRequest(depsFor(target), { requestId: 'w-1', browserId: 'b-1', op: 'scroll', params: { deltaY: 300 } });
+    expect(outcome.ok).toBe(true);
+    expect(target.calls.execute.join('\n')).toContain('scrollBy');
+  });
+  it('select:缺 value 回 ok:false', async () => {
+    const target = snapshotTarget();
+    const deps = depsFor(target);
+    await executeAutomationRequest(deps, { requestId: 's-1', browserId: 'b-1', op: 'snapshot', params: {} });
+    const outcome = await executeAutomationRequest(deps, { requestId: 'v-0', browserId: 'b-1', op: 'select', params: { elementId: 'e1' } });
+    expect(outcome.ok).toBe(false);
+  });
+});

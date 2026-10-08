@@ -248,6 +248,10 @@ export interface CodemuxDesktopBridge {
   browserClearData(scope: BrowserDataScope): Promise<void>;
   /** guest webContentsId → browserId 登记(弹窗拒绝转发据此回填来源)。 */
   browserRegisterGuest(webContentsId: number, browserId: string): Promise<void>;
+  /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
+  captureDesktopScreen(): Promise<{ image: string; width: number; height: number }>;
+  /** 全局 Esc 急停(工单 06):系统级执行开启期间武装;返回是否已生效。 */
+  setEmergencyStopArmed(armed: boolean): Promise<boolean>;
 
   // perf / devtools
   exportPerfSnapshot(path: string, content: string): Promise<null>;
@@ -262,6 +266,8 @@ export interface CodemuxDesktopBridge {
   onAgentNotificationClicked(callback: (payload: DesktopAgentNotificationClickPayload) => void): () => void;
   onUpdaterEvent(callback: (event: DesktopUpdaterEvent) => void): () => void;
   onBrowserNewWindow(callback: (payload: DesktopBrowserNewWindowPayload) => void): () => void;
+  /** 全局 Esc 急停触发(工单 06):壳已杀驱动,渲染层据此打断当前回合。 */
+  onEmergencyStop(callback: () => void): () => void;
   /** daemon 桌面 UI 事件(工单 09:sessions-changed / scheduled-tasks-changed /
    * runtime-install-progress* / window-maximize-changed),main 按同名事件转发;
    * 返回取消订阅。 */

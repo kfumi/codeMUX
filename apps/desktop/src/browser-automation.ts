@@ -22,9 +22,17 @@ import http from 'node:http';
 import WebSocket from 'ws';
 
 import { parseDesktopUiEvent } from './desktop-events';
+import {
+  activeDesktopWindow,
+  captureDesktop,
+  listDesktopSources,
+  type DesktopCaptureDeps,
+} from './desktop-capture';
 
-/** 四种受控自动化操作。 */
-export type AutomationOp = 'eval' | 'screenshot' | 'input' | 'cdp';
+/** 受控自动化操作(浏览器级 + 桌面只读观测,工单 04)。 */
+export type AutomationOp =
+  | 'eval' | 'screenshot' | 'input' | 'cdp' | 'snapshot' | 'click' | 'type' | 'scroll' | 'select'
+  | 'desktop-windows' | 'desktop-screenshot' | 'desktop-active-window';
 
 /** automation 请求(daemon → 壳)的载荷形状。 */
 export interface AutomationRequest {
@@ -84,6 +92,11 @@ export interface BrowserAutomationDeps {
    * 以同名事件名转发渲染层(main 用 webContents.send)。缺省不转发。
    */
   onUiEvent?: (name: string, payload: unknown) => void;
+  /**
+   * 桌面只读观测(工单 04):窗口清单/截图/活动窗口。缺省表示该宿主没有
+   * 桌面捕获能力(纯浏览器形态),桌面 op 明确报错而不是静默失败。
+   */
+  desktop?: DesktopCaptureDeps;
 }
 
 export interface BrowserAutomationService {
@@ -152,13 +165,219 @@ export function parseAutomationRequest(raw: string): AutomationRequest | null {
  * 单次请求执行(不含队列):按 op 分发到目标页。失败以 {ok:false,error} 收口,
  * 不向上抛(调用方据此 POST result)。
  */
+/** 快照元素：一次 snapshot 的编号行，可被后续 click/type/scroll/select 引用 */
+export interface SnapshotElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface SnapshotElement {
+  id: string;
+  tag: string;
+  role: string;
+  name: string;
+  bounds: SnapshotElementBounds;
+  /**
+   * 密码框标记(工单 03 敏感判定用):daemon 据此强制人工确认,不允许
+   * 「本会话记住」。壳只报标记,不读值。
+   */
+  sensitive?: boolean;
+}
+/** snapshot 回填 payload 的形状 */
+export interface SnapshotPayload {
+  elements: SnapshotElement[];
+  viewport: { width: number; height: number };
+  screenshot: string;
+  /** 页面 URL 与标题(审批敏感判定:登录/支付页整页都要人确认)。 */
+  url: string;
+  title: string;
+}
+/** 元素快照缓存：snapshot 写入，元素操作按同一键读取；全局 FIFO 串行保证先后序 */
+const snapshotCaches = new Map<string, SnapshotElement[]>();
+/** 快照缓存键：与目标解析规则对齐（显式 browserId，否则最近页面） */
+function snapshotCacheKey(browserId: string | null | undefined): string {
+  return browserId ? browserId : '__recent__';
+}
+/** 测试与诊断用：清空元素快照缓存 */
+export function clearSnapshotCaches(): void {
+  snapshotCaches.clear();
+}
+/** 页面内枚举可交互元素的脚本（返回元素数组与视口，元素按出现顺序编号） */
+const SNAPSHOT_ENUMERATE_SCRIPT = `(() => {
+  const found = [];
+  const selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[contenteditable]';
+  let index = 0;
+  const nodes = document.querySelectorAll(selector);
+  for (const el of nodes) {
+    if (index >= 200) { break; }
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) { continue; }
+    const raw = el.getAttribute('aria-label') || el.textContent || '';
+    const label = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+    const sensitive = el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'password';
+    index += 1;
+    found.push({ id: 'e' + index, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: label, sensitive, bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } });
+  }
+  return { elements: found, viewport: { width: window.innerWidth, height: window.innerHeight }, url: location.href, title: document.title };
+})()`;
+
+
+/** 执行 snapshot：页内枚举 + 截图 + 写缓存 */
+async function executeSnapshot(target: AutomationTarget, cacheKey: string): Promise<AutomationOutcome> {
+  let enumerated: unknown;
+  try {
+    enumerated = await target.executeJavaScript(SNAPSHOT_ENUMERATE_SCRIPT);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const record = enumerated as { elements?: unknown; viewport?: unknown; url?: unknown; title?: unknown } | null | undefined;
+  const elements = Array.isArray(record?.elements) ? (record?.elements as SnapshotElement[]) : null;
+  if (!elements) {
+    return { ok: false, error: 'snapshot：页面未返回元素列表' };
+  }
+  snapshotCaches.set(cacheKey, elements);
+  try {
+    const image = await target.capturePage();
+    const viewport = (record?.viewport as { width: number; height: number } | undefined) ?? { width: 0, height: 0 };
+    const pageRecord = record as { url?: unknown; title?: unknown } | null | undefined;
+    const payload: SnapshotPayload = {
+      elements,
+      viewport,
+      screenshot: image.toPNG().toString('base64'),
+      url: typeof pageRecord?.url === 'string' ? pageRecord.url : '',
+      title: typeof pageRecord?.title === 'string' ? pageRecord.title : '',
+    };
+    return { ok: true, payload };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+/** 按缓存键解析元素编号；未命中交由调用方提示重新快照 */
+function resolveSnapshotElement(cacheKey: string, elementId: string): SnapshotElement | undefined {
+  return snapshotCaches.get(cacheKey)?.find((item) => item.id === elementId);
+}
+function unknownElementError(elementId: string): AutomationOutcome {
+  return { ok: false, error: 'unknown elementId: ' + elementId + '（先调 snapshot 拿最新元素列表）' };
+}
+/** 在元素中心点按下弹起（附带一次移动以保证悬停状态正确） */
+function clickElementCenter(target: AutomationTarget, element: SnapshotElement, button: string): void {
+  const x = Math.round(element.bounds.x + element.bounds.width / 2);
+  const y = Math.round(element.bounds.y + element.bounds.height / 2);
+  target.sendInputEvent({ type: 'mouseMove', x, y });
+  target.sendInputEvent({ type: 'mouseDown', x, y, button, clickCount: 1 });
+  target.sendInputEvent({ type: 'mouseUp', x, y, button, clickCount: 1 });
+}
+
+/** 构造输入脚本：聚焦元素设值并派发 input/change；submit 为真且在表单内则提交 */
+function buildTypeScript(text: string, submit: boolean): string {
+  const value = JSON.stringify(text);
+  const quote = (name: string): string => JSON.stringify(name);
+  const submitStep = submit ? 'var __form = el.form;if(__form && __form.requestSubmit){__form.requestSubmit();}' : '';
+  return '(function(){var el = document.activeElement;'
+    + 'if(!el){throw new Error(' + quote('no focused element') + ');}'
+    + 'el.focus();'
+    + 'if(' + quote('value') + ' in el){el.value = ' + value + ';}else{el.textContent = ' + value + ';}'
+    + 'el.dispatchEvent(new Event(' + quote('input') + ',{bubbles:true}));'
+    + 'el.dispatchEvent(new Event(' + quote('change') + ',{bubbles:true}));'
+    + submitStep + '})()';
+}
+/** 构造下拉选择脚本：聚焦元素必须是 select，设值后派发 change */
+function buildSelectScript(value: string): string {
+  const quote = (name: string): string => JSON.stringify(name);
+  return '(function(){var el = document.activeElement;'
+    + 'if(!el||el.tagName.toLowerCase()!==' + quote('select') + '){throw new Error(' + quote('focused element is not a select') + ');}'
+    + 'el.value = ' + JSON.stringify(value) + ';'
+    + 'el.dispatchEvent(new Event(' + quote('change') + ',{bubbles:true}));})()';
+}
+
+/** 元素级操作分发（click/type/scroll/select）；无元素 scroll 走整页滚屏 */
+async function executeElementOp(target: AutomationTarget, cacheKey: string, op: string, params: Record<string, unknown>): Promise<AutomationOutcome> {
+  if (op === 'scroll' && params.elementId === undefined) {
+    const deltaX = typeof params.deltaX === 'number' ? (params.deltaX as number) : 0;
+    const deltaY = typeof params.deltaY === 'number' ? (params.deltaY as number) : 0;
+    try {
+      await target.executeJavaScript('window.scrollBy(' + deltaX + ', ' + deltaY + ')');
+      return { ok: true, payload: null };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  const elementId = typeof params.elementId === 'string' ? params.elementId : '';
+  if (!elementId) {
+    return { ok: false, error: op + ' requires params.elementId' };
+  }
+  const element = resolveSnapshotElement(cacheKey, elementId);
+  if (!element) {
+    return unknownElementError(elementId);
+  }
+  const button = typeof params.button === 'string' ? params.button : 'left';
+  try {
+    switch (op) {
+      case 'click': {
+        clickElementCenter(target, element, button);
+        return { ok: true, payload: null };
+      }
+      case 'type': {
+        const text = typeof params.text === 'string' ? params.text : '';
+        if (!text) {
+          return { ok: false, error: 'type requires params.text' };
+        }
+        clickElementCenter(target, element, button);
+        await target.executeJavaScript(buildTypeScript(text, params.submit === true));
+        return { ok: true, payload: null };
+      }
+      case 'scroll': {
+        const deltaX = typeof params.deltaX === 'number' ? (params.deltaX as number) : 0;
+        const deltaY = typeof params.deltaY === 'number' ? (params.deltaY as number) : 0;
+        const x = Math.round(element.bounds.x + element.bounds.width / 2);
+        const y = Math.round(element.bounds.y + element.bounds.height / 2);
+        target.sendInputEvent({ type: 'mouseWheel', x, y, deltaX, deltaY });
+        return { ok: true, payload: null };
+      }
+      case 'select': {
+        const value = typeof params.value === 'string' ? params.value : '';
+        if (!value) {
+          return { ok: false, error: 'select requires params.value' };
+        }
+        clickElementCenter(target, element, button);
+        await target.executeJavaScript(buildSelectScript(value));
+        return { ok: true, payload: null };
+      }
+      default: {
+        return { ok: false, error: 'unknown element op: ' + op };
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function executeAutomationRequest(
-  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets'>,
+  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets' | 'desktop'>,
   request: AutomationRequest,
 ): Promise<AutomationOutcome> {
   const op = request.op;
-  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'list') {
+  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'snapshot' && op !== 'click' && op !== 'type' && op !== 'scroll' && op !== 'select' && op !== 'list'
+    && op !== 'desktop-windows' && op !== 'desktop-screenshot' && op !== 'desktop-active-window') {
     return { ok: false, error: `unknown automation op: ${op}` };
+  }
+  // 桌面只读观测(工单 04):不碰页面,走独立的捕获依赖面。
+  if (op === 'desktop-windows' || op === 'desktop-screenshot' || op === 'desktop-active-window') {
+    if (!deps.desktop) {
+      return { ok: false, error: '当前宿主不支持桌面截图(需要桌面壳)' };
+    }
+    try {
+      if (op === 'desktop-windows') {
+        return { ok: true, payload: await listDesktopSources(deps.desktop) };
+      }
+      if (op === 'desktop-screenshot') {
+        return await captureDesktop(deps.desktop, request.params ?? {});
+      }
+      return await activeDesktopWindow(deps.desktop);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
   // list 不需要目标页:直接报存活 guest 清单。
   if (op === 'list') {
@@ -202,6 +421,15 @@ export async function executeAutomationRequest(
         const cdpParams = (params.params ?? undefined) as Record<string, unknown> | undefined;
         const response = await debugger_.sendCommand(method, cdpParams);
         return { ok: true, payload: response ?? null };
+      }
+      case 'snapshot': {
+        return executeSnapshot(target, snapshotCacheKey(request.browserId));
+      }
+      case 'click':
+      case 'type':
+      case 'scroll':
+      case 'select': {
+        return executeElementOp(target, snapshotCacheKey(request.browserId), op, params);
       }
     }
   } catch (error) {

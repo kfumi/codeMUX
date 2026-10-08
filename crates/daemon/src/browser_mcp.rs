@@ -1,5 +1,11 @@
-//! 内置浏览器 MCP server(`codemux-daemon mcp-browser` 子命令):会话驱动
-//! 内置浏览器的工具面。
+//! 内置电脑控制 MCP server(`codemux-daemon mcp-browser` 子命令):会话驱动
+//! 内置浏览器与桌面只读观测的唯一工具面。
+//!
+//! 服务名沿用 `codemux-browser`(01 票上线,改名会改掉模型侧的工具前缀
+//! `mcp__codemux-browser__*`,既有权限规则与人读的日志都会失配);但按 spec
+//! 「能力只暴露为一个系统内置 MCP 服务」,桌面只读工具(04 票)与后续驱动工具
+//! 都挂在这一份 server 上,只读/输入的分权由 daemon 侧审批闸门(03 票)裁,
+//! 不靠拆服务。
 //!
 //! stdio 上讲 MCP(ISO JSON-RPC 2.0,按行分帧);每个工具调用转发 daemon
 //! 回环端点 `POST /api/browser-automation/execute`(Local Daemon Token 鉴权)。
@@ -22,14 +28,33 @@ use crate::daemon::{run_state, DAEMON_VERSION};
 /// 内置 server 名(会话命令 `mcpServers` 的键)。
 pub const BROWSER_MCP_SERVER_NAME: &str = "codemux-browser";
 
-/// 单次 execute 转发的等待上限(daemon 端等待壳回包默认 15s,此处放宽收口)。
-const EXECUTE_TIMEOUT: Duration = Duration::from_secs(20);
+/// 单次 execute 转发的等待上限。
+///
+/// 覆盖 daemon 端「人工审批等待(默认 120s)+ 壳执行(15s)」两级:审批是
+/// 面向人的,客户端必须比它等得久,否则用户还没点就被判定超时。
+const EXECUTE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// 会话命令注入用的内置 server spec(stdio 指向本 daemon 二进制子命令)。
 pub fn builtin_server_spec(current_exe: &Path, app_data_dir: &Path) -> Value {
     json!({
         "command": current_exe.to_string_lossy(),
         "args": ["mcp-browser", "--app-data-dir", app_data_dir.to_string_lossy()],
+    })
+}
+
+/// 带会话归属的 spec(会话命令注入用):审批与审计按会话落账。
+pub fn builtin_server_spec_for_session(
+    current_exe: &Path,
+    app_data_dir: &Path,
+    session_id: &str,
+) -> Value {
+    json!({
+        "command": current_exe.to_string_lossy(),
+        "args": [
+            "mcp-browser",
+            "--app-data-dir", app_data_dir.to_string_lossy(),
+            "--session-id", session_id,
+        ],
     })
 }
 
@@ -42,7 +67,7 @@ pub fn builtin_server_entry(
     crate::mcp::types::McpServer {
         id: BROWSER_MCP_SERVER_NAME.to_string(),
         name: BROWSER_MCP_SERVER_NAME.to_string(),
-        description: "内置浏览器控制:让会话驱动内置浏览器(eval / 截图 / 输入 / CDP)。随「设置 → 浏览器控制」开关生效,内置提供,不可修改或删除。".to_string(),
+        description: "内置电脑控制:浏览器级(列表、求值、截图、键鼠输入、CDP、快照、元素点击、输入、滚动、选择)与桌面只读观测(窗口清单、桌面截图、活动窗口)。浏览器级随「浏览器控制」开关,桌面只读随「电脑控制」开关;内置提供,不可修改或删除。".to_string(),
         server: builtin_server_spec(current_exe, app_data_dir),
         apps: crate::mcp::types::McpApps {
             claude: true,
@@ -56,20 +81,46 @@ pub fn builtin_server_entry(
 }
 
 /// daemon 回环地址 + Local Daemon Token(execute 转发所需的最小环境)。
+///
+/// 构造不做 I/O:daemon 没在跑时也要能应答 `initialize` / `tools/list`,
+/// 否则智能体连工具面都看不到,只能看见一个起不来的 server。端口与令牌在
+/// 每次转发时现取 —— daemon 重启换端口后自动跟上。
 pub struct BrowserMcpRuntime {
-    port: u16,
-    token: String,
+    app_data_dir: PathBuf,
+    /// 端口覆盖(测试/调试;None = 读 run-state)。
+    port_override: Option<u16>,
+    /// 令牌覆盖(测试;None = 读/建 app-data-dir 下的本地令牌)。
+    token_override: Option<String>,
     http: reqwest::Client,
+    /// 会话归属(会话命令经 `--session-id` 注入;手工直连时为 None)。
+    session_id: Option<String>,
 }
 
 impl BrowserMcpRuntime {
-    /// 从 app-data-dir 发现端口与令牌;`port_override` 供测试/调试直连。
-    pub fn discover(app_data_dir: &Path, port_override: Option<u16>) -> Result<Self, String> {
-        let port = match port_override {
+    pub fn new(
+        app_data_dir: &Path,
+        port_override: Option<u16>,
+        session_id: Option<String>,
+    ) -> Self {
+        Self {
+            app_data_dir: app_data_dir.to_path_buf(),
+            port_override,
+            token_override: None,
+            http: reqwest::Client::builder()
+                .timeout(EXECUTE_TIMEOUT)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
+            session_id,
+        }
+    }
+
+    /// 现取 daemon 端口与本地令牌;每一步失败都给面向模型的明确文案。
+    fn endpoint(&self) -> Result<(u16, String), String> {
+        let port = match self.port_override {
             Some(port) => port,
             None => {
                 let roots = crate::paths::PathRoots {
-                    app_data_dir: app_data_dir.to_path_buf(),
+                    app_data_dir: self.app_data_dir.clone(),
                     resource_dir: None,
                 };
                 run_state::read(&roots)
@@ -79,30 +130,37 @@ impl BrowserMcpRuntime {
                     .port
             }
         };
-        let token = local_daemon_token::ensure_local_daemon_token(app_data_dir, false)?;
-        let http = reqwest::Client::builder()
-            .timeout(EXECUTE_TIMEOUT)
-            .build()
-            .map_err(|e| format!("构建 HTTP 客户端失败: {}", e))?;
-        Ok(Self { port, token, http })
+        let token = match &self.token_override {
+            Some(token) => token.clone(),
+            None => local_daemon_token::ensure_local_daemon_token(&self.app_data_dir, false)?,
+        };
+        Ok((port, token))
     }
 
     /// 转发一次 execute;成功返回 payload,失败(4xx/5xx/网络)返回面向
     /// 模型的错误文案(daemon 的 403 文案原样透传)。
     pub async fn call_execute(
         &self,
+        tool: &str,
         op: &str,
         browser_id: Option<&str>,
         params: Value,
     ) -> Result<Value, String> {
+        let (port, token) = self.endpoint()?;
         let response = self
             .http
             .post(format!(
                 "http://127.0.0.1:{}/api/browser-automation/execute",
-                self.port
+                port
             ))
-            .bearer_auth(&self.token)
-            .json(&json!({ "op": op, "browserId": browser_id, "params": params }))
+            .bearer_auth(&token)
+            .json(&json!({
+                "op": op,
+                "browserId": browser_id,
+                "params": params,
+                "tool": tool,
+                "sessionId": self.session_id,
+            }))
             .send()
             .await
             .map_err(|e| format!("连接 daemon 失败: {}", e))?;
@@ -176,6 +234,89 @@ fn tool_definitions() -> Value {
                 "required": ["method"],
             },
         },
+        {
+            "name": "browser_snapshot",
+            "description": "读取当前浏览器页的结构化快照：可交互元素列表（含编号、角色、名称与包围盒）与视口尺寸；截图随结果以图片形式返回。用元素编号驱动后续点击、输入等操作。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "browserId": { "type": "string", "description": "目标页面；省略时取最近打开的页面" },
+                },
+            },
+        },
+        {
+            "name": "browser_click",
+            "description": "点击快照中的元素（按元素编号，如 e3）；先调 browser_snapshot 拿最新列表。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "button": { "type": "string", "description": "left、middle 或 right，缺省 left" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId"],
+            },
+        },
+        {
+            "name": "browser_type",
+            "description": "在快照中的元素里输入文字（按元素编号）；聚焦后设值并派发输入事件，submit 为真且在表单内时提交。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "text": { "type": "string" },
+                    "submit": { "type": "boolean" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId", "text"],
+            },
+        },
+        {
+            "name": "browser_scroll",
+            "description": "滚动页面或快照中的元素：无元素编号时按增量滚屏，有编号时在元素中心滚轮。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "deltaX": { "type": "number" },
+                    "deltaY": { "type": "number" },
+                    "browserId": { "type": "string" },
+                },
+            },
+        },
+        {
+            "name": "browser_select",
+            "description": "在快照中的下拉框元素里按值选择（按元素编号），选择后派发变更事件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "elementId": { "type": "string" },
+                    "value": { "type": "string" },
+                    "browserId": { "type": "string" },
+                },
+                "required": ["elementId", "value"],
+            },
+        },
+        {
+            "name": "computer_windows",
+            "description": "列出桌面上的屏幕与窗口(来源 id 与标题)。只读,不改动任何窗口。截取某个窗口前先用它取 sourceId。",
+            "inputSchema": { "type": "object", "properties": {} },
+        },
+        {
+            "name": "computer_screenshot",
+            "description": "截取桌面画面(默认主屏,可指定 computer_windows 给出来源 id)。只读;返回图片。窗口最小化或已关闭时返回错误。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sourceId": { "type": "string", "description": "computer_windows 返回的来源 id;省略时截主屏" },
+                },
+            },
+        },
+        {
+            "name": "computer_active_window",
+            "description": "读取当前前台窗口(标题、进程、位置,以及可用于截图的来源 id)。读不到时明确报错,不会拿别的窗口冒充。",
+            "inputSchema": { "type": "object", "properties": {} },
+        },
     ])
 }
 
@@ -223,24 +364,24 @@ async fn call_tool(
 ) -> Result<Value, (i64, String)> {
     let browser_id = args.get("browserId").and_then(|v| v.as_str());
     let result: Result<Value, String> = match name {
-        "browser_list" => runtime.call_execute("list", None, json!({})).await,
+        "browser_list" => runtime.call_execute(name, "list", None, json!({})).await,
         "browser_eval" => match args.get("code").and_then(|v| v.as_str()) {
             Some(code) if !code.trim().is_empty() => {
                 runtime
-                    .call_execute("eval", browser_id, json!({ "code": code }))
+                    .call_execute(name, "eval", browser_id, json!({ "code": code }))
                     .await
             }
             _ => Err("browser_eval 缺少必填参数 code".to_string()),
         },
         "browser_screenshot" => {
             runtime
-                .call_execute("screenshot", browser_id, json!({}))
+                .call_execute(name, "screenshot", browser_id, json!({}))
                 .await
         }
         "browser_input" => match args.get("event") {
             Some(event) if event.is_object() => {
                 runtime
-                    .call_execute("input", browser_id, event.clone())
+                    .call_execute(name, "input", browser_id, event.clone())
                     .await
             }
             _ => Err("browser_input 缺少必填参数 event(对象)".to_string()),
@@ -249,6 +390,7 @@ async fn call_tool(
             Some(method) if !method.trim().is_empty() => {
                 runtime
                     .call_execute(
+                        name,
                         "cdp",
                         browser_id,
                         json!({ "method": method, "params": args.get("params") }),
@@ -257,13 +399,126 @@ async fn call_tool(
             }
             _ => Err("browser_cdp 缺少必填参数 method".to_string()),
         },
+        "browser_snapshot" => {
+            runtime
+                .call_execute(name, "snapshot", browser_id, json!({}))
+                .await
+        }
+        "browser_click" => match args.get("elementId").and_then(|v| v.as_str()) {
+            Some(element_id) if !element_id.trim().is_empty() => {
+                runtime
+                    .call_execute(
+                        name,
+                        "click",
+                        browser_id,
+                        json!({ "elementId": element_id }),
+                    )
+                    .await
+            }
+            _ => Err("browser_click 缺少必填参数 elementId".to_string()),
+        },
+        "browser_type" => {
+            let element_id = args.get("elementId").and_then(|v| v.as_str()).unwrap_or("");
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if element_id.trim().is_empty() || text.is_empty() {
+                Err("browser_type 缺少必填参数 elementId 或 text".to_string())
+            } else {
+                let mut params = serde_json::Map::new();
+                params.insert(
+                    "elementId".to_string(),
+                    Value::String(element_id.to_string()),
+                );
+                params.insert("text".to_string(), Value::String(text.to_string()));
+                if let Some(submit) = args.get("submit") {
+                    params.insert("submit".to_string(), submit.clone());
+                }
+                runtime
+                    .call_execute(name, "type", browser_id, Value::Object(params))
+                    .await
+            }
+        }
+        "browser_scroll" => {
+            let mut params = serde_json::Map::new();
+            for key in ["elementId", "deltaX", "deltaY"] {
+                if let Some(value) = args.get(key) {
+                    params.insert(key.to_string(), value.clone());
+                }
+            }
+            runtime
+                .call_execute(name, "scroll", browser_id, Value::Object(params))
+                .await
+        }
+        "browser_select" => {
+            let element_id = args.get("elementId").and_then(|v| v.as_str()).unwrap_or("");
+            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            if element_id.trim().is_empty() || value.is_empty() {
+                Err("browser_select 缺少必填参数 elementId 或 value".to_string())
+            } else {
+                runtime
+                    .call_execute(
+                        name,
+                        "select",
+                        browser_id,
+                        json!({ "elementId": element_id, "value": value }),
+                    )
+                    .await
+            }
+        }
+        "computer_windows" => {
+            runtime
+                .call_execute(name, "desktop-windows", None, json!({}))
+                .await
+        }
+        "computer_screenshot" => {
+            let mut params = serde_json::Map::new();
+            if let Some(source_id) = args.get("sourceId") {
+                params.insert("sourceId".to_string(), source_id.clone());
+            }
+            runtime
+                .call_execute(name, "desktop-screenshot", None, Value::Object(params))
+                .await
+        }
+        "computer_active_window" => {
+            runtime
+                .call_execute(name, "desktop-active-window", None, json!({}))
+                .await
+        }
         other => Err(format!("未知工具: {}(见 tools/list)", other)),
     };
     Ok(match result {
         Ok(payload) => match (name, payload) {
+            ("browser_snapshot", Value::Object(map)) => {
+                let screenshot = map.get("screenshot").and_then(|v| v.as_str()).unwrap_or("");
+                let mut summary = map.clone();
+                summary.remove("screenshot");
+                json!({
+                    "content": [
+                        { "type": "image", "data": screenshot, "mimeType": "image/png" },
+                        { "type": "text", "text": serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string()) },
+                    ],
+                })
+            }
             ("browser_screenshot", Value::String(data)) if !data.is_empty() => json!({
                 "content": [{ "type": "image", "data": data, "mimeType": "image/png" }],
             }),
+            ("computer_screenshot", Value::Object(map)) => {
+                let image = map.get("image").and_then(|v| v.as_str()).unwrap_or("");
+                if image.is_empty() {
+                    json!({
+                        "content": [{ "type": "text", "text": "桌面截图为空(来源可能已关闭或最小化)" }],
+                        "isError": true,
+                    })
+                } else {
+                    let mut meta = map.clone();
+                    meta.remove("image");
+                    json!({
+                        "content": [
+                            { "type": "image", "data": image, "mimeType": "image/png" },
+                            { "type": "text", "text": serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "null".to_string()) },
+                        ],
+                    })
+                }
+            }
             ("browser_eval", payload) => json!({
                 "content": [{ "type": "text", "text": payload.as_str().unwrap_or("null") }],
             }),
@@ -323,9 +578,14 @@ pub fn run_stdio(runtime: &BrowserMcpRuntime) -> Result<(), String> {
     Ok(())
 }
 
-/// 子命令入口:`codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>]`。
-pub fn run_subcommand(app_data_dir: PathBuf, port_override: Option<u16>) -> Result<(), String> {
-    let runtime = BrowserMcpRuntime::discover(&app_data_dir, port_override)?;
+/// 子命令入口:`codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>]
+/// [--session-id <id>]`。
+pub fn run_subcommand(
+    app_data_dir: PathBuf,
+    port_override: Option<u16>,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let runtime = BrowserMcpRuntime::new(&app_data_dir, port_override, session_id);
     run_stdio(&runtime)
 }
 
@@ -335,9 +595,11 @@ mod tests {
 
     fn runtime_at(port: u16) -> BrowserMcpRuntime {
         BrowserMcpRuntime {
-            port,
-            token: "test-token".to_string(),
+            app_data_dir: std::env::temp_dir(),
+            port_override: Some(port),
+            token_override: Some("test-token".to_string()),
             http: reqwest::Client::new(),
+            session_id: Some("session-test".to_string()),
         }
     }
 
@@ -385,9 +647,53 @@ mod tests {
                 "browser_eval",
                 "browser_screenshot",
                 "browser_input",
-                "browser_cdp"
+                "browser_cdp",
+                "browser_snapshot",
+                "browser_click",
+                "browser_type",
+                "browser_scroll",
+                "browser_select",
+                "computer_windows",
+                "computer_screenshot",
+                "computer_active_window",
             ]
         );
+        // 工具面覆盖全部 op 面:每个合法 op 至少有一个工具能到达它(01 票的
+        // 一一对应在 04 票加了桌面只读三件套,这里按「覆盖」而非「同名」断言)。
+        let ops_reachable = [
+            "list",
+            "eval",
+            "screenshot",
+            "input",
+            "cdp",
+            "snapshot",
+            "click",
+            "type",
+            "scroll",
+            "select",
+            "desktop-windows",
+            "desktop-screenshot",
+            "desktop-active-window",
+        ];
+        assert_eq!(
+            ops_reachable.len(),
+            crate::companion::browser_automation::AUTOMATION_OPS.len(),
+            "新增 op 时同步补工具或更新本断言"
+        );
+    }
+
+    #[test]
+    fn desktop_tools_are_mapped_to_desktop_ops() {
+        // 三个桌面只读工具的存在与分类:只读由 daemon 闸门按 op 裁决。
+        for op in crate::companion::browser_automation::DESKTOP_OPS {
+            assert!(
+                crate::companion::browser_automation::is_desktop_op(op),
+                "{op} 应被识别为桌面只读操作"
+            );
+        }
+        assert!(!crate::companion::browser_automation::is_desktop_op(
+            "snapshot"
+        ));
     }
 
     #[tokio::test]
@@ -407,6 +713,9 @@ mod tests {
             ("browser_eval", json!({})),
             ("browser_input", json!({ "event": "not-object" })),
             ("browser_cdp", json!({})),
+            ("browser_click", json!({})),
+            ("browser_type", json!({"elementId": "e1"})),
+            ("browser_select", json!({"elementId": "e1"})),
         ] {
             let result = handle_request(
                 &runtime,

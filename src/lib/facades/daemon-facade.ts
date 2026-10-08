@@ -415,6 +415,8 @@ export const daemonFacade = {
     (await ensureDaemonClient()).interruptSession(sessionId),
   respondToPermissionViaDaemon: async (sessionId: string, requestId: string, response: unknown) =>
     (await ensureDaemonClient()).respondToPermission(sessionId, requestId, response),
+  respondToComputerUseApproval: async (requestId: string, choice: 'once' | 'always' | 'reject') =>
+    (await ensureDaemonClient()).respondToComputerUseApproval(requestId, choice),
   respondToInteractiveViaDaemon: async (sessionId: string, toolUseId: string, response: unknown) =>
     (await ensureDaemonClient()).respondToInteractive(sessionId, toolUseId, response),
   updateSessionSettingsViaDaemon: async (sessionId: string, settings: Record<string, unknown>) =>
@@ -649,6 +651,23 @@ export const daemonFacade = {
   },
   setBrowserControl: async (settings: import('../../types/provider').BrowserControlSettings) => {
     await (await ensureDaemonClient()).patchAppConfig({ browser: settings });
+  },
+  setComputerUse: async (settings: import('../../types/provider').ComputerUseSettings) => {
+    await (await ensureDaemonClient()).patchAppConfig({ computer_use: settings });
+  },
+  /** 电脑控制治理面(工单 06):驱动状态/诊断/启停/更新/允许范围/审计。 */
+  computerUse: {
+    driverStatus: async () => (await ensureDaemonClient()).computerUseGet('/api/computer-use/driver'),
+    diagnostics: async () =>
+      (await ensureDaemonClient()).computerUsePost('/api/computer-use/driver/diagnose', {}),
+    startDriver: async () =>
+      (await ensureDaemonClient()).computerUsePost('/api/computer-use/driver/start', {}),
+    estopDriver: async () =>
+      (await ensureDaemonClient()).computerUsePost('/api/computer-use/driver/estop', {}),
+    updateDriver: async () =>
+      (await ensureDaemonClient()).computerUsePost('/api/computer-use/driver/update', { confirm: true }),
+    audit: async (limit = 50) =>
+      (await ensureDaemonClient()).computerUseGet(`/api/computer-use/audit?limit=${limit}`),
   },
   fetchProviderModels: async (apiKey: string, baseUrl: string, provider?: string | null) =>
     providersViaDaemon.fetchProviderModels(apiKey, baseUrl, provider),

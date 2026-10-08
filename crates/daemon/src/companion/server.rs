@@ -445,6 +445,8 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
     let api = routes_providers::extend_api_router(api);
     let api = routes_terminal::extend_api_router(api);
     let api = browser_automation::extend_api_router(api);
+    let api = crate::computer_use::approval::extend_api_router(api);
+    let api = crate::computer_use::routes::extend_api_router(api);
 
     let mut router = Router::new().nest("/api", api);
     if let Some(static_dir) = static_dir {

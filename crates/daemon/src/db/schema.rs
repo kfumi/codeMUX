@@ -250,6 +250,19 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (task_id) REFERENCES work_tasks(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS browser_automation_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            op TEXT NOT NULL,
+            tool TEXT,
+            browser_id TEXT,
+            session_id TEXT,
+            actor TEXT NOT NULL DEFAULT 'local',
+            ok INTEGER NOT NULL,
+            decision TEXT,
+            error TEXT
+        );
+
         CREATE INDEX IF NOT EXISTS idx_work_tasks_project ON work_tasks(project_id);
         CREATE INDEX IF NOT EXISTS idx_work_tasks_status ON work_tasks(status);
         CREATE INDEX IF NOT EXISTS idx_work_task_events_task ON work_task_events(task_id);
@@ -270,6 +283,35 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     if !has_scheduled_task_weekly_weekdays {
         let _ = conn.execute(
             "ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT",
+            [],
+        );
+    }
+
+    // Migration: 03 票在审计表上补 tool/actor/decision（旧库缺列时补齐）。
+    let has_audit_tool: bool = conn
+        .prepare("SELECT tool FROM browser_automation_audit LIMIT 0")
+        .is_ok();
+    if !has_audit_tool {
+        let _ = conn.execute(
+            "ALTER TABLE browser_automation_audit ADD COLUMN tool TEXT",
+            [],
+        );
+    }
+    let has_audit_actor: bool = conn
+        .prepare("SELECT actor FROM browser_automation_audit LIMIT 0")
+        .is_ok();
+    if !has_audit_actor {
+        let _ = conn.execute(
+            "ALTER TABLE browser_automation_audit ADD COLUMN actor TEXT NOT NULL DEFAULT 'local'",
+            [],
+        );
+    }
+    let has_audit_decision: bool = conn
+        .prepare("SELECT decision FROM browser_automation_audit LIMIT 0")
+        .is_ok();
+    if !has_audit_decision {
+        let _ = conn.execute(
+            "ALTER TABLE browser_automation_audit ADD COLUMN decision TEXT",
             [],
         );
     }

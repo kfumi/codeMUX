@@ -11,6 +11,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useEmergencyStop } from './hooks/useEmergencyStop';
 import { useModelDisplayNames } from './hooks/useModelDisplayNames';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
@@ -348,6 +349,8 @@ function App() {
 
   // 全应用唯一的窗口 keydown 监听（见 ADR 0013）
   useKeyboardShortcuts(runShortcutCommand);
+  // 全局 Esc 强打断(工单 06):按「系统级执行」开关武装壳侧快捷键。
+  useEmergencyStop();
   const handleStartNewSession = async (input: AgentInputPayload) => {
     const {
       selectedAgentKind,
@@ -359,6 +362,15 @@ function App() {
       draftProjectId,
       draftWorkspace,
     } = useNewSessionStore.getState();
+    // Cold-start safety net: NewSessionPanel corrects store before onSubmit, but resolve here too
+    // so a null draft never falls back to provider default instead of agent default
+    // (free catalog pending -> store null -> daemon would use provider.default_model).
+    const settingsConfigForDraft = useSettingsStore.getState().config;
+    const agentDefaultConfigForDraft = isProviderAgent(selectedAgentKind)
+      ? (settingsConfigForDraft?.agent_configs[selectedAgentKind] as { default_provider_id?: string | null; default_model?: string } | undefined)
+      : undefined;
+    const resolvedModel = selectedModel?.trim() || agentDefaultConfigForDraft?.default_model?.trim() || undefined;
+    const resolvedProviderId = selectedProviderId ?? agentDefaultConfigForDraft?.default_provider_id ?? settingsConfigForDraft?.active_provider_id ?? null;
     const rawCwd = await resolveDraftSessionCwd(
       projects,
       draftProjectId,
@@ -389,25 +401,25 @@ function App() {
         draftProjectId ?? undefined,
         selectedPermissionConfig,
         selectedPlanMode,
-        selectedModel ?? undefined,
+        resolvedModel,
       );
       createdSessionId = session.id;
       useAgentStore.getState().setSessionWorkingPath(session.id, cwd);
       await daemonFacade.updateWorkingPath(session.id, cwd);
 
-      if (selectedProviderId && selectedModel) {
+      if (resolvedProviderId && resolvedModel) {
         await daemonFacade.updateProvider(
           session.id,
-          selectedProviderId,
-          selectedModel,
+          resolvedProviderId,
+          resolvedModel,
           selectedReasoningEffort,
         );
         useSessionStore.setState((state) => ({
           sessions: state.sessions.map((entry) => entry.id === session.id
             ? {
                 ...entry,
-                provider_id: selectedProviderId,
-                model: selectedModel,
+                provider_id: resolvedProviderId,
+                model: resolvedModel,
                 reasoning_effort: selectedReasoningEffort,
               }
             : entry),
@@ -420,7 +432,7 @@ function App() {
           : entry),
       }));
 
-      await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
+      await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, resolvedModel);
       useAgentStore.getState().consumeComposerDraft(NEW_SESSION_DRAFT_SESSION_ID);
       closeDraft();
       const currentNavigation = useNavigationStore.getState().current;

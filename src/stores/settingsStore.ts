@@ -19,6 +19,7 @@ import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
 import { normalizeGitSettings } from '../lib/gitSettings';
 import { normalizeBrowserControl } from '../lib/browserControl';
+import { normalizeComputerUse, type ComputerUseSettings } from '../lib/computerUseSettings';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 import { normalizeImmediateRunMode } from '../lib/agentSteer';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
@@ -57,6 +58,7 @@ interface SettingsState {
   setGitSettings: (settings: GitSettings) => Promise<void>;
   setKeybindings: (keybindings: KeybindingsSettings) => Promise<void>;
   setBrowserControl: (settings: BrowserControlSettings) => Promise<void>;
+  setComputerUse: (settings: ComputerUseSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   upsertModelProvider: (provider: ModelProvider) => Promise<void>;
   deleteModelProvider: (providerId: string) => Promise<void>;
@@ -263,6 +265,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           : state.config,
         error: String(error),
       }));
+    }
+  },
+
+  setComputerUse: async (settings: ComputerUseSettings) => {
+    const previous = get().config?.computer_use;
+    const nextSettings = normalizeComputerUse(settings);
+    // 乐观更新 + 失败回滚(与浏览器控制同一套)。
+    set((state) => ({
+      config: state.config ? { ...state.config, computer_use: nextSettings } : state.config,
+      error: null,
+    }));
+    try {
+      await daemonFacade.setComputerUse(nextSettings);
+    } catch (error) {
+      set((state) => ({
+        config: state.config
+          ? { ...state.config, computer_use: previous }
+          : state.config,
+        error: String(error),
+      }));
+      throw error;
     }
   },
 

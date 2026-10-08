@@ -290,6 +290,51 @@ pub fn set_browser_control_for_companion(
     Ok(())
 }
 
+/// 电脑控制设置(工单 04-06):归一化允许列表与驱动命令,校验步数上限。
+pub fn set_computer_use_for_companion(
+    state: &AppState,
+    roots: &crate::paths::PathRoots,
+    mut settings: crate::config::types::ComputerUseConfig,
+) -> Result<(), String> {
+    if settings.max_steps == 0 || settings.max_steps > 200 {
+        return Err("步数上限必须在 1 到 200 之间".to_string());
+    }
+    settings.allowlist = settings
+        .allowlist
+        .iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .take(100)
+        .collect();
+    settings.driver_command = settings
+        .driver_command
+        .map(|command| command.trim().to_string())
+        .filter(|command| !command.is_empty());
+    settings.driver_args = settings
+        .driver_args
+        .iter()
+        .map(|arg| arg.trim().to_string())
+        .filter(|arg| !arg.is_empty())
+        .take(20)
+        .collect();
+    settings.driver_update_command = settings
+        .driver_update_command
+        .map(|command| command.trim().to_string())
+        .filter(|command| !command.is_empty());
+    info!(
+        target: "provider",
+        "Setting computer use enabled={} system_execution={} allowlist_entries={} max_steps={}",
+        settings.enabled,
+        settings.system_execution_enabled,
+        settings.allowlist.len(),
+        settings.max_steps
+    );
+    let mut config = state.config.lock().unwrap();
+    config.computer_use = settings;
+    crate::config::save_config(roots, &config)?;
+    Ok(())
+}
+
 pub fn set_git_settings_for_companion(
     state: &AppState,
     roots: &crate::paths::PathRoots,
@@ -357,6 +402,7 @@ pub struct PatchAppConfigRequest {
     pub git: Option<GitSettingsConfig>,
     pub keybindings: Option<std::collections::HashMap<String, Option<String>>>,
     pub browser: Option<crate::config::types::BrowserControlConfig>,
+    pub computer_use: Option<crate::config::types::ComputerUseConfig>,
     pub default_agent_kind: Option<String>,
     pub agent_kind: Option<String>,
     pub agent_config: Option<serde_json::Value>,
@@ -390,6 +436,9 @@ pub fn patch_app_config_for_companion(
     }
     if let Some(keybindings) = patch.keybindings {
         set_keybindings_for_companion(state, roots, keybindings)?;
+    }
+    if let Some(settings) = patch.computer_use {
+        set_computer_use_for_companion(state, roots, settings)?;
     }
     if let Some(settings) = patch.browser {
         set_browser_control_for_companion(state, roots, settings)?;

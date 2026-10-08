@@ -15,26 +15,42 @@ import { NewSessionPanel } from './NewSessionPanel';
 import { useAgentStore } from '../../stores/agentStore';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
+const freeCtl = vi.hoisted(() => ({ list: [] as Array<{
+  id: string;
+  modelId: string;
+  providerId: string;
+  providerTemplateId: string | null;
+  name: string;
+  group: string;
+  efforts: boolean;
+  source: 'catalog';
+}> }));
+const pendingCtl = vi.hoisted(() => ({ value: false }));
+
 vi.mock('../../hooks/useAgentModels', () => ({
   useAgentModels: (
     _agentKind: AgentKind,
     providers: ModelProvider[] | ModelProvider | null,
   ) => {
     const list = !providers ? [] : Array.isArray(providers) ? providers : [providers];
+    const base = list.flatMap((provider) =>
+      provider.models.map((model) => ({
+        id: `${provider.id}::${model.id}`,
+        modelId: model.id,
+        providerId: provider.id,
+        providerTemplateId: provider.builtin_template_id ?? null,
+        name: model.id,
+        group: provider.name,
+        efforts: true,
+        source: 'provider' as const,
+      })),
+    );
+    // freeCtl 模拟 opencode 免费目录的异步到达：默认空（pending），用例按需填入。
+    const free = _agentKind === 'opencode' ? freeCtl.list : [];
     return {
       isLoading: false,
-      models: list.flatMap((provider) =>
-        provider.models.map((model) => ({
-          id: `${provider.id}::${model.id}`,
-          modelId: model.id,
-          providerId: provider.id,
-          providerTemplateId: provider.builtin_template_id ?? null,
-          name: model.id,
-          group: provider.name,
-          efforts: true,
-          source: 'provider' as const,
-        })),
-      ),
+      models: [...base, ...free],
+      freePending: pendingCtl.value && _agentKind === 'opencode',
     };
   },
 }));
@@ -146,6 +162,8 @@ function sampleProvider(id: string, models: string[], protocol: 'anthropic' | 'o
 describe('NewSessionPanel', () => {
   beforeEach(() => {
     composerProps.length = 0;
+    freeCtl.list = [];
+    pendingCtl.value = false;
     useProjectStore.setState({
       projects: [
         { id: 'project-1', name: 'codeMUX', path: 'D:/project/ai-code/codeMUX', created_at: '', updated_at: '' },
@@ -268,6 +286,213 @@ describe('NewSessionPanel', () => {
     }));
     render(<NewSessionPanel onSubmit={vi.fn()} />);
     expect(screen.getByText(/请先在设置 → 模型配置/)).toBeTruthy();
+  });
+
+  it('does not persist fallback when configured opencode free default is not in model list yet', () => {
+    // Cold start: free catalog async, provider list only. Old logic persisted models[0] into store,
+    // shadowing configured free default forever (first chat wrong, second correct via warm cache).
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+    // Must stay null (follow config), not fallback to provider-1 first model.
+    expect(useNewSessionStore.getState().selectedModel).toBeNull();
+    expect(useNewSessionStore.getState().selectedProviderId).toBeNull();
+  });
+
+  it('sends configured free default when user submits before free catalog arrives', async () => {
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const onSubmit = vi.fn(async () => {});
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const send = composerProps.find((entry) => typeof entry.onSend === 'function')?.onSend;
+    expect(send).toBeTypeOf('function');
+    await send?.({ text: 'hello' });
+    expect(onSubmit).toHaveBeenCalled();
+    // handleSend must correct store to configured default, not effective fallback.
+    expect(useNewSessionStore.getState().selectedModel).toBe('free-model-x');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('opencode-free');
+  });
+
+  it('snaps to configured free default when the free catalog arrives late', () => {
+    // 动态复现冷启动：挂载时免费目录还没到（仅供应商模型），之后到达。
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const { rerender } = render(<NewSessionPanel onSubmit={vi.fn()} />);
+    expect(useNewSessionStore.getState().selectedModel).toBeNull();
+    freeCtl.list = [
+      {
+        id: 'opencode-free::free-model-x',
+        modelId: 'free-model-x',
+        providerId: 'opencode-free',
+        providerTemplateId: 'opencode',
+        name: 'free-model-x',
+        group: 'OpenCode 免费模型',
+        efforts: false,
+        source: 'catalog' as const,
+      },
+    ];
+    rerender(<NewSessionPanel onSubmit={vi.fn()} />);
+    expect(useNewSessionStore.getState().selectedModel).toBe('free-model-x');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('opencode-free');
+  });
+
+  it('keeps an explicit user choice when the free catalog arrives late', () => {
+    // 用户手动选过的值：免费目录后到也不许抢回配置默认值。
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const { rerender } = render(<NewSessionPanel onSubmit={vi.fn()} />);
+    // 通过模型选择器手动选第一个供应商模型（走 handleModelChange，标记为用户选择）。
+    fireEvent.change(screen.getByRole('combobox', { name: 'Models' }), {
+      target: { value: 'claude-sonnet-4-20250514' },
+    });
+    expect(useNewSessionStore.getState().selectedModel).toBe('claude-sonnet-4-20250514');
+    freeCtl.list = [
+      {
+        id: 'opencode-free::free-model-x',
+        modelId: 'free-model-x',
+        providerId: 'opencode-free',
+        providerTemplateId: 'opencode',
+        name: 'free-model-x',
+        group: 'OpenCode 免费模型',
+        efforts: false,
+        source: 'catalog' as const,
+      },
+    ];
+    rerender(<NewSessionPanel onSubmit={vi.fn()} />);
+    expect(useNewSessionStore.getState().selectedModel).toBe('claude-sonnet-4-20250514');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('provider-1');
+  });
+
+  it('blocks sending while the configured free default is still pending', async () => {
+    // 免费目录在途：发送门槛挂起，composer 禁用，发送直接吞掉，不会带着兜底发出。
+    pendingCtl.value = true;
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const onSubmit = vi.fn(async () => {});
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const composer = [...composerProps].reverse().find((entry) => entry.sessionId === 'new-session-draft');
+    expect(composer?.disabled).toBe(true);
+    // 等待期选择器槽位是加载占位，不挂真实选择器：首屏看不到错误的第一个模型。
+    expect((composer as any)?.modelSelector?.type).toBe('span');
+    const send = composerProps.find((entry) => typeof entry.onSend === 'function')?.onSend;
+    await send?.({ text: 'hello' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(useNewSessionStore.getState().selectedModel).toBeNull();
+  });
+
+  it('sends the configured free default once the pending catalog settles', async () => {
+    pendingCtl.value = true;
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode', selectedModel: null, selectedProviderId: null });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              opencode: {
+                default_provider_id: 'opencode-free',
+                default_model: 'free-model-x',
+              },
+            },
+          }
+        : null,
+    }));
+    const onSubmit = vi.fn(async () => {});
+    const { rerender } = render(<NewSessionPanel onSubmit={onSubmit} />);
+    pendingCtl.value = false;
+    freeCtl.list = [
+      {
+        id: 'opencode-free::free-model-x',
+        modelId: 'free-model-x',
+        providerId: 'opencode-free',
+        providerTemplateId: 'opencode',
+        name: 'free-model-x',
+        group: 'OpenCode 免费模型',
+        efforts: false,
+        source: 'catalog' as const,
+      },
+    ];
+    rerender(<NewSessionPanel onSubmit={onSubmit} />);
+    const composer = [...composerProps].reverse().find((entry) => entry.sessionId === 'new-session-draft');
+    expect(composer?.disabled).toBe(false);
+    expect((composer as any)?.modelSelector?.type).not.toBe('span');
+    // 取最后一次渲染的 onSend：首渲染闭包里的 hasUsableProvider 还是等待中的旧值。
+    const send = [...composerProps].reverse().find((entry) => typeof entry.onSend === 'function')?.onSend;
+    await send?.({ text: 'hello' });
+    expect(onSubmit).toHaveBeenCalled();
+    expect(useNewSessionStore.getState().selectedModel).toBe('free-model-x');
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('opencode-free');
   });
 
   it('wires the + menu plan mode entry and active chip state into the draft', () => {

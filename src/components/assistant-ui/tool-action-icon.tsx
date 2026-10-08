@@ -1,9 +1,11 @@
 import {
   Bot,
   CheckSquare,
+  CircleHelp,
   FileText,
   Folder,
   Globe,
+  MonitorSmartphone,
   Pencil,
   Search,
   SquareTerminal,
@@ -35,6 +37,18 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   update_plan: CheckSquare,
   TaskList: CheckSquare,
   ExitPlanMode: CheckSquare,
+  AskUserQuestion: CircleHelp,
+  request_user_input: CircleHelp,
+  browser_list: MonitorSmartphone,
+  browser_eval: MonitorSmartphone,
+  browser_screenshot: MonitorSmartphone,
+  browser_input: MonitorSmartphone,
+  browser_cdp: MonitorSmartphone,
+  browser_snapshot: MonitorSmartphone,
+  browser_click: MonitorSmartphone,
+  browser_type: MonitorSmartphone,
+  browser_scroll: MonitorSmartphone,
+  browser_select: MonitorSmartphone,
 };
 
 /**

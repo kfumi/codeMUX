@@ -10,6 +10,7 @@ import {
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
+  Camera,
   Check,
   FileCode2,
   FilePlus2,
@@ -35,6 +36,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
+import { toast } from 'sonner';
 import { registerComposerFocus } from '../../../lib/shortcuts/composerFocus';
 import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../../hooks/useShortcutHint';
 import { appendComposerReference, getPathLabel } from '../../../lib/composerReferences';
@@ -43,6 +45,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../../ui/tooltip';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useSessionFlowActive } from '../../../hooks/useSessionFlowActive';
+import type {
+  ComputerUseApprovalChoice,
+  ComputerUseApprovalRequest,
+} from '../../../lib/computerUseApprovals';
+import { base64PngToFile, screenshotFileName } from '../../../lib/desktopScreenshot';
+import { shellFacade } from '../../../lib/facades/shell-facade';
+import { useHostCapabilities } from '../../../hooks/useHostCapabilities';
 import { useBrowserElementStore } from '../../../stores/browserElementStore';
 import { BrowserElementPills } from '../../browser/BrowserElementPills';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
@@ -54,6 +63,7 @@ import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import { PermissionApprovalCard, PermissionApprovalTabs } from '../PermissionApprovalCard';
+import { ComputerUseApprovalCard } from '../ComputerUseApprovalCard';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../../types/agent';
 import {
   collectAnsweredToolUseIds,
@@ -85,6 +95,12 @@ interface CodeMuxComposerProps {
   onTogglePlanMode?: () => void;
   pendingPermissions?: AgentPermissionRequest[];
   onPermissionResponse?: (requestId: string, response: AgentPermissionResponse) => void | Promise<void>;
+  /** 电脑控制放行请求（工单 03）：daemon 闸门挂起的一步动作。 */
+  pendingComputerUseApprovals?: ComputerUseApprovalRequest[];
+  onComputerUseApprovalResponse?: (
+    requestId: string,
+    choice: ComputerUseApprovalChoice,
+  ) => void | Promise<void>;
   disabled?: boolean;
   loading?: boolean;
   onStop?: () => void | Promise<void>;
@@ -192,6 +208,8 @@ export function CodeMuxComposer({
   onTogglePlanMode,
   pendingPermissions = [],
   onPermissionResponse,
+  pendingComputerUseApprovals = [],
+  onComputerUseApprovalResponse,
   disabled = false,
   loading = false,
   onStop,
@@ -288,6 +306,7 @@ export function CodeMuxComposer({
   }, [activeChar, activeQuery, allFileEntries]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
   const hasPendingPermissions = pendingPermissions.length > 0;
+  const pendingComputerUseApproval = pendingComputerUseApprovals[0];
   const menuVisible = activeChar !== null && !hasPendingPermissions && !pendingQuestion && !pendingPlan;
 
   useEffect(() => {
@@ -434,6 +453,25 @@ export function CodeMuxComposer({
     });
   }, [events]);
 
+
+  const hostCapabilities = useHostCapabilities();
+  const canCaptureScreen = hostCapabilities.has('computer.capture');
+  const [capturingScreen, setCapturingScreen] = useState(false);
+
+  /** 手动贴屏(需求 17):截主屏 → 作为图片附件贴进当前会话。 */
+  const captureScreenIntoComposer = async () => {
+    if (capturingScreen) return;
+    setCapturingScreen(true);
+    try {
+      const shot = await shellFacade.captureDesktopScreen();
+      await addSelectedFiles([base64PngToFile(shot.image, screenshotFileName())]);
+    } catch (error) {
+      logger.error('Failed to capture desktop screen', { sessionId }, serializeError(error));
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCapturingScreen(false);
+    }
+  };
 
   const openFilePicker = () => {
     setAddMenuOpen(false);
@@ -598,6 +636,19 @@ export function CodeMuxComposer({
                   setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
                 }}
               />
+            ) : pendingComputerUseApproval ? (
+              // 原生门先发生(它闸的是「模型能不能调这个工具」),所以排在前面;
+              // 电脑控制审批是这一步动作的粒度放行,答完原生门再答它。
+              <ComputerUseApprovalCard
+                key={pendingComputerUseApproval.request_id}
+                request={pendingComputerUseApproval}
+                onResponse={async (choice) => {
+                  await onComputerUseApprovalResponse?.(
+                    pendingComputerUseApproval.request_id,
+                    choice,
+                  );
+                }}
+              />
             ) : (
               <CodeMuxLexicalComposerInput
                 ref={editorRef}
@@ -612,7 +663,7 @@ export function CodeMuxComposer({
               />
             )}
 
-            {!hasPendingPermissions && !pendingQuestion && !pendingPlan && <div className="@container/composer-bar relative flex w-full min-w-0 items-center justify-between pl-1">
+            {!hasPendingPermissions && !pendingQuestion && !pendingPlan && !pendingComputerUseApproval && <div className="@container/composer-bar relative flex w-full min-w-0 items-center justify-between pl-1">
               <div className="flex shrink-0 items-center gap-2">
                 <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
                   <TooltipProvider delayDuration={300}>
@@ -660,6 +711,19 @@ export function CodeMuxComposer({
                   ) : null}
                 </PopoverContent>
               </Popover>
+                {canCaptureScreen ? (
+                  <TooltipHint content="截取桌面贴进会话（只读，不经智能体）">
+                    <button
+                      type="button"
+                      disabled={disabled || capturingScreen}
+                      aria-label="截取桌面贴进会话"
+                      onClick={() => void captureScreenIntoComposer()}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground transition-all duration-normal hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <Camera className="h-4 w-4" />
+                    </button>
+                  </TooltipHint>
+                ) : null}
                 {permissionSelector}
                 {showComposerPlanControls && planMode === 'on' && onTogglePlanMode ? (
                   // Active Plan indicator — entry lives in the add (+) menu;
