@@ -317,17 +317,43 @@ pub fn get_skill_content_impl(state: &AppState, id: String) -> Result<String, St
 pub(crate) const BUILTIN_SKILLS: [(&str, &str); 1] =
     [("computer-control", super::builtin::COMPUTER_CONTROL_CONTENT)];
 
-/// 补齐内置技能文件:只在缺 `SKILL.md` 时写入,已存在的不覆盖(用户改过的
-/// 版本、或磁盘导入的同名技能都保留)。返回实际落盘的 `(名字, 目录)`。
+/// 我们写进去的副本后缀(与 SKILL.md 同目录):用来区分「我们写的版本」与
+/// 「用户改过的版本」。用户改过的绝不覆盖;我们写的随版本更新 —— 否则技能
+/// 内容永远停留在首次安装那一版(工单 12 修的就是这个:操作规范更新到不了已有安装)。
+const BUILTIN_MIRROR_SUFFIX: &str = ".builtin";
+
+/// 补齐内置技能文件,并在「确认是我们写的、且内容已过期」时刷新。
+///
+/// 判定顺序:
+/// 1. 文件不存在 → 写入,并留一份镜像副本;
+/// 2. 文件与我们当前内容一致 → 什么都不做;
+/// 3. 文件与镜像副本一致(我们写的、用户没动过)→ 刷新到当前内容;
+/// 4. 旧安装没有镜像副本,但文件自称是这个技能(frontmatter 的 name 与内置名一致)
+///    → 认领并刷新(旧版本的内置文件就是这种情况);
+/// 5. 其余(用户自己改过、或磁盘导入的同名技能)→ 一律不动。
+///
+/// 返回实际落盘的 `(名字, 目录)`(含刷新)。
 pub(crate) fn write_builtin_skills(base: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
     let mut written = Vec::new();
     for (name, content) in BUILTIN_SKILLS {
         let directory = base.join(name);
         let skill_md = directory.join("SKILL.md");
-        if skill_md.exists() {
-            continue;
+        let mirror = directory.join(format!("SKILL.md{BUILTIN_MIRROR_SUFFIX}"));
+        if let Ok(on_disk) = std::fs::read_to_string(&skill_md) {
+            if on_disk == content {
+                continue;
+            }
+            let untouched_by_user = std::fs::read_to_string(&mirror)
+                .map(|last_written| last_written == on_disk)
+                .unwrap_or(false);
+            if !untouched_by_user && !declares_skill(&on_disk, name) {
+                continue;
+            }
         }
-        match std::fs::create_dir_all(&directory).and_then(|_| std::fs::write(&skill_md, content)) {
+        match std::fs::create_dir_all(&directory)
+            .and_then(|_| std::fs::write(&skill_md, content))
+            .and_then(|_| std::fs::write(&mirror, content))
+        {
             Ok(()) => written.push((name.to_string(), directory)),
             Err(error) => log::warn!(
                 target: "skills_scan",
@@ -338,6 +364,15 @@ pub(crate) fn write_builtin_skills(base: &std::path::Path) -> Vec<(String, std::
         }
     }
     written
+}
+
+/// 文件自称是这个技能(frontmatter 的 `name:` 与内置名一致)。
+fn declares_skill(content: &str, name: &str) -> bool {
+    content.starts_with("---")
+        && content
+            .lines()
+            .take(12)
+            .any(|line| line.trim() == format!("name: {name}"))
 }
 
 /// 内置技能种子(工单 03):系统随能力上线的技能,写进 SSOT 后按五端全开注册。
@@ -504,5 +539,64 @@ mod tests {
             std::fs::read_to_string(dir.join("SKILL.md")).unwrap(),
             "用户改过的内容"
         );
+    }
+
+    #[test]
+    fn an_untouched_builtin_is_refreshed_when_its_content_changes() {
+        let base = temp_base("refresh");
+        let dir = base.join("computer-control");
+        // 我们写过、用户没动过:镜像副本与 SKILL.md 一致。
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "旧版内置内容").unwrap();
+        std::fs::write(dir.join("SKILL.md.builtin"), "旧版内置内容").unwrap();
+
+        let written = write_builtin_skills(&base);
+
+        assert_eq!(written.len(), 1, "我们写的旧版本应被刷新");
+        let content = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert!(content.contains("电脑控制操作规范"));
+        assert!(content.contains("桌面坐标怎么算"), "新版内容应落盘");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("SKILL.md.builtin")).unwrap(),
+            content,
+            "镜像副本要同步,否则下次会把我们自己的文件当成用户改过的"
+        );
+    }
+
+    #[test]
+    fn a_user_edited_builtin_is_left_alone() {
+        let base = temp_base("user-edited");
+        let dir = base.join("computer-control");
+        std::fs::create_dir_all(&dir).unwrap();
+        // 镜像记录的是我们写的内容,磁盘上却是用户改过的 —— 不动它。
+        std::fs::write(dir.join("SKILL.md"), "用户版:先快照再动手(自改)").unwrap();
+        std::fs::write(dir.join("SKILL.md.builtin"), "我们写的旧版本").unwrap();
+
+        assert!(write_builtin_skills(&base).is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("SKILL.md")).unwrap(),
+            "用户版:先快照再动手(自改)"
+        );
+    }
+
+    #[test]
+    fn an_older_install_without_a_mirror_is_adopted_by_its_frontmatter() {
+        let base = temp_base("adopt");
+        let dir = base.join("computer-control");
+        // 旧安装:有 frontmatter 声明自己是 computer-control,但没有镜像副本。
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: computer-control\ndescription: 旧的\n---\n\n# 旧内容\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            write_builtin_skills(&base).len(),
+            1,
+            "旧内置文件应被认领并刷新"
+        );
+        let content = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
+        assert!(content.contains("桌面坐标怎么算"));
     }
 }

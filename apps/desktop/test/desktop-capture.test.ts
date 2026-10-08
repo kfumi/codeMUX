@@ -175,15 +175,21 @@ describe('activeDesktopWindow', () => {
   });
 });
 
-// 工单 11:窗口条目与截图要带上进程身份 —— 宿主自己的窗口可能没有标题,
-// daemon 只能靠身份拒绝。身份解不到时字段不出现(daemon 退回按标题裁决)。
-describe('窗口进程身份', () => {
+// 工单 11/12:窗口条目与截图要带上进程身份与窗口矩形 —— 宿主自己的窗口可能没有
+// 标题(靠身份拒绝),模型要点击就得有系统坐标(靠矩形换算,不必猜 DPI)。
+describe('窗口进程身份与矩形', () => {
   const identities = [
-    { hwnd: 100, processId: 4242, parentProcessId: 100, processName: 'CodeMUX.exe' },
+    {
+      hwnd: 100,
+      processId: 4242,
+      parentProcessId: 100,
+      processName: 'CodeMUX.exe',
+      bounds: { x: 158, y: 141, width: 1296, height: 839 },
+    },
     { hwnd: 200, processId: 5150, parentProcessId: 4242, processName: 'CodeMUX.exe' },
   ];
 
-  it('attaches identity to listed windows (screens stay bare)', async () => {
+  it('attaches identity and bounds to listed windows (screens stay bare)', async () => {
     const captureDeps = deps({ readWindowIdentities: async () => identities });
     const result = await listDesktopSources(captureDeps);
 
@@ -196,11 +202,12 @@ describe('窗口进程身份', () => {
         processId: 4242,
         parentProcessId: 100,
         processName: 'CodeMUX.exe',
+        bounds: { x: 158, y: 141, width: 1296, height: 839 },
       },
     ]);
   });
 
-  it('attaches identity to a window screenshot', async () => {
+  it('attaches identity and the window rect to a window screenshot', async () => {
     const captureDeps = deps({ readWindowIdentities: async () => identities });
     const outcome = await captureDesktop(captureDeps, { sourceId: 'window:100:0' });
 
@@ -212,6 +219,8 @@ describe('窗口进程身份', () => {
         processId: 4242,
         parentProcessId: 100,
         processName: 'CodeMUX.exe',
+        // 截图里图像像素是 width/height,窗口矩形另起一个键名。
+        windowBounds: { x: 158, y: 141, width: 1296, height: 839 },
       });
     }
   });

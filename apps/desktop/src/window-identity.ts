@@ -9,6 +9,14 @@
 //! 注意:daemon 才是裁决者;壳只负责把事实(pid/父进程/映像名)报上去,不做二次
 //! 判断(与 `desktop-capture.ts` 的隐私边界一致)。
 
+/** 窗口矩形(系统坐标,与鼠标定位同一坐标系)。 */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** 一个顶层窗口的进程身份。 */
 export interface WindowIdentity {
   /** 窗口句柄(与 Electron 来源 id 的 `window:<hwnd>:<n>` 中段对应)。 */
@@ -17,6 +25,8 @@ export interface WindowIdentity {
   parentProcessId?: number;
   /** 进程映像名,如 `CodeMUX.exe` / `electron.exe` / `cua-driver.exe`。 */
   processName?: string;
+  /** 窗口矩形:模型按截图定位点击时靠它换算坐标,不必自己猜缩放。 */
+  bounds?: WindowBounds;
 }
 
 /** 拼进 payload 的身份字段(身份缺失时不带任何字段,daemon 按标题回退裁决)。 */
@@ -27,9 +37,32 @@ export interface WindowIdentityFields {
 }
 
 function asPositiveInt(value: unknown): number | undefined {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  const numeric = asNumber(value);
+  if (numeric === undefined || numeric <= 0) return undefined;
   return Math.trunc(numeric);
+}
+
+/** 矩形解析:四个分量都要有,宽高必须为正(否则当作没读到)。 */
+function asBounds(record: Record<string, unknown>): WindowBounds | undefined {
+  const x = asNumber(record.x);
+  const y = asNumber(record.y);
+  const width = asNumber(record.width);
+  const height = asNumber(record.height);
+  if (x === undefined || y === undefined) return undefined;
+  if (width === undefined || height === undefined || width <= 0 || height <= 0) return undefined;
+  return {
+    x: Math.trunc(x),
+    y: Math.trunc(y),
+    width: Math.trunc(width),
+    height: Math.trunc(height),
+  };
+}
+
+/** 数字读数:只接受数字与数字字符串 —— `null`/布尔不能被 `Number()` 悄悄变成 0。 */
+function asNumber(value: unknown): number | undefined {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 /**
@@ -58,11 +91,13 @@ export function parseWindowIdentities(raw: string): WindowIdentity[] {
       typeof record.processName === 'string' && record.processName.trim()
         ? record.processName.trim()
         : undefined;
+    const bounds = asBounds(record);
     identities.push({
       hwnd,
       processId,
       ...(parentProcessId !== undefined ? { parentProcessId } : {}),
       ...(processName !== undefined ? { processName } : {}),
+      ...(bounds !== undefined ? { bounds } : {}),
     });
   }
   return identities;
@@ -99,4 +134,23 @@ export function identityFields(identity: WindowIdentity | undefined): WindowIden
       : {}),
     ...(identity.processName !== undefined ? { processName: identity.processName } : {}),
   };
+}
+
+/**
+ * 窗口清单条目里的矩形字段(键名 `bounds`)。
+ *
+ * 截图元数据里用 [`windowBoundsField`] —— 那里已有 `width`/`height`(图像像素),
+ * 同一个 `bounds` 会把两套坐标系混在一起。
+ */
+export function boundsField(
+  identity: WindowIdentity | undefined,
+): { bounds?: WindowBounds } {
+  return identity?.bounds ? { bounds: identity.bounds } : {};
+}
+
+/** 截图元数据里的窗口矩形(键名 `windowBounds`,与图像像素的 `width`/`height` 区分开)。 */
+export function windowBoundsField(
+  identity: WindowIdentity | undefined,
+): { windowBounds?: WindowBounds } {
+  return identity?.bounds ? { windowBounds: identity.bounds } : {};
 }

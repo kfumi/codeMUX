@@ -23,6 +23,8 @@ export interface DesktopSourceInfo {
   processId?: number;
   parentProcessId?: number;
   processName?: string;
+  /** 窗口矩形(系统坐标,工单 12):按截图定位点击时用它换算,不必猜缩放。 */
+  bounds?: { x: number; y: number; width: number; height: number };
 }
 
 /** 截图结果:base64 PNG + 尺寸 + 来源名与类型(daemon 据此判可操作范围)。 */
@@ -37,6 +39,8 @@ export interface DesktopScreenshot {
   processId?: number;
   parentProcessId?: number;
   processName?: string;
+  /** 窗口截图时附带的窗口矩形(系统坐标;与图像像素的 width/height 是两套,工单 12)。 */
+  windowBounds?: { x: number; y: number; width: number; height: number };
   /** 整屏截图时附带的前台窗口标题与身份(daemon 据此拒绝受保护前台)。 */
   foregroundTitle?: string;
   foregroundProcessId?: number;
@@ -132,7 +136,13 @@ export interface DesktopCaptureDeps {
 /** 截图尺寸上限:避免一张 4K 截图把模型上下文撑爆。 */
 const MAX_CAPTURE_EDGE = 1920;
 
-import { identityFields, identityOfSource, type WindowIdentity } from './window-identity';
+import {
+  boundsField,
+  identityFields,
+  identityOfSource,
+  windowBoundsField,
+  type WindowIdentity,
+} from './window-identity';
 
 export type DesktopOpOutcome =
   | { ok: true; payload: unknown }
@@ -149,7 +159,8 @@ function toSourceInfo(source: CaptureSource, kind: 'screen' | 'window'): Desktop
 
 /**
  * 窗口清单:不取缩略图(thumbnailSize 0),避免为一次列举编码整屏位图。
- * 窗口条目带上进程身份(来源 id 里的窗口句柄 ↔ PowerShell 枚举的句柄)。
+ * 窗口条目带上进程身份与窗口矩形(来源 id 里的窗口句柄 ↔ PowerShell 枚举的句柄)
+ * —— 模型据此就能算点击坐标,不必自己 P/Invoke 取矩形。
  */
 export async function listDesktopSources(deps: DesktopCaptureDeps): Promise<DesktopSourceInfo[]> {
   const [screens, windows, identities] = await Promise.all([
@@ -159,10 +170,14 @@ export async function listDesktopSources(deps: DesktopCaptureDeps): Promise<Desk
   ]);
   return [
     ...screens.map((source) => toSourceInfo(source, 'screen')),
-    ...windows.map((source) => ({
-      ...toSourceInfo(source, 'window'),
-      ...identityFields(identityOfSource(source.id, identities)),
-    })),
+    ...windows.map((source) => {
+      const identity = identityOfSource(source.id, identities);
+      return {
+        ...toSourceInfo(source, 'window'),
+        ...identityFields(identity),
+        ...boundsField(identity),
+      };
+    }),
   ];
 }
 
@@ -229,9 +244,11 @@ export async function captureDesktop(
     // 来源类型取自它出自哪张清单 —— 不用 display_id 推断(Electron 不保证
     // 窗口源没有 display_id,推断错会让受保护窗口绕过筛查)。
     kind: isWindow ? 'window' : 'screen',
-    // 整屏截图时附上前台窗口的标题与身份:受保护应用在前台时,daemon 据此拒绝
-    // 整屏截图(密码管理器/宿主自己的窗口不该被整屏拍进去)。
-    ...(isWindow ? identityFields(identity) : await foregroundFacts(deps)),
+    // 窗口截图带身份与窗口矩形;整屏截图带前台窗口的标题与身份(daemon 据此
+    // 拒绝受保护前台:密码管理器/宿主自己的窗口不该被整屏拍进去)。
+    ...(isWindow
+      ? { ...identityFields(identity), ...windowBoundsField(identity) }
+      : await foregroundFacts(deps)),
   };
   return { ok: true, payload: screenshot };
 }

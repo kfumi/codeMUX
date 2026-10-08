@@ -205,15 +205,25 @@ impl WindowSubject {
     }
 }
 
-/// 裁决一个窗口能否被操作:**身份优先,其次名称**。
+/// 裁决一个窗口能否被操作。规则按「更具体的那条先说」排:
 ///
-/// 身份命中(自己的 pid / 外壳的 pid / 驱动 pid / 宿主子进程 / 宿主映像名)
-/// 一律拒绝,允许列表也覆盖不了 —— 与内置拒绝同一条铁律。
+/// 1. 标题命中内置拒绝词表 → 就报内置拒绝(人类可读、能解释是哪条规则);
+/// 2. 进程身份命中(自己的 pid / 外壳的 pid / 驱动 pid / 宿主子进程 / 宿主映像名)
+///    → 报进程家族 —— 标题缺失或被改时,挡得住的就是这一层;
+/// 3. 否则按允许列表(空列表 = 除拒绝外全部可操作)。
+///
+/// 三条都不接受允许列表的覆盖(与内置拒绝同一条铁律)。
 pub fn decide_window_access(
     subject: &WindowSubject,
     allowlist: &[String],
     protected: &ProtectedProcesses,
 ) -> AppAccess {
+    if let Some(scope) = builtin_deny_scope(&subject.title) {
+        return AppAccess::Denied {
+            scope: scope.to_string(),
+            reason: format!("{scope}在不可操作范围内(内置拒绝列表,不可删除)"),
+        };
+    }
     let identity_hit = protected.contains_pid(subject.process_id)
         || protected.contains_pid(subject.parent_process_id)
         || subject
@@ -363,7 +373,7 @@ pub fn screen_desktop_payload(
             ) {
                 AppAccess::Allowed => Ok(payload.clone()),
                 AppAccess::Denied { scope, reason } => Err(format!(
-                    "当前前台窗口属于不可操作范围({scope}),已拒绝读取。{reason}"
+                    "当前前台窗口属于不可操作范围({scope}),已拒绝读取。{reason}可以先用 computer_windows 看看有哪些可操作的窗口。"
                 )),
             }
         }
@@ -398,7 +408,7 @@ pub fn screen_desktop_payload(
                     decide_window_access(&foreground, allowlist, protected)
                 {
                     return Err(format!(
-                        "前台窗口属于不可操作范围({scope}),整屏截图会把它一并拍下,已拒绝。请先切到别的窗口再截,或指定可截的窗口来源。"
+                        "前台窗口属于不可操作范围({scope}),整屏截图会把它一并拍下,已拒绝。请先切到别的窗口,或用 computer_windows 取窗口来源后带 sourceId 截那个窗口。"
                     ));
                 }
                 return Ok(payload.clone());
@@ -592,6 +602,31 @@ mod screening_tests {
             )
             .expect_err("宿主家族映像名必须拒绝");
             assert!(error.contains("CodeMUX 进程家族"), "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_more_specific_rule_names_the_refusal() {
+        // 标题就写着 CodeMUX(身份也可能命中):报「内置拒绝列表」这条,人才知道
+        // 是哪条规则挡的;否则会误以为是莫名其妙的进程判定。
+        let titled = WindowSubject {
+            title: "CodeMUX".to_string(),
+            ..Default::default()
+        };
+        match decide_window_access(&titled, &[], &host_family()) {
+            AppAccess::Denied { scope, .. } => assert_eq!(scope, "CodeMUX 自身与安装更新器"),
+            AppAccess::Allowed => panic!("必须拒绝"),
+        }
+
+        // 标题无害但身份是宿主(无标题窗口同理):报进程家族。
+        let nameless = WindowSubject {
+            title: String::new(),
+            process_id: Some(4242),
+            ..Default::default()
+        };
+        match decide_window_access(&nameless, &[], &host_family()) {
+            AppAccess::Denied { scope, .. } => assert_eq!(scope, "CodeMUX 进程家族"),
+            AppAccess::Allowed => panic!("必须拒绝"),
         }
     }
 

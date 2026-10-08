@@ -169,14 +169,29 @@ impl BrowserMcpRuntime {
             .json()
             .await
             .map_err(|e| format!("daemon 响应解析失败: {}", e))?;
-        match status {
-            reqwest::StatusCode::OK => Ok(body["payload"].clone()),
-            _ => Err(body["error"]
-                .as_str()
-                .unwrap_or("浏览器自动化请求失败")
-                .to_string()),
-        }
+        interpret_automation_response(status.is_success(), &body)
     }
+}
+
+/// 自动化回包 → 工具结果的映射(纯函数,便于逐例测试)。
+///
+/// 关键一条:**失败也是 HTTP 200**(`{ok:false, error}`)—— 只看状态码会把拒绝
+/// 理由取成 payload 的 `null`,模型看到的是「成功但空」,只能自己猜能力是不是坏了
+/// (实测代价:一轮里白烧 5 次调用)。失败必须把原文冒泡给模型。
+fn interpret_automation_response(http_ok: bool, body: &Value) -> Result<Value, String> {
+    if body.get("ok").and_then(Value::as_bool) == Some(false) || !http_ok {
+        return Err(automation_error_text(body));
+    }
+    Ok(body["payload"].clone())
+}
+
+/// 失败响应的可读原因:优先 `error` 字段,退回默认文案。
+fn automation_error_text(body: &Value) -> String {
+    body.get("error")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| "浏览器自动化请求失败".to_string())
 }
 
 /// 工具清单(与 `AUTOMATION_OPS` 的 op 面一一对应;描述面向模型)。
@@ -299,12 +314,12 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "computer_windows",
-            "description": "列出桌面上的屏幕与窗口(来源 id 与标题)。只读,不改动任何窗口。截取某个窗口前先用它取 sourceId。",
+            "description": "列出桌面上的屏幕与窗口(来源 id、标题、所属进程与窗口矩形 bounds)。只读,不改动任何窗口。截取或点击某个窗口前先用它取 sourceId 与 bounds。宿主自身(CodeMUX)的窗口不在清单里,属于设计如此。",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {
             "name": "computer_screenshot",
-            "description": "截取桌面画面(默认主屏,可指定 computer_windows 给出来源 id)。只读;返回图片。窗口最小化或已关闭时返回错误。",
+            "description": "截取桌面画面(默认主屏,可指定 computer_windows 给出来源 id)。只读;返回图片与元数据。width/height 是图像像素,windowBounds 是该窗口在系统坐标(鼠标坐标系)里的矩形 —— 需要按截图定位坐标时用 windowBounds 换算:x = windowBounds.x + 图像像素x × windowBounds.width ÷ width。整屏截图在前台是受保护应用(密码管理器、CodeMUX 自身等)时会被拒绝,此时改用窗口来源。窗口最小化或已关闭时返回错误。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -611,6 +626,43 @@ mod tests {
         assert_eq!(spec["args"][0], "mcp-browser");
         assert_eq!(spec["args"][1], "--app-data-dir");
         assert_eq!(spec["args"][2], "D:/data");
+    }
+
+    // ---- 失败回包必须把理由冒泡给模型(实测:被吞成 null 时模型判定"能力坏了") ----
+
+    #[test]
+    fn a_refusal_inside_a_200_response_becomes_a_tool_error() {
+        // 桌面只读观测的拒绝就是走这条路:HTTP 200 + {ok:false, error}。
+        let body = json!({
+            "ok": false,
+            "requestId": "r1",
+            "error": "前台窗口属于不可操作范围(CodeMUX 进程家族),整屏截图会把它一并拍下,已拒绝。",
+        });
+        let error = interpret_automation_response(true, &body).expect_err("拒绝必须变成错误");
+        assert!(error.contains("整屏截图"));
+        assert!(error.contains("CodeMUX"), "理由要原样带给模型: {error}");
+    }
+
+    #[test]
+    fn a_successful_response_returns_the_payload() {
+        let body = json!({ "ok": true, "requestId": "r1", "payload": { "elements": 3 } });
+        assert_eq!(
+            interpret_automation_response(true, &body).expect("成功"),
+            json!({ "elements": 3 })
+        );
+    }
+
+    #[test]
+    fn an_http_failure_uses_the_error_field_and_falls_back_to_a_default() {
+        let with_reason = json!({ "error": "电脑控制未开启:请在 设置 → 电脑控制 中打开后重试" });
+        let error = interpret_automation_response(false, &with_reason).expect_err("403 也是错误");
+        assert!(error.contains("电脑控制未开启"));
+
+        let bare = json!({ "ok": false });
+        assert_eq!(
+            interpret_automation_response(true, &bare).expect_err("没有理由也要报错"),
+            "浏览器自动化请求失败"
+        );
     }
 
     #[tokio::test]

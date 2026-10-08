@@ -54,10 +54,12 @@ const WINDOW_IDENTITY_SCRIPT = `Add-Type @"
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+public struct CxIdRect { public int Left, Top, Right, Bottom; }
 public class CxEnum {
   public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out CxIdRect rect);
   public static List<IntPtr> TopLevel() {
     List<IntPtr> handles = new List<IntPtr>();
     EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) { handles.Add(hWnd); return true; }, IntPtr.Zero);
@@ -79,7 +81,9 @@ $rows = foreach ($h in [CxEnum]::TopLevel()) {
     $parent = [int]$procs[[int]$ownerPid].ParentProcessId
     $name = $procs[[int]$ownerPid].Name
   }
-  [pscustomobject]@{ hwnd = [int64]$h; processId = [int]$ownerPid; parentProcessId = $parent; processName = $name }
+  $rect = New-Object CxIdRect
+  [void][CxEnum]::GetWindowRect($h, [ref]$rect)
+  [pscustomobject]@{ hwnd = [int64]$h; processId = [int]$ownerPid; parentProcessId = $parent; processName = $name; x = $rect.Left; y = $rect.Top; width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top }
 }
 @($rows) | ConvertTo-Json -Compress`;
 
