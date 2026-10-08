@@ -297,6 +297,9 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
         detached: false,
         // stdout/stderr 追加重定向到同一个日志文件(对齐 Rust 的 Stdio::from(log))。
         stdio: ['ignore', logFd, logFd],
+        // 外壳 pid 交给 daemon(工单 11):桌面只读观测的「不可操作范围」要按进程
+        // 身份硬拒宿主家族 —— 壳自己的窗口可能没有标题,只靠标题匹配挡不住。
+        env: { ...process.env, CODEMUX_SHELL_PID: String(process.pid) },
       });
       spawned.on('error', () => {
         /* spawn 失败通过就绪轮询的 exit/超时路径上报 */

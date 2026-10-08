@@ -277,6 +277,16 @@ async fn execute_browser_automation(
         }
         config.computer_use.allowlist.clone()
     };
+    // 宿主进程家族(工单 11):自己的 pid + 外壳 pid(壳 spawn daemon 时经
+    // CODEMUX_SHELL_PID 告知)+ 正在跑的驱动 pid。桌面回包筛查按这份身份硬拒
+    // —— 没有标题的宿主窗口(自绘窗、驱动面板、DevTools)只靠标题挡不住。
+    let protected = {
+        let shell_pid = std::env::var("CODEMUX_SHELL_PID")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u32>().ok());
+        let driver_pid = ctx.daemon.companion.inner.driver.pid().await;
+        crate::computer_use::policy::ProtectedProcesses::host_family(shell_pid, driver_pid)
+    };
     if !AUTOMATION_OPS.contains(&body.op.as_str()) {
         audit_attempt(
             &ctx,
@@ -394,11 +404,12 @@ async fn execute_browser_automation(
         )));
     };
 
-    // 桌面只读回包按可操作范围筛查(需求 14):不可操作的窗口既不截图也不列举。
+    // 桌面只读回包按可操作范围筛查(需求 14、工单 11):不可操作的窗口(按
+    // 名称或按宿主进程身份)既不截图也不列举。
     let outcome = match outcome {
         AutomationOutcome::Ok(payload) if is_desktop_op(&body.op) => {
             match crate::computer_use::policy::screen_desktop_payload(
-                &body.op, &payload, &allowlist,
+                &body.op, &payload, &allowlist, &protected,
             ) {
                 Ok(filtered) => AutomationOutcome::Ok(filtered),
                 Err(refusal) => AutomationOutcome::Failed(refusal),

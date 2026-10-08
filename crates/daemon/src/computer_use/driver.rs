@@ -155,6 +155,13 @@ impl DriverHost {
         self.process.lock().await.is_some() && !self.stopping.load(Ordering::SeqCst)
     }
 
+    /// 驱动子进程的 pid(未运行 = `None`)。桌面只读回包筛查(工单 11)据此
+    /// 拒绝驱动自己的窗口(比如它的状态面板)。
+    pub async fn pid(&self) -> Option<u32> {
+        let guard = self.process.lock().await;
+        guard.as_ref().and_then(|process| process.child.id())
+    }
+
     /// 状态快照(设置页诊断与 UI 用);不主动拉起进程。
     ///
     /// 规格每次由调用方从配置传入 —— 配置是唯一事实来源,不存在「改了配置

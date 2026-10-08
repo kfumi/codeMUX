@@ -19,6 +19,10 @@ export interface DesktopSourceInfo {
   name: string;
   kind: 'screen' | 'window';
   displayId?: string;
+  /** 窗口所属进程身份(工单 11):解不到就不带,daemon 退回按标题裁决。 */
+  processId?: number;
+  parentProcessId?: number;
+  processName?: string;
 }
 
 /** 截图结果:base64 PNG + 尺寸 + 来源名与类型(daemon 据此判可操作范围)。 */
@@ -29,29 +33,67 @@ export interface DesktopScreenshot {
   name: string;
   sourceId: string;
   kind: 'screen' | 'window';
-  /** 整屏截图时附带的前台窗口标题(受保护应用在前台时 daemon 会拒绝)。 */
+  /** 窗口截图时附带的来源进程身份(工单 11)。 */
+  processId?: number;
+  parentProcessId?: number;
+  processName?: string;
+  /** 整屏截图时附带的前台窗口标题与身份(daemon 据此拒绝受保护前台)。 */
   foregroundTitle?: string;
+  foregroundProcessId?: number;
+  foregroundParentProcessId?: number;
+  foregroundProcessName?: string;
 }
 
 /** 活动窗口信息(前台窗口)。 */
 export interface DesktopActiveWindow {
   title: string;
   processId?: number;
+  parentProcessId?: number;
+  processName?: string;
   bounds?: { x: number; y: number; width: number; height: number };
   /** 能在来源清单里按标题对上的窗口 id(供随后截图用)。 */
   sourceId?: string;
 }
 
-/** 前台窗口标题(整屏截图时附带,供 daemon 判可操作范围);读不到就不带。 */
-async function foregroundTitle(
-  deps: DesktopCaptureDeps,
-): Promise<{ foregroundTitle?: string }> {
+/**
+ * 整屏截图附带的前台窗口事实(标题 + 身份):受保护应用在前台时,daemon 据此
+ * 拒绝整屏截图。读不到就不带(非 Windows / PowerShell 失败)。
+ */
+async function foregroundFacts(deps: DesktopCaptureDeps): Promise<{
+  foregroundTitle?: string;
+  foregroundProcessId?: number;
+  foregroundParentProcessId?: number;
+  foregroundProcessName?: string;
+}> {
   if (!deps.readForegroundWindow) return {};
   try {
     const foreground = await deps.readForegroundWindow();
-    return foreground?.title ? { foregroundTitle: foreground.title } : {};
+    if (!foreground?.title) return {};
+    return {
+      foregroundTitle: foreground.title,
+      ...(foreground.processId !== undefined
+        ? { foregroundProcessId: foreground.processId }
+        : {}),
+      ...(foreground.parentProcessId !== undefined
+        ? { foregroundParentProcessId: foreground.parentProcessId }
+        : {}),
+      ...(foreground.processName ? { foregroundProcessName: foreground.processName } : {}),
+    };
   } catch {
     return {};
+  }
+}
+
+/**
+ * 窗口 → 进程身份(工单 11)。壳只把事实报给 daemon,自己不做裁决;
+ * 平台不支持或枚举失败时返回空表 —— 身份未知时按标题裁决,不因此拒掉一切。
+ */
+async function windowIdentities(deps: DesktopCaptureDeps): Promise<WindowIdentity[]> {
+  if (!deps.readWindowIdentities) return [];
+  try {
+    return await deps.readWindowIdentities();
+  } catch {
+    return [];
   }
 }
 
@@ -76,11 +118,21 @@ export interface DesktopCaptureDeps {
   /** 主显示器(缺省来源)。 */
   primaryDisplay(): { id: number | string; size: { width: number; height: number } };
   /** 前台窗口读数;缺省表示平台不支持(工具据此报错而不是猜)。 */
-  readForegroundWindow?: () => Promise<{ title: string; processId?: number; bounds?: { x: number; y: number; width: number; height: number } } | null>;
+  readForegroundWindow?: () => Promise<{
+    title: string;
+    processId?: number;
+    parentProcessId?: number;
+    processName?: string;
+    bounds?: { x: number; y: number; width: number; height: number };
+  } | null>;
+  /** 顶层窗口的进程身份(工单 11);缺省表示平台不支持。 */
+  readWindowIdentities?: () => Promise<WindowIdentity[]>;
 }
 
 /** 截图尺寸上限:避免一张 4K 截图把模型上下文撑爆。 */
 const MAX_CAPTURE_EDGE = 1920;
+
+import { identityFields, identityOfSource, type WindowIdentity } from './window-identity';
 
 export type DesktopOpOutcome =
   | { ok: true; payload: unknown }
@@ -95,15 +147,22 @@ function toSourceInfo(source: CaptureSource, kind: 'screen' | 'window'): Desktop
   };
 }
 
-/** 窗口清单:不取缩略图(thumbnailSize 0),避免为一次列举编码整屏位图。 */
+/**
+ * 窗口清单:不取缩略图(thumbnailSize 0),避免为一次列举编码整屏位图。
+ * 窗口条目带上进程身份(来源 id 里的窗口句柄 ↔ PowerShell 枚举的句柄)。
+ */
 export async function listDesktopSources(deps: DesktopCaptureDeps): Promise<DesktopSourceInfo[]> {
-  const [screens, windows] = await Promise.all([
+  const [screens, windows, identities] = await Promise.all([
     deps.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }),
     deps.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } }),
+    windowIdentities(deps),
   ]);
   return [
     ...screens.map((source) => toSourceInfo(source, 'screen')),
-    ...windows.map((source) => toSourceInfo(source, 'window')),
+    ...windows.map((source) => ({
+      ...toSourceInfo(source, 'window'),
+      ...identityFields(identityOfSource(source.id, identities)),
+    })),
   ];
 }
 
@@ -157,6 +216,10 @@ export async function captureDesktop(
   }
   const actual = source.thumbnail.getSize();
   const isWindow = windowsSource;
+  // 窗口截图带上来源进程身份:daemon 据此按身份拒绝(标题可以没有,身份不会)。
+  const identity = isWindow
+    ? identityOfSource(source.id, await windowIdentities(deps))
+    : undefined;
   const screenshot: DesktopScreenshot = {
     image: Buffer.from(png).toString('base64'),
     width: actual.width,
@@ -166,9 +229,9 @@ export async function captureDesktop(
     // 来源类型取自它出自哪张清单 —— 不用 display_id 推断(Electron 不保证
     // 窗口源没有 display_id,推断错会让受保护窗口绕过筛查)。
     kind: isWindow ? 'window' : 'screen',
-    // 整屏截图时附上前台窗口标题:受保护应用在前台时,daemon 据此拒绝整屏
-    // 截图(密码管理器的窗口不该被整屏拍进去)。
-    ...(isWindow ? {} : await foregroundTitle(deps)),
+    // 整屏截图时附上前台窗口的标题与身份:受保护应用在前台时,daemon 据此拒绝
+    // 整屏截图(密码管理器/宿主自己的窗口不该被整屏拍进去)。
+    ...(isWindow ? identityFields(identity) : await foregroundFacts(deps)),
   };
   return { ok: true, payload: screenshot };
 }
@@ -201,6 +264,10 @@ export async function activeDesktopWindow(deps: DesktopCaptureDeps): Promise<Des
   const payload: DesktopActiveWindow = {
     title: foreground.title,
     ...(foreground.processId !== undefined ? { processId: foreground.processId } : {}),
+    ...(foreground.parentProcessId !== undefined
+      ? { parentProcessId: foreground.parentProcessId }
+      : {}),
+    ...(foreground.processName ? { processName: foreground.processName } : {}),
     ...(foreground.bounds ? { bounds: foreground.bounds } : {}),
     ...(match ? { sourceId: match.id } : {}),
   };

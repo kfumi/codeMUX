@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { desktopCapturer, screen } from 'electron';
 
 import type { DesktopCaptureDeps } from './desktop-capture';
+import { parseWindowIdentities, type WindowIdentity } from './window-identity';
 
 const execFileAsync = promisify(execFile);
 
@@ -36,11 +37,58 @@ $procId = 0
 [void][CxWin]::GetWindowThreadProcessId($h, [ref]$procId)
 $r = New-Object CxRect
 [void][CxWin]::GetWindowRect($h, [ref]$r)
-[pscustomobject]@{ title = $sb.ToString(); processId = $procId; x = $r.Left; y = $r.Top; width = $r.Right - $r.Left; height = $r.Bottom - $r.Top } | ConvertTo-Json -Compress`;
+$parentId = 0
+$procName = $null
+try {
+  $info = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction Stop
+  if ($info) { $parentId = [int]$info.ParentProcessId; $procName = $info.Name }
+} catch { }
+[pscustomobject]@{ title = $sb.ToString(); processId = $procId; parentProcessId = $parentId; processName = $procName; x = $r.Left; y = $r.Top; width = $r.Right - $r.Left; height = $r.Bottom - $r.Top } | ConvertTo-Json -Compress`;
+
+/**
+ * 顶层窗口 → 进程身份(工单 11)。一次调用枚举全部句柄,然后**一次性**取
+ * Win32_Process 快照(逐窗口查 CIM 会慢一个数量级)。失败返回空行,调用方按
+ * 「身份未知」处理(daemon 退回按标题裁决,不会因此拒掉一切)。
+ */
+const WINDOW_IDENTITY_SCRIPT = `Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public class CxEnum {
+  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  public static List<IntPtr> TopLevel() {
+    List<IntPtr> handles = new List<IntPtr>();
+    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) { handles.Add(hWnd); return true; }, IntPtr.Zero);
+    return handles;
+  }
+}
+"@
+$procs = @{}
+try {
+  Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { $procs[[int]$_.ProcessId] = $_ }
+} catch { }
+$rows = foreach ($h in [CxEnum]::TopLevel()) {
+  $ownerPid = 0
+  [void][CxEnum]::GetWindowThreadProcessId($h, [ref]$ownerPid)
+  if ($ownerPid -eq 0) { continue }
+  $parent = 0
+  $name = $null
+  if ($procs.ContainsKey([int]$ownerPid)) {
+    $parent = [int]$procs[[int]$ownerPid].ParentProcessId
+    $name = $procs[[int]$ownerPid].Name
+  }
+  [pscustomobject]@{ hwnd = [int64]$h; processId = [int]$ownerPid; parentProcessId = $parent; processName = $name }
+}
+@($rows) | ConvertTo-Json -Compress`;
+
 
 interface ForegroundWindowJson {
   title?: unknown;
   processId?: unknown;
+  parentProcessId?: unknown;
+  processName?: unknown;
   x?: unknown;
   y?: unknown;
   width?: unknown;
@@ -51,10 +99,17 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function asIdentityPart(value: unknown): number | undefined {
+  const numeric = asNumber(value);
+  return numeric !== undefined && numeric > 0 ? Math.trunc(numeric) : undefined;
+}
+
 /** PowerShell 输出解析(纯函数,便于单测)。 */
 export function parseForegroundWindow(raw: string): {
   title: string;
   processId?: number;
+  parentProcessId?: number;
+  processName?: string;
   bounds?: { x: number; y: number; width: number; height: number };
 } | null {
   let parsed: ForegroundWindowJson;
@@ -68,10 +123,17 @@ export function parseForegroundWindow(raw: string): {
   const y = asNumber(parsed.y);
   const width = asNumber(parsed.width);
   const height = asNumber(parsed.height);
-  const processId = asNumber(parsed.processId);
+  const processId = asIdentityPart(parsed.processId);
+  const parentProcessId = asIdentityPart(parsed.parentProcessId);
+  const processName =
+    typeof parsed.processName === 'string' && parsed.processName.trim()
+      ? parsed.processName.trim()
+      : undefined;
   return {
     title: parsed.title,
     ...(processId !== undefined ? { processId } : {}),
+    ...(parentProcessId !== undefined ? { parentProcessId } : {}),
+    ...(processName !== undefined ? { processName } : {}),
     ...(x !== undefined && y !== undefined && width !== undefined && height !== undefined
       ? { bounds: { x, y, width, height } }
       : {}),
@@ -81,6 +143,8 @@ export function parseForegroundWindow(raw: string): {
 async function readForegroundWindow(): Promise<{
   title: string;
   processId?: number;
+  parentProcessId?: number;
+  processName?: string;
   bounds?: { x: number; y: number; width: number; height: number };
 } | null> {
   if (process.platform !== 'win32') return null;
@@ -93,6 +157,21 @@ async function readForegroundWindow(): Promise<{
     return parseForegroundWindow(stdout);
   } catch {
     return null;
+  }
+}
+
+/** 顶层窗口 → 进程身份;平台不支持或读取失败时返回空表(身份未知)。 */
+export async function readWindowIdentities(): Promise<WindowIdentity[]> {
+  if (process.platform !== 'win32') return [];
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', WINDOW_IDENTITY_SCRIPT],
+      { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+    );
+    return parseWindowIdentities(stdout);
+  } catch {
+    return [];
   }
 }
 
@@ -118,6 +197,7 @@ export function createDesktopCaptureHost(): DesktopCaptureDeps {
       return { id: display.id, size: display.size };
     },
     readForegroundWindow,
+    readWindowIdentities,
   };
 }
 

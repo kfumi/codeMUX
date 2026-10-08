@@ -174,3 +174,106 @@ describe('activeDesktopWindow', () => {
     }
   });
 });
+
+// 工单 11:窗口条目与截图要带上进程身份 —— 宿主自己的窗口可能没有标题,
+// daemon 只能靠身份拒绝。身份解不到时字段不出现(daemon 退回按标题裁决)。
+describe('窗口进程身份', () => {
+  const identities = [
+    { hwnd: 100, processId: 4242, parentProcessId: 100, processName: 'CodeMUX.exe' },
+    { hwnd: 200, processId: 5150, parentProcessId: 4242, processName: 'CodeMUX.exe' },
+  ];
+
+  it('attaches identity to listed windows (screens stay bare)', async () => {
+    const captureDeps = deps({ readWindowIdentities: async () => identities });
+    const result = await listDesktopSources(captureDeps);
+
+    expect(result).toEqual([
+      { id: 'screen:0:0', name: '整个屏幕', kind: 'screen', displayId: '7' },
+      {
+        id: 'window:100:0',
+        name: '记事本',
+        kind: 'window',
+        processId: 4242,
+        parentProcessId: 100,
+        processName: 'CodeMUX.exe',
+      },
+    ]);
+  });
+
+  it('attaches identity to a window screenshot', async () => {
+    const captureDeps = deps({ readWindowIdentities: async () => identities });
+    const outcome = await captureDesktop(captureDeps, { sourceId: 'window:100:0' });
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.payload).toMatchObject({
+        name: '记事本',
+        kind: 'window',
+        processId: 4242,
+        parentProcessId: 100,
+        processName: 'CodeMUX.exe',
+      });
+    }
+  });
+
+  it('attaches the foreground identity to a full-screen capture', async () => {
+    const captureDeps = deps({
+      readForegroundWindow: async () => ({
+        title: '设置',
+        processId: 5150,
+        parentProcessId: 4242,
+        processName: 'CodeMUX.exe',
+      }),
+    });
+    const outcome = await captureDesktop(captureDeps, {});
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.payload).toMatchObject({
+        kind: 'screen',
+        foregroundTitle: '设置',
+        foregroundProcessId: 5150,
+        foregroundParentProcessId: 4242,
+        foregroundProcessName: 'CodeMUX.exe',
+      });
+    }
+  });
+
+  it('attaches the foreground identity to the active-window payload', async () => {
+    const captureDeps = deps({
+      readForegroundWindow: async () => ({
+        title: '记事本',
+        processId: 4242,
+        parentProcessId: 100,
+        processName: 'notepad.exe',
+      }),
+    });
+    const outcome = await activeDesktopWindow(captureDeps);
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.payload).toMatchObject({
+        title: '记事本',
+        processId: 4242,
+        parentProcessId: 100,
+        processName: 'notepad.exe',
+      });
+    }
+  });
+
+  it('keeps the payload identity-free when the enumeration is unavailable', async () => {
+    const captureDeps = deps({
+      readWindowIdentities: async () => {
+        throw new Error('powershell 不可用');
+      },
+    });
+    const result = await listDesktopSources(captureDeps);
+    expect(result[1]).toEqual({ id: 'window:100:0', name: '记事本', kind: 'window' });
+
+    const outcome = await captureDesktop(captureDeps, { sourceId: 'window:100:0' });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.payload).not.toHaveProperty('processId');
+    }
+  });
+});
