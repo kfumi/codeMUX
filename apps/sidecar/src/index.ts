@@ -1525,6 +1525,7 @@ export class SessionRuntime {
           for (const sourceEvent of projection.toolEvents) {
             for (const normalizedEvent of this.projectionNormalizer(appSessionId).accept(sourceEvent)) {
               continuationContentActivity = true;
+              this.trackArtifactWireEvent(normalizedEvent);
               emit(normalizedEvent);
             }
           }
