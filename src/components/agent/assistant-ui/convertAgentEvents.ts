@@ -361,6 +361,7 @@ function attachSessionSummariesToFinalAssistants(
     }
 
     const summary = coalesceSessionSummaries(turnSummaries);
+
     const message = messages[messageIndex];
     messages[messageIndex] = {
       ...message,

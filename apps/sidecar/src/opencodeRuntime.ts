@@ -31,7 +31,7 @@ import {
 import { DEBUG_OPENCODE_EVENTS, setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
-import { isMutationTool, TurnArtifactAggregator } from './turnArtifactSummary.js';
+import { resolveMutationKind, TurnArtifactAggregator } from './turnArtifactSummary.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
 import { buildSessionTitleEvent, isOpenCodePlaceholderTitle } from './sessionTitleEvent.js';
 import fs from 'node:fs';
@@ -215,6 +215,9 @@ export class OpenCodeRuntime {
       await this.compactSession();
       return;
     }
+    // 新的一轮（一条 User Message）：产物基线从这里重置。steer 与手动 compact
+    // 不经过这里，产物在轮内继续累积。
+    this.turnArtifactAggregator.reset();
     this.beginTurnEventState();
     setLogCtx({ sessionId: this.config.sessionId });
     writeLog('[opencode-task]', `sendInput START model=${this.config.provider}/${this.config.model} prompt_preview=${normalizedPrompt.slice(0, 120)}`);
@@ -1163,9 +1166,10 @@ export class OpenCodeRuntime {
     toolName: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> | null {
-    const normalized = toolName.toLowerCase();
-    if (normalized !== 'write' && normalized !== 'edit') return null;
-    if (!isMutationTool(toolName)) return null;
+    // 写入/编辑类工具在执行前读取磁盘作为变更前基线。补丁类工具自带完整
+    // 内容，不需要快照。工具名经归一化表判定，大小写与命名变体都能命中。
+    const kind = resolveMutationKind(toolName);
+    if (kind !== 'write' && kind !== 'edit') return null;
 
     const filePath = typeof input.file_path === 'string'
       ? input.file_path
@@ -1217,11 +1221,12 @@ export class OpenCodeRuntime {
       }
       this.turnArtifactAggregator.observe(event);
     } else if (event.type === 'turn_finished') {
+      // 产物汇总按「轮」累积：只发射累计，不在内部 turn 收尾时清空；
+      // 清空发生在下一次 sendInput（新的一轮）。
       const summary = this.turnArtifactAggregator.flushSummary(this.config.sessionId);
       if (summary) {
         eventsToEmit.push(summary as Record<string, unknown>);
       }
-      this.turnArtifactAggregator.reset();
     } else if (event.type === 'tool_finished') {
       this.turnArtifactAggregator.observe(event);
     }
@@ -1238,7 +1243,6 @@ export class OpenCodeRuntime {
 
   private beginTurnEventState(): void {
     this.turnId += 1;
-    this.turnArtifactAggregator.reset();
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.compactionBoundarySessionIds.clear();

@@ -38,6 +38,7 @@ const {
   interruptViaDaemonMock,
   getTimelineMock,
   updateWorkingPathMock,
+  catchUpTimelineAfterSequenceMock,
 } = vi.hoisted(() => {
   const sessionHandlers = new Map<string, (raw: string) => void>();
   const sessionStateHandlers = new Map<string, (running: boolean) => void>();
@@ -103,6 +104,7 @@ const {
     updateWorkingPathMock: vi.fn<(sessionId: string, workingPath: string) => Promise<unknown>>(
       () => Promise.resolve(),
     ),
+    catchUpTimelineAfterSequenceMock: vi.fn<(sessionId: string) => Promise<void>>(),
   };
 });
 
@@ -133,9 +135,8 @@ vi.mock('../lib/daemon-session-bridge', () => ({
   setLastEventSequence: vi.fn(),
   resetLastEventSequence: resetLastEventSequenceMock,
   reconcileHistorySequence: reconcileHistorySequenceMock,
-  catchUpTimelineAfterSequence: vi.fn(),
-  teardownDaemonSession: vi.fn(),
-  resetDaemonSessionBridge: vi.fn(),
+  catchUpTimelineAfterSequence: catchUpTimelineAfterSequenceMock,
+  markTimelineSequencesAccepted: vi.fn(),
 }));
 
 vi.mock('../lib/facades/daemon-facade', () => ({
@@ -257,6 +258,7 @@ describe('agent store Codex history loading', () => {
     saveEventsMock.mockClear();
     getEventsMock.mockClear();
     respondToAgentPermissionMock.mockClear();
+    catchUpTimelineAfterSequenceMock.mockClear();
     enrichAttachmentsMock.mockResolvedValue({
       blocks: [{ attachment_name: 'screen.png', markdown: 'Visible terminal error.', ok: true }],
     });
@@ -600,6 +602,81 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
     expect(useAgentStore.getState().queryStartTime[session.id]).toBeUndefined();
     expect(useAgentStore.getState().streamingEstimatedOutputTokens[session.id]).toBe(0);
+    // 兜底收尾后必须对账一次时间线尾部:把乱序窗口里漏掉的低频帧(产物汇总等)补回来。
+    expect(catchUpTimelineAfterSequenceMock).toHaveBeenCalledWith(session.id);
+  });
+
+  it('daemon state 帧抢跑收尾时,summary 先被补拉再收到原帧,卡片不重复不丢失', async () => {
+    // 生产实测时序(12:42 轮):sidecar 依次发 summary+result,但客户端先收到
+    // state(false) 触发兜底收尾,补拉把 summary/result 喂进 store,随后原帧又到。
+    const session = await primeSession('claude_code');
+    sessionHandlers.clear();
+    sessionStateHandlers.clear();
+
+    const wireEvents = [
+      {
+        type: 'tool_started',
+        session_id: session.id,
+        tool_use_id: 'call_edit_1',
+        name: 'Edit',
+        input: { file_path: 'D:/demo/package.json', old_string: '"pi-desktop4"', new_string: '"pi-desktop5"' },
+      },
+      {
+        type: 'file_snapshot',
+        session_id: session.id,
+        file_path: 'D:/demo/package.json',
+        original_content: '{"name": "pi-desktop4"}',
+        is_new: false,
+        tool_use_id: 'call_edit_1',
+      },
+      {
+        type: 'tool_finished',
+        session_id: session.id,
+        tool_use_id: 'call_edit_1',
+        content: 'ok',
+        is_error: false,
+      },
+      {
+        type: 'assistant_message',
+        session_id: session.id,
+        content: [{ type: 'text', text: '已完成,name 已改为 "pi-desktop5"。' }],
+      },
+      {
+        type: 'system_event',
+        subtype: 'session_summary',
+        session_id: session.id,
+        event_id: 'summary-race-1',
+        diffs: [{ file: 'D:/demo/package.json', before: '{"name": "pi-desktop4"}', after: '{"name": "pi-desktop5"}', additions: 1, deletions: 1 }],
+      },
+      {
+        type: 'turn_finished',
+        session_id: session.id,
+        outcome: 'completed',
+      },
+    ];
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      // 客户端在收尾帧之前先收到 state(false):补拉兜底把整段尾部喂进 store。
+      for (const wireEvent of wireEvents) {
+        sessionHandlers.get(sessionId)?.(JSON.stringify(wireEvent));
+      }
+      onEvent(JSON.stringify(wireEvents[4]));
+      onEvent(JSON.stringify(wireEvents[5]));
+    });
+
+    await useAgentStore.getState().startQuery(session.id, '改 name', 'D:\\demo');
+
+    const storeEvents = useAgentStore.getState().events[session.id];
+    const summaries = storeEvents.filter((event) => event.kind === 'session_summary');
+    expect(summaries.length, 'summary 必须恰好在时间线里出现一次(补拉与原帧去重)').toBe(1);
+
+    // 与运行时一致:用 store 构建的 turns 走完整转换,断言卡片真的挂得上去。
+    const { convertAgentEventsToAssistantMessages } = await import('../components/agent/assistant-ui/convertAgentEvents');
+    const messages = convertAgentEventsToAssistantMessages(storeEvents, useAgentStore.getState().turns[session.id]);
+    const parts = messages
+      .flatMap((message) => message.content)
+      .filter((part) => part.type === 'data-codemux-event' && part.eventKind === 'session_summary');
+    expect(parts.length, '转换后必须产出一张产物卡片').toBe(1);
   });
 
   it('daemon idle fallback commits a pending one-shot assistant before settling', async () => {
@@ -3092,6 +3169,52 @@ describe('agent store Codex history loading', () => {
           trigger: 'manual',
           status: 'completed',
         }),
+      }),
+    });
+  });
+
+  it('keeps a live session_summary system event in the claude conversation timeline', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'system_event',
+        subtype: 'session_summary',
+        session_id: sessionId,
+        event_id: 'summary-live-1',
+        diffs: [
+          { file: 'D:/demo/src/app.ts', before: 'alpha', after: 'ALPHA', additions: 1, deletions: 1 },
+        ],
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-live-summary',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }));
+    });
+
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'edit a file', 'D:\\demo');
+
+    const summaries = useAgentStore
+      .getState()
+      .events[session.id]
+      .filter((event) => event.kind === 'session_summary');
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      kind: 'session_summary',
+      data: expect.objectContaining({
+        subtype: 'session_summary',
+        diffs: [expect.objectContaining({ file: 'D:/demo/src/app.ts' })],
       }),
     });
   });

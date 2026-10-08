@@ -71,6 +71,27 @@ export function getLastEventSequence(sessionId: string): number {
 
 export function setLastEventSequence(sessionId: string, sequence: number): void {
   lastSequenceBySession.set(sessionId, sequence);
+  acceptedSequences(sessionId).add(sequence);
+}
+
+/**
+ * 每会话「已接受帧」的序号集合。
+ *
+ * 水位线只能表达「已看到的最高序号」，表达不了**中间的洞**：实时帧在乱序窗口里
+ * 丢失（实测 daemon 的 state 帧会先于收尾事件帧到达，随后丢掉 summary 帧）后，
+ * 后续帧照常抬水位线，丢掉的那帧就落在水位线之下 —— cursor 补拉（`after 水位线`）
+ * 永远拉不回它。补拉因此改为拉时间线尾部并按这个集合逐帧去重（见
+ * `catchUpTimelineAfterSequence`），洞里的帧不在集合中，会被补喂。
+ */
+const acceptedSequencesBySession = new Map<string, Set<number>>();
+
+function acceptedSequences(sessionId: string): Set<number> {
+  let accepted = acceptedSequencesBySession.get(sessionId);
+  if (!accepted) {
+    accepted = new Set<number>();
+    acceptedSequencesBySession.set(sessionId, accepted);
+  }
+  return accepted;
 }
 
 /**
@@ -85,6 +106,24 @@ export function setLastEventSequence(sessionId: string, sequence: number): void 
  */
 export function resetLastEventSequence(sessionId: string, sequence = -1): void {
   lastSequenceBySession.set(sessionId, sequence);
+  // 序号空间整体回退（时间线重建）后，旧空间里记录的「已接受」序号全部作废：
+  // 留着它们会让补拉把重建后的帧误判为重复。
+  acceptedSequencesBySession.delete(sessionId);
+}
+
+/**
+ * 历史加载把整页 DB 事件喂进 store 后，把这些序号记为已接受。
+ *
+ * 只应在「加载结果替换了 store 时间线」的分支调用：替换后的 store 内容与 DB
+ * 逐帧一致，补拉据此跳过它们。若加载结果被丢弃（保留本地实时时间线），不能
+ * 标记 —— DB 里有而本地丢掉的帧（乱序窗口的洞）必须留给补拉补喂。
+ */
+export function markTimelineSequencesAccepted(sessionId: string, sequences: number[]): void {
+  if (sequences.length === 0) return;
+  const accepted = acceptedSequences(sessionId);
+  for (const sequence of sequences) {
+    accepted.add(sequence);
+  }
 }
 
 /**
@@ -142,15 +181,24 @@ export async function catchUpTimelineAfterSequence(sessionId: string): Promise<v
   if (after < 0) return;
   try {
     const client = await ensureDaemonClient();
-    const page = await client.getTimeline(sessionId, { direction: 'after', cursor: after, limit: 200 });
     const handler = handlers.get(sessionId);
     if (!handler) return;
+    // 拉尾部而非 `after 水位线`：水位线之下的洞（乱序窗口里丢掉的帧，实测是
+    // 产物汇总帧）cursor 补拉永远拉不回来，只能按「已接受序号集合」逐帧对账。
+    // 集合去重保证已接受的帧（含洞后已到达的帧）不会被重复投喂。
+    const page = await client.getTimeline(sessionId, { direction: 'tail', limit: 200 });
+    const accepted = acceptedSequences(sessionId);
     for (const event of page.events ?? []) {
       if (event && typeof event === 'object') {
         const record = event as Record<string, unknown>;
         const sequence = typeof record.sequence === 'number' ? record.sequence : null;
         if (sequence !== null) {
+          const alreadyAccepted = accepted.has(sequence);
+          accepted.add(sequence);
           setLastEventSequence(sessionId, Math.max(getLastEventSequence(sessionId), sequence));
+          if (alreadyAccepted) {
+            continue;
+          }
         }
         handler(record);
       }
@@ -227,6 +275,10 @@ async function ensureDaemonSubscription(sessionId: string): Promise<void> {
         if (sequence !== null) {
           const last = getLastEventSequence(sessionId);
           if (sequence <= last) {
+            // 水位线之下的回放帧不投喂(去重),但也**不标记已接受**:它可能正是
+            // 乱序窗口里丢掉的洞(实测是产物汇总帧)——一旦标记,尾部对账会把它
+            // 当成已接受永远跳过,卡片再次永久丢失。是洞就交给补拉补喂;
+            // 已在 store 的帧会被补拉的接受集合跳过,不会重复。
             noteDroppedFrame(sessionId, sequence, last);
             return;
           }
@@ -259,6 +311,7 @@ export function teardownDaemonSession(sessionId: string): void {
   timelineResetHandlers.delete(sessionId);
   lastAcceptedFrameAt.delete(sessionId);
   droppedFrameLoggedAt.delete(sessionId);
+  acceptedSequencesBySession.delete(sessionId);
   const unsubscribe = unsubscribeFns.get(sessionId);
   if (unsubscribe) {
     unsubscribe();
@@ -277,4 +330,5 @@ export function resetDaemonSessionBridge(): void {
   lastSequenceBySession.clear();
   lastAcceptedFrameAt.clear();
   droppedFrameLoggedAt.clear();
+  acceptedSequencesBySession.clear();
 }

@@ -14,6 +14,8 @@ import {
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import {
+  catchUpTimelineAfterSequence,
+  markTimelineSequencesAccepted,
   reconcileHistorySequence,
   registerDaemonSessionHandler,
   resetLastEventSequence,
@@ -1904,6 +1906,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
     });
     useSessionStore.getState().markSessionUnread(sessionId);
     logger.warn('Settled stuck turn from daemon state frame', { sessionId });
+    // 收尾对账：实测 daemon 的 state(false) 帧可能先于收尾事件帧到达（乱序窗口），
+    // 在飞的低频帧（如产物汇总）可能没被处理。从持久化时间线补拉水位线之后的
+    // 帧，桥接层水位线会去重已接受的帧，重复拉取无副作用。
+    void catchUpTimelineAfterSequence(sessionId);
     dispatchNextQueuedQuery(sessionId);
     return true;
   };
@@ -2623,6 +2629,23 @@ function createSessionEventHandler(
       commitPendingSimulatedStream(sessionId, set);
     }
 
+    // 产物汇总按 daemon event_id 去重:补拉与 WS 回放/双渠道可能投喂同一条
+    // summary,时间线里它必须只出现一次(转换层 coalesce 依赖单一来源)。
+    if (event.kind === 'session_summary') {
+      const summaryUuid = typeof (event.data as { uuid?: unknown }).uuid === 'string'
+        ? (event.data as { uuid: string }).uuid
+        : null;
+      if (summaryUuid) {
+        const alreadyAccepted = (get().events[sessionId] || []).some((entry) => (
+          entry.kind === 'session_summary'
+          && (entry.data as { uuid?: unknown }).uuid === summaryUuid
+        ));
+        if (alreadyAccepted) {
+          return;
+        }
+      }
+    }
+
     set((s) => {
       const prev = s.events[sessionId] || [];
       const supersededAssistantIds = event.kind === 'assistant' && Array.isArray(event.data.supersedes)
@@ -2798,6 +2821,9 @@ function createSessionEventHandler(
         terminalEvent: event.kind,
         isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
       });
+      // 收尾对账：与 settleIdleTurnFromState 同理——低频帧（产物汇总等）在
+      // 极端时序下可能没被实时处理，收尾时从持久化时间线补拉一次，水位线去重。
+      void catchUpTimelineAfterSequence(sessionId);
       if (event.kind === 'result' && !event.data?.is_error) {
         void get().refreshLatestTokenUsage(sessionId, 'live_synced');
       }
@@ -3673,6 +3699,7 @@ function createSessionEventHandler(
         const seenEventIds = new Set<string>();
 
         let highestLoadedSequence = -1;
+        const loadedSequences: number[] = [];
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
@@ -3686,6 +3713,7 @@ function createSessionEventHandler(
           const sequence = typeof rawMsg.sequence === 'number' ? rawMsg.sequence : null;
           if (sequence !== null) {
             highestLoadedSequence = Math.max(highestLoadedSequence, sequence);
+            loadedSequences.push(sequence);
           }
           let ts = typeof rawMsg.timestamp === 'string'
             ? new Date(rawMsg.timestamp).getTime() || 0
@@ -3724,6 +3752,8 @@ function createSessionEventHandler(
         const rememberedCwd = extractSessionWorkingPathFromEvents(events);
         const existingWorkingPath = get().sessionWorkingPaths[sessionId] ?? session?.working_path ?? null;
 
+        let replacedTimeline = false;
+
         set((state) => {
           const currentEvents = state.events[sessionId];
           const isSessionRunning = Boolean(state.isRunning[sessionId]);
@@ -3746,6 +3776,10 @@ function createSessionEventHandler(
           const nextTimestamps = keepCurrentEvents
             ? state.eventTimestamps[sessionId] ?? timestamps
             : timestamps;
+          // 替换分支：store 时间线与 DB 逐帧一致，加载的序号全部记为已接受，
+          // 收尾补拉据此跳过；保留分支不标记 —— DB 里有而本地丢掉的帧（乱序窗口
+          // 的洞）要留给补拉补喂。
+          replacedTimeline = !keepCurrentEvents;
 
           const base = {
             events: { ...state.events, [sessionId]: nextEvents },
@@ -3754,6 +3788,10 @@ function createSessionEventHandler(
           };
           return { ...base, ...turnsForCommit(state, sessionId, base) };
         });
+
+        if (replacedTimeline) {
+          markTimelineSequencesAccepted(sessionId, loadedSequences);
+        }
 
         // 加载完成后对账去重水位线:正常情况推进到本页最高序号;若低于当前水位线,
         // 说明 daemon 重建了时间线并重新编号(回退 / 从原生重同步),必须回退水位线,

@@ -423,6 +423,9 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
     let _ = conn.execute("DROP TABLE IF EXISTS messages", []);
+    // Migration: 死表 turn_artifacts — 产物改为每轮从工具消息重建，此表已无写入方，
+    // 但老库里仍残留，这里清掉。
+    let _ = conn.execute("DROP TABLE IF EXISTS turn_artifacts", []);
 
     // Migration: migrate mcp_servers from legacy schema to per-app schema
     // Must run BEFORE subtitle/always_load migrations since those columns
@@ -687,6 +690,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(branch, None);
+    }
+
+    #[test]
+    fn drops_the_retired_turn_artifacts_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                agent_kind TEXT NOT NULL DEFAULT 'claude_code',
+                mode TEXT NOT NULL DEFAULT 'chat',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE turn_artifacts (
+                id TEXT PRIMARY KEY,
+                app_session_id TEXT NOT NULL,
+                turn_ordinal INTEGER NOT NULL,
+                project_path TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        // 产物改为每轮从工具消息重建，老库里的残留表必须被清掉。
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'turn_artifacts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]
