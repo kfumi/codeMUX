@@ -250,7 +250,11 @@ export interface CodemuxDesktopBridge {
   browserRegisterGuest(webContentsId: number, browserId: string): Promise<void>;
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen(): Promise<{ image: string; width: number; height: number }>;
-  /** 全局 Esc 急停(工单 06):系统级执行开启期间武装;返回是否已生效。 */
+  /**
+   * 全局 Esc 急停(工单 06/10):「有回合在跑 **且** 系统级执行开启」期间武装
+   * —— 空闲时 Esc 还给系统和别的应用。返回**实际**是否已武装(键被别的程序
+   * 占用时注册失败返回 false);壳侧控制中提示条跟随这个结果显示或隐藏。
+   */
   setEmergencyStopArmed(armed: boolean): Promise<boolean>;
 
   // perf / devtools

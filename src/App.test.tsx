@@ -78,11 +78,14 @@ vi.mock('./stores/agentStore', () => ({
     todos: Record<string, never[]>;
     events: Record<string, never[]>;
     eventTimestamps: Record<string, never[]>;
+    // 全局 Esc 的武装窗口读它(工单 10):没有回合在跑 = 不该武装。
+    isRunning: Record<string, boolean>;
   }) => unknown) => selector({
     startQuery: vi.fn(),
     todos: {},
     events: {},
     eventTimestamps: {},
+    isRunning: {},
   }),
 }));
 

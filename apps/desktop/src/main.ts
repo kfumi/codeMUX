@@ -20,6 +20,8 @@ import path from 'node:path';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
+import { createControlBannerService, type ControlBannerService } from './control-banner';
+import { openControlBannerWindow } from './control-banner-window';
 import { createDesktopCaptureHost } from './desktop-capture-host';
 import { createEmergencyStopService, type EmergencyStopService } from './emergency-stop';
 import { parseByteRange } from './http-range';
@@ -213,8 +215,10 @@ let unregisterBridge: (() => void) | null = null;
 let browserGuests: BrowserGuestTracker | null = null;
 /** 浏览器自动化接缝(工单 08):daemon → 壳内页面的自动化执行客户端。 */
 let automation: BrowserAutomationService | null = null;
-/** 全局 Esc 急停(工单 06):系统级执行开启期间武装。 */
+/** 全局 Esc 急停(工单 06):有回合在跑且系统级执行开着时武装。 */
 let emergencyStop: EmergencyStopService | null = null;
+/** 控制中提示条(工单 10):显示与否跟随急停的武装状态。 */
+let controlBanner: ControlBannerService | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
 
@@ -483,6 +487,9 @@ async function quitApplication(): Promise<void> {
   // 解除全局 Esc:退出后不该再占着这个键(也避免重入时残留注册)。
   emergencyStop?.setArmed(false);
   emergencyStop = null;
+  // 提示条跟着收掉:它是独立窗口,不该比应用活得久。
+  controlBanner?.setVisible(false);
+  controlBanner = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
     await supervisor?.stopManaged();
@@ -562,8 +569,8 @@ if (!gotLock) {
       desktop: createDesktopCaptureHost(),
     });
     automation.start();
-    // 全局 Esc 急停(工单 06):系统级执行开启期间武装。触发时先通知渲染层
-    // 打断当前回合,再让 daemon 杀掉驱动子进程 —— 两件事都不经模型。
+    // 全局 Esc 急停(工单 06):有回合在跑且系统级执行开着时武装。触发时先通知
+    // 渲染层打断当前回合,再让 daemon 杀掉驱动子进程 —— 两件事都不经模型。
     const emergencyStopService = createEmergencyStopService({
       registerShortcut: (accelerator, handler) => globalShortcut.register(accelerator, handler),
       unregisterShortcut: (accelerator) => globalShortcut.unregister(accelerator),
@@ -576,6 +583,16 @@ if (!gotLock) {
       },
     });
     emergencyStop = emergencyStopService;
+    // 控制中提示条(工单 10):屏幕上写明「电脑正在被控制,按 Esc 急停」。
+    // 显示与否跟随武装状态(见 shell-bridge 的 setEmergencyStopArmed)。
+    controlBanner = createControlBannerService({
+      open: () => openControlBannerWindow(),
+      log: (level, message) => {
+        if (level === 'error') console.error(message);
+        else if (level === 'warn') console.warn(message);
+        else console.log(message);
+      },
+    });
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);
     // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
     const updater = createUpdaterService({
@@ -586,6 +603,7 @@ if (!gotLock) {
     });
     unregisterBridge = registerShellBridge({
       emergencyStop: emergencyStopService,
+      controlBanner,
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,

@@ -33,6 +33,7 @@ import {
   upgradeAgentRuntime,
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
+import type { ControlBannerService } from './control-banner';
 import { capturePrimaryScreen } from './desktop-capture-host';
 import type { EmergencyStopService } from './emergency-stop';
 import { readLocalDaemonTokenOrThrow } from './daemon-token';
@@ -59,6 +60,8 @@ export interface ShellBridgeDeps {
   browserGuests: BrowserGuestTracker;
   /** 全局 Esc 急停服务(工单 06;main.ts 创建)。 */
   emergencyStop: EmergencyStopService;
+  /** 控制中提示条(工单 10;main.ts 创建,跟随急停武装状态显示)。 */
+  controlBanner: ControlBannerService;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -426,14 +429,18 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   // 手动贴屏(工单 04):用户点一下截主屏,渲染层把 PNG 贴进会话上下文。
   // 这是用户主动发起的只读动作,不经 daemon 闸门(需求 17)。
   handle('captureDesktopScreen', () => capturePrimaryScreen());
-  // 全局 Esc 急停(工单 06):渲染层按「系统级执行」开关武装/解除。
+  // 全局 Esc 急停(工单 06/10):渲染层在「有回合在跑且系统级执行开着」时武装。
+  // 提示条跟着**实际**武装结果走 —— 注册失败(键被别的程序占着)时不能挂一个
+  // 「按 Esc 急停」却按不动的提示。
   handle('setEmergencyStopArmed', (payload: unknown) => {
     const { armed } = (payload ?? {}) as { armed?: unknown };
     if (typeof armed !== 'boolean') {
       throw new Error('armed must be a boolean');
     }
     deps.emergencyStop.setArmed(armed);
-    return deps.emergencyStop.isArmed();
+    const effective = deps.emergencyStop.isArmed();
+    deps.controlBanner.setVisible(effective);
+    return effective;
   });
   // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
   // main 侧弹窗拒绝转发据此回填 sourceBrowserId。

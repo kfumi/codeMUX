@@ -186,7 +186,7 @@ export function ComputerUseSettings() {
           surface
           inlineControl
           label="系统级执行"
-          description="开启后驱动才能启动，智能体可经驱动操作原生应用界面。每一步输入动作仍要你放行。"
+          description="开启后驱动才能启动，智能体可经驱动操作原生应用界面。每一步输入动作仍要你放行。任务运行期间会临时接管全局 Esc（按 Esc = 急停驱动并打断当前回合，屏幕上会显示提示条），任务结束即解除。"
           control={
             <Switch
               aria-label="系统级执行"
