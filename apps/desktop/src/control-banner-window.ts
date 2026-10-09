@@ -27,6 +27,10 @@ export function openControlBannerWindow(): ControlBannerHandle {
   });
   // 点击穿透:提示条不能挡住用户或智能体的鼠标操作。
   window.setIgnoreMouseEvents(true);
+  // 内容保护(工单 10 跟进):Windows 10 2004+ 走 WDA_EXCLUDEFROMCAPTURE,
+  // 提示条从所有截屏里被排除 —— driver 的 computer_screenshot 拍不到它,
+  // 不依赖「赶在截图前收起」的时序运气。
+  window.setContentProtection(true);
   window.setAlwaysOnTop(true, 'screen-saver');
 
   const keepTop = setInterval(() => {

@@ -1,8 +1,9 @@
 // 控制中提示条契约测试(工单 10):状态机(重复调用幂等、建窗失败降级、关窗
 // 不抛)、窗口参数不变量(点击穿透/不抢焦点/不进任务栏),以及文案与页面内容。
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CONTROL_BANNER_MAX_VISIBLE_MS,
   CONTROL_BANNER_TEXT,
   bannerDataUrl,
   bannerHtml,
@@ -54,6 +55,67 @@ describe('control banner 状态机', () => {
     banner.setVisible(true);
     expect(() => banner.setVisible(false)).not.toThrow();
     expect(banner.isVisible()).toBe(false);
+  });
+});
+
+describe('control banner 自动收起(工单 10 跟进)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hides itself after the visible cap', () => {
+    const handle = { close: vi.fn() };
+    const deps = bannerDeps(() => handle);
+    const banner = createControlBannerService(deps);
+
+    banner.setVisible(true);
+    expect(banner.isVisible()).toBe(true);
+
+    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
+
+    expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(banner.isVisible()).toBe(false);
+    expect(deps.log).toHaveBeenCalledWith('info', expect.stringContaining('自动收起'));
+  });
+
+  it('does not re-show while the same activity is still requested', () => {
+    const open = vi.fn(() => ({ close: vi.fn() }));
+    const banner = createControlBannerService({ open, log: vi.fn() });
+
+    banner.setVisible(true);
+    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
+    banner.setVisible(true);
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(banner.isVisible()).toBe(false);
+  });
+
+  it('shows again for a new activity episode after an explicit hide', () => {
+    const open = vi.fn(() => ({ close: vi.fn() }));
+    const banner = createControlBannerService({ open, log: vi.fn() });
+
+    banner.setVisible(true);
+    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
+    banner.setVisible(false);
+    banner.setVisible(true);
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(banner.isVisible()).toBe(true);
+  });
+
+  it('clears a pending auto-hide when hidden explicitly first', () => {
+    const handle = { close: vi.fn() };
+    const banner = createControlBannerService(bannerDeps(() => handle));
+
+    banner.setVisible(true);
+    banner.setVisible(false);
+    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS * 2);
+
+    expect(handle.close).toHaveBeenCalledTimes(1);
   });
 });
 

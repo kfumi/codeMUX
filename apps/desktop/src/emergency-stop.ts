@@ -1,8 +1,9 @@
-//! 全局 Esc 强打断(工单 06 需求 12):失控时两秒内停下来。
+//! 全局 Esc 强打断(工单 06 需求 12;工单 10 收窄窗口,10 跟进再收窄):失控时两秒内停下来。
 //!
-//! 只在「系统级执行」开启期间武装 —— 全局 Esc 会抢走所有应用的 Esc,平时
-//! 装着它等于替用户决定 Esc 归谁。开启系统级执行意味着智能体能碰真实键鼠,
-//! 这个代价才是值的。
+//! 武装窗口由渲染层决定(见 `src/hooks/useEmergencyStop.ts`):只在「电脑控制开启 +
+//! 系统级执行开着 + 真的有 computer_* 工具在飞(含等审批)」时接管全局 Esc ——
+//! 平时装着它等于替用户决定 Esc 归谁,而急停要停的是真实驱动动作,所以只在
+//! 该动作进行期间接管。
 //!
 //! 触发动作是两件事,缺一不可:杀驱动子进程(在途动作立刻断),并通知渲染层
 //! 打断当前回合(把「停下来」这个事实告诉模型与用户)。
@@ -68,7 +69,7 @@ export function createEmergencyStopService(deps: EmergencyStopDeps): EmergencySt
           return;
         }
         armed = true;
-        log('info', '全局 Esc 已武装(系统级执行开启期间生效)');
+        log('info', '全局 Esc 已武装(有电脑控制在飞期间生效)');
       } else {
         deps.unregisterShortcut(EMERGENCY_STOP_ACCELERATOR);
         armed = false;

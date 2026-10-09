@@ -3,6 +3,8 @@
 //!
 //! 与全局 Esc 同生共死:提示条宣传的就是那个键,所以只在 Esc 真武装了之后显示
 //! —— 注册失败(被别的程序占着)时宁可什么都不显示,也不给一个骗人的提示。
+//! 显示本身有上限(见 CONTROL_BANNER_MAX_VISIBLE_MS):到点自动收起,同一次连续
+//! 活动期间不重复弹;活动断开后新的活动才会再显示(急停的武装状态不受影响)。
 //!
 //! 窗口本身不可交互(点击穿透、不抢焦点、不进任务栏),生命周期由渲染层按
 //! 「有回合在跑」驱动。本文件不 import electron(建窗在 control-banner-window),
@@ -10,6 +12,14 @@
 
 /** 提示条文案(与 PI-Desktop 的提示条同一件事:告诉用户电脑正在被控制)。 */
 export const CONTROL_BANNER_TEXT = 'CodeMUX 正在控制这台电脑 · 按 Esc 急停';
+
+/**
+ * 显示上限(ms):提示条是「闪一下告知」,不是常驻角标。
+ *
+ * 一是别在屏幕上碍眼;二是 driver 会截屏,提示条必须赶在后续截图之前收掉
+ * (配合 `control-banner-window` 的内容保护,截图里也不会出现它)。
+ */
+export const CONTROL_BANNER_MAX_VISIBLE_MS = 1000;
 
 /** 提示条尺寸(px)。 */
 export const CONTROL_BANNER_WIDTH = 460;
@@ -126,29 +136,55 @@ function defaultLog(level: 'info' | 'warn' | 'error', message: string): void {
 export function createControlBannerService(deps: ControlBannerDeps): ControlBannerService {
   const log = deps.log ?? defaultLog;
   let handle: ControlBannerHandle | null = null;
+  /** 被显示上限收起后仍处于「已请求」状态:同一次连续活动期间不再弹。 */
+  let suppressedByTimeout = false;
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearHideTimer = () => {
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  };
+
+  const closeHandle = () => {
+    const closing = handle;
+    handle = null;
+    try {
+      closing?.close();
+    } catch (error) {
+      // 关窗失败不该拦住退出流程,记一条就够。
+      log('warn', `控制中提示条关闭失败: ${String(error)}`);
+    }
+  };
 
   return {
     setVisible(visible: boolean) {
-      if (visible === (handle !== null)) return;
       if (visible) {
+        if (handle !== null || suppressedByTimeout) return;
         try {
           handle = deps.open();
-          log('info', '控制中提示条已显示(电脑控制进行中,按 Esc 急停)');
         } catch (error) {
           handle = null;
           log('warn', `控制中提示条创建失败: ${String(error)}`);
+          return;
         }
+        log('info', '控制中提示条已显示(电脑控制进行中,按 Esc 急停)');
+        hideTimer = setTimeout(() => {
+          hideTimer = null;
+          closeHandle();
+          suppressedByTimeout = true;
+          log('info', `控制中提示条已自动收起(显示上限 ${CONTROL_BANNER_MAX_VISIBLE_MS}ms)`);
+        }, CONTROL_BANNER_MAX_VISIBLE_MS);
         return;
       }
-      const closing = handle;
-      handle = null;
-      try {
-        closing?.close();
-      } catch (error) {
-        // 关窗失败不该拦住退出流程,记一条就够。
-        log('warn', `控制中提示条关闭失败: ${String(error)}`);
+      clearHideTimer();
+      const wasVisible = handle !== null;
+      closeHandle();
+      suppressedByTimeout = false;
+      if (wasVisible) {
+        log('info', '控制中提示条已隐藏');
       }
-      log('info', '控制中提示条已隐藏');
     },
     isVisible: () => handle !== null,
   };
