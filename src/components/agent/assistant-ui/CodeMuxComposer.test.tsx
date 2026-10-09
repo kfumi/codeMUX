@@ -35,6 +35,11 @@ const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSe
   editorSetTextMock: vi.fn(),
 }));
 
+const { captureDesktopScreenMock, hostCapabilitiesState } = vi.hoisted(() => ({
+  captureDesktopScreenMock: vi.fn(),
+  hostCapabilitiesState: { capture: false },
+}));
+
 const capturedPopovers: Array<{
   char?: string;
   adapter?: {
@@ -174,6 +179,35 @@ vi.mock('../../../lib/facades/daemon-facade', () => ({
   },
 }));
 
+vi.mock('../../../lib/facades/shell-facade', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/facades/shell-facade')>(
+    '../../../lib/facades/shell-facade',
+  );
+  return {
+    ...actual,
+    shellFacade: {
+      ...actual.shellFacade,
+      captureDesktopScreen: captureDesktopScreenMock,
+    },
+  };
+});
+
+// 手动贴屏入口已合并进 + 菜单:测试用它控制 computer.capture 能力的有无。
+vi.mock('../../../hooks/useHostCapabilities', async () => {
+  const { capabilitiesForHost } = await vi.importActual<
+    typeof import('../../../lib/host/host-capabilities')
+  >('../../../lib/host/host-capabilities');
+  return {
+    useHostCapabilities: () => {
+      const base = capabilitiesForHost('browser');
+      return {
+        ...base,
+        has: (id: string) => (id === 'computer.capture' ? hostCapabilitiesState.capture : base.has(id)),
+      };
+    },
+  };
+});
+
 
 const pendingQuestionEvents: AgentMessage[] = [
   {
@@ -220,6 +254,8 @@ describe('CodeMuxComposer', () => {
     composerSendMock.mockClear();
     updatePermissionsMock.mockReset();
     editorSetTextMock.mockClear();
+    captureDesktopScreenMock.mockReset();
+    hostCapabilitiesState.capture = false;
     useAgentStore.setState({ events: {}, forceStopped: {}, pendingComposerRestore: {} });
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
@@ -380,6 +416,29 @@ describe('CodeMuxComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
 
     expect(screen.getByText('计划模式')).toBeTruthy();
+  });
+
+  it('merges desktop capture into the add menu when the host supports it', async () => {
+    hostCapabilitiesState.capture = true;
+    captureDesktopScreenMock.mockResolvedValue({ image: 'iVBORw0KGgo=', width: 1, height: 1 });
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    // 相机按钮不再单独占位:入口只在 + 菜单里。
+    expect(screen.queryByRole('button', { name: '截取桌面贴进会话' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
+    fireEvent.click(screen.getByRole('button', { name: '截取桌面' }));
+
+    await waitFor(() => expect(captureDesktopScreenMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('hides the desktop capture entry when the host lacks the capability', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
+
+    expect(screen.getByText('选择文件')).toBeTruthy();
+    expect(screen.queryByText('截取桌面')).toBeNull();
   });
 
   it('shows the active plan indicator only for Codex while plan mode is on', () => {

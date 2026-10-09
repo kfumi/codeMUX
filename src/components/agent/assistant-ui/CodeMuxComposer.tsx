@@ -698,6 +698,20 @@ export function CodeMuxComposer({
                     <FilePlus2 className="h-4 w-4 text-muted-foreground" />
                     <span>选择文件</span>
                   </button>
+                  {canCaptureScreen ? (
+                    // 手动贴屏(需求 17)与「选择文件」同为附件来源,合并进 + 菜单,
+                    // 不再在工具栏上占一个独立按钮。
+                    <button
+                      type="button"
+                      disabled={disabled || capturingScreen}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { setAddMenuOpen(false); void captureScreenIntoComposer(); }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/56 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <Camera className="h-4 w-4 text-muted-foreground" />
+                      <span>截取桌面</span>
+                    </button>
+                  ) : null}
                   {showComposerPlanControls && onActivatePlanMode ? (
                     <button
                       type="button"
@@ -711,19 +725,6 @@ export function CodeMuxComposer({
                   ) : null}
                 </PopoverContent>
               </Popover>
-                {canCaptureScreen ? (
-                  <TooltipHint content="截取桌面贴进会话（只读，不经智能体）">
-                    <button
-                      type="button"
-                      disabled={disabled || capturingScreen}
-                      aria-label="截取桌面贴进会话"
-                      onClick={() => void captureScreenIntoComposer()}
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground transition-all duration-normal hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <Camera className="h-4 w-4" />
-                    </button>
-                  </TooltipHint>
-                ) : null}
                 {permissionSelector}
                 {showComposerPlanControls && planMode === 'on' && onTogglePlanMode ? (
                   // Active Plan indicator — entry lives in the add (+) menu;
