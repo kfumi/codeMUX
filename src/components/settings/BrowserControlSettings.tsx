@@ -45,7 +45,7 @@ export function BrowserControlSettings() {
           surface
           inlineControl
           label="开启内置浏览器控制"
-          description="允许后续会话通过内置浏览器操作网页。此开关不影响侧边栏打开浏览器。"
+          description="允许后续会话通过内置浏览器操作网页。此开关不影响侧边栏打开浏览器；关闭时浏览器操作工具不会出现在会话的工具清单里。"
           control={
             <Switch
             aria-label="开启内置浏览器控制"

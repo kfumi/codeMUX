@@ -5,8 +5,8 @@ import { mapClaudeMcpServers, toClaudeSdkMcpServer } from './claudeMcpServers.js
 describe('claudeMcpServers', () => {
   it('toClaudeSdkMcpServer:stdio spec 带 args/env,缺省字段省略', () => {
     expect(
-      toClaudeSdkMcpServer({ command: 'codemux-daemon', args: ['mcp-browser'], env: { A: '1' } }),
-    ).toEqual({ type: 'stdio', command: 'codemux-daemon', args: ['mcp-browser'], env: { A: '1' } });
+      toClaudeSdkMcpServer({ command: 'codemux-daemon', args: ['mcp-control'], env: { A: '1' } }),
+    ).toEqual({ type: 'stdio', command: 'codemux-daemon', args: ['mcp-control'], env: { A: '1' } });
     expect(toClaudeSdkMcpServer({ command: 'npx' })).toEqual({ type: 'stdio', command: 'npx' });
   });
 
@@ -20,10 +20,10 @@ describe('claudeMcpServers', () => {
     expect(mapClaudeMcpServers({})).toBeNull();
     expect(mapClaudeMcpServers({ bad: { url: 'https://x' } })).toBeNull();
     const mapped = mapClaudeMcpServers({
-      'codemux-browser': { command: 'D:/bin/codemux-daemon.exe', args: ['mcp-browser', '--app-data-dir', 'D:/data'] },
+      'codemux-control': { command: 'D:/bin/codemux-daemon.exe', args: ['mcp-control', '--app-data-dir', 'D:/data'] },
       bad: { url: 'https://x' },
     });
-    expect(Object.keys(mapped ?? {})).toEqual(['codemux-browser']);
-    expect((mapped ?? {})['codemux-browser']).toMatchObject({ type: 'stdio' });
+    expect(Object.keys(mapped ?? {})).toEqual(['codemux-control']);
+    expect((mapped ?? {})['codemux-control']).toMatchObject({ type: 'stdio' });
   });
 });

@@ -1,10 +1,12 @@
-// 控制中提示条契约测试(工单 10):状态机(重复调用幂等、建窗失败降级、关窗
-// 不抛)、窗口参数不变量(点击穿透/不抢焦点/不进任务栏),以及文案与页面内容。
+// 控制中提示条契约测试(工单 10;常驻语义与顶部样式见工单 15):状态机(重复调用
+// 幂等、建窗失败降级、关窗不抛、**不自动收起**)、窗口参数不变量(点击穿透/不抢
+// 焦点/不进任务栏/贴顶部居中),以及文案与页面内容。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  CONTROL_BANNER_MAX_VISIBLE_MS,
+  CONTROL_BANNER_HINT,
   CONTROL_BANNER_TEXT,
+  CONTROL_BANNER_TOP_OFFSET,
   bannerDataUrl,
   bannerHtml,
   bannerWindowOptions,
@@ -58,7 +60,7 @@ describe('control banner 状态机', () => {
   });
 });
 
-describe('control banner 自动收起(工单 10 跟进)', () => {
+describe('control banner 常驻语义(工单 15)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -67,7 +69,7 @@ describe('control banner 自动收起(工单 10 跟进)', () => {
     vi.useRealTimers();
   });
 
-  it('hides itself after the visible cap', () => {
+  it('stays visible until it is hidden explicitly (no auto-hide)', () => {
     const handle = { close: vi.fn() };
     const deps = bannerDeps(() => handle);
     const banner = createControlBannerService(deps);
@@ -75,31 +77,38 @@ describe('control banner 自动收起(工单 10 跟进)', () => {
     banner.setVisible(true);
     expect(banner.isVisible()).toBe(true);
 
-    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
+    // 之前这里 1s 就把窗口收掉;现在显示多久由渲染层的武装窗口决定。
+    vi.advanceTimersByTime(10 * 60 * 1000);
+
+    expect(handle.close).not.toHaveBeenCalled();
+    expect(banner.isVisible()).toBe(true);
+
+    banner.setVisible(false);
 
     expect(handle.close).toHaveBeenCalledTimes(1);
     expect(banner.isVisible()).toBe(false);
-    expect(deps.log).toHaveBeenCalledWith('info', expect.stringContaining('自动收起'));
+    expect(deps.log).toHaveBeenCalledWith('info', expect.stringContaining('已隐藏'));
   });
 
-  it('does not re-show while the same activity is still requested', () => {
+  it('keeps the same window across repeated requests while armed', () => {
+    // 武装期间判据会随工具事件反复重算:同一段操作只开一次,不闪断、不重建。
     const open = vi.fn(() => ({ close: vi.fn() }));
     const banner = createControlBannerService({ open, log: vi.fn() });
 
     banner.setVisible(true);
-    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
+    vi.advanceTimersByTime(60_000);
+    banner.setVisible(true);
     banner.setVisible(true);
 
     expect(open).toHaveBeenCalledTimes(1);
-    expect(banner.isVisible()).toBe(false);
+    expect(banner.isVisible()).toBe(true);
   });
 
-  it('shows again for a new activity episode after an explicit hide', () => {
+  it('shows a fresh window for the next episode after an explicit hide', () => {
     const open = vi.fn(() => ({ close: vi.fn() }));
     const banner = createControlBannerService({ open, log: vi.fn() });
 
     banner.setVisible(true);
-    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS);
     banner.setVisible(false);
     banner.setVisible(true);
 
@@ -107,13 +116,14 @@ describe('control banner 自动收起(工单 10 跟进)', () => {
     expect(banner.isVisible()).toBe(true);
   });
 
-  it('clears a pending auto-hide when hidden explicitly first', () => {
+  it('closes once and tolerates repeated hide requests', () => {
     const handle = { close: vi.fn() };
     const banner = createControlBannerService(bannerDeps(() => handle));
 
     banner.setVisible(true);
     banner.setVisible(false);
-    vi.advanceTimersByTime(CONTROL_BANNER_MAX_VISIBLE_MS * 2);
+    banner.setVisible(false);
+    vi.advanceTimersByTime(10_000);
 
     expect(handle.close).toHaveBeenCalledTimes(1);
   });
@@ -135,7 +145,7 @@ describe('control banner 窗口参数', () => {
   it('centers horizontally and sits near the top of the work area', () => {
     const options = bannerWindowOptions(workArea);
     expect(options.x + options.width / 2).toBe(960);
-    expect(options.y).toBeGreaterThan(0);
+    expect(options.y).toBe(workArea.y + CONTROL_BANNER_TOP_OFFSET);
     expect(options.y).toBeLessThan(workArea.height / 2);
   });
 
@@ -149,12 +159,28 @@ describe('control banner 窗口参数', () => {
 
 describe('control banner 页面', () => {
   it('states what is happening and that Esc stops it', () => {
-    expect(CONTROL_BANNER_TEXT).toContain('Esc');
+    expect(CONTROL_BANNER_HINT).toContain('Esc');
     const html = bannerHtml();
     expect(html).toContain(CONTROL_BANNER_TEXT);
+    expect(html).toContain(CONTROL_BANNER_HINT);
     // 无脚本、无外链:提示条不能是一条可被利用的通道。
     expect(html).not.toContain('<script');
     expect(html).not.toContain('http');
+  });
+
+  it('renders the reference-style pill: three animated dots in a rounded bar', () => {
+    const html = bannerHtml();
+    expect(html).toContain('class="dots"');
+    expect(html).toContain('@keyframes dots');
+    expect(html).toContain('border-radius: 12px');
+    // 三点呼吸与入场淡入都要尊重系统「减少动态效果」。
+    expect(html).toContain('prefers-reduced-motion');
+  });
+
+  it('escapes both the main text and the hint', () => {
+    const html = bannerHtml('<b>hi</b>', 'a & b');
+    expect(html).toContain('&lt;b&gt;hi&lt;/b&gt;');
+    expect(html).toContain('a &amp; b');
   });
 
   it('ships as a data URL so nothing has to be written to disk', () => {

@@ -1349,7 +1349,7 @@ pub(crate) fn build_ensure_session_command(
     }
 
     // 内置电脑控制工具(设置 → 浏览器控制 / 电脑控制):开启时随会话命令下发
-    // stdio MCP server(daemon 二进制的 mcp-browser 子命令)。pi 在此合并用户
+    // stdio MCP server(daemon 二进制的 mcp-control 子命令)。pi 在此合并用户
     // DB 配置,claude/codex/opencode 由 sidecar 各自落到 SDK/覆盖面;端点闸门
     // 对已在途的会话兜底。
     //
@@ -1383,8 +1383,8 @@ pub(crate) fn build_ensure_session_command(
             let current_exe = std::env::current_exe()
                 .unwrap_or_else(|_| std::path::PathBuf::from("codemux-daemon"));
             mcp_map.insert(
-                crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
-                crate::browser_mcp::builtin_server_spec_for_session(
+                crate::builtin_mcp::SERVER_NAME.to_string(),
+                crate::builtin_mcp::builtin_server_spec_for_session(
                     &current_exe,
                     &state.app_data_dir,
                     session_id,
@@ -2863,6 +2863,7 @@ mod tests {
                     pi: true,
                 },
                 builtin: false,
+                tools: Vec::new(),
             },
         )
         .unwrap();
@@ -2914,7 +2915,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_browser_mcp_server_follows_browser_control_toggle() {
+    fn builtin_control_mcp_server_follows_browser_control_toggle() {
         fn app_state_with_browser(enabled: bool) -> (tempfile::TempDir, crate::AppState) {
             let conn = rusqlite::Connection::open_in_memory().unwrap();
             let runtime_root = tempfile::tempdir().unwrap();
@@ -2973,11 +2974,11 @@ mod tests {
             "浏览器控制关闭时不得注入内置 server,got {command:?}"
         );
 
-        // 开启:注入 stdio spec,指向 daemon 二进制的 mcp-browser 子命令。
+        // 开启:注入 stdio spec,指向 daemon 二进制的 mcp-control 子命令。
         let (_root, state) = app_state_with_browser(true);
         let command = build(&state);
-        let spec = &command["mcpServers"][crate::browser_mcp::BROWSER_MCP_SERVER_NAME];
-        assert_eq!(spec["args"][0], "mcp-browser");
+        let spec = &command["mcpServers"][crate::builtin_mcp::SERVER_NAME];
+        assert_eq!(spec["args"][0], crate::builtin_mcp::SUBCOMMAND);
         assert_eq!(spec["args"][1], "--app-data-dir");
         assert_eq!(spec["args"][2], "D:/codemux-data");
         assert!(

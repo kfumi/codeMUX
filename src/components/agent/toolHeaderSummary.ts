@@ -1,3 +1,4 @@
+import { builtinMcpToolSegment } from '../../lib/builtinMcp';
 export interface ToolHeaderSummary {
   displayName?: string;
   text?: string;
@@ -57,6 +58,20 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   browser_type: '输入文字',
   browser_scroll: '滚动页面',
   browser_select: '选择选项',
+  computer_windows: '桌面窗口',
+  computer_screenshot: '桌面截图',
+  computer_active_window: '当前窗口',
+  computer_apps: '应用列表',
+  computer_elements: '界面元素',
+  computer_wait: '等待条件',
+  computer_click: '点击',
+  computer_type: '输入',
+  computer_key: '按键',
+  computer_paste: '粘贴',
+  computer_scroll: '滚动',
+  computer_drag: '拖拽',
+  computer_set_value: '设值',
+  computer_launch: '启动',
   js: '运行 JS',
   js_repl: '运行 JS',
   js_repl_reset: '重置 JS',
@@ -101,13 +116,26 @@ export function getToolDisplayName(toolName: string): string {
   return BUILT_IN_TOOL_DISPLAY_NAMES[normalizedToolName] ?? toolName;
 }
 
+/**
+ * 内置 server 的工具用**工具自己的标签**当显示名(「桌面截图」而不是 server 段)。
+ *
+ * 为什么:工具卡片过去对 `mcp__` 名字一律显示 server 段,于是两族工具(browser_* 与
+ * computer_*)在界面上一模一样 —— 前缀只说明「哪半边」,标签直接说「干什么」(工单 16)。
+ * 第三方 MCP 不受影响:认不出来就返回 undefined,调用点退回 server 段。
+ */
+function builtinToolLabel(toolName: string): string | undefined {
+  const segment = builtinMcpToolSegment(toolName);
+  if (!segment) return undefined;
+  return BUILT_IN_TOOL_DISPLAY_NAMES[segment];
+}
+
 export function getToolHeaderSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
   if (toolName.startsWith('mcp__')) {
     const queryKey = firstPresentKey(input, ['query', 'libraryName', 'libraryId', 'url', 'path']);
     const query = queryKey ? asDisplayText(input[queryKey]) : '';
 
     return {
-      displayName: getToolDisplayName(toolName),
+      displayName: builtinToolLabel(toolName) ?? getToolDisplayName(toolName),
       text: query || undefined,
       consumedKeys: queryKey ? [queryKey] : [],
     };
@@ -230,7 +258,7 @@ default:
 
   return {
     ...summary,
-    displayName: getToolDisplayName(toolName),
+    displayName: builtinToolLabel(toolName) ?? getToolDisplayName(toolName),
   };
 }
 

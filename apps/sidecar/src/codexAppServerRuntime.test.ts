@@ -2528,26 +2528,26 @@ describe('buildAppServerConfigOverrides', () => {
     const overrides = buildAppServerConfigOverrides({
       upstreamBaseUrl: 'https://api.openai.com/v1',
       mcpServers: {
-        'codemux-browser': {
+        'codemux-control': {
           command: 'D:/bin/codemux-daemon.exe',
-          args: ['mcp-browser', '--app-data-dir', 'D:/data'],
+          args: ['mcp-control', '--app-data-dir', 'D:/data'],
           env: { CODEMUX_DAEMON_PORT: '39127' },
         },
         bad: { url: 'https://x' },
       },
     });
-    expect(overrides).toContain('mcp_servers.codemux-browser.command="D:/bin/codemux-daemon.exe"');
-    expect(overrides).toContain('mcp_servers.codemux-browser.args=["mcp-browser","--app-data-dir","D:/data"]');
-    expect(overrides).toContain('mcp_servers.codemux-browser.env={"CODEMUX_DAEMON_PORT":"39127"}');
+    expect(overrides).toContain('mcp_servers.codemux-control.command="D:/bin/codemux-daemon.exe"');
+    expect(overrides).toContain('mcp_servers.codemux-control.args=["mcp-control","--app-data-dir","D:/data"]');
+    expect(overrides).toContain('mcp_servers.codemux-control.env={"CODEMUX_DAEMON_PORT":"39127"}');
     expect(overrides.some((flag) => flag.includes('mcp_servers.bad'))).toBe(false);
     expect(overrides.some((flag) => flag.includes('model_providers.codemux_session'))).toBe(true);
   });
 
   it('emits mcp overrides even without any base URL', () => {
     const overrides = buildAppServerConfigOverrides({
-      mcpServers: { 'codemux-browser': { command: 'codemux-daemon' } },
+      mcpServers: { 'codemux-control': { command: 'codemux-daemon' } },
     });
-    expect(overrides).toEqual(['-c', 'mcp_servers.codemux-browser.command="codemux-daemon"']);
+    expect(overrides).toEqual(['-c', 'mcp_servers.codemux-control.command="codemux-daemon"']);
   });
 });
 

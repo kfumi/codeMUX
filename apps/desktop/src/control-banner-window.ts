@@ -1,8 +1,8 @@
 //! 控制中提示条的 Electron 实现(工单 10):一个置顶、点击穿透、不抢焦点的小条。
 //!
 //! 纯逻辑(文案/尺寸/页面/状态机)在 control-banner.ts;这里只做 Electron 那一层。
-//! 位置取主屏工作区的 17% 高度处并居中,与 PI-Desktop 的提示条同位 —— 避开顶部
-//! 工具栏,又落在视线中心附近。
+//! 位置取主屏工作区顶部下方 28px 并水平居中(工单 15),与参考实现(ZCode)的顶部
+//! 指示条同位 —— 一眼看得见它在,又不压住标题栏与工具栏。
 
 import { BrowserWindow, screen } from 'electron';
 
@@ -28,8 +28,9 @@ export function openControlBannerWindow(): ControlBannerHandle {
   // 点击穿透:提示条不能挡住用户或智能体的鼠标操作。
   window.setIgnoreMouseEvents(true);
   // 内容保护(工单 10 跟进):Windows 10 2004+ 走 WDA_EXCLUDEFROMCAPTURE,
-  // 提示条从所有截屏里被排除 —— driver 的 computer_screenshot 拍不到它,
-  // 不依赖「赶在截图前收起」的时序运气。
+  // 提示条从所有截屏里被排除 —— driver 的 computer_screenshot 拍不到它。
+  // 工单 15 起提示条常驻整个操作过程(不再 1s 自动收起),这条内容保护就是
+  // 「截图里没有提示条」的全部依靠,不再有时序余量可用。
   window.setContentProtection(true);
   window.setAlwaysOnTop(true, 'screen-saver');
 

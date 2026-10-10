@@ -168,7 +168,7 @@ describe('permission gate attribution', () => {
 
   it('carries the attribution into the mode-blocked event', () => {
     const event = buildClaudeModeBlockedEvent({
-      toolName: 'mcp__codemux-browser__browser_click',
+      toolName: 'mcp__codemux-control__browser_click',
       toolUseId: 'tool-1',
       effectiveMode: 'plan',
       reasonCode: 'permission_mode_blocked',

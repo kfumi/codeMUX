@@ -138,9 +138,10 @@ const bridge = {
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen: () => invoke<{ image: string; width: number; height: number }>('captureDesktopScreen'),
   /**
-   * 全局 Esc 急停(工单 06/10):「有回合在跑 且 系统级执行开启」期间武装。
-   * 壳负责注册/解除、跟随武装结果显示控制中提示条,并在触发时急停驱动 +
-   * 打断当前回合;返回实际是否已武装。
+   * 全局 Esc 急停(工单 06/10;武装窗口口径见工单 15):「有回合在跑 且 系统级
+   * 执行开启 且 这个回合里出现过 computer_* 调用」期间武装。壳负责注册/解除、
+   * 跟随武装结果显示控制中提示条(常驻到这次桌面操作结束),并在触发时急停驱动
+   * + 打断当前回合;返回实际是否已武装。
    */
   setEmergencyStopArmed: (armed: boolean) => invoke<boolean>('setEmergencyStopArmed', { armed }),
 

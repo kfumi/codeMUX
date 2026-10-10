@@ -22,12 +22,42 @@ const mockState = {
       apps: { claude: true, codex: false, gemini: false, opencode: false, pi: false },
     },
     {
-      id: 'codemux-browser',
-      name: 'codemux-browser',
-      description: '内置浏览器控制:让会话驱动内置浏览器。',
-      server: { command: 'codemux-daemon', args: ['mcp-browser'] },
+      id: 'codemux-control',
+      name: 'codemux-control',
+      description:
+        '让智能体操作内置浏览器与桌面应用(截图、点击、输入)。可用工具随「浏览器控制」「电脑控制」设置变化。',
+      server: {
+        command: 'C:/Users/u/AppData/Local/Programs/CodeMUX/resources/daemon/codemux-daemon.exe',
+        args: ['mcp-control', '--app-data-dir', 'C:/Users/u/AppData/Roaming/com.codemux.desktop'],
+      },
       apps: { claude: true, codex: true, gemini: true, opencode: true, pi: true },
       builtin: true,
+      tools: [
+        'browser_list',
+        'browser_eval',
+        'browser_screenshot',
+        'browser_input',
+        'browser_cdp',
+        'browser_snapshot',
+        'browser_click',
+        'browser_type',
+        'browser_scroll',
+        'browser_select',
+        'computer_windows',
+        'computer_screenshot',
+        'computer_active_window',
+        'computer_apps',
+        'computer_elements',
+        'computer_wait',
+        'computer_click',
+        'computer_type',
+        'computer_key',
+        'computer_paste',
+        'computer_scroll',
+        'computer_drag',
+        'computer_set_value',
+        'computer_launch',
+      ],
     },
   ],
   probeStatus: { fetch: 'idle' as const },
@@ -95,18 +125,24 @@ describe('McpSettingsPanel', () => {
 
     // 四个 app 图标都渲染,但全部 disabled(不触发 toggleApp)。
     for (const app of ['claude', 'codex', 'opencode', 'pi']) {
-      const button = screen.getByLabelText(`toggle-codemux-browser-${app}`) as HTMLButtonElement;
+      const button = screen.getByLabelText(`toggle-codemux-control-${app}`) as HTMLButtonElement;
       expect(button.disabled).toBe(true);
     }
     const before = toggleApp.mock.calls.length;
-    fireEvent.click(screen.getByLabelText('toggle-codemux-browser-codex'));
+    fireEvent.click(screen.getByLabelText('toggle-codemux-control-codex'));
     expect(toggleApp.mock.calls.length).toBe(before);
 
     // 内置行没有 probe/edit/delete 按钮(fetch 行才有)。
     expect(screen.getByLabelText('toggle-fetch-codex')).toBeTruthy();
-    expect(screen.queryByLabelText(`builtin-codemux-browser`)).toBeTruthy();
+    expect(screen.queryByLabelText(`builtin-codemux-control`)).toBeTruthy();
     // 内置行不渲染探测/编辑按钮:同一行只有锁图标(aria builtin-*)。
-    const lockIcon = screen.getByLabelText('builtin-codemux-browser');
+    const lockIcon = screen.getByLabelText('builtin-codemux-control');
     expect(lockIcon).toBeTruthy();
+
+    // 工具数由 daemon 现算(方案 A):徽章给数量,tooltip 里是全部工具名。
+    expect(screen.getByText('· 24 个工具')).toBeTruthy();
+    // 内置行只展示命令形态:绝对安装路径不进页面(真实命令在 tooltip 里)。
+    expect(screen.getByText('codemux-daemon mcp-control --app-data-dir <数据目录>')).toBeTruthy();
+    expect(screen.queryByText(/resources\/daemon/)).toBeNull();
   });
 });

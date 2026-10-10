@@ -41,7 +41,7 @@ describe('getStreamStatusDisplay', () => {
       message: 'blocked',
       is_reconnecting: false,
       mode_blocked: {
-        blocked_method: 'item/tool/mcp__codemux-browser__browser_click',
+        blocked_method: 'item/tool/mcp__codemux-control__browser_click',
         effective_mode: 'code',
         reason_code: 'permission_mode_blocked',
         gate_agent_kind: 'codex',

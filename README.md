@@ -138,7 +138,7 @@
 
 - MCP 支持 `stdio`、`http`、`sse`
 - 支持 JSON 编辑、配置向导、探测、从本机工具导入
-- 内置 `codemux-browser` MCP 随「设置 → 浏览器控制」开关生效，让会话直接驱动内置浏览器
+- 内置 `codemux-control` MCP 承载浏览器与桌面两类工具（共 24 个），随「设置 → 浏览器控制」「电脑控制」两个开关增减，设置页直接显示当前可用工具数
 - 每个 MCP 可单独启用到 Claude Code / Codex / OpenCode / pi
 - Skills 以 `~/.codemux/skills/` 为单一数据源，Windows 下按 symlink → junction → copy 回退链处理
 - Skills 支持内置同步、预览、启用 / 禁用、卸载
@@ -335,7 +335,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ### 2.1 启用内置浏览器（可选）
 
-在「设置 → 浏览器控制」打开开关后，右侧面板会出现「浏览器」标签，同时内置的 `codemux-browser` MCP 会自动启用，会话即可直接操作网页。
+在「设置 → 浏览器控制」打开开关后，右侧面板会出现「浏览器」标签，同时内置的 `codemux-control` MCP 会注入浏览器类工具，会话即可直接操作网页。
 
 ### 3. 管理 MCP
 

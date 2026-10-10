@@ -6,7 +6,7 @@
 //! 协议面与内置 server 同形(按行 JSON-RPC 2.0):`initialize` →
 //! `notifications/initialized` → `tools/list` → 逐个 `tools/call`。驱动可以是
 //! 任何讲 MCP 的 stdio 程序(cua-driver 之类的外部实现,或概念验证时拿
-//! `codemux-daemon mcp-browser` 顶替)。
+//! `codemux-daemon mcp-control` 顶替)。
 //!
 //! 本模块的协议解析是纯函数;真正拉起子进程的部分由集成测试用真实二进制覆盖
 //! (`tests/computer_use_driver.rs`)。

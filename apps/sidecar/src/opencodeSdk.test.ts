@@ -247,18 +247,18 @@ describe('official OpenCode SDK adapter', () => {
       model: 'model-1',
       credentialSource: 'codemux',
       mcpServers: {
-        'codemux-browser': {
+        'codemux-control': {
           command: 'D:/bin/codemux-daemon.exe',
-          args: ['mcp-browser', '--app-data-dir', 'D:/data'],
+          args: ['mcp-control', '--app-data-dir', 'D:/data'],
           env: { A: '1' },
         },
         bad: { url: 'https://x' },
       },
     });
     expect(config.mcp).toEqual({
-      'codemux-browser': {
+      'codemux-control': {
         type: 'local',
-        command: ['D:/bin/codemux-daemon.exe', 'mcp-browser', '--app-data-dir', 'D:/data'],
+        command: ['D:/bin/codemux-daemon.exe', 'mcp-control', '--app-data-dir', 'D:/data'],
         environment: { A: '1' },
         enabled: true,
       },
@@ -269,9 +269,9 @@ describe('official OpenCode SDK adapter', () => {
       model: 'model-1',
       credentialSource: 'codemux',
       existingConfig: { mcp: { mine: { type: 'local', command: ['x'], enabled: true } } },
-      mcpServers: { 'codemux-browser': { command: 'daemon' } },
+      mcpServers: { 'codemux-control': { command: 'daemon' } },
     });
-    expect(Object.keys(merged.mcp)).toEqual(['mine', 'codemux-browser']);
+    expect(Object.keys(merged.mcp)).toEqual(['mine', 'codemux-control']);
   });
 
   it('includes a default output limit when only the context window is configured', () => {

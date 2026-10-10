@@ -152,6 +152,7 @@ pub fn import_from_apps(
                     server: spec,
                     apps,
                     builtin: false,
+                    tools: Vec::new(),
                 };
                 if let Err(e) = crate::mcp::db::upsert_mcp_server(&db, &server) {
                     log::warn!(target: "mcp_import", "app={} id={} upsert new failed: {}", app, id, e);
@@ -215,6 +216,7 @@ mod tests {
                 pi: false,
             },
             builtin: false,
+            tools: Vec::new(),
         };
 
         let merged = merge_imported_server(existing, "codex");

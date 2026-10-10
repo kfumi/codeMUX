@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { CodeEditorSurface } from '../code/CodeEditorSurface';
 import { cn } from '../../lib/utils';
+import { McpToolCountBadge } from './McpToolCountBadge';
 
 // Agent brand SVGs for per-tool toggle icons
 import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
@@ -324,8 +325,16 @@ export function McpSettingsPanel() {
 
   const renderServerRow = (server: McpServer) => {
     const serverType = (server.server.type ?? 'stdio') as string;
-    // 连接端点:http/sse 展示 url,stdio 展示 命令 + 参数。
+    // 连接端点:http/sse 展示 url,stdio 展示命令 + 参数。内置行只给命令形态 ——
+    // 用户机器上的绝对路径是噪音(还带用户名),真实命令留在 tooltip 里。
     const endpoint = (() => {
+      if (server.builtin) {
+        const exe = (server.server.command as string | undefined) ?? '';
+        // 抹掉 Windows 的 .exe 后缀:这一行只表达命令形态,真实绝对路径在 tooltip 里。
+        const exeName = (exe.split(/[\\/]/).pop() || 'codemux-daemon').replace(/\.exe$/i, '');
+        const subcommand = ((server.server.args as string[] | undefined) ?? [])[0] ?? '';
+        return [exeName, subcommand, '--app-data-dir <数据目录>'].filter(Boolean).join(' ');
+      }
       const url = server.server.url as string | undefined;
       if (url) return url;
       const command = server.server.command as string | undefined;
@@ -333,7 +342,13 @@ export function McpSettingsPanel() {
       const args = (server.server.args as string[] | undefined) ?? [];
       return [command, ...args].join(' ');
     })();
-    const tools = probeTools[server.id];
+    const endpointTooltip = server.builtin
+      ? [
+          (server.server.command as string | undefined) ?? '',
+          ...((server.server.args as string[] | undefined) ?? []),
+        ].join(' ')
+      : endpoint;
+    const tools = server.builtin ? server.tools ?? [] : probeTools[server.id];
     const anyEnabled = server.builtin || Object.values(server.apps).some(Boolean);
     const statusClass = anyEnabled
       ? probeStatus[server.id] === 'connected'
@@ -365,14 +380,10 @@ export function McpSettingsPanel() {
               ) : (
                 <span className="shrink-0">{transportBadge(serverType)}</span>
               )}
-              {tools?.length ? (
-                <span className="shrink-0 text-ui-micro font-medium text-[hsl(var(--success))]">
-                  · {tools.length} 个工具
-                </span>
-              ) : null}
+              <McpToolCountBadge tools={tools ?? []} builtin={server.builtin} />
             </div>
             {endpoint && (
-              <TooltipHint content={endpoint}>
+              <TooltipHint content={endpointTooltip}>
                 <p className="mt-0.5 cursor-default truncate font-mono text-ui-micro text-muted-foreground">
                   {endpoint}
                 </p>

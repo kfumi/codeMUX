@@ -61,12 +61,12 @@ const USAGE: &str = "codemux-daemon — CodeMUX 权威 daemon(无壳运行)
   --managed-by    托管方标记,写入 run-state(壳 spawn 时传 desktop)
 ";
 
-/// `mcp-browser` 子命令的旗标取值:`(app_data_dir, port, session_id)`。
-type McpBrowserCli = (Option<std::path::PathBuf>, Option<u16>, Option<String>);
+/// `mcp-control` 子命令的旗标取值:`(app_data_dir, port, session_id)`。
+type McpControlCli = (Option<std::path::PathBuf>, Option<u16>, Option<String>);
 
-/// `mcp-browser` 子命令旗标解析:
+/// `mcp-control` 子命令旗标解析:
 /// `--app-data-dir <dir> [--port <n>] [--session-id <id>]`。
-fn parse_mcp_browser_cli(mut args: impl Iterator<Item = String>) -> Result<McpBrowserCli, String> {
+fn parse_mcp_control_cli(mut args: impl Iterator<Item = String>) -> Result<McpControlCli, String> {
     let env = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
     let mut app_data_dir: Option<std::path::PathBuf> =
         env("CODEMUX_APP_DATA_DIR").map(std::path::PathBuf::from);
@@ -88,7 +88,7 @@ fn parse_mcp_browser_cli(mut args: impl Iterator<Item = String>) -> Result<McpBr
             "--session-id" => session_id = Some(value_for(&arg)?),
             "--help" | "-h" => {
                 println!(
-                    "用法: codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>] [--session-id <id>]"
+                    "用法: codemux-daemon mcp-control --app-data-dir <dir> [--port <n>] [--session-id <id>]"
                 );
                 std::process::exit(0);
             }
@@ -101,11 +101,11 @@ fn parse_mcp_browser_cli(mut args: impl Iterator<Item = String>) -> Result<McpBr
 fn main() {
     init_stderr_logger();
 
-    // 子命令:`codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>]`
-    // (内置浏览器 MCP server,stdio;详见 browser_mcp 模块文档)。
+    // 子命令:`codemux-daemon mcp-control --app-data-dir <dir> [--port <n>]`
+    // (内置控制 MCP server,stdio;详见 builtin_mcp 模块文档)。
     let mut cli_args = std::env::args().skip(1);
-    if cli_args.next().as_deref() == Some("mcp-browser") {
-        match parse_mcp_browser_cli(cli_args) {
+    if cli_args.next().as_deref() == Some(codemux_lib::builtin_mcp::SUBCOMMAND) {
+        match parse_mcp_control_cli(cli_args) {
             Ok((app_data_dir, port, session_id)) => {
                 let app_data_dir = app_data_dir.unwrap_or_else(|| {
                     dirs::data_dir()
@@ -113,14 +113,14 @@ fn main() {
                         .join("com.codemux.desktop")
                 });
                 if let Err(error) =
-                    codemux_lib::browser_mcp::run_subcommand(app_data_dir, port, session_id)
+                    codemux_lib::builtin_mcp::run_subcommand(app_data_dir, port, session_id)
                 {
-                    eprintln!("codemux-daemon mcp-browser: {}", error);
+                    eprintln!("codemux-daemon mcp-control: {}", error);
                     std::process::exit(1);
                 }
             }
             Err(error) => {
-                eprintln!("codemux-daemon mcp-browser: {}", error);
+                eprintln!("codemux-daemon mcp-control: {}", error);
                 std::process::exit(2);
             }
         }

@@ -205,6 +205,24 @@ describe('toolHeaderSummary', () => {
     expect(summary.text).not.toContain('query_docs');
     expect(summary.text).not.toContain('mcp__');
   });
+
+  it('内置 server 的工具用工具自己的标签,而不是 server 段(工单 16)', () => {
+    // 卡片标题:两族工具过去都显示 server 段,看不出在干什么。
+    expect(
+      getToolHeaderSummary('mcp__codemux-control__browser_snapshot', {}).displayName,
+    ).toBe('读取页面快照');
+    expect(
+      getToolHeaderSummary('mcp__codemux-control__computer_screenshot', {}).displayName,
+    ).toBe('桌面截图');
+    // OpenCode 一类的连写形态同样认。
+    expect(getToolHeaderSummary('codemux-control_computer_click', {}).displayName).toBe('点击');
+    // 改名前的历史轨迹仍按工具标签显示(轨迹是持久数据)。
+    expect(getToolHeaderSummary('mcp__codemux-browser__computer_type', {}).displayName).toBe('输入');
+    // 折叠行措辞保持 server 段,不跟着变(非目标)。
+    expect(getToolGroupPhrase('mcp__codemux-control__computer_click', 2)).toBe(
+      '调用 2 次 codemux-control',
+    );
+  });
 });
 
 describe('getToolGroupPhrase', () => {

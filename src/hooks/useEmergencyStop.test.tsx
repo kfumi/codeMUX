@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// 全局 Esc 急停的武装窗口(工单 10 及其跟进):只在「系统级执行开启 + 有回合在跑 +
-// 真的有 computer_* 工具在飞」时武装 —— 纯聊天回合不该武装,更不该弹提示条。
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+// 全局 Esc 急停的武装窗口(工单 10 及其跟进,口径见工单 15):只在「系统级执行开启 +
+// 有回合在跑 + 这个回合里出现过 computer_* 调用」时武装 —— 纯聊天回合不该武装,更不
+// 该弹提示条;而一旦进入桌面操作过程,提示条随武装状态常驻到回合结束(不再 1s 收起)。
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const bridgeState = vi.hoisted(() => ({ present: true }));
@@ -71,7 +72,7 @@ function assistantText(text: string): AgentMessage {
   return assistantBlocks([{ type: 'text', text }]);
 }
 
-function computerCall(id: string, name = 'mcp__codemux-browser__computer_click'): AgentMessage {
+function computerCall(id: string, name = 'mcp__codemux-control__computer_click'): AgentMessage {
   return assistantBlocks([{ type: 'tool_use', id, name, input: {} }]);
 }
 
@@ -215,7 +216,7 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     expect(setArmedMock).not.toHaveBeenCalledWith(true);
   });
 
-  it('disarms again as soon as the computer call settles', async () => {
+  it('stays armed after the tool result lands (the operation is not over)', async () => {
     setComputerUse({ enabled: true, systemExecution: true });
     setRunning({ sessionA: true });
     const events = [userMessage('帮我看下这个窗口'), computerCall('call-1')];
@@ -224,8 +225,29 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     await waitFor(() => expect(setArmedMock).toHaveBeenCalledWith(true));
 
     setTurns({ sessionA: runningTurns([...events, toolResult('call-1')]) });
+    await act(async () => { await Promise.resolve(); });
+
+    // 工具结果回来 ≠ 操作结束:武装不该在这里解除(提示条会跟着常驻)。
+    expect(setArmedMock.mock.calls.map(([armed]) => armed)).toEqual([true]);
+
+    setRunning({ sessionA: false });
 
     await waitFor(() => expect(setArmedMock).toHaveBeenLastCalledWith(false));
+  });
+
+  it('stays armed across the thinking gap between two desktop steps', async () => {
+    setComputerUse({ enabled: true, systemExecution: true });
+    setRunning({ sessionA: true });
+    setTurns({ sessionA: runningTurns([
+      userMessage('打开记事本输入测试123'),
+      computerCall('call-1'),
+      toolResult('call-1'),
+      assistantText('我再看一下窗口里的内容'),
+    ]) });
+
+    renderHook(() => useEmergencyStop());
+
+    await waitFor(() => expect(setArmedMock).toHaveBeenCalledWith(true));
   });
 
   it('disarms as soon as the turn ends', async () => {
@@ -243,12 +265,25 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     await waitFor(() => expect(setArmedMock).toHaveBeenLastCalledWith(false));
   });
 
+  it('still arms for the pre-rename tool names in historical transcripts', async () => {
+    setComputerUse({ enabled: true, systemExecution: true });
+    setRunning({ sessionA: true });
+    setTurns({ sessionA: runningTurns([
+      userMessage('帮我看下这个窗口'),
+      computerCall('call-1', 'mcp__codemux-browser__computer_click'),
+    ]) });
+
+    renderHook(() => useEmergencyStop());
+
+    await waitFor(() => expect(setArmedMock).toHaveBeenCalledWith(true));
+  });
+
   it('ignores pending browser tools (in-app browser is not desktop control)', async () => {
     setComputerUse({ enabled: true, systemExecution: true });
     setRunning({ sessionA: true });
     setTurns({ sessionA: runningTurns([
       userMessage('点一下页面'),
-      computerCall('call-1', 'mcp__codemux-browser__browser_click'),
+      computerCall('call-1', 'mcp__codemux-control__browser_click'),
     ]) });
 
     renderHook(() => useEmergencyStop());
@@ -284,7 +319,7 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     setComputerUse({ enabled: true, systemExecution: true });
     setRunning({ sessionA: true });
     setSubagentTimeline([
-      { type: 'tool_started', tool_use_id: 'sub-1', name: 'mcp__codemux-browser__computer_type', input: {} },
+      { type: 'tool_started', tool_use_id: 'sub-1', name: 'mcp__codemux-control__computer_type', input: {} },
     ], 'running');
 
     renderHook(() => useEmergencyStop());
@@ -296,13 +331,26 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     setComputerUse({ enabled: true, systemExecution: true });
     setRunning({ sessionA: true });
     setSubagentTimeline([
-      { type: 'tool_started', tool_use_id: 'sub-1', name: 'mcp__codemux-browser__computer_type', input: {} },
+      { type: 'tool_started', tool_use_id: 'sub-1', name: 'mcp__codemux-control__computer_type', input: {} },
     ], 'completed');
 
     renderHook(() => useEmergencyStop());
 
     await waitFor(() => expect(setArmedMock).toHaveBeenCalledWith(false));
     expect(setArmedMock).not.toHaveBeenCalledWith(true);
+  });
+
+  it('stays armed while a subagent keeps running after its computer call finished', async () => {
+    setComputerUse({ enabled: true, systemExecution: true });
+    setRunning({ sessionA: true });
+    setSubagentTimeline([
+      { type: 'tool_started', tool_use_id: 'sub-1', name: 'mcp__codemux-control__computer_type', input: {} },
+      { type: 'tool_finished', tool_use_id: 'sub-1', name: 'mcp__codemux-control__computer_type' },
+    ], 'running');
+
+    renderHook(() => useEmergencyStop());
+
+    await waitFor(() => expect(setArmedMock).toHaveBeenCalledWith(true));
   });
 
   it('interrupts every running session when the shell reports the hotkey', async () => {

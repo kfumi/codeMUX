@@ -1,20 +1,40 @@
-//! 内置电脑控制 MCP server(`codemux-daemon mcp-browser` 子命令):会话驱动
-//! 内置浏览器与桌面只读观测的唯一工具面。
+//! 唯一的系统内置 MCP server(`codemux-daemon mcp-control` 子命令):会话驱动内置
+//! 浏览器与桌面应用/窗口的单一工具面,承载两族工具 —— 浏览器级 10 个(`browser_*`)
+//! 与电脑控制 14 个(`computer_*`)。
 //!
-//! 服务名沿用 `codemux-browser`(01 票上线,改名会改掉模型侧的工具前缀
-//! `mcp__codemux-browser__*`,既有权限规则与人读的日志都会失配);但按 spec
-//! 「能力只暴露为一个系统内置 MCP 服务」,桌面只读工具(04 票)与后续驱动工具
-//! 都挂在这一份 server 上,只读/输入的分权由 daemon 侧审批闸门(03 票)裁,
-//! 不靠拆服务。
+//! 服务名 `codemux-control`(2026-10 由 `codemux-browser` 改名):取设置页
+//! 「浏览器**控制**」与「电脑**控制**」的公共词 —— 两族工具各自挂在其中一个开关下,
+//! 用任何一个单边词命名都会把另一半说错(候选评估见工单 16)。
+//!
+//! **改名只动 server key,不动工具名**:`tools/list` 里 24 个 `name` 一个没变;
+//! 变的是各运行时拼出来的全名(前缀由 key 派生):
+//!
+//! | 形态 | 改前 | 改后 |
+//! |---|---|---|
+//! | Claude / Codex `mcp__<server>__<tool>` | `mcp__codemux-browser__computer_click` | `mcp__codemux-control__computer_click` |
+//! | OpenCode 等 `<server>_<tool>` | `codemux-browser_computer_click` | `codemux-control_computer_click` |
+//!
+//! 所以历史轨迹里的旧全名仍要认得(见 `src/lib/computerUseActivity.ts` 的旧名名单),
+//! 旧 key 也保留为禁用名(见 [`LEGACY_SERVER_NAMES`])。
+//!
+//! **一个 server 而不是两个**:两族能力在开关、调用闸门、审批分级与清单过滤上早已
+//! 各自独立(见 [`ToolGroup`]),拆 server 只换来「注入跟着开关走」一条工程收益,
+//! 代价是每会话多一个子进程、设置页多一行、spec 与工单 14 的决定要改判(评估见工单 16)。
+//!
+//! 工单 14 起 `tools/list` 按开关过滤:关着的能力不出现在模型面前。这仍是
+//! **礼貌而不是闸门** —— 每次调用的裁决在 daemon 端点,配置读不到时清单一律
+//! 放行(宁可多列几个,也不让工具面静默消失,见 [`visible_tool_definitions`])。
 //!
 //! stdio 上讲 MCP(ISO JSON-RPC 2.0,按行分帧);每个工具调用转发 daemon
 //! 回环端点 `POST /api/browser-automation/execute`(Local Daemon Token 鉴权)。
-//! 「开启内置浏览器控制」闸门在 daemon 端点统一裁决,本子命令不做二次判断。
+//! 「浏览器控制 / 电脑控制」闸门在 daemon 端点统一裁决,本子命令不做二次判断。
 //!
 //! 发现:`--app-data-dir`(必填)→ `daemon-run-state.json` 取端口(daemon
-//! 必须在运行),`local-daemon-token` 取令牌(与壳/CLI 同源)。
+//! 必须在运行),`local-daemon-token` 取令牌(与壳/CLI 同源);`tools/list` 另外
+//! 从该目录下的 `config.json` 只读地取开关(不写、不迁移,见 `read_switch_config`)。
 //!
-//! 本文件不含 I/O 以外的环境假设;JSON-RPC 应答为纯函数,便于单测。
+//! 本文件不含 I/O 以外的环境假设;除 `tools/list` 读一次开关外,JSON-RPC 应答
+//! 为纯函数,便于单测。
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -23,10 +43,20 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::companion::local_daemon_token;
+use crate::config::types::AppConfig;
 use crate::daemon::{run_state, DAEMON_VERSION};
 
-/// 内置 server 名(会话命令 `mcpServers` 的键)。
-pub const BROWSER_MCP_SERVER_NAME: &str = "codemux-browser";
+/// 内置 server 名(会话命令 `mcpServers` 的键)。取「浏览器控制」与「电脑控制」的
+/// 公共词:两族工具各自挂在一个开关下,单边词都会把另一半说错(见文件头)。
+pub const SERVER_NAME: &str = "codemux-control";
+
+/// 同名子命令(`codemux-daemon mcp-control …`):spec 生成与 bin 解析共用一份,
+/// 免得两边各写一个字面量后悄悄漂移。
+pub const SUBCOMMAND: &str = "mcp-control";
+
+/// 改名前的 server key。**只用于拒绝**:用户不得再占用它(否则会与历史轨迹里的旧
+/// 全名混淆);它不出现在任何注入路径上。
+pub const LEGACY_SERVER_NAMES: &[&str] = &["codemux-browser"];
 
 /// 单次 execute 转发的等待上限。
 ///
@@ -38,7 +68,7 @@ const EXECUTE_TIMEOUT: Duration = Duration::from_secs(180);
 pub fn builtin_server_spec(current_exe: &Path, app_data_dir: &Path) -> Value {
     json!({
         "command": current_exe.to_string_lossy(),
-        "args": ["mcp-browser", "--app-data-dir", app_data_dir.to_string_lossy()],
+        "args": [SUBCOMMAND, "--app-data-dir", app_data_dir.to_string_lossy()],
     })
 }
 
@@ -51,7 +81,7 @@ pub fn builtin_server_spec_for_session(
     json!({
         "command": current_exe.to_string_lossy(),
         "args": [
-            "mcp-browser",
+            SUBCOMMAND,
             "--app-data-dir", app_data_dir.to_string_lossy(),
             "--session-id", session_id,
         ],
@@ -60,14 +90,18 @@ pub fn builtin_server_spec_for_session(
 
 /// MCP 设置页展示用的内置条目(不在 DB,列表 API 动态追加;写入路径按
 /// id/name 拒绝改删)。apps 全开:注入侧按 runtime 会话命令分发。
+///
+/// `config` 用来现算 `tools`:当前开关下模型真正看得见的工具名。内置 server 不在
+/// 探测链路里(`probe_all_mcp_servers_impl` 只扫 DB),工具数只能由权威侧算。
 pub fn builtin_server_entry(
     current_exe: &Path,
     app_data_dir: &Path,
+    config: Option<&AppConfig>,
 ) -> crate::mcp::types::McpServer {
     crate::mcp::types::McpServer {
-        id: BROWSER_MCP_SERVER_NAME.to_string(),
-        name: BROWSER_MCP_SERVER_NAME.to_string(),
-        description: "内置电脑控制:浏览器级(列表、求值、截图、键鼠输入、CDP、快照、元素点击、输入、滚动、选择)与桌面只读观测(窗口清单、桌面截图、活动窗口)。浏览器级随「浏览器控制」开关,桌面只读随「电脑控制」开关;内置提供,不可修改或删除。".to_string(),
+        id: SERVER_NAME.to_string(),
+        name: SERVER_NAME.to_string(),
+        description: "让智能体操作内置浏览器与桌面应用(截图、点击、输入)。可用工具随「浏览器控制」「电脑控制」设置变化。".to_string(),
         server: builtin_server_spec(current_exe, app_data_dir),
         apps: crate::mcp::types::McpApps {
             claude: true,
@@ -77,6 +111,7 @@ pub fn builtin_server_entry(
             pi: true,
         },
         builtin: true,
+        tools: visible_tool_names(config),
     }
 }
 
@@ -85,7 +120,7 @@ pub fn builtin_server_entry(
 /// 构造不做 I/O:daemon 没在跑时也要能应答 `initialize` / `tools/list`,
 /// 否则智能体连工具面都看不到,只能看见一个起不来的 server。端口与令牌在
 /// 每次转发时现取 —— daemon 重启换端口后自动跟上。
-pub struct BrowserMcpRuntime {
+pub struct BuiltinMcpRuntime {
     app_data_dir: PathBuf,
     /// 端口覆盖(测试/调试;None = 读 run-state)。
     port_override: Option<u16>,
@@ -96,7 +131,7 @@ pub struct BrowserMcpRuntime {
     session_id: Option<String>,
 }
 
-impl BrowserMcpRuntime {
+impl BuiltinMcpRuntime {
     pub fn new(
         app_data_dir: &Path,
         port_override: Option<u16>,
@@ -135,6 +170,47 @@ impl BrowserMcpRuntime {
             None => local_daemon_token::ensure_local_daemon_token(&self.app_data_dir, false)?,
         };
         Ok((port, token))
+    }
+
+    /// 磁盘上的开关,只读;读不到、解析不了都返回 `None`(调用侧按全可见收口)。
+    ///
+    /// 刻意不走 [`crate::config::load_config`]:那条路带迁移与「读不了就备份 +
+    /// 重写默认值」的副作用,是权威侧(daemon)的启动逻辑 —— 一个只负责给模型
+    /// 列清单的子进程不该顺手改用户的配置。
+    fn read_switch_config(&self) -> Option<AppConfig> {
+        let roots = crate::paths::PathRoots {
+            app_data_dir: self.app_data_dir.clone(),
+            resource_dir: None,
+        };
+        let path = roots.config_path();
+        let Ok(bytes) = std::fs::read(&path) else {
+            log::debug!(
+                target: "mcp_control",
+                "读不到配置 {}:工具清单按全量列出(闸门仍在 daemon 端点)",
+                path.display()
+            );
+            return None;
+        };
+        match serde_json::from_slice::<AppConfig>(&bytes) {
+            Ok(config) => Some(config),
+            Err(error) => {
+                log::warn!(
+                    target: "mcp_control",
+                    "配置解析失败 {}:{} —— 工具清单按全量列出(闸门仍在 daemon 端点)",
+                    path.display(),
+                    error
+                );
+                None
+            }
+        }
+    }
+
+    /// `tools/list` 的应答体:关着的开关对应的工具不出现(工单 14)。
+    ///
+    /// 每次调用现读配置:客户端重新列清单就能跟上开关变化;只列一次的老客户端
+    /// 仍按启动时的清单跑,调用侧由 daemon 端点闸门兜底。
+    fn tool_list(&self) -> Value {
+        json!({ "tools": visible_tool_definitions(self.read_switch_config().as_ref()) })
     }
 
     /// 转发一次 execute;成功返回 payload,失败(4xx/5xx/网络)返回面向
@@ -540,9 +616,110 @@ fn tool_definitions() -> Value {
     ])
 }
 
-/// 一次 stdio 请求的应答(纯函数,便于单测):`Ok(None)` 表示通知,不应答。
+/// 工具分组:决定「哪个开关关着时,这个工具不该出现在模型面前」(工单 14)。
+///
+/// 分组只跟**调用时会拦它的那一档闸门**对齐 —— 清单过滤与调用闸门是两条执行
+/// 路径,判据必须同源,否则清单会承诺一个调用必被拒的工具:
+///
+/// - `Browser`:浏览器级,看「浏览器控制」(`browser.enabled`);
+/// - `DesktopObservation`:壳侧执行的桌面只读三件套(工单 04),
+///   看「电脑控制」(`computer_use.enabled`);
+/// - `DesktopDriver`:驱动面(工单 13 的观测与输入),驱动是执行者,
+///   看「电脑控制」+「系统级执行」(`system_execution_enabled`)。
+///
+/// 与审批的风险分级(只读/输入,`computer_use::guard`)是**两条轴**:这里决定
+/// 清单里出不出现,那里决定调用时要人点几下。桌面只读三件套落在驱动组,是因为
+/// 它们经驱动执行(`computer_use::desktop::ensure_ready`),不是因为风险高 ——
+/// 两个枚举不要并成一个。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolGroup {
+    Browser,
+    DesktopObservation,
+    DesktopDriver,
+}
+
+/// 工具名 → 分组;`None` 表示没登记(测试锁死每个工具都必须登记)。
+fn tool_group(name: &str) -> Option<ToolGroup> {
+    Some(match name {
+        "browser_list" | "browser_eval" | "browser_screenshot" | "browser_input"
+        | "browser_cdp" | "browser_snapshot" | "browser_click" | "browser_type"
+        | "browser_scroll" | "browser_select" => ToolGroup::Browser,
+        "computer_windows" | "computer_screenshot" | "computer_active_window" => {
+            ToolGroup::DesktopObservation
+        }
+        _ if crate::computer_use::desktop::op_for_tool(name).is_some() => ToolGroup::DesktopDriver,
+        _ => return None,
+    })
+}
+
+/// 某分组在当前开关下该不该出现在清单里。
+///
+/// `config` 为 `None`(读不到配置)时全部可见:清单是礼貌,闸门才是权威 ——
+/// 不确定时宁可多列几个,也不能让能力静默消失(工单 05 的「daemon 没起就看不到
+/// 工具面」与工单 07 的「运行时回退静默丢工具」都属于这一类事故)。
+fn group_is_visible(group: ToolGroup, config: Option<&AppConfig>) -> bool {
+    let Some(config) = config else {
+        return true;
+    };
+    match group {
+        ToolGroup::Browser => config.browser.enabled,
+        ToolGroup::DesktopObservation => config.computer_use.enabled,
+        ToolGroup::DesktopDriver => {
+            config.computer_use.enabled && config.computer_use.system_execution_enabled
+        }
+    }
+}
+
+/// 某个工具在当前开关下该不该出现在清单里(纯函数)。
+///
+/// 清单过滤与工具计数是两条消费路径,判据必须同源 —— 否则设置页会显示一个模型
+/// 根本看不到的工具数。没登记分组的名字按可见处理(登记由测试看住)。
+fn is_visible(name: &str, config: Option<&AppConfig>) -> bool {
+    tool_group(name)
+        .map(|group| group_is_visible(group, config))
+        .unwrap_or(true)
+}
+
+/// 按开关过滤后的工具清单(纯函数)。
+fn visible_tool_definitions(config: Option<&AppConfig>) -> Value {
+    let tools = tool_definitions();
+    if config.is_none() {
+        return tools;
+    }
+    let kept: Vec<Value> = tools
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|tool| {
+            tool["name"]
+                .as_str()
+                .map(|name| is_visible(name, config))
+                .unwrap_or(true)
+        })
+        .collect();
+    Value::Array(kept)
+}
+
+/// 当前开关下可见的工具名(与 [`visible_tool_definitions`] 同一判据)。
+///
+/// 给设置页用:内置 server 不在探测链路里(`probe_all_mcp_servers_impl` 只扫 DB),
+/// 工具数只能由权威侧按内存里的配置现算 —— 与 `tools/list` 共用这一个纯函数,
+/// 所以设置页的数字不会和模型看到的清单打架。
+pub fn visible_tool_names(config: Option<&AppConfig>) -> Vec<String> {
+    tool_definitions()
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+        .filter(|name| is_visible(name, config))
+        .collect()
+}
+
+/// 一次 stdio 请求的应答:除 `tools/list` 现读一次磁盘上的开关外无副作用。
 pub fn handle_request<'a>(
-    runtime: &'a BrowserMcpRuntime,
+    runtime: &'a BuiltinMcpRuntime,
     method: &'a str,
     params: &'a Value,
 ) -> impl std::future::Future<Output = Result<Value, (i64, String)>> + 'a {
@@ -554,12 +731,12 @@ pub fn handle_request<'a>(
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or("2024-11-05"),
                 "capabilities": { "tools": {} },
                 "serverInfo": {
-                    "name": BROWSER_MCP_SERVER_NAME,
+                    "name": SERVER_NAME,
                     "version": DAEMON_VERSION,
                 },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tool_definitions() })),
+            "tools/list" => Ok(runtime.tool_list()),
             "tools/call" => {
                 let name = params["name"].as_str().unwrap_or_default();
                 let args = params["arguments"].as_object().cloned().unwrap_or_default();
@@ -578,7 +755,7 @@ pub fn handle_request<'a>(
 
 /// 工具调用 → execute 转发;返回 MCP content 数组(失败置 isError)。
 async fn call_tool(
-    runtime: &BrowserMcpRuntime,
+    runtime: &BuiltinMcpRuntime,
     name: &str,
     args: &serde_json::Map<String, Value>,
 ) -> Result<Value, (i64, String)> {
@@ -788,7 +965,7 @@ pub(crate) fn shape_desktop_payload(payload: &Value) -> Value {
 
 /// stdio 主循环:按行读 JSON-RPC,应答写 stdout(逐行 flush)。EOF 或致命
 /// 写错误返回。永不因单条坏行失败 —— 坏行回 -32700(id null)。
-pub fn run_stdio(runtime: &BrowserMcpRuntime) -> Result<(), String> {
+pub fn run_stdio(runtime: &BuiltinMcpRuntime) -> Result<(), String> {
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -831,24 +1008,32 @@ pub fn run_stdio(runtime: &BrowserMcpRuntime) -> Result<(), String> {
     Ok(())
 }
 
-/// 子命令入口:`codemux-daemon mcp-browser --app-data-dir <dir> [--port <n>]
+/// 子命令入口:`codemux-daemon mcp-control --app-data-dir <dir> [--port <n>]
 /// [--session-id <id>]`。
 pub fn run_subcommand(
     app_data_dir: PathBuf,
     port_override: Option<u16>,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    let runtime = BrowserMcpRuntime::new(&app_data_dir, port_override, session_id);
+    let runtime = BuiltinMcpRuntime::new(&app_data_dir, port_override, session_id);
     run_stdio(&runtime)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::{AppConfig, BrowserControlConfig, ComputerUseConfig};
 
-    fn runtime_at(port: u16) -> BrowserMcpRuntime {
-        BrowserMcpRuntime {
-            app_data_dir: std::env::temp_dir(),
+    fn runtime_at(port: u16) -> BuiltinMcpRuntime {
+        // 不存在的 app-data-dir:配置读不到 → 清单按全量收口(见 read_switch_config)。
+        let configless =
+            std::env::temp_dir().join(format!("codemux-mcp-no-config-{}", uuid::Uuid::new_v4()));
+        runtime_in(&configless, port)
+    }
+
+    fn runtime_in(app_data_dir: &Path, port: u16) -> BuiltinMcpRuntime {
+        BuiltinMcpRuntime {
+            app_data_dir: app_data_dir.to_path_buf(),
             port_override: Some(port),
             token_override: Some("test-token".to_string()),
             http: reqwest::Client::new(),
@@ -856,12 +1041,63 @@ mod tests {
         }
     }
 
+    /// 三个开关的一次组合(其余字段取默认,形状与 daemon 落盘的一致)。
+    fn switches_config(browser: bool, computer_use: bool, system_execution: bool) -> AppConfig {
+        AppConfig {
+            browser: BrowserControlConfig {
+                enabled: browser,
+                ignore_certificate_errors: false,
+            },
+            computer_use: ComputerUseConfig {
+                enabled: computer_use,
+                system_execution_enabled: system_execution,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn write_switches(
+        app_data_dir: &Path,
+        browser: bool,
+        computer_use: bool,
+        system_execution: bool,
+    ) {
+        let bytes =
+            serde_json::to_vec_pretty(&switches_config(browser, computer_use, system_execution))
+                .expect("序列化配置");
+        std::fs::write(app_data_dir.join("config.json"), bytes).expect("写配置");
+    }
+
+    fn config_names(config: Option<&AppConfig>) -> Vec<String> {
+        visible_tool_definitions(config)
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    async fn listed_names(runtime: &BuiltinMcpRuntime) -> Vec<String> {
+        let result = handle_request(runtime, "tools/list", &json!({}))
+            .await
+            .expect("tools/list 应成功");
+        result["tools"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect()
+    }
+
     #[test]
     fn builtin_spec_points_at_daemon_subcommand() {
         let spec =
             builtin_server_spec(Path::new("C:/bin/codemux-daemon.exe"), Path::new("D:/data"));
         assert_eq!(spec["command"], "C:/bin/codemux-daemon.exe");
-        assert_eq!(spec["args"][0], "mcp-browser");
+        assert_eq!(spec["args"][0], SUBCOMMAND);
         assert_eq!(spec["args"][1], "--app-data-dir");
         assert_eq!(spec["args"][2], "D:/data");
     }
@@ -914,12 +1150,14 @@ mod tests {
         .await
         .expect("initialize 应成功");
         assert_eq!(result["protocolVersion"], "2025-06-18");
-        assert_eq!(result["serverInfo"]["name"], BROWSER_MCP_SERVER_NAME);
+        assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
         assert_eq!(result["capabilities"]["tools"], json!({}));
     }
 
     #[tokio::test]
     async fn tools_list_covers_all_execute_ops() {
+        // 读不到配置 → 清单按全量收口(见 read_switch_config);开关过滤见
+        // `the_tool_list_follows_the_three_switches`。
         let runtime = runtime_at(1);
         let result = handle_request(&runtime, "tools/list", &json!({}))
             .await
@@ -971,6 +1209,157 @@ mod tests {
             crate::companion::browser_automation::AUTOMATION_OPS.len(),
             "新增 op 时同步补工具或更新本断言"
         );
+    }
+
+    // ---- 工具清单随开关(工单 14) ----
+
+    #[test]
+    fn the_tool_list_follows_the_three_switches() {
+        let names = |browser: bool, computer_use: bool, system_execution: bool| {
+            config_names(Some(&switches_config(
+                browser,
+                computer_use,
+                system_execution,
+            )))
+        };
+
+        // 全关:一个都不列(这份 server 只在开关打开过的会话里才会被注入)。
+        assert!(names(false, false, false).is_empty());
+
+        // 只开浏览器控制:10 个 browser_*,桌面工具一个都不出现。
+        let browser_only = names(true, false, false);
+        assert_eq!(browser_only.len(), 10, "{browser_only:?}");
+        assert!(browser_only.iter().all(|name| name.starts_with("browser_")));
+
+        // 只开电脑控制:壳侧只读三件套;驱动面(含驱动侧只读)不出现。
+        let observation_only = names(false, true, false);
+        assert_eq!(observation_only.len(), 3, "{observation_only:?}");
+
+        // 电脑控制 + 系统级执行:驱动面出现,合计 14 个 computer_*。
+        let driver_only = names(false, true, true);
+        assert_eq!(driver_only.len(), 14, "{driver_only:?}");
+
+        // 三开:与静态表逐字一致(过滤只做删减,不改顺序、不动 schema)。
+        let full = names(true, true, true);
+        assert_eq!(full, config_names(None));
+        assert_eq!(full.len(), 24);
+    }
+
+    /// 设置页拿到的工具名:与 `tools/list` 同源,且随开关走(工单 16)。
+    ///
+    /// 内置 server 不进探测链路,所以这个数字由 daemon 现算;它与清单侧
+    /// (`config_names`)必须逐字一致 —— 设置页不能显示一个模型看不到的工具数。
+    #[test]
+    fn the_builtin_entry_carries_the_switch_filtered_tool_names() {
+        let entry = |browser: bool, computer_use: bool, system_execution: bool| {
+            builtin_server_entry(
+                Path::new("C:/bin/codemux-daemon.exe"),
+                Path::new("D:/data"),
+                Some(&switches_config(browser, computer_use, system_execution)),
+            )
+        };
+
+        let full = entry(true, true, true);
+        assert_eq!(full.tools, config_names(None));
+        assert_eq!(full.tools.len(), 24);
+        assert_eq!(entry(true, false, false).tools.len(), 10);
+        assert_eq!(entry(false, true, false).tools.len(), 3);
+        assert_eq!(entry(false, true, true).tools.len(), 14);
+        assert!(entry(false, false, false).tools.is_empty());
+
+        // 配置读不到:按全量列,与 `tools/list` 的失败开口一致。
+        let configless = builtin_server_entry(
+            Path::new("C:/bin/codemux-daemon.exe"),
+            Path::new("D:/data"),
+            None,
+        );
+        assert_eq!(configless.tools, config_names(None));
+
+        // 身份:新 key 唯一,历史名只作为禁用名存在(改名不动工具名)。
+        assert_eq!(SERVER_NAME, "codemux-control");
+        assert_eq!(SUBCOMMAND, "mcp-control");
+        assert_eq!(LEGACY_SERVER_NAMES, &["codemux-browser"]);
+        assert_eq!(full.id, SERVER_NAME);
+        assert_eq!(full.name, SERVER_NAME);
+        assert!(full.builtin);
+        assert_eq!(full.server["args"][0], SUBCOMMAND);
+        assert!(
+            !LEGACY_SERVER_NAMES.contains(&full.id.as_str()),
+            "新 key 不得与历史名重合"
+        );
+        assert!(
+            full.tools.iter().all(|name| !name.contains("codemux")),
+            "工具名本身不含 server 段:{:?}",
+            full.tools
+        );
+    }
+
+    #[test]
+    fn every_listed_tool_is_registered_and_matches_the_call_time_gate() {
+        let tools = tool_definitions();
+        let tools = tools.as_array().cloned().unwrap_or_default();
+        let mut observation = Vec::new();
+        for tool in &tools {
+            let name = tool["name"].as_str().expect("工具名");
+            let group = tool_group(name).unwrap_or_else(|| panic!("{name} 没登记分组"));
+
+            // 期望分组从**调用侧的事实**独立推出来:浏览器前缀看浏览器开关;
+            // 在驱动 op 表里的走驱动面;其余 computer_* 是壳侧只读三件套。
+            let expected = if name.starts_with("browser_") {
+                ToolGroup::Browser
+            } else if crate::computer_use::desktop::op_for_tool(name).is_some() {
+                ToolGroup::DesktopDriver
+            } else {
+                observation.push(name.to_string());
+                ToolGroup::DesktopObservation
+            };
+            assert_eq!(group, expected, "{name} 的分组与调用侧闸门不一致");
+        }
+
+        // 驱动组与驱动工具表同一批(漏登记/多登记都在这里失败)。
+        assert_eq!(
+            crate::computer_use::desktop::DESKTOP_TOOL_NAMES.len(),
+            tools
+                .iter()
+                .filter(|tool| {
+                    tool["name"].as_str().and_then(tool_group) == Some(ToolGroup::DesktopDriver)
+                })
+                .count(),
+            "驱动组与 DESKTOP_TOOL_NAMES 必须一一对应"
+        );
+        // 壳侧只读组的成员钉死:新增 computer_* 工具若不进驱动 op 表,会静默
+        // 落进这一组 —— 这里逼作者先决定它归哪一组。
+        assert_eq!(
+            observation,
+            vec![
+                "computer_windows",
+                "computer_screenshot",
+                "computer_active_window"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_list_reads_the_switches_from_disk_each_time() {
+        let dir = tempfile::tempdir().expect("建临时目录");
+        write_switches(dir.path(), true, false, false);
+        let runtime = runtime_in(dir.path(), 1);
+
+        let browser_only = listed_names(&runtime).await;
+        assert_eq!(browser_only.len(), 10, "{browser_only:?}");
+        assert!(browser_only.iter().all(|name| name.starts_with("browser_")));
+
+        // 开关改了(daemon 落盘),重新列清单就跟着变 —— 只列一次的老客户端
+        // 仍按启动时的清单跑,调用侧由端点闸门兜底。
+        write_switches(dir.path(), true, true, true);
+        assert_eq!(listed_names(&runtime).await.len(), 24);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_config_keeps_every_tool_visible() {
+        // 失败开口:工具面静默缺失比多列几个更贵(工单 05/07 两次事故)。
+        let runtime = runtime_at(1);
+        assert_eq!(listed_names(&runtime).await.len(), 24);
     }
 
     #[test]

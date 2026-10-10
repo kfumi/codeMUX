@@ -1,7 +1,7 @@
 //! 驱动宿主概念验证(工单 05):以真实子进程为被测对象,验证 daemon 能拉起
 //! 一个 stdio MCP 程序、完成握手、拿到工具清单,并且急停真的把进程杀掉。
 //!
-//! 驱动替身用 daemon 自己的 `mcp-browser` 子命令 —— 它就是一个讲 MCP 的
+//! 驱动替身用 daemon 自己的 `mcp-control` 子命令 —— 它就是一个讲 MCP 的
 //! stdio 程序(initialize / tools/list 不依赖运行中的 daemon)。这样这条测试
 //! 跨平台、无外部下载,验的是宿主本身:spawn、按行分帧、id 配对、握手超时、
 //! 进程级急停。真实第三方驱动(cua-driver 等)接入时,配置成同一形态即可。
@@ -14,7 +14,7 @@ fn driver_spec() -> DriverSpec {
     DriverSpec::new(
         env!("CARGO_BIN_EXE_codemux-daemon"),
         vec![
-            "mcp-browser".to_string(),
+            "mcp-control".to_string(),
             "--app-data-dir".to_string(),
             std::env::temp_dir().to_string_lossy().into_owned(),
         ],
@@ -32,7 +32,7 @@ async fn daemon_spawns_a_stdio_mcp_driver_and_lists_its_tools() {
         .expect("驱动应能拉起并完成握手");
     assert!(status.configured);
     assert!(status.running);
-    assert_eq!(status.server_name.as_deref(), Some("codemux-browser"));
+    assert_eq!(status.server_name.as_deref(), Some("codemux-control"));
     assert!(status.version.is_some(), "握手应带回驱动版本");
     assert!(
         status

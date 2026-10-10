@@ -24,6 +24,7 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
             pi: row.get::<_, i64>(8)? != 0,
         },
         builtin: false,
+        tools: Vec::new(),
     })
 }
 
@@ -141,6 +142,7 @@ mod tests {
                 pi: false,
             },
             builtin: false,
+            tools: Vec::new(),
         };
 
         upsert_mcp_server(&conn, &server).unwrap();

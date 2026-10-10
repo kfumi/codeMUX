@@ -27,7 +27,7 @@
 - 新增定时任务：支持一次性、每日、每周、间隔等时点，到点自动新建会话执行指令，带启停开关、立即执行与运行历史
 
 #### 对话与工作区
-- 新增内置浏览器侧边面板：沙箱 webview（独立 partition、可配 CDP），随「设置 → 浏览器控制」开关提供内置 `codemux-browser` MCP，支持选取网页元素加入对话
+- 新增内置浏览器侧边面板：沙箱 webview（独立 partition、可配 CDP），随「设置 → 浏览器控制」开关提供内置 `codemux-control` MCP，支持选取网页元素加入对话
 - 新增对任意用户消息的回退（可同时回滚文件）与从任意回复分叉出新会话
 - 整轮 AI 输出折叠为「已处理 + 时长 + 步骤数」，可展开查看思考、工具卡片与子智能体过程
 - 新增流式输出速度显示（`xx.x tok/s`）
@@ -115,6 +115,10 @@
 - 视图切换统一使用 `animate-fade-in-up` 动画
 - Claude Code token 用量计算统一使用 `input_tokens + cache_read_input_tokens`，并优先取 `result` 事件的 `last_token_usage`
 - Codex 启动统一从 `~/.codex/` 读取配置，保留登录与 vendor 信息
+
+#### MCP 与内置自动化
+- 内置 MCP 由 `codemux-browser` 更名为 `codemux-control`：一个 server 同时承载浏览器级（10）与电脑控制（14）工具，新名取「浏览器控制」「电脑控制」两个设置页的公共词；工具名本身不变，只有运行时全名前缀从 `mcp__codemux-browser__*` 变为 `mcp__codemux-control__*`（历史会话里的旧前缀仍被识别）
+- 内置 MCP 描述精简为一行；工具清单改由 daemon 按当前开关现算——设置页显示「· N 个工具」并悬停列出全部工具名，两族工具在卡片标题上直接显示中文名（如「桌面截图」「读取页面快照」）而不是 server 名
 
 ### Fixed
 

@@ -173,7 +173,7 @@ export function ComputerUseSettings() {
           surface
           inlineControl
           label="开启电脑控制"
-          description="允许会话读取桌面窗口清单与截图（只读观测）。默认关闭；与「浏览器控制」是两个开关，互不代管。"
+          description="允许会话读取桌面窗口清单与截图（只读观测）。默认关闭；与「浏览器控制」是两个开关，互不代管。关闭时桌面工具不会出现在会话的工具清单里。"
           control={
             <Switch
               aria-label="开启电脑控制"
@@ -186,7 +186,7 @@ export function ComputerUseSettings() {
           surface
           inlineControl
           label="系统级执行"
-          description="开启后驱动才能启动，智能体可经驱动操作原生应用界面。每一步输入动作仍要你放行。任务运行期间会临时接管全局 Esc（按 Esc = 急停驱动并打断当前回合，屏幕上会显示提示条），任务结束即解除。"
+          description="开启后驱动才能启动，智能体可经驱动操作原生应用界面。每一步输入动作仍要你放行。关闭时经驱动的工具（界面观测与输入）不会出现在会话的工具清单里。任务运行期间会临时接管全局 Esc（按 Esc = 急停驱动并打断当前回合，屏幕上会显示提示条），任务结束即解除。"
           control={
             <Switch
               aria-label="系统级执行"

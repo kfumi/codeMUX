@@ -1,5 +1,6 @@
-// 电脑控制活动信号(工单 10 跟进)契约:提示条/全局 Esc 只在智能体真的在操作
-// 桌面时武装 —— 判据是 computer_* 工具调用在飞,不是「某个回合在跑」。
+// 电脑控制活动信号(工单 10 及其跟进,口径见工单 15)契约:提示条/全局 Esc 只在智能体
+// 真的在操作桌面时武装 —— 判据是「这个回合里出现过 computer_* 调用」,不看结果是否
+// 已回,所以模型两次调用之间的思考空档不会把提示条闪断。
 import { describe, expect, it } from 'vitest';
 
 import type { AgentMessage } from '../stores/agentStore';
@@ -7,19 +8,22 @@ import type { AgentMessage } from '../stores/agentStore';
 import { buildConversationTurns } from './conversationTurns';
 import {
   isComputerUseToolName,
-  subagentTimelineHasPendingComputerUse,
-  turnHasPendingComputerUseCall,
+  subagentTimelineHasComputerUse,
+  turnHasComputerUseCall,
   turnIsWaitingOnTool,
 } from './computerUseActivity';
 
 describe('isComputerUseToolName', () => {
-  it('recognizes the mcp server-prefixed form (Claude / Codex)', () => {
-    expect(isComputerUseToolName('mcp__codemux-browser__computer_click')).toBe(true);
-    expect(isComputerUseToolName('mcp__codemux-browser__computer_screenshot')).toBe(true);
-    expect(isComputerUseToolName('mcp__codemux-browser__computer_set_value')).toBe(true);
+  it('recognizes the current server name (codemux-control) in every spelling', () => {
+    expect(isComputerUseToolName('mcp__codemux-control__computer_click')).toBe(true);
+    expect(isComputerUseToolName('mcp__codemux-control__computer_screenshot')).toBe(true);
+    expect(isComputerUseToolName('mcp__codemux-control__computer_set_value')).toBe(true);
+    expect(isComputerUseToolName('codemux-control_computer_launch')).toBe(true);
+    expect(isComputerUseToolName('codemux_control_computer_type')).toBe(true);
   });
 
-  it('recognizes the underscore server-prefixed form (OpenCode style)', () => {
+  it('still recognizes the pre-rename server name (historical transcripts)', () => {
+    expect(isComputerUseToolName('mcp__codemux-browser__computer_click')).toBe(true);
     expect(isComputerUseToolName('codemux-browser_computer_launch')).toBe(true);
     expect(isComputerUseToolName('codemux_browser_computer_type')).toBe(true);
   });
@@ -30,11 +34,13 @@ describe('isComputerUseToolName', () => {
   });
 
   it('is case and whitespace tolerant', () => {
+    expect(isComputerUseToolName('  MCP__CODEMUX-CONTROL__COMPUTER_CLICK ')).toBe(true);
     expect(isComputerUseToolName('  MCP__CODEMUX-BROWSER__COMPUTER_CLICK ')).toBe(true);
   });
 
   it('never counts browser tools or other mcp servers', () => {
     expect(isComputerUseToolName('browser_click')).toBe(false);
+    expect(isComputerUseToolName('mcp__codemux-control__browser_click')).toBe(false);
     expect(isComputerUseToolName('mcp__codemux-browser__browser_click')).toBe(false);
     expect(isComputerUseToolName('mcp__context7__resolve-library-id')).toBe(false);
     expect(isComputerUseToolName('mcp__other__computer_click')).toBe(false);
@@ -89,38 +95,48 @@ function turnsOf(events: AgentMessage[], isRunning: boolean) {
   return buildConversationTurns(events, { isRunning, sessionId: 'session-1' });
 }
 
-describe('turnHasPendingComputerUseCall', () => {
+describe('turnHasComputerUseCall', () => {
   it('is true while a computer tool call waits for its result', () => {
     const [turn] = turnsOf([
       user('看一下这个窗口'),
       assistant([{ type: 'tool_use', id: 'call-1', name: 'mcp__codemux-browser__computer_click', input: {} }]),
     ], true);
-    expect(turn && turnHasPendingComputerUseCall(turn)).toBe(true);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(true);
   });
 
-  it('is false once the tool result lands', () => {
+  it('stays true once the result lands (this episode is not over)', () => {
     const [turn] = turnsOf([
       user('看一下这个窗口'),
       assistant([{ type: 'tool_use', id: 'call-1', name: 'mcp__codemux-browser__computer_click', input: {} }]),
       toolResult('call-1'),
     ], true);
-    expect(turn && turnHasPendingComputerUseCall(turn)).toBe(false);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(true);
   });
 
-  it('ignores pending browser tools (in-app browser is not desktop control)', () => {
+  it('stays true across the thinking gap between two desktop steps', () => {
+    const [turn] = turnsOf([
+      user('打开记事本输入测试123'),
+      assistant([{ type: 'tool_use', id: 'call-1', name: 'mcp__codemux-browser__computer_click', input: {} }]),
+      toolResult('call-1'),
+      assistant([{ type: 'text', text: '我再看一下窗口里的内容' }]),
+    ], true);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(true);
+  });
+
+  it('ignores browser tools (in-app browser is not desktop control)', () => {
     const [turn] = turnsOf([
       user('点一下页面'),
       assistant([{ type: 'tool_use', id: 'call-2', name: 'mcp__codemux-browser__browser_click', input: {} }]),
     ], true);
-    expect(turn && turnHasPendingComputerUseCall(turn)).toBe(false);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(false);
   });
 
-  it('is false without pending tools', () => {
+  it('is false without computer-use tools', () => {
     const [turn] = turnsOf([
       user('你好'),
       assistant([{ type: 'text', text: '你好，有什么可以帮你？' }]),
     ], true);
-    expect(turn && turnHasPendingComputerUseCall(turn)).toBe(false);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(false);
   });
 });
 
@@ -143,7 +159,7 @@ describe('turnIsWaitingOnTool', () => {
       toolResult('call-1'),
     ], true);
     expect(turn && turnIsWaitingOnTool(turn)).toBe(true);
-    expect(turn && turnHasPendingComputerUseCall(turn)).toBe(true);
+    expect(turn && turnHasComputerUseCall(turn)).toBe(true);
   });
 
   it('is false once a terminal marker follows the pending tool (stale interrupted turn)', () => {
@@ -156,29 +172,29 @@ describe('turnIsWaitingOnTool', () => {
   });
 });
 
-describe('subagentTimelineHasPendingComputerUse', () => {
+describe('subagentTimelineHasComputerUse', () => {
   it('is true while a subagent computer call has no finished frame', () => {
-    expect(subagentTimelineHasPendingComputerUse([
+    expect(subagentTimelineHasComputerUse([
       { type: 'tool_started', tool_use_id: 'sub-call-1', name: 'mcp__codemux-browser__computer_key', input: {} },
     ])).toBe(true);
   });
 
-  it('is false once the matching tool_finished arrives', () => {
-    expect(subagentTimelineHasPendingComputerUse([
+  it('stays true after the matching tool_finished (the subagent is still working)', () => {
+    expect(subagentTimelineHasComputerUse([
       { type: 'tool_started', tool_use_id: 'sub-call-1', name: 'mcp__codemux-browser__computer_key', input: {} },
       { type: 'tool_finished', tool_use_id: 'sub-call-1', name: 'mcp__codemux-browser__computer_key' },
-    ])).toBe(false);
+    ])).toBe(true);
   });
 
-  it('ignores browser tools and unmatched finishes', () => {
-    expect(subagentTimelineHasPendingComputerUse([
+  it('ignores browser tools and frames without a tool name', () => {
+    expect(subagentTimelineHasComputerUse([
       { type: 'tool_started', tool_use_id: 'sub-call-2', name: 'mcp__codemux-browser__browser_click', input: {} },
-      { type: 'tool_finished', tool_use_id: 'other', name: 'mcp__codemux-browser__computer_click' },
+      { type: 'tool_finished', tool_use_id: 'other' },
     ])).toBe(false);
   });
 
-  it('keeps the call pending across input refresh frames', () => {
-    expect(subagentTimelineHasPendingComputerUse([
+  it('sees the call across input refresh frames', () => {
+    expect(subagentTimelineHasComputerUse([
       { type: 'tool_started', tool_use_id: 'sub-call-3', name: 'codemux-browser_computer_click', input: {} },
       { type: 'tool_started', tool_use_id: 'sub-call-3', name: 'codemux-browser_computer_click', input: { count: 2 } },
     ])).toBe(true);

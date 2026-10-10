@@ -43,20 +43,33 @@ fn get_mcp_servers_from_db(db: &Mutex<rusqlite::Connection>) -> Result<Vec<McpSe
 }
 
 pub fn get_mcp_servers_impl(state: &AppState) -> Result<Vec<McpServer>, String> {
+    // 先克隆配置再取 DB:内置条目的 `tools` 要按**当前开关**现算,而取 DB 行也要持锁。
+    // 两把锁不嵌套,免得与别处的加锁顺序打架。
+    let config = state.config.lock().unwrap().clone();
     let mut servers = get_mcp_servers_from_db(&state.db)?;
-    // 内置浏览器控制 server 动态追加(不落 DB):设置页展示为「内置」,
+    // 内置控制 server 动态追加(不落 DB):设置页展示为「内置」,
     // 无需刷新/导入,写入路径按 id/name 拒绝改删。
-    servers.push(crate::browser_mcp::builtin_server_entry(
+    servers.push(crate::builtin_mcp::builtin_server_entry(
         &std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("codemux-daemon")),
         &state.app_data_dir,
+        Some(&config),
     ));
     log::info!(target: "mcp_fetch", "get_mcp_servers returning {} entries", servers.len());
     Ok(servers)
 }
 
+/// 该 id/name 是否属于保留名:内置 server 现名,或它的历史名。
+fn is_reserved_server_name(id_or_name: &str) -> bool {
+    id_or_name == crate::builtin_mcp::SERVER_NAME
+        || crate::builtin_mcp::LEGACY_SERVER_NAMES.contains(&id_or_name)
+}
+
 /// 内置 server 保护:用户侧写入(upsert/toggle/delete)不得触碰内置 id/name。
+///
+/// 历史名(`codemux-browser`)一并保留:它已不再是我们的 key,但历史轨迹里的旧全名
+/// 仍按它识别 —— 用户自建一个同名 server 会让人读日志与轨迹时串味。
 fn reject_builtin(id_or_name: &str) -> Result<(), String> {
-    if id_or_name == crate::browser_mcp::BROWSER_MCP_SERVER_NAME {
+    if is_reserved_server_name(id_or_name) {
         Err("内置 MCP server 不可修改或删除".to_string())
     } else {
         Ok(())
@@ -65,7 +78,7 @@ fn reject_builtin(id_or_name: &str) -> Result<(), String> {
 
 pub fn upsert_mcp_server_impl(state: &AppState, server: McpServer) -> Result<(), String> {
     reject_builtin(&server.id)?;
-    if server.name == crate::browser_mcp::BROWSER_MCP_SERVER_NAME {
+    if is_reserved_server_name(&server.name) {
         return Err("内置 MCP server 名称保留,不可占用".to_string());
     }
     let db = state.db.lock().unwrap();
@@ -653,6 +666,7 @@ mod tests {
                     pi: false,
                 },
                 builtin: false,
+                tools: Vec::new(),
             },
         )
         .unwrap();
@@ -688,7 +702,19 @@ mod tests {
         let servers = get_mcp_servers_impl(&state).unwrap();
         assert_eq!(servers.len(), 1);
         assert!(servers[0].builtin);
-        assert_eq!(servers[0].id, crate::browser_mcp::BROWSER_MCP_SERVER_NAME);
+        assert_eq!(servers[0].id, crate::builtin_mcp::SERVER_NAME);
+
+        // 工具名由 daemon 按**当前配置**现算(内置 server 不进探测链路):全关时为空,
+        // 设置页据此显示「未启用」而不是「0 个工具」。
+        assert!(servers[0].tools.is_empty(), "{:?}", servers[0].tools);
+        {
+            let mut config = state.config.lock().unwrap();
+            config.browser.enabled = true;
+            config.computer_use.enabled = true;
+            config.computer_use.system_execution_enabled = true;
+        }
+        let servers = get_mcp_servers_impl(&state).unwrap();
+        assert_eq!(servers[0].tools.len(), 24, "{:?}", servers[0].tools);
         assert!(
             servers[0].apps.claude
                 && servers[0].apps.codex
@@ -699,7 +725,7 @@ mod tests {
         // DB 里没有它:刷新/重启不产生累积。
         let db = state.db.lock().unwrap();
         assert!(
-            crate::mcp::db::get_mcp_server(&db, crate::browser_mcp::BROWSER_MCP_SERVER_NAME)
+            crate::mcp::db::get_mcp_server(&db, crate::builtin_mcp::SERVER_NAME)
                 .unwrap()
                 .is_none()
         );
@@ -709,12 +735,13 @@ mod tests {
         let err = upsert_mcp_server_impl(
             &state,
             crate::mcp::types::McpServer {
-                id: crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
+                id: crate::builtin_mcp::SERVER_NAME.to_string(),
                 name: "x".into(),
                 description: String::new(),
                 server: serde_json::json!({"command": "evil"}),
                 apps: Default::default(),
                 builtin: true,
+                tools: Vec::new(),
             },
         )
         .unwrap_err();
@@ -725,24 +752,24 @@ mod tests {
             &state,
             crate::mcp::types::McpServer {
                 id: "mine".into(),
-                name: crate::browser_mcp::BROWSER_MCP_SERVER_NAME.to_string(),
+                name: crate::builtin_mcp::SERVER_NAME.to_string(),
                 description: String::new(),
                 server: serde_json::json!({"command": "evil"}),
                 apps: Default::default(),
                 builtin: false,
+                tools: Vec::new(),
             },
         )
         .unwrap_err();
         assert!(err.contains("名称保留"));
 
         let err =
-            delete_mcp_server_impl(&state, crate::browser_mcp::BROWSER_MCP_SERVER_NAME.into())
-                .unwrap_err();
+            delete_mcp_server_impl(&state, crate::builtin_mcp::SERVER_NAME.into()).unwrap_err();
         assert!(err.contains("不可修改或删除"));
 
         let err = toggle_mcp_app_impl(
             &state,
-            crate::browser_mcp::BROWSER_MCP_SERVER_NAME.into(),
+            crate::builtin_mcp::SERVER_NAME.into(),
             "claude".into(),
             false,
         )
@@ -759,9 +786,34 @@ mod tests {
                 server: serde_json::json!({"command": "npx"}),
                 apps: Default::default(),
                 builtin: false,
+                tools: Vec::new(),
             },
         )
         .unwrap();
         assert_eq!(get_mcp_servers_impl(&state).unwrap().len(), 2);
+
+        // 历史名同样保留:用户占用它会与历史轨迹里的旧全名串味。
+        let err = upsert_mcp_server_impl(
+            &state,
+            crate::mcp::types::McpServer {
+                id: "legacy".into(),
+                name: crate::builtin_mcp::LEGACY_SERVER_NAMES[0].to_string(),
+                description: String::new(),
+                server: serde_json::json!({"command": "evil"}),
+                apps: Default::default(),
+                builtin: false,
+                tools: Vec::new(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("名称保留"));
+        let err = delete_mcp_server_impl(&state, crate::builtin_mcp::LEGACY_SERVER_NAMES[0].into())
+            .unwrap_err();
+        assert!(err.contains("不可修改或删除"));
+        assert_eq!(
+            get_mcp_servers_impl(&state).unwrap().len(),
+            2,
+            "拒绝写入后条目数不变"
+        );
     }
 }
