@@ -1280,6 +1280,17 @@ async fn serve_control_socket(
         return;
     }
 
+    // 先给一份活动快照(工单 01):壳可能启动得比活动晚,只靠「变化才发」会整段漏掉
+    // (无人值守的回合最典型 —— 没人开界面,活动早就开始了)。
+    let snapshot = companion_state.computer_use_activity_frame();
+    if socket
+        .send(Message::Text(snapshot.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
     loop {
         tokio::select! {
             incoming = socket.recv() => {

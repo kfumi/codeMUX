@@ -1020,6 +1020,29 @@ pub fn receipt_line(tool: &str, args: &Map<String, Value>, ok: bool) -> String {
 // 执行
 // ---------------------------------------------------------------------------
 
+/// 标记「这个回合试图驱动桌面」并广播整机活动状态(工单 01)。
+///
+/// 调用点是 [`execute`] 的入口、**闸门之前**:判据是「这个回合正在试图驱动桌面」,
+/// 与这次动作最终有没有落地无关 —— 被审批拦下、无人应答、步数到顶、参数写错、驱动
+/// 没起来都算。否则「模型正在乱动」的那一段就会既没有提示条、也没有 Esc。
+///
+/// 没有会话归属的调用(手工 curl `/api/computer-use/execute`)不成活动:活动按
+/// (会话, 回合) 记账,急停也要按会话去打断回合,凭空造一条「无会话」的活动没人能用。
+fn mark_computer_use_activity(ctx: &ServerContext, session_id: Option<&str>) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    let companion = &ctx.daemon.companion;
+    // 代次取的是「当前回合」:正常路径上闸门受理的调用必然属于正在跑的回合。
+    let epoch = companion.turn_epoch(session_id).unwrap_or(0);
+    let steps = companion.inner.step_budget.used_in_turn(session_id, epoch);
+    companion
+        .inner
+        .computer_use_activity
+        .mark(session_id, epoch, steps);
+    companion.publish_computer_use_activity_if_changed();
+}
+
 /// 一次桌面工具调用的完整链路:驱动就绪 → 参数翻译 → 动作前裁决 → 闸门 →
 /// 驱动执行 → 整形 → 审计。
 pub(crate) async fn execute(
@@ -1031,6 +1054,8 @@ pub(crate) async fn execute(
     let Some(op) = op_for_tool(tool) else {
         return Err(format!("未知桌面工具: {tool}"));
     };
+
+    mark_computer_use_activity(ctx, session_id);
 
     // 参数翻译放在启驱动之前:写错的调用不该先把驱动拉起来(纯函数,不碰外部)。
     // 只读的三个自己不翻译:等待在本地轮询,观测要整形,应用列表要过滤宿主。

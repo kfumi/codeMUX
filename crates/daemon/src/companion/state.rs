@@ -79,6 +79,31 @@ pub struct CompanionInner {
     /// 「这条审批有没有界面能应答」只能看这个数,不能看广播通道有没有接收者 —— 壳的
     /// 控制面连接长期挂在通道上,却永远收不到(也不该收到)会话帧。
     pub ui_subscribers: Mutex<HashMap<String, usize>>,
+    /// 电脑控制活动真值(工单 01):哪个回合试图驱动过桌面。判据的本体在
+    /// [`crate::computer_use::activity`],这里只负责「取快照 + 变化时广播」。
+    pub computer_use_activity: crate::computer_use::activity::ComputerUseActivity,
+    /// 上一次广播出去的活动状态「显著部分」(见 [`activity_change_key`]):只在它变了才
+    /// 发帧 —— 步数与起始时间每走一步都会变,不能拿来当发帧依据。
+    last_published_activity: Mutex<Option<ActivityChangeKey>>,
+}
+
+/// 活动状态的显著部分:(整机有没有活动, [(会话, 有没有在等放行)])。
+///
+/// 步数与起始时间属于**明细**:它们每走一步都会变,拿它们当发帧依据就变成
+/// 「每个桌面动作刷一帧」—— 提示条与 Esc 只关心「有没有」「哪些会话」「是不是在等放行」。
+type ActivityChangeKey = (bool, Vec<(String, bool)>);
+
+fn activity_change_key(
+    snapshot: &crate::computer_use::activity::ActivitySnapshot,
+) -> ActivityChangeKey {
+    (
+        snapshot.active,
+        snapshot
+            .sessions
+            .iter()
+            .map(|session| (session.session_id.clone(), session.awaiting_approval))
+            .collect(),
+    )
 }
 
 impl CompanionInner {
@@ -111,6 +136,10 @@ impl CompanionInner {
             control_sessions: crate::computer_use::guard::ControlSessions::new(),
             local_pairing: crate::companion::local_pairing::LocalPairingRegistry::new(),
             ui_subscribers: Mutex::new(HashMap::new()),
+            computer_use_activity: crate::computer_use::activity::ComputerUseActivity::new(),
+            // 初值当作「已经公布过空闲」:否则启动后第一次标记/回合开始时,会先给
+            // 控制面发一帧「没有活动」的噪声 —— 那不是变化,只是还没有人说过话。
+            last_published_activity: Mutex::new(Some((false, Vec::new()))),
         }
     }
 
@@ -272,10 +301,19 @@ impl CompanionState {
         if inserted {
             self.broadcast_turn_state(session_id, true);
         }
-        let mut epochs = self.inner.turn_epoch.lock().unwrap();
-        let epoch = epochs.entry(session_id.to_string()).or_insert(0);
-        *epoch += 1;
-        *epoch
+        let epoch = {
+            // 作用域收紧:别把回合代次锁带出这个块(活动表的加锁顺序见
+            // [`Self::computer_use_snapshot`])。
+            let mut epochs = self.inner.turn_epoch.lock().unwrap();
+            let epoch = epochs.entry(session_id.to_string()).or_insert(0);
+            *epoch += 1;
+            *epoch
+        };
+        // 新回合不继承上一回合的桌面活动(工单 01):代次前移就是重新开始计时,再拿
+        // 上一回合的标记支撑提示条与 Esc 没有意义。
+        self.inner.computer_use_activity.clear(session_id);
+        self.publish_computer_use_activity_if_changed();
+        epoch
     }
 
     /// 当前回合代次;回合从未开始过(或本会话从未 mark)时为 None。
@@ -290,6 +328,77 @@ impl CompanionState {
 
     pub fn is_turn_active(&self, session_id: &str) -> bool {
         self.inner.turn_active.lock().unwrap().contains(session_id)
+    }
+
+    /// 活动快照:只保留「回合还在跑 + 代次没前移」的标记(工单 01)。
+    ///
+    /// 先把回合真值抄成一份集合,再交给活动表过滤 —— 不持着活动表的锁去问回合状态。
+    /// 两边加锁顺序必须一致:错了就会和 [`Self::mark_turn_active`] 构成 AB-BA 死锁。
+    pub fn computer_use_snapshot(&self) -> crate::computer_use::activity::ActivitySnapshot {
+        let live: HashSet<(String, u64)> = {
+            let turn_active = self.inner.turn_active.lock().unwrap();
+            let turn_epoch = self.inner.turn_epoch.lock().unwrap();
+            turn_active
+                .iter()
+                .filter_map(|session_id| {
+                    turn_epoch
+                        .get(session_id)
+                        .map(|epoch| (session_id.clone(), *epoch))
+                })
+                .collect()
+        };
+        self.inner
+            .computer_use_activity
+            .snapshot_where(|session_id, epoch| live.contains(&(session_id.to_string(), epoch)))
+    }
+
+    /// 控制面 lane 上的 `computer-use-activity` 帧(工单 01):整机是否正在被驱动。
+    ///
+    /// `sessionId` 故意留空:这是**整机状态**而不是某条会话的事件 —— 会话流拿不到它,
+    /// 壳也就漏掉了「没人订阅的会话正在被跑」这类形态。控制面后连上时先发这一帧做快照。
+    pub fn computer_use_activity_frame(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "event",
+            "sessionId": "",
+            "event": Self::computer_use_activity_event(&self.computer_use_snapshot()),
+        })
+    }
+
+    /// 活动状态变了才广播(工单 01),返回是否真的发了。
+    ///
+    /// 控制面不接受「每一步刷一帧」:daemon 每个桌面动作都会标记一次活动(步数也跟着
+    /// 变),但只有「有没有活动 / 哪些会话 / 是不是在等放行」变了才值得惊动界面。
+    pub fn publish_computer_use_activity_if_changed(&self) -> bool {
+        if !self.inner.is_enabled() {
+            // 回环服务没在跑:没有控制面客户端,发出去也没人收(后连上的客户端会拿到快照)。
+            return false;
+        }
+        let snapshot = self.computer_use_snapshot();
+        let key = activity_change_key(&snapshot);
+        {
+            let mut last = self.inner.last_published_activity.lock().unwrap();
+            if last.as_ref() == Some(&key) {
+                return false;
+            }
+            *last = Some(key);
+        }
+        let _ = self.inner.event_tx.send(CompanionBroadcastEvent {
+            session_id: String::new(),
+            event: Self::computer_use_activity_event(&snapshot),
+        });
+        true
+    }
+
+    /// `ui-event` 信封(与壳侧解析入口同形):`{"type":"ui-event","name":…,"payload":…}`。
+    fn computer_use_activity_event(
+        snapshot: &crate::computer_use::activity::ActivitySnapshot,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "type": "ui-event",
+            "name": "computer-use-activity",
+            "payload": serde_json::to_value(snapshot)
+                .unwrap_or_else(|_| serde_json::json!({ "active": false, "sessions": [] })),
+        })
     }
 
     pub fn enqueue_message(
@@ -314,6 +423,9 @@ impl CompanionState {
             self.broadcast_turn_state(session_id, false);
         }
         self.clear_continuation_pending(session_id);
+        // 回合结束(或被用户打断)即解除活动(工单 01):提示条与 Esc 跟着这一条走。
+        self.inner.computer_use_activity.clear(session_id);
+        self.publish_computer_use_activity_if_changed();
         self.inner
             .message_queues
             .lock()
@@ -530,6 +642,104 @@ mod tests {
             0,
             "已经空了:再收一次是空操作"
         );
+    }
+
+    #[tokio::test]
+    async fn computer_use_activity_needs_a_running_turn() {
+        // 工单 01:标记本身不算数 —— 只有「回合还在跑 + 代次没前移」的标记才是活动。
+        let state = CompanionState::new();
+        state.inner.computer_use_activity.mark("session-a", 0, 0);
+
+        assert!(
+            !state.computer_use_snapshot().active,
+            "回合没在跑:标记不算活动(还会被顺手剔掉)"
+        );
+        assert!(
+            !state.inner.computer_use_activity.is_marked("session-a"),
+            "取快照时顺手剔掉了陈旧标记"
+        );
+
+        let epoch = state.mark_turn_active("session-a");
+        state
+            .inner
+            .computer_use_activity
+            .mark("session-a", epoch, 2);
+        let snapshot = state.computer_use_snapshot();
+        assert!(snapshot.active);
+        assert_eq!(snapshot.session_ids(), vec!["session-a".to_string()]);
+        assert_eq!(snapshot.sessions[0].steps, 2);
+
+        // 新回合不继承上一回合的活动(用户发新消息即重新开始)。
+        let next = state.mark_turn_active("session-a");
+        assert!(next > epoch);
+        assert!(!state.computer_use_snapshot().active);
+
+        // 回合结束:活动随之结束,不靠调用方记得清标记。
+        state.inner.computer_use_activity.mark("session-a", next, 0);
+        assert!(state.computer_use_snapshot().active);
+        state.finish_turn("session-a");
+        assert!(!state.computer_use_snapshot().active);
+    }
+
+    #[tokio::test]
+    async fn activity_events_are_broadcast_only_on_change() {
+        // 工单 01:每个桌面动作都会标记活动,但控制面只该在**状态变化**时收到帧。
+        let state = CompanionState::new();
+        state.inner.set_loopback_running(true);
+        let mut before = state.inner.event_tx.subscribe();
+        assert!(
+            !state.publish_computer_use_activity_if_changed(),
+            "没有任何活动:不发"
+        );
+        assert!(before.try_recv().is_err());
+
+        let epoch = state.mark_turn_active("session-a");
+        state
+            .inner
+            .computer_use_activity
+            .mark("session-a", epoch, 0);
+        // 换一个订阅者:上面 `mark_turn_active` 会先发一条会话流的回合状态帧。
+        let mut rx = state.inner.event_tx.subscribe();
+
+        assert!(
+            state.publish_computer_use_activity_if_changed(),
+            "活动开始:发一帧"
+        );
+        let started = rx.try_recv().expect("活动帧");
+        assert_eq!(started.session_id, "", "整机状态走控制面那条流");
+        assert_eq!(started.event["type"], "ui-event");
+        assert_eq!(started.event["name"], "computer-use-activity");
+        assert_eq!(started.event["payload"]["active"], true);
+        assert_eq!(
+            started.event["payload"]["sessions"][0]["sessionId"],
+            "session-a"
+        );
+        // 只有步数变(每走一步都会变):不算状态变化,不该发帧。
+        state
+            .inner
+            .computer_use_activity
+            .mark("session-a", epoch, 7);
+        assert!(
+            !state.publish_computer_use_activity_if_changed(),
+            "只有步数变:不再发(否则每个桌面动作都刷一帧)"
+        );
+        assert!(rx.try_recv().is_err());
+
+        state.finish_turn("session-a");
+        // `finish_turn` 会先发一条会话流的回合状态帧,跳过它取活动帧。
+        let ended = loop {
+            let frame = rx.try_recv().expect("活动结束帧");
+            if frame.event["name"] == "computer-use-activity" {
+                break frame;
+            }
+        };
+        assert_eq!(ended.event["payload"]["active"], false);
+
+        // 后连上的控制面客户端直接拿快照:帧形与广播一致(壳侧同一个解析入口)。
+        let frame = state.computer_use_activity_frame();
+        assert_eq!(frame["type"], "event");
+        assert_eq!(frame["sessionId"], "");
+        assert_eq!(frame["event"]["name"], "computer-use-activity");
     }
 
     #[test]

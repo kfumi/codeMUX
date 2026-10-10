@@ -339,8 +339,25 @@ pub async fn gate(
         )));
     }
 
+    // 停在这里等放行:活动明细带一条「正在等放行」(工单 01),拿到结果就撤回 ——
+    // 从标记处到这里只有这一条等待路径,所以清除放在等待之后、处置之前。
+    if let Some(session_id) = input.session_id {
+        companion
+            .inner
+            .computer_use_activity
+            .set_awaiting_approval(session_id, true);
+        companion.publish_computer_use_activity_if_changed();
+    }
     let timeout = companion.inner.approvals.timeout();
-    let choice = match tokio::time::timeout(timeout, rx).await {
+    let waiting = tokio::time::timeout(timeout, rx).await;
+    if let Some(session_id) = input.session_id {
+        companion
+            .inner
+            .computer_use_activity
+            .set_awaiting_approval(session_id, false);
+        companion.publish_computer_use_activity_if_changed();
+    }
+    let choice = match waiting {
         Ok(Ok(choice)) => choice,
         Ok(Err(_)) => {
             record_decision(
