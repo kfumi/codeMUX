@@ -206,3 +206,85 @@ async fn activity_frames_follow_the_turn_and_do_not_repeat_on_every_step() {
 
     stop(&fixture).await;
 }
+
+/// 急停端点(工单 02):一次调用把驱动、限时授权与有活动的回合一起停下,且不依赖界面。
+#[tokio::test]
+async fn estop_stops_the_driver_the_grants_and_the_active_turns() {
+    const SESSION: &str = "session-estop";
+    let fixture = start_fixture().await;
+    let mut ws = connect_control(fixture.port, &fixture.token).await;
+    assert_eq!(read_activity(&mut ws).await["active"], false);
+
+    // 场景:一个回合在跑、这个回合试图驱动过桌面、外加一条限时授权。
+    let epoch = fixture.daemon.companion.mark_turn_active(SESSION);
+    let _ = execute_desktop(fixture.port, &fixture.token, SESSION, "computer_click").await;
+    let granted = fixture.daemon.companion.inner.control_sessions.grant(
+        SESSION,
+        epoch,
+        Duration::from_secs(180),
+    );
+    assert_eq!(granted.as_secs(), 180);
+    assert_eq!(read_activity(&mut ws).await["active"], true);
+
+    let (status, body) = http_json(
+        fixture.port,
+        "POST",
+        "/api/computer-use/estop",
+        Some(&fixture.token),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "急停应成功: {body:?}");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["killed"], false, "没有驱动在跑也要停干净: {body:?}");
+    assert_eq!(
+        body["revokedControlSessions"], 1,
+        "限时授权要一起收回: {body:?}"
+    );
+    assert_eq!(body["interruptedTurns"], serde_json::json!([SESSION]));
+
+    // 「停干净」的判据:回合不再在跑、活动转假,控制面也收到。
+    assert!(!fixture.daemon.companion.is_turn_active(SESSION));
+    assert!(!fixture.daemon.companion.computer_use_snapshot().active);
+    assert_eq!(read_activity(&mut ws).await["active"], false);
+    // 审计:急停要留一笔可查的记录(需求 26:谁、何时、什么动作)。
+    let (status, audit) = http_json(
+        fixture.port,
+        "GET",
+        "/api/computer-use/audit",
+        Some(&fixture.token),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "审计列表应可读: {audit:?}");
+    let entries = audit["entries"].as_array().cloned().unwrap_or_default();
+    assert!(
+        entries.iter().any(|entry| entry["op"] == "estop"),
+        "急停要在审计里留一笔: {audit:?}"
+    );
+
+    // 幂等:没有活动时再喊一次不报错,列表为空。
+    let (status, body) = http_json(
+        fixture.port,
+        "POST",
+        "/api/computer-use/estop",
+        Some(&fixture.token),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "空操作也要是 200: {body:?}");
+    assert_eq!(body["interruptedTurns"], serde_json::json!([]));
+
+    // 鉴权与其它电脑控制端点同一道门。
+    let (unauthorized, _) = http_json(
+        fixture.port,
+        "POST",
+        "/api/computer-use/estop",
+        None,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(unauthorized, 401);
+
+    stop(&fixture).await;
+}

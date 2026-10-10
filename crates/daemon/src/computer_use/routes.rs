@@ -364,6 +364,7 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
         .route("/computer-use/policy", get(policy_snapshot))
         .route("/computer-use/audit", get(list_computer_use_audit))
         .route("/computer-use/execute", post(execute_desktop_tool))
+        .route("/computer-use/estop", post(estop_everything))
 }
 
 /// 桌面工具调用请求(内置 MCP server 转发;闸门与裁决都在 daemon 侧)。
@@ -501,6 +502,65 @@ async fn estop_driver(
         "ok": true,
         "killed": killed,
         "revokedControlSessions": revoked,
+    })))
+}
+
+/// 急停(工单 02):一次调用把刹车踩到底 —— 杀驱动、收回限时授权、**打断所有有电脑
+/// 控制活动的回合**。
+///
+/// 与 `/computer-use/driver/estop` 的差别在第三件事:那个端点只停机器,回合要靠渲染层
+/// 回话才停得下来(没人开界面时驱动被杀、模型还会往下跑)。这里由 daemon 自己决定打断谁,
+/// 判据就是工单 01 的活动真值 —— 不依赖任何界面活着。
+async fn estop_everything(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    // 先把要打断的会话钉住:下面的打断会把活动清掉,清完再取就空了。
+    let sessions = ctx.daemon.companion.computer_use_snapshot().session_ids();
+    let revoked = ctx.daemon.companion.inner.control_sessions.revoke_all();
+    let killed = ctx.daemon.companion.inner.driver.estop().await;
+
+    let mut interrupted = Vec::new();
+    for session_id in sessions {
+        match crate::companion::actions::interrupt_companion_session(&ctx.daemon, &session_id).await
+        {
+            Ok(()) => interrupted.push(session_id),
+            Err(error) => {
+                // 会话已经不在了(被删、时间线丢了)也算「不再在跑」:急停的目标是这台
+                // 机器上没有回合在驱动,不是「每个会话都还在」。但回合与活动仍要收掉,
+                // 否则提示条会挂着不走 —— 停下来就要停干净。
+                log::warn!(
+                    target: "computer_use",
+                    "急停打断回合失败 session_id={session_id}: {error}"
+                );
+                ctx.daemon.companion.finish_turn(&session_id);
+                interrupted.push(session_id);
+            }
+        }
+    }
+    // 兜底:即使上面一条也没走到(标记被判成陈旧),急停之后也不该还留着活动。
+    ctx.daemon.companion.inner.computer_use_activity.clear_all();
+    ctx.daemon
+        .companion
+        .publish_computer_use_activity_if_changed();
+
+    audit(
+        &ctx,
+        "estop",
+        true,
+        if interrupted.is_empty() {
+            Some("急停时没有在驱动桌面的回合")
+        } else {
+            None
+        },
+    );
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "killed": killed,
+        "revokedControlSessions": revoked,
+        "interruptedTurns": interrupted,
     })))
 }
 
