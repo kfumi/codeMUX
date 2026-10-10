@@ -8,7 +8,10 @@
 
 use std::time::Duration;
 
-use codemux_lib::companion::{local_daemon_token, start_daemon_server, stop_daemon_for_state};
+use codemux_lib::companion::{
+    handle_agent_stream_closed_for_companion, local_daemon_token, start_daemon_server,
+    stop_daemon_for_state,
+};
 use codemux_lib::daemon::DaemonState;
 use codemux_lib::paths::PathRoots;
 use futures_util::StreamExt;
@@ -143,6 +146,67 @@ where
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
             if value["event"]["name"] == "computer-use-activity" {
                 return value["event"]["payload"].clone();
+            }
+        }
+    }
+}
+
+/// 连上某条会话的 WS(带 session_id):界面侧的收尾信号(state 帧)走这条流。
+async fn connect_session(
+    port: u16,
+    token: &str,
+    session_id: &str,
+) -> impl futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin
+{
+    let url = format!("ws://127.0.0.1:{port}/api/ws?token={token}&sessionId={session_id}");
+    let (stream, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("connect session ws");
+    Box::pin(stream)
+}
+
+/// 读下一条 `type: state` 帧(连接时先补发的历史事件帧要跳过)。
+async fn read_state<S>(read: &mut S) -> serde_json::Value
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let deadline = Duration::from_secs(5);
+    loop {
+        let message = tokio::time::timeout(deadline, read.next())
+            .await
+            .expect("state frame in time")
+            .expect("stream open")
+            .expect("message ok");
+        let text = message.to_string();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            if value["type"] == "state" {
+                return value;
+            }
+        }
+    }
+}
+
+/// 给定时间窗内**没有** `state` 帧 → true(守卫类断言用:没消息就是好消息)。
+async fn no_state_frame<S>(read: &mut S, within: Duration) -> bool
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return true;
+        }
+        match tokio::time::timeout(remaining, read.next()).await {
+            Err(_) | Ok(None) => return true,
+            Ok(Some(Err(_))) => return true,
+            Ok(Some(Ok(message))) => {
+                let text = message.to_string();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if value["type"] == "state" {
+                        return false;
+                    }
+                }
             }
         }
     }
@@ -285,6 +349,97 @@ async fn estop_stops_the_driver_the_grants_and_the_active_turns() {
     )
     .await;
     assert_eq!(unauthorized, 401);
+
+    stop(&fixture).await;
+}
+
+/// 运行时在回合结束前退出(工单 05):回合真值、电脑控制活动与界面三者一起收口 ——
+/// 不收口的后果是提示条一直挂着、全局 Esc 一直被占、界面卡在「正在执行」。
+#[tokio::test]
+async fn a_runtime_that_dies_mid_turn_is_reconciled_as_terminal() {
+    const SESSION: &str = "session-runtime-died";
+    let fixture = start_fixture().await;
+    let mut control = connect_control(fixture.port, &fixture.token).await;
+    assert_eq!(read_activity(&mut control).await["active"], false);
+
+    // 回合在跑,且这个回合试图驱动过桌面 → 提示条该出现。
+    fixture.daemon.companion.mark_turn_active(SESSION);
+    let _ = execute_desktop(fixture.port, &fixture.token, SESSION, "computer_click").await;
+    assert_eq!(read_activity(&mut control).await["active"], true);
+
+    // 有人正看着这条会话。
+    let mut session_ws = connect_session(fixture.port, &fixture.token, SESSION).await;
+    assert_eq!(read_state(&mut session_ws).await["running"], true);
+
+    // 生产路径在 `Sidecar stream closed` 处调这一句(测试里直接调,不起真 sidecar)。
+    handle_agent_stream_closed_for_companion(
+        &fixture.daemon.app,
+        &fixture.daemon.agent,
+        &fixture.daemon.companion,
+        &fixture.daemon.roots,
+        SESSION,
+    );
+
+    // ① 回合真值立刻收口 ② 界面收到 running=false ③ 活动转假(提示条收起、Esc 解除)
+    assert!(
+        !fixture.daemon.companion.is_turn_active(SESSION),
+        "回合该被对账收口"
+    );
+    assert_eq!(read_state(&mut session_ws).await["running"], false);
+    assert_eq!(read_activity(&mut control).await["active"], false);
+
+    stop(&fixture).await;
+}
+
+/// 正常结束的回合(终态事件先到)随后流关闭:守卫必须让它落空。
+///
+/// state 帧本身是幂等的(`finish_turn` 只在回合真挂着时才广播),所以守卫可观测的差别在
+/// 队列上:再收一次会把队列里的消息当成「该派发了」推出去(用户消息会被重复发送)。
+#[tokio::test]
+async fn a_normally_finished_turn_is_not_reconciled_twice() {
+    const SESSION: &str = "session-normal-end";
+    let fixture = start_fixture().await;
+
+    fixture.daemon.companion.mark_turn_active(SESSION);
+    let mut session_ws = connect_session(fixture.port, &fixture.token, SESSION).await;
+    assert_eq!(read_state(&mut session_ws).await["running"], true);
+
+    // 终态事件那条路径已经收过尾。
+    fixture.daemon.companion.finish_turn(SESSION);
+    assert_eq!(read_state(&mut session_ws).await["running"], false);
+
+    // 哨兵消息:只有「无视守卫再收一次」才会把它取走。
+    fixture
+        .daemon
+        .companion
+        .enqueue_message(SESSION, "queued-after-end".to_string(), None);
+
+    handle_agent_stream_closed_for_companion(
+        &fixture.daemon.app,
+        &fixture.daemon.agent,
+        &fixture.daemon.companion,
+        &fixture.daemon.roots,
+        SESSION,
+    );
+
+    let pending = fixture
+        .daemon
+        .companion
+        .inner
+        .message_queues
+        .lock()
+        .unwrap()
+        .get(SESSION)
+        .map(std::collections::VecDeque::len)
+        .unwrap_or(0);
+    assert_eq!(
+        pending, 1,
+        "已收过尾的回合不该再被对账碰队列(会重复派发用户消息)"
+    );
+    assert!(
+        no_state_frame(&mut session_ws, Duration::from_millis(200)).await,
+        "已收过尾的回合不该再广播 state 帧"
+    );
 
     stop(&fixture).await;
 }

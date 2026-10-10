@@ -126,7 +126,43 @@ fn maybe_finish_turn_and_drain_queue(
     if event_type != "turn_finished" && event_type != "error" {
         return;
     }
+    finish_turn_and_drain_queue(app, agent_state, companion_state, roots, session_id);
+}
 
+/// 运行时在回合结束前退出(工单 05):事件流关掉、而这一回合还挂着时,终态事件永远不会
+/// 再来 —— 按终态对账,否则回合真值、电脑控制活动、提示条与全局 Esc 会一起挂着。
+///
+/// 只在**回合确实还挂着**时才收口:正常结束的回合(终态事件先到)已经收过尾,重复收口
+/// 会重复广播 state 帧、把排队的消息当成「该派发了」再推一遍。
+pub fn handle_agent_stream_closed_for_companion(
+    app: &Arc<AppState>,
+    agent_state: &Arc<AgentState>,
+    companion_state: &Arc<CompanionState>,
+    roots: &PathRoots,
+    session_id: &str,
+) {
+    if session_id.is_empty() || !companion_state.is_turn_active(session_id) {
+        return;
+    }
+    warn!(
+        target: "companion",
+        "Agent stream closed while the turn was still active; reconciling as terminal session_id={}",
+        session_id
+    );
+    finish_turn_and_drain_queue(app, agent_state, companion_state, roots, session_id);
+}
+
+/// 终态收尾(工单 05 从上面抽出,两条路径共用):工作任务对账 + `finish_turn` + 派发排队消息。
+///
+/// 广播留在调用方:真实终态事件那条路径必须先广播事件帧再翻转真值(顺序契约见
+/// `handle_sidecar_event_for_companion`),流关闭这条路径没有事件帧要排,直接翻转即可。
+fn finish_turn_and_drain_queue(
+    app: &Arc<AppState>,
+    agent_state: &Arc<AgentState>,
+    companion_state: &Arc<CompanionState>,
+    roots: &PathRoots,
+    session_id: &str,
+) {
     {
         let conn = app.db.lock().unwrap();
         crate::scheduled_tasks::reconcile_runs_for_session(&conn, session_id);

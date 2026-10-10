@@ -26,6 +26,6 @@ pub mod server;
 pub mod state;
 pub mod stream_coalescer;
 
-pub use events::handle_sidecar_event_for_companion;
+pub use events::{handle_agent_stream_closed_for_companion, handle_sidecar_event_for_companion};
 pub use server::{start_daemon_server, stop_daemon_for_state};
 pub use state::CompanionState;

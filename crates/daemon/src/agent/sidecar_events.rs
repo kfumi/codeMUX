@@ -30,6 +30,14 @@ impl SidecarEventBinding {
         *self.sink.lock().await = Some(sink);
     }
 
+    /// 身份比较(工单 05):两个 binding 是否来自同一次 `spawn_sidecar`。
+    ///
+    /// 复用同一条 sidecar 时只换 sink(`bind`),所以这里比的是「同一条事件信道」——
+    /// 事件泵据此判断自己关掉的那条流是不是这个会话**当前**的 sidecar。
+    pub fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.sink, &other.sink)
+    }
+
     pub async fn send(&self, event: String) {
         let sink = self.sink.lock().await.clone();
         if let Some(sink) = sink {
@@ -124,5 +132,15 @@ mod tests {
         binding.send("b".to_string()).await;
 
         assert_eq!(DROPPED.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn same_channel_distinguishes_spawns_but_survives_rebinding() {
+        let first = SidecarEventBinding::unbound();
+        let alias = first.clone();
+        let second = SidecarEventBinding::unbound();
+
+        assert!(first.same_channel(&alias), "克隆体是同一条信道");
+        assert!(!first.same_channel(&second), "不同 spawn 的信道不是同一条");
     }
 }

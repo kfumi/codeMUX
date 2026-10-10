@@ -795,6 +795,26 @@ async fn ensure_sidecar_for_session(
             }
         }
         info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
+        // 流关掉 = 这条 sidecar 不会再有任何事件(工单 05)。只有它**仍是**这个会话的
+        // 当前 sidecar 时才允许对账:会话若已经换了新的 sidecar(新回合在跑),这条泵的
+        // 关闭是陈旧信号,拿它去收新回合的真值会把活着的回合作废。要不要收口由
+        // companion 侧再判一次(回合是否还挂着,见 handle_agent_stream_closed_for_companion)。
+        let still_current = {
+            let sidecars = agent_state_task.sidecars.lock().await;
+            sidecars
+                .get(&session_id_clone)
+                .map(|handle| handle.event_binding().same_channel(&event_binding))
+                .unwrap_or(false)
+        };
+        if still_current {
+            crate::companion::handle_agent_stream_closed_for_companion(
+                &app_state,
+                &agent_state_task,
+                &companion_state,
+                &roots,
+                &session_id_clone,
+            );
+        }
     });
 
     let mut sidecars = agent_state.sidecars.lock().await;
