@@ -180,6 +180,7 @@
 | [codex-collab-subagent-parity](tickets/codex-collab-subagent-parity/) | 3 | [2026-09-20](specs/2026-09-20-codex-collab-subagent-parity.md) |
 | [companion-pairing-evolution](tickets/companion-pairing-evolution/) | 9 | [2026-08-16](specs/2026-08-16-companion-pairing-evolution.md) + [map](plans/2026-08-16-companion-pairing-evolution-map.md) |
 | [computer-use](tickets/computer-use/) | 19 | [2026-10-07](specs/2026-10-07-computer-use.md) |
+| [computer-use-activity-authority-in-daemon](tickets/computer-use-activity-authority-in-daemon/) | 4 | [2026-10-10](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) + [ADR 0018](adr/0018-computer-use-activity-authority-in-daemon.md) |
 | [daemon-boundary](tickets/daemon-boundary/) | 12 | [2026-09-07](specs/2026-09-07-daemon-boundary.md) |
 | [electron-shell-swap](tickets/electron-shell-swap/) | 9 | [2026-09-11](specs/2026-09-11-electron-shell-swap.md) |
 | [enhance-agent-runtime-detection](tickets/enhance-agent-runtime-detection/) | 2 | [2026-07-25](specs/2026-07-25-enhance-agent-runtime-detection.md) |
