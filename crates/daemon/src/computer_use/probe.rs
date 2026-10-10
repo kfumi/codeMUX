@@ -33,12 +33,15 @@ pub fn binary_name() -> &'static str {
 
 /// 这条命令是不是 cua-driver 本体 —— 自更新(`update --apply`)只对本体成立,
 /// 别的 stdio MCP 驱动没有这个子命令。
+///
+/// 判据必须与运行平台无关:配置里写的是**哪台机器上的路径**,不是本进程跑在
+/// 哪个平台。`Path::file_stem` 只按当前平台的分隔符切分(unix 下 `\` 是普通
+/// 字符),于是同一条 Windows 路径在 Linux/macOS runner 上会被判成「别的驱动」
+/// —— CI 的 `Rust Check` 就是这样在 ubuntu/macOS 上红的。这里两种分隔符一视同仁。
 pub fn is_cua_driver(command: &str) -> bool {
-    Path::new(command)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.eq_ignore_ascii_case("cua-driver"))
-        .unwrap_or(false)
+    let file = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _ext)| stem);
+    stem.eq_ignore_ascii_case("cua-driver")
 }
 
 /// 默认候选路径(纯函数):`local_app_data` 与 `home` 由调用方注入,便于测试。
@@ -182,6 +185,15 @@ mod tests {
         assert!(is_cua_driver("Cua-Driver.EXE"), "大小写不敏感");
         assert!(!is_cua_driver("my-stdio-mcp-driver"));
         assert!(!is_cua_driver(""));
+
+        // 与运行平台无关:同一条 Windows 路径在 Linux/macOS 上同样是本体
+        // (`Path::file_stem` 只在 unix 分隔符上切分,CI 曾因此在两个 unix runner 上红)。
+        assert!(is_cua_driver("C:\\Program Files\\Cua\\cua-driver.exe"));
+        assert!(
+            !is_cua_driver("C:\\tools\\cua-driver-helper.exe"),
+            "只认本体,不是包含关系"
+        );
+        assert!(!is_cua_driver("C:\\Program Files\\Cua\\"), "只有目录名不算");
     }
 
     fn path_delimiter() -> char {
