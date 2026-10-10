@@ -73,6 +73,7 @@
 | [2026-10-07-computer-use-plugin-research.md](research/2026-10-07-computer-use-plugin-research.md) | Agent Computer Use 电脑控制调研与落地建议 |
 | [2026-10-07-computer-use-capability-matrix.md](research/2026-10-07-computer-use-capability-matrix.md) | 电脑控制能力矩阵与铺开验收记录（工单 07） |
 | [2026-10-09-reference-plugin-method-inventory.md](research/2026-10-09-reference-plugin-method-inventory.md) | 参考插件方法面清单与 CodeMUX 差异（工单 13 附件） |
+| [2026-10-10-esc-as-stop-key-assessment.md](research/2026-10-10-esc-as-stop-key-assessment.md) | Esc 作为「停止」键的可行性评估（Ctrl+. 现状、Esc 多义冲突与固定系统键方案） |
 
 ### specs
 
