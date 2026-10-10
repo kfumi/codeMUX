@@ -144,6 +144,13 @@ const bridge = {
    * + 打断当前回合;返回实际是否已武装。
    */
   setEmergencyStopArmed: (armed: boolean) => invoke<boolean>('setEmergencyStopArmed', { armed }),
+  /**
+   * 武装心跳(工单 18):武装期间按固定周期调用,壳侧只在「真的还武装着」时续期并
+   * 返回 true。返回 false 表示壳侧已经不武装(看门狗超时解除,或键被别的程序占着
+   * 注册失败)—— 此时渲染层若仍需要 Esc,应重新调用 setEmergencyStopArmed 声明。
+   * 壳侧超过 ARMED_HEARTBEAT_TIMEOUT_MS 收不到心跳就自己收起提示条并解除 Esc。
+   */
+  emergencyStopHeartbeat: () => invoke<boolean>('emergencyStopHeartbeat'),
 
   // perf / devtools
   exportPerfSnapshot: (path: string, content: string) => invoke<null>('exportPerfSnapshot', { path, content }),

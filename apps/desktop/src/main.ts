@@ -17,11 +17,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
+import { createArmedHeartbeat, type ArmedHeartbeatService } from './armed-heartbeat';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { readLocalDaemonToken } from './daemon-token';
 import { createControlBannerService, type ControlBannerService } from './control-banner';
-import { openControlBannerWindow } from './control-banner-window';
+import { createControlBannerWindow } from './control-banner-window';
 import { createDesktopCaptureHost } from './desktop-capture-host';
 import { createEmergencyStopService, type EmergencyStopService } from './emergency-stop';
 import { parseByteRange } from './http-range';
@@ -219,8 +220,23 @@ let automation: BrowserAutomationService | null = null;
 let emergencyStop: EmergencyStopService | null = null;
 /** 控制中提示条(工单 10):显示与否跟随急停的武装状态。 */
 let controlBanner: ControlBannerService | null = null;
+/** 武装心跳看门狗(工单 18):渲染层失联时由壳自己收起提示条并解除 Esc。 */
+let armedHeartbeat: ArmedHeartbeatService | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
+
+/**
+ * 渲染层不会再驱动这套状态时的收尾(工单 18):解除全局 Esc 与收起提示条**必须一起**做
+ * —— 只撤一半就是另一种撒谎(提示条还挂着却按不动,或 Esc 还占着却没有任何提示)。
+ *
+ * 两个来源:看门狗超时(渲染层主线程卡死,只能靠「不再续期」推断)、渲染进程 gone
+ * (直接证据,不必等超时)。
+ */
+function disarmEmergencyStopAndHideBanner(): void {
+  emergencyStop?.setArmed(false);
+  armedHeartbeat?.stop();
+  controlBanner?.setVisible(false);
+}
 
 /**
  * 壳直连 daemon 的 JSON POST(工单 06 急停):与自动化回包同一套回环 +
@@ -336,6 +352,11 @@ function createMainWindow(): BrowserWindow {
   // 打包态文件日志;webview guest 的 console 不在此列,由 browser-host 管)。
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     getRendererLog().record(level, message, line, sourceId);
+  });
+  // 渲染进程挂了(工单 18):提示条宣称的「按 Esc 急停」已经没人能维持,而心跳看门狗
+  // 要等到超时才有反应 —— 这是最直接的证据,立刻按「渲染层不会再驱动状态」收尾。
+  window.webContents.on('render-process-gone', () => {
+    disarmEmergencyStopAndHideBanner();
   });
 
   // 开发态右键菜单:WebView2/Tauri dev 默认带「刷新/检查」,Electron 需自建。
@@ -487,8 +508,11 @@ async function quitApplication(): Promise<void> {
   // 解除全局 Esc:退出后不该再占着这个键(也避免重入时残留注册)。
   emergencyStop?.setArmed(false);
   emergencyStop = null;
-  // 提示条跟着收掉:它是独立窗口,不该比应用活得久。
-  controlBanner?.setVisible(false);
+  // 看门狗一起停:退出时不该再留一个计时器等「渲染层失联」。
+  armedHeartbeat?.stop();
+  armedHeartbeat = null;
+  // 提示条跟着收掉:它是独立窗口,不该比应用活得久(这里是真销毁,不是隐藏)。
+  controlBanner?.dispose();
   controlBanner = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
@@ -586,13 +610,27 @@ if (!gotLock) {
     // 控制中提示条(工单 10):屏幕上写明「电脑正在被控制,按 Esc 急停」。
     // 显示与否跟随武装状态(见 shell-bridge 的 setEmergencyStopArmed)。
     controlBanner = createControlBannerService({
-      open: () => openControlBannerWindow(),
+      open: () => createControlBannerWindow({
+        // 窗口层自己也补不回来时(系统关窗 + 重建失败)如实上报:否则服务层会一直记着
+        // 「已显示」,把后面的显示请求全短路掉,这一整段操作里提示条再也回不来。
+        onVisibilityLost: () => controlBanner?.setVisible(false),
+      }),
       log: (level, message) => {
         if (level === 'error') console.error(message);
         else if (level === 'warn') console.warn(message);
         else console.log(message);
       },
     });
+    // 武装心跳看门狗(工单 18):渲染层在武装期间持续发心跳(见
+    // src/hooks/useEmergencyStop.ts),这里负责「它不再发」的那一侧 —— 提示条正在
+    // 宣称「按 Esc 急停」,渲染层失联时宁可收起,也不能替它继续撒谎。
+    const armedHeartbeatService = createArmedHeartbeat({
+      onTimeout: () => {
+        disarmEmergencyStopAndHideBanner();
+      },
+      logger: { warn: (message) => console.warn(message) },
+    });
+    armedHeartbeat = armedHeartbeatService;
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);
     // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
     const updater = createUpdaterService({
@@ -604,6 +642,8 @@ if (!gotLock) {
     unregisterBridge = registerShellBridge({
       emergencyStop: emergencyStopService,
       controlBanner,
+      armedHeartbeat: armedHeartbeatService,
+      isQuitting: () => quitting,
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,

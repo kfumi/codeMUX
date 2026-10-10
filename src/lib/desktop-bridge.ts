@@ -258,6 +258,14 @@ export interface CodemuxDesktopBridge {
    * 多久,直到这次桌面操作结束。
    */
   setEmergencyStopArmed(armed: boolean): Promise<boolean>;
+  /**
+   * 武装心跳(工单 18):武装期间按固定周期调用,壳侧只在「真的还武装着」时续期并
+   * 返回 true;返回 false(看门狗已解除武装 / 注册失败)时,渲染层若仍需要 Esc 应
+   * 重新调用 setEmergencyStopArmed 声明。壳侧超过 ARMED_HEARTBEAT_TIMEOUT_MS 收不到
+   * 心跳就自己收起提示条并解除 Esc —— 提示条宣传的是 Esc 急停,不能让一个可能已经
+   * 失联的渲染层决定它还该不该留在屏幕上。
+   */
+  emergencyStopHeartbeat(): Promise<boolean>;
 
   // perf / devtools
   exportPerfSnapshot(path: string, content: string): Promise<null>;

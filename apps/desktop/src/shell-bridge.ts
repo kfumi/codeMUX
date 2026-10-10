@@ -33,6 +33,7 @@ import {
   upgradeAgentRuntime,
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
+import type { ArmedHeartbeatService } from './armed-heartbeat';
 import type { ControlBannerService } from './control-banner';
 import { capturePrimaryScreen } from './desktop-capture-host';
 import type { EmergencyStopService } from './emergency-stop';
@@ -62,6 +63,16 @@ export interface ShellBridgeDeps {
   emergencyStop: EmergencyStopService;
   /** 控制中提示条(工单 10;main.ts 创建,跟随急停武装状态显示)。 */
   controlBanner: ControlBannerService;
+  /** 武装心跳看门狗(工单 18;main.ts 创建,超时解除 Esc 并收起提示条)。 */
+  armedHeartbeat: ArmedHeartbeatService;
+  /**
+   * 是否正在退出(工单 18)。
+   *
+   * 退出流程会先解除武装并销毁提示条,而渲染层的武装心跳还会在拿到 false 后重新声明
+   * 一次 —— 那条路径必须被拒掉,否则会在关机过程里重新注册全局 Esc、重建提示条窗口,
+   * 而 main 那边的引用已经置空,没人再去收它。
+   */
+  isQuitting?(): boolean;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -437,10 +448,33 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     if (typeof armed !== 'boolean') {
       throw new Error('armed must be a boolean');
     }
+    if (armed && deps.isQuitting?.()) {
+      // 退出中:武装请求一律落空(解除请求照常走)。渲染层据此不再重试,退出过程里
+      // 也不会再出现「提示条 + 全局 Esc」这对已经没人负责的状态。
+      return false;
+    }
     deps.emergencyStop.setArmed(armed);
     const effective = deps.emergencyStop.isArmed();
     deps.controlBanner.setVisible(effective);
+    if (effective) {
+      // 只有真武装了才起看门狗:注册失败时提示条本来就是隐藏的,没有「撒谎」风险。
+      deps.armedHeartbeat.beat();
+    } else {
+      deps.armedHeartbeat.stop();
+    }
     return effective;
+  });
+  // 武装心跳(工单 18):提示条宣传的是 Esc 急停,不能让一个可能已经失联的渲染层
+  // 决定它还该不该留在屏幕上。渲染层在武装期间按固定周期调用这里续期;看门狗超时
+  // (见 armed-heartbeat)由 main 收起提示条并解除 Esc。
+  handle('emergencyStopHeartbeat', () => {
+    if (!deps.emergencyStop.isArmed()) {
+      // 已被看门狗解除武装(渲染层卡顿到心跳丢失)或注册从未成功:如实回 false,
+      // 让仍在驱动桌面的渲染层重新声明一次,而不是让它以为一切都好。
+      return false;
+    }
+    deps.armedHeartbeat.beat();
+    return true;
   });
   // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
   // main 侧弹窗拒绝转发据此回填 sourceBrowserId。

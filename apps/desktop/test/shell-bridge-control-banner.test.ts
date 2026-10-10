@@ -30,11 +30,26 @@ function invokeArmed(payload: unknown): Promise<unknown> {
   return Promise.resolve(wrapper({}, payload));
 }
 
+/** 命中 `codemux:emergencyStopHeartbeat` 通道;返回壳侧当前是否真的武装着。 */
+function invokeHeartbeat(): Promise<unknown> {
+  const call = ipcMainMock.handle.mock.calls.find(
+    ([name]) => name === 'codemux:emergencyStopHeartbeat',
+  );
+  if (!call) {
+    throw new Error('channel not registered: emergencyStopHeartbeat');
+  }
+  const wrapper = call[1] as (event: unknown, payload: unknown) => unknown;
+  return Promise.resolve(wrapper({}, undefined));
+}
+
 /**
  * 最小壳依赖:急停服务由 `registrationSucceeds` 决定 setArmed 是否生效
  * (对应 Electron globalShortcut.register 被别的程序占用时返回 false)。
  */
-function createDeps(registrationSucceeds: boolean): ShellBridgeDeps {
+function createDeps(
+  registrationSucceeds: boolean,
+  options: { quitting?: boolean } = {},
+): ShellBridgeDeps {
   const updater: UpdaterService = {
     check: vi.fn(),
     downloadAndInstall: vi.fn(),
@@ -54,6 +69,11 @@ function createDeps(registrationSucceeds: boolean): ShellBridgeDeps {
     isArmed: vi.fn(() => armed),
     trigger: vi.fn(),
   };
+  const armedHeartbeat = {
+    beat: vi.fn(),
+    stop: vi.fn(),
+    isWatching: vi.fn(() => false),
+  };
   return {
     getAppDataDir: () => 'D:/app-data',
     getLogDir: () => 'D:/app-data/logs',
@@ -64,7 +84,9 @@ function createDeps(registrationSucceeds: boolean): ShellBridgeDeps {
     sendToRenderer: vi.fn(),
     browserGuests,
     emergencyStop,
-    controlBanner: { setVisible: vi.fn(), isVisible: vi.fn(() => false) },
+    controlBanner: { setVisible: vi.fn(), isVisible: vi.fn(() => false), dispose: vi.fn() },
+    armedHeartbeat,
+    isQuitting: options.quitting ? () => true : undefined,
   };
 }
 
@@ -104,5 +126,63 @@ describe('shell-bridge 武装/提示条接线(工单 10)', () => {
     registerShellBridge(deps);
 
     await expect(invokeArmed({ armed: 'yes' })).rejects.toThrow('armed must be a boolean');
+  });
+
+  it('starts the watchdog while armed and stops it when disarmed', async () => {
+    const deps = createDeps(true);
+    registerShellBridge(deps);
+
+    await invokeArmed({ armed: true });
+    expect(deps.armedHeartbeat.beat).toHaveBeenCalledTimes(1);
+    expect(deps.armedHeartbeat.stop).not.toHaveBeenCalled();
+
+    await invokeArmed({ armed: false });
+    expect(deps.armedHeartbeat.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not watch for heartbeats when the shortcut registration failed', async () => {
+    // 没武装 = 提示条本来是隐藏的,没有「渲染层失联还挂着假提示」的风险。
+    const deps = createDeps(false);
+    registerShellBridge(deps);
+
+    await invokeArmed({ armed: true });
+
+    expect(deps.armedHeartbeat.beat).not.toHaveBeenCalled();
+    expect(deps.armedHeartbeat.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes the watchdog on every renderer heartbeat', async () => {
+    const deps = createDeps(true);
+    registerShellBridge(deps);
+    await invokeArmed({ armed: true });
+
+    await expect(invokeHeartbeat()).resolves.toBe(true);
+    await expect(invokeHeartbeat()).resolves.toBe(true);
+
+    // 武装起来一次 + 两次心跳续期。
+    expect(deps.armedHeartbeat.beat).toHaveBeenCalledTimes(3);
+  });
+
+  it('answers false (and does not refresh) once the watchdog disarmed the shell', async () => {
+    // 渲染层据此发现自己被看门狗解除,并在仍需要 Esc 时重新声明 —— 不能让它以为一切都好。
+    const deps = createDeps(true);
+    registerShellBridge(deps);
+    await invokeArmed({ armed: true });
+    await invokeArmed({ armed: false });
+
+    await expect(invokeHeartbeat()).resolves.toBe(false);
+
+    expect(deps.armedHeartbeat.beat).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to re-arm while the app is quitting', async () => {
+    // 退出等待期间渲染层的武装心跳会拿到 false 并重新声明一次;那条路径必须落空,否则会在
+    // 关机过程里重新注册全局 Esc、重建提示条窗口,而 main 那边已经没人再收它(工单 18)。
+    const deps = createDeps(true, { quitting: true });
+    registerShellBridge(deps);
+
+    await expect(invokeArmed({ armed: true })).resolves.toBe(false);
+    expect(deps.emergencyStop.setArmed).not.toHaveBeenCalled();
+    expect(deps.controlBanner.setVisible).not.toHaveBeenCalled();
   });
 });

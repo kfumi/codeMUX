@@ -5,10 +5,22 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const bridgeState = vi.hoisted(() => ({ present: true }));
+const bridgeState = vi.hoisted(() => ({ present: true, heartbeat: true }));
+/**
+ * 把武装 effect 里的 async 链跑到底:setEmergencyStopArmed / heartbeat 都是 Promise,
+ * fake timers 不影响微任务,所以这里只推进 Promise 队列。
+ */
+async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    for (let tick = 0; tick < 5; tick += 1) {
+      await Promise.resolve();
+    }
+  });
+}
 
-const { setArmedMock, onEmergencyStopMock, unsubscribeMock } = vi.hoisted(() => ({
+const { setArmedMock, heartbeatMock, onEmergencyStopMock, unsubscribeMock } = vi.hoisted(() => ({
   setArmedMock: vi.fn(async (armed: boolean) => armed),
+  heartbeatMock: vi.fn(async () => true),
   onEmergencyStopMock: vi.fn(() => unsubscribeMock),
   unsubscribeMock: vi.fn(),
 }));
@@ -20,7 +32,11 @@ vi.mock('../lib/desktop-bridge', async () => {
     ...actual,
     get desktopBridge() {
       return bridgeState.present
-        ? { setEmergencyStopArmed: setArmedMock, onEmergencyStop: onEmergencyStopMock }
+        ? {
+            setEmergencyStopArmed: setArmedMock,
+            emergencyStopHeartbeat: bridgeState.heartbeat ? heartbeatMock : undefined,
+            onEmergencyStop: onEmergencyStopMock,
+          }
         : undefined;
     },
   };
@@ -32,7 +48,7 @@ import type { AgentMessage } from '../stores/agentStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSubagentStore } from '../stores/subagentStore';
-import { useEmergencyStop } from './useEmergencyStop';
+import { ARMED_HEARTBEAT_INTERVAL_MS, useEmergencyStop } from './useEmergencyStop';
 
 type Turns = ReturnType<typeof buildConversationTurns>;
 
@@ -143,6 +159,10 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks 只清调用记录、保留实现:显式恢复默认实现,免得上一个用例留下的
+    // mockResolvedValue(false) 悄悄带进来(那些用例就不再跑真实返回值分支了)。
+    setArmedMock.mockImplementation(async (armed: boolean) => armed);
+    heartbeatMock.mockResolvedValue(true);
     bridgeState.present = true;
     setComputerUse({ enabled: true, systemExecution: false });
     setRunning({});
@@ -377,4 +397,108 @@ describe('useEmergencyStop 武装窗口(工单 10 跟进)', () => {
     expect(() => renderHook(() => useEmergencyStop())).not.toThrow();
     expect(setArmedMock).not.toHaveBeenCalled();
   });
+
+describe('useEmergencyStop 心跳兜底(工单 18)', () => {
+  afterEach(() => cleanup());
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setArmedMock.mockImplementation(async (armed: boolean) => armed);
+    heartbeatMock.mockResolvedValue(true);
+    bridgeState.present = true;
+    bridgeState.heartbeat = true;
+    setComputerUse({ enabled: true, systemExecution: true });
+    setApprovals({});
+    useSubagentStore.setState({ sessions: {}, continuationPending: {} });
+    setRunning({ sessionA: true });
+    setTurns({ sessionA: runningTurns([
+      userMessage('帮我看下这个窗口'),
+      computerCall('call-1'),
+    ]) });
+  });
+
+  it('keeps the shell watchdog alive while armed', async () => {
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useEmergencyStop());
+      await flushMicrotasks();
+
+      await act(async () => { vi.advanceTimersByTime(ARMED_HEARTBEAT_INTERVAL_MS); });
+      expect(heartbeatMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => { vi.advanceTimersByTime(ARMED_HEARTBEAT_INTERVAL_MS); });
+      expect(heartbeatMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops heartbeating once the turn ends', async () => {
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useEmergencyStop());
+      await flushMicrotasks();
+      await act(async () => { vi.advanceTimersByTime(ARMED_HEARTBEAT_INTERVAL_MS); });
+      expect(heartbeatMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => { setRunning({ sessionA: false }); });
+      await flushMicrotasks();
+      expect(setArmedMock).toHaveBeenLastCalledWith(false);
+
+      await act(async () => { vi.advanceTimersByTime(10 * ARMED_HEARTBEAT_INTERVAL_MS); });
+      expect(heartbeatMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-asserts the arming when the shell reports it was disarmed', async () => {
+    // 渲染层卡顿到心跳丢失 → 壳侧看门狗已解除武装并收起提示条;卡顿恢复后必须重新声明,
+    // 否则桌面还在被驱动,而 Esc 与提示条已经消失。
+    heartbeatMock.mockResolvedValueOnce(true).mockResolvedValue(false);
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useEmergencyStop());
+      await flushMicrotasks();
+
+      await act(async () => { vi.advanceTimersByTime(ARMED_HEARTBEAT_INTERVAL_MS); });
+      expect(setArmedMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => { vi.advanceTimersByTime(ARMED_HEARTBEAT_INTERVAL_MS); });
+      await flushMicrotasks();
+
+      expect(setArmedMock).toHaveBeenCalledTimes(2);
+      expect(setArmedMock).toHaveBeenLastCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fight the shell when the arming never took effect', async () => {
+    // 键被别的程序占着:每次心跳都回 false,但从未真正武装过 —— 不该每 5s 重试一次注册。
+    setArmedMock.mockResolvedValue(false);
+    heartbeatMock.mockResolvedValue(false);
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useEmergencyStop());
+      await flushMicrotasks();
+
+      await act(async () => { vi.advanceTimersByTime(10 * ARMED_HEARTBEAT_INTERVAL_MS); });
+      await flushMicrotasks();
+
+      expect(setArmedMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still arms when the shell predates the heartbeat channel', async () => {
+    bridgeState.heartbeat = false;
+    renderHook(() => useEmergencyStop());
+    await flushMicrotasks();
+
+    expect(setArmedMock).toHaveBeenCalledWith(true);
+    expect(heartbeatMock).not.toHaveBeenCalled();
+  });
+});
 });

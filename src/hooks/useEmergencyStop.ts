@@ -12,6 +12,16 @@ import { useAgentStore } from '../stores/agentStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSubagentStore } from '../stores/subagentStore';
 
+/**
+ * 武装期间的心跳周期(工单 18)。
+ *
+ * 它**不**决定壳侧的超时:窗口被遮挡/最小化时,Chromium 会把渲染层的定时器压到分钟级
+ * (见 `apps/desktop/src/main.ts` 里刻意保留默认节流的说明),壳侧看门狗因此取到分钟量级
+ * (见 `apps/desktop/src/armed-heartbeat.ts` 的 `ARMED_HEARTBEAT_TIMEOUT_MS`),而不是
+ * 「心跳周期的几倍」—— 那样会把还活着的渲染层判成失联。
+ */
+export const ARMED_HEARTBEAT_INTERVAL_MS = 5_000;
+
 const logger = createLogger('EmergencyStop');
 
 /**
@@ -25,7 +35,9 @@ const logger = createLogger('EmergencyStop');
  * 2. 壳触发时打断所有在跑的回合:驱动已被 daemon 杀停,这里让模型与界面
  *    都知道「停下来了」。
  * 3. 提示条由壳跟随武装状态显示(见 shell-bridge):**武装多久就显示多久**,不再
- *    有壳侧定时收起(工单 15) —— 操作进行期间常驻,回合结束/解除武装才消失。
+ *    有壳侧定时收起(工单 15) —— 操作进行期间常驻,回合结束/解除武装才消失;
+ *    但壳侧不再无条件相信这套计算:武装期间按固定周期发心跳(工单 18),壳侧看门狗
+ *    收不到就自己收起提示条并解除 Esc(渲染层可能比提示条先死,那时它只会撒谎)。
  */
 export function useEmergencyStop(): void {
   const computerUseEnabled = useSettingsStore(
@@ -78,11 +90,55 @@ export function useEmergencyStop(): void {
     && anyTurnRunning
     && (desktopActivity || subagentActivity);
 
+  // 壳侧看到的是「最近一次心跳」:渲染层卡死 / 进程没了 / WS 断链时,屏幕上会一直挂着
+  // 「按 Esc 急停」而实际按不动 —— 那是骗人。武装期间按固定周期续期,壳侧看门狗收不到
+  // 就自己收起提示条并解除 Esc;反过来,壳侧在渲染层仍认为自己该武装时报 false(看门狗
+  // 刚收过、或注册失败过),这里重新声明一次,别让 Esc 与提示条就这么消失。
   useEffect(() => {
     if (!desktopBridge) return;
-    void Promise.resolve(desktopBridge.setEmergencyStopArmed(shouldArm)).catch((error) => {
-      logger.warn('Failed to sync emergency stop arming', { shouldArm }, error as Error);
-    });
+    const bridge = desktopBridge;
+    let cancelled = false;
+    let lastArmed: boolean | null = null;
+
+    const assertArmed = async (armed: boolean): Promise<void> => {
+      try {
+        const effective = await bridge.setEmergencyStopArmed(armed);
+        if (!cancelled) lastArmed = effective;
+      } catch (error) {
+        logger.warn('Failed to sync emergency stop arming', { armed }, error as Error);
+      }
+    };
+
+    void assertArmed(shouldArm);
+    if (!shouldArm) return;
+
+    const heartbeat = bridge.emergencyStopHeartbeat;
+    if (typeof heartbeat !== 'function') {
+      // 旧壳(preload 未升级)没有心跳通道:退回「只在武装状态变化时同步」的老行为,
+      // 此时提示条没有壳侧兜底,但也不该整个武装流程失败。
+      return;
+    }
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const armed = await heartbeat();
+          if (cancelled) return;
+          const wasArmed = lastArmed;
+          lastArmed = armed;
+          if (!armed && wasArmed === true) {
+            logger.warn('Shell disarmed the emergency stop after missed heartbeats; re-asserting');
+            await assertArmed(true);
+          }
+        } catch (error) {
+          logger.warn('Emergency stop heartbeat failed', {}, error as Error);
+        }
+      })();
+    }, ARMED_HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [shouldArm]);
 
   useEffect(() => {
