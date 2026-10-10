@@ -43,6 +43,7 @@
 | [agent-provider-profiles-guide.md](guides/agent-provider-profiles-guide.md) | 智能体供应商使用说明 |
 | [ai-agent-permission-approval-guide.md](guides/ai-agent-permission-approval-guide.md) | AI Agent 权限审批功能实现总结与指导 |
 | [codex-routing-proxy-guide.md](guides/codex-routing-proxy-guide.md) | Codex 路由代理实现指导说明 |
+| [computer-use-guide.md](guides/computer-use-guide.md) | 电脑控制使用指南（提示条、全局 Esc 急停与审批口径） |
 | [desktop-release-guide.md](guides/desktop-release-guide.md) | CodeMUX 桌面端发版指南 |
 | [mcp-unified-management-guide.md](guides/mcp-unified-management-guide.md) | MCP 统一管理实现指导说明 |
 | [skills-unified-management-guide.md](guides/skills-unified-management-guide.md) | Skills 统一管理实现指导说明 |

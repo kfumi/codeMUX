@@ -33,10 +33,8 @@ import {
   upgradeAgentRuntime,
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
-import type { ArmedHeartbeatService } from './armed-heartbeat';
-import type { ControlBannerService } from './control-banner';
 import { capturePrimaryScreen } from './desktop-capture-host';
-import type { EmergencyStopService } from './emergency-stop';
+import type { ComputerUseArming } from './computer-use-arming';
 import { readLocalDaemonTokenOrThrow } from './daemon-token';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
@@ -59,20 +57,13 @@ export interface ShellBridgeDeps {
   sendToRenderer(channel: string, payload: unknown): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
-  /** 全局 Esc 急停服务(工单 06;main.ts 创建)。 */
-  emergencyStop: EmergencyStopService;
-  /** 控制中提示条(工单 10;main.ts 创建,跟随急停武装状态显示)。 */
-  controlBanner: ControlBannerService;
-  /** 武装心跳看门狗(工单 18;main.ts 创建,超时解除 Esc 并收起提示条)。 */
-  armedHeartbeat: ArmedHeartbeatService;
   /**
-   * 是否正在退出(工单 18)。
+   * 电脑控制「武装」真值(工单 03;main.ts 创建)。
    *
-   * 退出流程会先解除武装并销毁提示条,而渲染层的武装心跳还会在拿到 false 后重新声明
-   * 一次 —— 那条路径必须被拒掉,否则会在关机过程里重新注册全局 Esc、重建提示条窗口,
-   * 而 main 那边的引用已经置空,没人再去收它。
+   * 提示条显隐与全局 Esc 由两个来源合成(daemon 的活动事件 + 渲染层的旧路径),
+   * 合成规则、看门狗与退出守卫都在 `computer-use-arming.ts` 里,这里只是 IPC 薄壳。
    */
-  isQuitting?(): boolean;
+  computerUseArming: ComputerUseArming;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -440,42 +431,21 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   // 手动贴屏(工单 04):用户点一下截主屏,渲染层把 PNG 贴进会话上下文。
   // 这是用户主动发起的只读动作,不经 daemon 闸门(需求 17)。
   handle('captureDesktopScreen', () => capturePrimaryScreen());
-  // 全局 Esc 急停(工单 06/10):渲染层在「有回合在跑且系统级执行开着」时武装。
-  // 提示条跟着**实际**武装结果走 —— 注册失败(键被别的程序占着)时不能挂一个
-  // 「按 Esc 急停」却按不动的提示。
+  // 全局 Esc 急停 / 提示条(工单 06/10/18;工单 03 起合成规则搬进 computer-use-arming):
+  // 通道面与语义不变 —— 渲染层看到的仍是**实际**武装结果:注册失败(键被别的程序占着)、
+  // 控制面链路断开、退出中都不生效,那时绝不能挂一个「按 Esc 急停」却按不动的提示。
   handle('setEmergencyStopArmed', (payload: unknown) => {
     const { armed } = (payload ?? {}) as { armed?: unknown };
     if (typeof armed !== 'boolean') {
       throw new Error('armed must be a boolean');
     }
-    if (armed && deps.isQuitting?.()) {
-      // 退出中:武装请求一律落空(解除请求照常走)。渲染层据此不再重试,退出过程里
-      // 也不会再出现「提示条 + 全局 Esc」这对已经没人负责的状态。
-      return false;
-    }
-    deps.emergencyStop.setArmed(armed);
-    const effective = deps.emergencyStop.isArmed();
-    deps.controlBanner.setVisible(effective);
-    if (effective) {
-      // 只有真武装了才起看门狗:注册失败时提示条本来就是隐藏的,没有「撒谎」风险。
-      deps.armedHeartbeat.beat();
-    } else {
-      deps.armedHeartbeat.stop();
-    }
-    return effective;
+    // 退出中一律落空、两个来源怎么合成,都由 arming 负责,这里不重复判定。
+    return deps.computerUseArming.setRendererArmed(armed);
   });
   // 武装心跳(工单 18):提示条宣传的是 Esc 急停,不能让一个可能已经失联的渲染层
-  // 决定它还该不该留在屏幕上。渲染层在武装期间按固定周期调用这里续期;看门狗超时
-  // (见 armed-heartbeat)由 main 收起提示条并解除 Esc。
-  handle('emergencyStopHeartbeat', () => {
-    if (!deps.emergencyStop.isArmed()) {
-      // 已被看门狗解除武装(渲染层卡顿到心跳丢失)或注册从未成功:如实回 false,
-      // 让仍在驱动桌面的渲染层重新声明一次,而不是让它以为一切都好。
-      return false;
-    }
-    deps.armedHeartbeat.beat();
-    return true;
-  });
+  // 决定它还该不该留在屏幕上。渲染层按固定周期调用这里续期;返回 false 时它若仍需要
+  // Esc 就重新声明一次,而不是以为一切都好。
+  handle('emergencyStopHeartbeat', () => deps.computerUseArming.heartbeat());
   // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
   // main 侧弹窗拒绝转发据此回填 sourceBrowserId。
   handle('browserRegisterGuest', (payload: unknown) => {

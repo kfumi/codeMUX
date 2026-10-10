@@ -26,6 +26,15 @@ const wsState = vi.hoisted(() => {
     removeAllListeners(): void {
       this.handlers.clear();
     }
+
+    /** 工单 03 保活:记录客户端发了几次 ping(回 Pong 由测试手动触发)。 */
+    pingCount = 0;
+    ping(): void {
+      this.pingCount += 1;
+    }
+    emitPong(): void {
+      this.emit('pong');
+    }
     terminate(): void {
       this.emit('close', 1006, Buffer.alloc(0));
     }
@@ -113,6 +122,8 @@ const httpState = vi.hoisted(() => {
 vi.mock('node:http', () => ({ default: { request: httpState.request } }));
 
 import {
+  CONTROL_PING_INTERVAL_MS,
+  CONTROL_PONG_TIMEOUT_MS,
   createBrowserAutomationService,
   executeAutomationRequest,
   mapInputParams,
@@ -182,6 +193,7 @@ function serviceDeps(overrides: {
   resolveMostRecent?: () => AutomationTarget | undefined;
   listTargets?: () => Array<{ browserId: string; url: string; title: string }>;
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
+  onConnectionChange?: (connected: boolean) => void;
 }) {
   return {
     getPort: overrides.getPort ?? (() => 4321),
@@ -191,6 +203,7 @@ function serviceDeps(overrides: {
     listTargets: overrides.listTargets ?? (() => []),
     reconnectBaseDelayMs: 1,
     ...(overrides.log ? { log: overrides.log } : {}),
+    ...(overrides.onConnectionChange ? { onConnectionChange: overrides.onConnectionChange } : {}),
   };
 }
 
@@ -255,6 +268,67 @@ describe('browser-automation 连接(工单 08 壳侧)', () => {
       service.stop();
       await vi.advanceTimersByTimeAsync(60_000);
       expect(wsState.instances.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('连接状态变化:open → true,close → false,stop() 不重复回调(工单 03)', async () => {
+    const changes: boolean[] = [];
+    const { service, socket } = await startAndConnect(
+      serviceDeps({ onConnectionChange: (connected) => changes.push(connected) }),
+    );
+    expect(changes).toEqual([true]);
+
+    socket.emitClose();
+    expect(changes).toEqual([true, false]);
+
+    // 已经是断的:stop() 不该再报一次(壳侧据此 fail-hidden,重复回调没有意义)。
+    service.stop();
+    expect(changes).toEqual([true, false]);
+  });
+
+  it('控制面保活:按周期 ping,收到 Pong 就不动连接(工单 03)', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = createBrowserAutomationService(serviceDeps({}));
+      service.start();
+      await vi.advanceTimersByTimeAsync(5);
+      const socket = wsState.instances[0];
+      socket.emitOpen();
+
+      await vi.advanceTimersByTimeAsync(CONTROL_PING_INTERVAL_MS);
+      expect(socket.pingCount).toBe(1);
+      socket.emitPong();
+
+      // Pong 已续期:再跑三个周期仍是「活着」的连接,pings 照发,连接不动。
+      await vi.advanceTimersByTimeAsync(CONTROL_PING_INTERVAL_MS * 3);
+      expect(socket.pingCount).toBe(4);
+      expect(service.isConnected()).toBe(true);
+      service.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('控制面超时未回 Pong:主动断开并报链路断开(fail-hidden 的前置信号)', async () => {
+    vi.useFakeTimers();
+    try {
+      const changes: boolean[] = [];
+      const service = createBrowserAutomationService(
+        serviceDeps({ onConnectionChange: (connected) => changes.push(connected) }),
+      );
+      service.start();
+      await vi.advanceTimersByTimeAsync(5);
+      const socket = wsState.instances[0];
+      socket.emitOpen();
+      expect(changes).toEqual([true]);
+
+      // 一个 Pong 都不回:容忍窗口一过(45s + 一个周期)主动断开 ——
+      // 对端卡死时也不会在壳侧留下一条看起来还活着的链路。
+      await vi.advanceTimersByTimeAsync(CONTROL_PONG_TIMEOUT_MS + CONTROL_PING_INTERVAL_MS);
+      expect(changes).toEqual([true, false]);
+      expect(service.isConnected()).toBe(false);
+      service.stop();
     } finally {
       vi.useRealTimers();
     }

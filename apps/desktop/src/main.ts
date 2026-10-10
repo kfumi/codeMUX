@@ -20,10 +20,13 @@ import path from 'node:path';
 import { createArmedHeartbeat, type ArmedHeartbeatService } from './armed-heartbeat';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
+import { createComputerUseArming, type ComputerUseArming } from './computer-use-arming';
+import { createEstopEndpoint, DaemonHttpError } from './computer-use-estop';
 import { readLocalDaemonToken } from './daemon-token';
 import { createControlBannerService, type ControlBannerService } from './control-banner';
 import { createControlBannerWindow } from './control-banner-window';
 import { createDesktopCaptureHost } from './desktop-capture-host';
+import { COMPUTER_USE_ACTIVITY_EVENT, parseComputerUseActivity } from './desktop-events';
 import { createEmergencyStopService, type EmergencyStopService } from './emergency-stop';
 import { parseByteRange } from './http-range';
 import { ensureNotificationIdentity } from './notification-identity';
@@ -222,20 +225,22 @@ let emergencyStop: EmergencyStopService | null = null;
 let controlBanner: ControlBannerService | null = null;
 /** 武装心跳看门狗(工单 18):渲染层失联时由壳自己收起提示条并解除 Esc。 */
 let armedHeartbeat: ArmedHeartbeatService | null = null;
+/** 电脑控制「武装」真值(工单 03):提示条显隐与全局 Esc 的唯一出口(两个来源合成)。 */
+let computerUseArming: ComputerUseArming | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
 
 /**
- * 渲染层不会再驱动这套状态时的收尾(工单 18):解除全局 Esc 与收起提示条**必须一起**做
- * —— 只撤一半就是另一种撒谎(提示条还挂着却按不动,或 Esc 还占着却没有任何提示)。
+ * 渲染层不会再驱动这套状态时的收尾(工单 18;工单 03 起只撤**渲染层这一半**)。
  *
  * 两个来源:看门狗超时(渲染层主线程卡死,只能靠「不再续期」推断)、渲染进程 gone
  * (直接证据,不必等超时)。
+ *
+ * 不能直接改屏幕状态:daemon 报「正在被驱动」时,没有渲染层也必须留着提示条与 Esc
+ * (无人值守驱动正是本设计要覆盖的形态),所以这里只把渲染层的举手放下,由合成结果决定。
  */
-function disarmEmergencyStopAndHideBanner(): void {
-  emergencyStop?.setArmed(false);
-  armedHeartbeat?.stop();
-  controlBanner?.setVisible(false);
+function dropRendererArming(reason: string): void {
+  computerUseArming?.dropRendererSource(reason);
 }
 
 /**
@@ -267,13 +272,30 @@ function postDaemonJson(path: string, body: Record<string, unknown>): Promise<vo
         if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
           resolve();
         } else {
-          reject(new Error(`daemon 返回 ${response.statusCode}`));
+          reject(new DaemonHttpError(response.statusCode ?? 0));
         }
       },
     );
     request.on('error', reject);
     request.end(payload);
   });
+}
+
+/**
+ * 全局 Esc 的收尾动作(工单 03):一次调用让 daemon 把驱动、限时授权、有活动的回合一起
+ * 停下(工单 02 的 `/api/computer-use/estop`);旧 daemon 退回 driver/estop + 渲染层通知。
+ * 判定与兜底都在 `computer-use-estop.ts` 里(Node 可测),这里只接壳自己的两个出口。
+ */
+function estopEverything(): Promise<void> {
+  return createEstopEndpoint({
+    post: postDaemonJson,
+    notifyRenderer: () => sendToRenderer('emergency-stop', {}),
+    log: (level, message) => {
+      if (level === 'error') console.error(`[computer-use-estop] ${message}`);
+      else if (level === 'warn') console.warn(`[computer-use-estop] ${message}`);
+      else console.log(`[computer-use-estop] ${message}`);
+    },
+  }).estopEverything();
 }
 
 function getRendererLog(): RendererLogRecorder {
@@ -353,10 +375,10 @@ function createMainWindow(): BrowserWindow {
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     getRendererLog().record(level, message, line, sourceId);
   });
-  // 渲染进程挂了(工单 18):提示条宣称的「按 Esc 急停」已经没人能维持,而心跳看门狗
-  // 要等到超时才有反应 —— 这是最直接的证据,立刻按「渲染层不会再驱动状态」收尾。
+  // 渲染进程挂了(工单 18):它这一半的武装已经没人能维持,而心跳看门狗要等到超时才有
+  // 反应 —— 这是最直接的证据,立刻撤掉渲染层这一半(daemon 那一半照旧,工单 03)。
   window.webContents.on('render-process-gone', () => {
-    disarmEmergencyStopAndHideBanner();
+    dropRendererArming('渲染进程已退出');
   });
 
   // 开发态右键菜单:WebView2/Tauri dev 默认带「刷新/检查」,Electron 需自建。
@@ -514,6 +536,9 @@ async function quitApplication(): Promise<void> {
   // 提示条跟着收掉:它是独立窗口,不该比应用活得久(这里是真销毁,不是隐藏)。
   controlBanner?.dispose();
   controlBanner = null;
+  // 武装真值自己不带资源(定时器/窗口都在上面几个服务里),置空只为让退出后的一切
+  // 合成路径都无处可去。
+  computerUseArming = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
     await supervisor?.stopManaged();
@@ -582,24 +607,38 @@ if (!gotLock) {
     // 帧(工单 09:sessions-changed / scheduled-tasks-changed /
     // runtime-install-progress*)以同名事件名转发渲染层 —— Tauri 壳删除后
     // 这些事件的原投递方(app.emit)由本 sink 接管。
+    // 这条连接同时是电脑控制的链路(工单 03):daemon 的活动事件决定提示条与全局 Esc,
+    // 连接状态决定 fail-hidden(见 computer-use-arming.ts)。
     automation = createBrowserAutomationService({
       getPort: () => supervisor?.getPort() ?? null,
       readToken: () => readLocalDaemonToken(resolveAppDataDir()),
       resolveTarget: (browserId) => guests.resolveTarget(browserId),
       resolveMostRecent: () => guests.resolveMostRecent(),
       listTargets: () => guests.list(),
-      onUiEvent: (name, payload) => sendToRenderer(name, payload),
+      // 工单 03:`computer-use-activity` 不只是转发 —— 壳自己也要据此武装全局 Esc 与
+      // 显隐提示条。「这台机器正在被驱动」的权威在 daemon:没人开界面、渲染层从没加载、
+      // 浏览器/手机客户端在用,这些形态下渲染层都算不出来。
+      onUiEvent: (name, payload) => {
+        if (name === COMPUTER_USE_ACTIVITY_EVENT) {
+          const active = parseComputerUseActivity(payload);
+          // 认不出形状就什么都不做(旧 daemon 的其它事件撞名、载荷改版):宁可不动,
+          // 也不拿半个载荷去撤掉别人的武装。
+          if (active !== null) computerUseArming?.setDaemonActivity(active);
+        }
+        sendToRenderer(name, payload);
+      },
+      // 控制面链路状态(工单 03):断开即 fail-hidden(不挂一条按不动的急停提示)。
+      onConnectionChange: (connected) => computerUseArming?.setDaemonLinkUp(connected),
       // 桌面只读观测(工单 04):窗口清单/截图/活动窗口。
       desktop: createDesktopCaptureHost(),
     });
     automation.start();
-    // 全局 Esc 急停(工单 06):有回合在跑且系统级执行开着时武装。触发时先通知
-    // 渲染层打断当前回合,再让 daemon 杀掉驱动子进程 —— 两件事都不经模型。
+    // 全局 Esc 急停(工单 06;工单 03 起触发动作收敛成一次 daemon 急停调用):
+    // 有电脑控制在飞时武装,按下去让 daemon 把驱动、限时授权与有活动的回合一起停下。
     const emergencyStopService = createEmergencyStopService({
       registerShortcut: (accelerator, handler) => globalShortcut.register(accelerator, handler),
       unregisterShortcut: (accelerator) => globalShortcut.unregister(accelerator),
-      estopDriver: () => postDaemonJson('/api/computer-use/driver/estop', {}),
-      notifyRenderer: () => sendToRenderer('emergency-stop', {}),
+      estopEverything: () => estopEverything(),
       log: (level, message) => {
         if (level === 'error') console.error(message);
         else if (level === 'warn') console.warn(message);
@@ -608,7 +647,7 @@ if (!gotLock) {
     });
     emergencyStop = emergencyStopService;
     // 控制中提示条(工单 10):屏幕上写明「电脑正在被控制,按 Esc 急停」。
-    // 显示与否跟随武装状态(见 shell-bridge 的 setEmergencyStopArmed)。
+    // 显示与否由武装真值合成后的结果决定(见 computer-use-arming.ts)。
     controlBanner = createControlBannerService({
       open: () => createControlBannerWindow({
         // 窗口层自己也补不回来时(系统关窗 + 重建失败)如实上报:否则服务层会一直记着
@@ -622,15 +661,33 @@ if (!gotLock) {
       },
     });
     // 武装心跳看门狗(工单 18):渲染层在武装期间持续发心跳(见
-    // src/hooks/useEmergencyStop.ts),这里负责「它不再发」的那一侧 —— 提示条正在
-    // 宣称「按 Esc 急停」,渲染层失联时宁可收起,也不能替它继续撒谎。
+    // src/hooks/useEmergencyStop.ts),这里负责「它不再发」的那一侧。工单 03 起它只撤
+    // **渲染层这一半**武装 —— daemon 报的活动由控制面链路守,不能被渲染层的死带走。
     const armedHeartbeatService = createArmedHeartbeat({
       onTimeout: () => {
-        disarmEmergencyStopAndHideBanner();
+        dropRendererArming('武装心跳超时');
       },
       logger: { warn: (message) => console.warn(message) },
     });
     armedHeartbeat = armedHeartbeatService;
+
+    // 电脑控制「武装」真值(工单 03):提示条显隐与全局 Esc 的唯一出口。两个来源合成
+    // (daemon 的活动事件是权威;渲染层的旧路径在并存期只能「加」不能「减」),控制面
+    // 链路断开即 fail-hidden —— 看门狗守的对象从「渲染层心跳」换成了「daemon 链路」。
+    const computerUseArmingService = createComputerUseArming({
+      emergencyStop: emergencyStopService,
+      controlBanner,
+      armedHeartbeat: armedHeartbeatService,
+      isQuitting: () => quitting,
+      log: (level, message) => {
+        if (level === 'error') console.error(`[computer-use-arming] ${message}`);
+        else if (level === 'warn') console.warn(`[computer-use-arming] ${message}`);
+        else console.log(`[computer-use-arming] ${message}`);
+      },
+    });
+    computerUseArming = computerUseArmingService;
+    // 连接早于武装真值创建也不丢状态:用当前连接状态补一次(幂等,已在连线时是 no-op)。
+    computerUseArmingService.setDaemonLinkUp(automation.isConnected());
     // 应用内更新器(工单 06):electron-updater(GitHub Releases);
     // 开发/未打包环境在服务内部自动禁用(check → unavailable)。
     const updater = createUpdaterService({
@@ -640,10 +697,7 @@ if (!gotLock) {
       logDir: resolveLogDir(),
     });
     unregisterBridge = registerShellBridge({
-      emergencyStop: emergencyStopService,
-      controlBanner,
-      armedHeartbeat: armedHeartbeatService,
-      isQuitting: () => quitting,
+      computerUseArming: computerUseArmingService,
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,

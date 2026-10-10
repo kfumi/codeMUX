@@ -8,6 +8,9 @@
 //! 同名同形:sessions-changed / scheduled-tasks-changed /
 //! runtime-install-progress / runtime-install-progress-<provider>)。
 //!
+//! 例外一个:`computer-use-activity`(工单 01/03)不只是转发 —— 壳自己要据此武装全局
+//! Esc 与显隐提示条,所以它的形状也在这里解析(`parseComputerUseActivity`)。
+//!
 //! 本文件不 import electron(纯解析),便于 Node(vitest)契约测试。
 
 /** 解析后的桌面 UI 事件:name = 渲染层事件名,payload = 原样载荷。 */
@@ -47,4 +50,21 @@ export function parseDesktopUiEvent(raw: string): DesktopUiEvent | null {
     name: event.name,
     payload: event.payload ?? null,
   };
+}
+
+/**
+ * daemon 活动真值事件(工单 01):控制面 lane 上 `{active, sessions}` 的快照 ——
+ * 「这台机器正在被驱动」的权威答案,壳据此武装/解除全局 Esc 并显隐提示条(工单 03)。
+ */
+export const COMPUTER_USE_ACTIVITY_EVENT = 'computer-use-activity';
+
+/**
+ * 从事件载荷里取「是否正在被驱动」。
+ *
+ * 认不出形状就返回 null:宁可不动武装状态,也不拿半个载荷去撤掉任何人的武装
+ * (旧 daemon 的其它事件名撞车、未来载荷改版都属于这一类)。
+ */
+export function parseComputerUseActivity(payload: unknown): boolean | null {
+  if (!isRecord(payload) || typeof payload.active !== 'boolean') return null;
+  return payload.active;
 }

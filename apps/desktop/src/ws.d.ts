@@ -1,6 +1,6 @@
 /**
  * `ws` 的最小类型声明(工单 08):apps/desktop 只允许新增唯一运行时依赖 `ws`,
- * 不引入 @types/ws。这里仅声明 browser-automation.ts 实际用到的面。
+ * 不引入 @types/ws。这里仅声明 browser-automation.ts 实际用到的面(含工单 03 的保活 ping/pong)。
  *
  * Electron main(main.ts/browser-automation.ts)按 apps/desktop/tsconfig
  * 编译为 CommonJS;vitest(根配置)经 vi.mock('ws') 注入测试替身。
@@ -14,8 +14,11 @@ declare module 'ws' {
     on(event: 'message', listener: (data: unknown) => void): this;
     on(event: 'error', listener: (error: Error) => void): this;
     on(event: 'close', listener: (code: number, reason: Buffer) => void): this;
+    on(event: 'pong', listener: () => void): this;
     on(event: string, listener: (...args: unknown[]) => void): this;
     send(data: string): void;
+    /** 协议级保活(工单 03):daemon 的 WS 循环会回 Pong(见 browser-automation.ts 常量说明)。 */
+    ping(data?: unknown): void;
     close(code?: number, reason?: string): void;
     removeAllListeners(): void;
     terminate(): void;

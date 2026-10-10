@@ -1,12 +1,13 @@
 //! 全局 Esc 强打断(工单 06 需求 12;工单 10 收窄窗口,10 跟进再收窄):失控时两秒内停下来。
 //!
-//! 武装窗口由渲染层决定(见 `src/hooks/useEmergencyStop.ts`):只在「电脑控制开启 +
-//! 系统级执行开着 + 真的有 computer_* 工具在飞(含等审批)」时接管全局 Esc ——
-//! 平时装着它等于替用户决定 Esc 归谁,而急停要停的是真实驱动动作,所以只在
-//! 该动作进行期间接管。
+//! 武装窗口(工单 03 起)由两个来源共同决定,见 `computer-use-arming.ts`:daemon 的
+//! `computer-use-activity` 事件(权威)与渲染层的旧路径(并存期,见
+//! `src/hooks/useEmergencyStop.ts`)。两者都只在「真的有电脑控制在飞」时举手 ——
+//! 平时接管全局 Esc 等于替用户决定 Esc 归谁,而急停要停的是真实驱动动作。
 //!
-//! 触发动作是两件事,缺一不可:杀驱动子进程(在途动作立刻断),并通知渲染层
-//! 打断当前回合(把「停下来」这个事实告诉模型与用户)。
+//! 触发动作是一件事:让 daemon 把**驱动子进程、限时授权、有活动的回合**一起停下
+//! (工单 02 的 `/api/computer-use/estop`,工单 03 改用它)。不再依赖渲染层回话 ——
+//! 「没人开界面」时那半条路本来就不存在,而这一层要能在任何形态下都停得下来。
 //!
 //! 本文件不 import electron(registerShortcut 由调用方注入),便于 Node 测试。
 
@@ -15,15 +16,18 @@ export interface EmergencyStopDeps {
   /** 注册全局快捷键;返回是否注册成功(被占用时为 false)。 */
   registerShortcut(accelerator: string, handler: () => void): boolean;
   unregisterShortcut(accelerator: string): void;
-  /** 触发时:杀驱动子进程(daemon 侧 estop)。失败不应拦住通知。 */
-  estopDriver(): Promise<void>;
-  /** 触发时:通知渲染层打断当前回合。 */
-  notifyRenderer(): void;
+  /**
+   * 触发时:一次调用把驱动、限时授权与有活动的回合一起停下(daemon 侧急停端点)。
+   *
+   * 失败只记日志(用户已经按下去了,这里没有第二条路可退);也没有「先通知渲染层」
+   * 这种顺序依赖 —— 回合由 daemon 打断,界面从 daemon 的事件里知道结果。
+   */
+  estopEverything(): Promise<void>;
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
 }
 
 export interface EmergencyStopService {
-  /** 渲染层按配置武装/解除(开启系统级执行才武装)。 */
+  /** 武装/解除(工单 03 起由 computer-use-arming 按两个来源合成后调用)。 */
   setArmed(armed: boolean): void;
   isArmed(): boolean;
   /** 手动触发(测试与将来的菜单项用)。 */
@@ -47,15 +51,9 @@ export function createEmergencyStopService(deps: EmergencyStopDeps): EmergencySt
   let armed = false;
 
   const run = () => {
-    log('warn', '全局 Esc 触发:急停驱动并打断当前回合');
-    // 先通知界面(人看到的要先发生),再异步杀驱动。
-    try {
-      deps.notifyRenderer();
-    } catch (error) {
-      log('error', `通知渲染层失败: ${String(error)}`);
-    }
-    void deps.estopDriver().catch((error: unknown) => {
-      log('error', `急停驱动失败: ${String(error)}`);
+    log('warn', '全局 Esc 触发:急停驱动、收回限时授权并打断有活动的回合');
+    void deps.estopEverything().catch((error: unknown) => {
+      log('error', `急停失败: ${String(error)}`);
     });
   };
 

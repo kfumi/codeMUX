@@ -93,6 +93,13 @@ export interface BrowserAutomationDeps {
    */
   onUiEvent?: (name: string, payload: unknown) => void;
   /**
+   * 控制面链路状态出口(工单 03):连上与断开各回调一次。
+   *
+   * 电脑控制提示条与全局 Esc 的活性判据就是这条链路(见 `computer-use-arming.ts`):
+   * 链路断开必须被壳侧看见 —— 断开即 fail-hidden,不留一条按不动的「按 Esc 急停」。
+   */
+  onConnectionChange?: (connected: boolean) => void;
+  /**
    * 桌面只读观测(工单 04):窗口清单/截图/活动窗口。缺省表示该宿主没有
    * 桌面捕获能力(纯浏览器形态),桌面 op 明确报错而不是静默失败。
    */
@@ -105,6 +112,21 @@ export interface BrowserAutomationService {
   stop(): void;
   isConnected(): boolean;
 }
+
+/**
+ * 控制面链路保活(工单 03)。
+ *
+ * daemon 只在活动变化时发事件,这条链路平时没有任何流量 —— 而提示条与全局 Esc 的活性
+ * 判据偏偏就是它。所以按固定周期发一次协议级 ping:daemon 的 WS 循环显式回 Pong
+ * (`crates/daemon/src/companion/server.rs` 的会话与控制面两条循环都处理 `Message::Ping`),
+ * 于是「超过容忍时长没收到 Pong」就等于这条链路已经不可用(对端卡死/假死),主动断开让
+ * 它走既有的重连退避,链路随之下线 → 壳侧 fail-hidden。
+ *
+ * 15s 一次、容忍 45s(跨三个周期):loopback 的正常 RTT 是微秒级,这个量级只用来兜
+ * 「对端不再回应」,不会把正常连接判死。
+ */
+export const CONTROL_PING_INTERVAL_MS = 15_000;
+export const CONTROL_PONG_TIMEOUT_MS = 45_000;
 
 /** daemon 控制面事件信封:{"type":"event","sessionId":"","event":{...}}。 */
 interface ControlEventEnvelope {
@@ -498,6 +520,9 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
   let connected = false;
   let reconnectAttempt = 0;
   let reconnectTimer: NodeJS.Timeout | null = null;
+  /** 控制面保活计时器与最近一次 Pong 时间戳(工单 03,见 CONTROL_PING_INTERVAL_MS)。 */
+  let pingTimer: NodeJS.Timeout | null = null;
+  let lastPongAt = 0;
   /** 全局 FIFO:每条请求串在队尾(执行完才轮到下一条,含 CDP)。 */
   let queueTail: Promise<void> = Promise.resolve();
 
@@ -530,6 +555,50 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
     }
   }
 
+  /** 连接状态变化:只在真变化时回调一次(壳侧据此武装/解除,fail-hidden)。 */
+  function setConnected(next: boolean): void {
+    if (connected === next) return;
+    connected = next;
+    try {
+      deps.onConnectionChange?.(next);
+    } catch (error) {
+      log('warn', `控制面连接状态回调异常: ${String(error)}`);
+    }
+  }
+
+  function stopPing(): void {
+    if (pingTimer === null) return;
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+
+  /** 连接建立后开始保活:超时未回 Pong 就主动断开,交给既有重连退避。 */
+  function startPing(current: WebSocket): void {
+    stopPing();
+    lastPongAt = Date.now();
+    pingTimer = setInterval(() => {
+      if (socket !== current) {
+        stopPing();
+        return;
+      }
+      if (Date.now() - lastPongAt > CONTROL_PONG_TIMEOUT_MS) {
+        log('warn', `控制面 ${CONTROL_PONG_TIMEOUT_MS}ms 未回 Pong:链路已不可用,断开重连`);
+        stopPing();
+        try {
+          current.terminate();
+        } catch {
+          // ignore:真正的收尾在 close 事件里(置连接状态 + 重连)。
+        }
+        return;
+      }
+      try {
+        current.ping();
+      } catch (error) {
+        log('warn', `控制面保活 ping 发送失败: ${String(error)}`);
+      }
+    }, CONTROL_PING_INTERVAL_MS);
+  }
+
   function scheduleConnect(delayMs: number): void {
     if (stopped || reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
@@ -558,9 +627,15 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
     socket = next;
     next.on('open', () => {
       if (socket !== next) return;
-      connected = true;
+      setConnected(true);
       reconnectAttempt = 0;
+      lastPongAt = Date.now();
+      startPing(next);
       log('info', `已连接 daemon 控制面(127.0.0.1:${port}/api/ws)`);
+    });
+    next.on('pong', () => {
+      if (socket !== next) return;
+      lastPongAt = Date.now();
     });
     next.on('message', (data: unknown) => {
       try {
@@ -577,7 +652,8 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
     next.on('close', () => {
       if (socket !== next) return;
       socket = null;
-      connected = false;
+      setConnected(false);
+      stopPing();
       // 主动 stop 的 close 不重连(stopped 已置位)。
       scheduleReconnect();
     });
@@ -596,9 +672,10 @@ export function createBrowserAutomationService(deps: BrowserAutomationDeps): Bro
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      stopPing();
       const current = socket;
       socket = null;
-      connected = false;
+      setConnected(false);
       if (current) {
         try {
           current.close();

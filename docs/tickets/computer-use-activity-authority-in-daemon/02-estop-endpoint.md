@@ -30,3 +30,6 @@
 - 门禁：`cargo fmt --check`、`clippy -D warnings`、`check --all-targets --all-features` 全 0；`cargo test` 767 单测 + 集成套件全绿（新增 1 条集成用例，连同工单 01 的共 3 条）；`npm run build:daemon` 成功；`check:size` 27 处与 master 逐条一致（`computer_use/routes.rs` 本来就已在其中）。
 - 本票的用例没有做「禁掉实现再跑」的反向验证（01 做了）：断言直接落在端点的输出与回合状态上（`interruptedTurns`、`is_turn_active`、活动快照），去掉打断循环就会红 —— 这是结构性推断，不是实测结论，如实记下。
 - 壳侧还没接这个端点：Esc 目前仍走「通知渲染层」的老路径，那是 03 的活。本票只把 daemon 侧的能力摆好。
+- 03 已接上本端点：全局 Esc 现在只发一次 `POST /api/computer-use/estop`（判定与 404 兜底在
+   `apps/desktop/src/computer-use-estop.ts`），不再依赖渲染层回话；旧 daemon 才退回
+   `driver/estop` + 通知渲染层。

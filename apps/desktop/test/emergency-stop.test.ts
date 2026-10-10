@@ -1,4 +1,5 @@
-// 全局 Esc 强打断(工单 06)契约测试:武装/解除/触发/注册失败的降级。
+// 全局 Esc 强打断(工单 06;工单 03 起触发动作收敛为一次 daemon 急停调用)契约测试:
+// 武装/解除/触发/注册失败的降级。
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,8 +20,7 @@ function deps(overrides: Partial<EmergencyStopDeps> = {}): EmergencyStopDeps & {
     unregisterShortcut: vi.fn((accelerator: string) => {
       registered.delete(accelerator);
     }),
-    estopDriver: vi.fn(async () => {}),
-    notifyRenderer: vi.fn(),
+    estopEverything: vi.fn(async () => {}),
     log: vi.fn(),
     registered,
     ...overrides,
@@ -49,27 +49,30 @@ describe('emergency stop', () => {
     expect(d.registerShortcut).toHaveBeenCalledTimes(1);
   });
 
-  it('the shortcut kills the driver and interrupts the turn', async () => {
+  it('the shortcut stops everything in one daemon call(工单 03)', async () => {
     const d = deps();
     const service = createEmergencyStopService(d);
     service.setArmed(true);
 
     d.registered.get(EMERGENCY_STOP_ACCELERATOR)?.();
 
-    expect(d.notifyRenderer).toHaveBeenCalledTimes(1);
-    expect(d.estopDriver).toHaveBeenCalledTimes(1);
+    // 驱动、限时授权、有活动的回合都由 daemon 那一次调用收口 —— 不再有第二条路径。
+    expect(d.estopEverything).toHaveBeenCalledTimes(1);
   });
 
-  it('a failing estop still interrupts the turn', async () => {
-    const d = deps({ estopDriver: vi.fn(async () => { throw new Error('daemon 断连'); }) });
+  it('a failing estop is only logged(用户已经按下去了,没有第二条路可退)', async () => {
+    const d = deps({
+      estopEverything: vi.fn(async () => {
+        throw new Error('daemon 断连');
+      }),
+    });
     const service = createEmergencyStopService(d);
     service.setArmed(true);
 
     d.registered.get(EMERGENCY_STOP_ACCELERATOR)?.();
     await Promise.resolve();
 
-    expect(d.notifyRenderer).toHaveBeenCalledTimes(1);
-    expect(d.log).toHaveBeenCalledWith('error', expect.stringContaining('急停驱动失败'));
+    expect(d.log).toHaveBeenCalledWith('error', expect.stringContaining('急停失败'));
   });
 
   it('stays disarmed when the shortcut cannot be registered', () => {
