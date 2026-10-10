@@ -34,7 +34,6 @@ import {
 } from './agent-checks';
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
 import { capturePrimaryScreen } from './desktop-capture-host';
-import type { ComputerUseArming } from './computer-use-arming';
 import { readLocalDaemonTokenOrThrow } from './daemon-token';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
@@ -57,13 +56,6 @@ export interface ShellBridgeDeps {
   sendToRenderer(channel: string, payload: unknown): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
-  /**
-   * 电脑控制「武装」真值(工单 03;main.ts 创建)。
-   *
-   * 提示条显隐与全局 Esc 由两个来源合成(daemon 的活动事件 + 渲染层的旧路径),
-   * 合成规则、看门狗与退出守卫都在 `computer-use-arming.ts` 里,这里只是 IPC 薄壳。
-   */
-  computerUseArming: ComputerUseArming;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -431,21 +423,9 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   // 手动贴屏(工单 04):用户点一下截主屏,渲染层把 PNG 贴进会话上下文。
   // 这是用户主动发起的只读动作,不经 daemon 闸门(需求 17)。
   handle('captureDesktopScreen', () => capturePrimaryScreen());
-  // 全局 Esc 急停 / 提示条(工单 06/10/18;工单 03 起合成规则搬进 computer-use-arming):
-  // 通道面与语义不变 —— 渲染层看到的仍是**实际**武装结果:注册失败(键被别的程序占着)、
-  // 控制面链路断开、退出中都不生效,那时绝不能挂一个「按 Esc 急停」却按不动的提示。
-  handle('setEmergencyStopArmed', (payload: unknown) => {
-    const { armed } = (payload ?? {}) as { armed?: unknown };
-    if (typeof armed !== 'boolean') {
-      throw new Error('armed must be a boolean');
-    }
-    // 退出中一律落空、两个来源怎么合成,都由 arming 负责,这里不重复判定。
-    return deps.computerUseArming.setRendererArmed(armed);
-  });
-  // 武装心跳(工单 18):提示条宣传的是 Esc 急停,不能让一个可能已经失联的渲染层
-  // 决定它还该不该留在屏幕上。渲染层按固定周期调用这里续期;返回 false 时它若仍需要
-  // Esc 就重新声明一次,而不是以为一切都好。
-  handle('emergencyStopHeartbeat', () => deps.computerUseArming.heartbeat());
+  // 全局 Esc 急停 / 提示条(工单 06/10/18)的武装与心跳通道已随工单 04 退役:提示条显隐
+  // 与全局 Esc 完全由 daemon 的活动事件驱动(见 computer-use-arming.ts),渲染层不再举手,
+  // 这里也就不留兜底 —— 旧渲染层调用这两个通道只会拿到「通道不存在」,不会拿到假的武装承诺。
   // guest 登记:webview did-attach 后渲染层上报 webContentsId → browserId,
   // main 侧弹窗拒绝转发据此回填 sourceBrowserId。
   handle('browserRegisterGuest', (payload: unknown) => {

@@ -110,6 +110,7 @@
 - 内置 Browser Host 迁移 Chromium：渲染层沙箱 `<webview>`（独立 partition，与应用 IPC 隔离），CDP 经 `webContents.debugger` 可用
 - 新增 daemon→壳受控自动化接缝：桌面 UI 事件出口（sessions-changed 等）与浏览器自动化请求队列，均复用既有控制面 WS 通道
 - 桌面 UI、移动伴侣（PWA）与本机 CLI 统一为 Daemon Client，共享回环 Companion REST/WS + CodeMUX Event 协议
+- 「电脑控制」的活动真值与急停权威收敛到 daemon 后，删掉渲染层那条旧路径（并存期结束）：渲染层不再计算「该不该武装」、不再发武装心跳，`codemux:setEmergencyStopArmed` / `codemux:emergencyStopHeartbeat` 两个 IPC 通道、心跳看门狗（`armed-heartbeat.ts`）与工具名判定（`computerUseActivity.ts`）一并退役。现在提示条与全局 Esc **只认 daemon 的活动事件**，活性判据是控制面链路（含 Ping/Pong 保活）：链路断开、daemon 报没有活动、或注册不到全局 Esc 时一律 fail-hidden；渲染进程崩掉 / 卡死 / 根本没加载都不再影响这台机器上的提示与急停
 
 #### Agent 运行时
 - 新增 `pi` 运行时：基于 pi RPC 的极简多供应商编码 Agent，支持会话恢复、工具审批、`AskUserQuestion` 与 steer

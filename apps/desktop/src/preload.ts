@@ -137,20 +137,8 @@ const bridge = {
     invoke<void>('browserRegisterGuest', { webContentsId, browserId }),
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen: () => invoke<{ image: string; width: number; height: number }>('captureDesktopScreen'),
-  /**
-   * 全局 Esc 急停(工单 06/10;武装窗口口径见工单 15):「有回合在跑 且 系统级
-   * 执行开启 且 这个回合里出现过 computer_* 调用」期间武装。壳负责注册/解除、
-   * 跟随武装结果显示控制中提示条(常驻到这次桌面操作结束),并在触发时急停驱动
-   * + 打断当前回合;返回实际是否已武装。
-   */
-  setEmergencyStopArmed: (armed: boolean) => invoke<boolean>('setEmergencyStopArmed', { armed }),
-  /**
-   * 武装心跳(工单 18):武装期间按固定周期调用,壳侧只在「真的还武装着」时续期并
-   * 返回 true。返回 false 表示壳侧已经不武装(看门狗超时解除,或键被别的程序占着
-   * 注册失败)—— 此时渲染层若仍需要 Esc,应重新调用 setEmergencyStopArmed 声明。
-   * 壳侧超过 ARMED_HEARTBEAT_TIMEOUT_MS 收不到心跳就自己收起提示条并解除 Esc。
-   */
-  emergencyStopHeartbeat: () => invoke<boolean>('emergencyStopHeartbeat'),
+  // 全局 Esc 急停的武装/心跳通道已随工单 04 退役(提示条与 Esc 由壳跟随 daemon 活动事件
+  // 驱动);渲染层只剩下面的 onEmergencyStop —— 旧 daemon 兜底路径下的打断通知。
 
   // perf / devtools
   exportPerfSnapshot: (path: string, content: string) => invoke<null>('exportPerfSnapshot', { path, content }),

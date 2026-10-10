@@ -18,7 +18,7 @@ daemon 侧具备全部原材料：`mark_turn_active` 由运行时事件驱动（
 2. **活动状态经控制面 lane 广播**：新 `ui-event` 名为 `computer-use-activity`（空 `sessionId` 的既有信封），只在状态变化时发，后连上的控制面客户端先收一份当前快照。单机一个聚合状态，明细带会话列表。
 3. **急停由 daemon 执行**：新增 `POST /api/computer-use/estop` = 杀驱动 + 收回限时授权 + 打断所有有桌面活动的回合（复用 `interrupt_companion_session`），写审计并返回被打断的会话。壳的 Esc 只做这一次调用，不再依赖渲染层回话。
 4. **壳是显示与输入适配器**：控制面事件 → 武装/解除全局 Esc + 提示条显隐；工单 18 的看门狗从「渲染层心跳」改为「daemon 链路心跳」，链路断了 fail-hidden（收起提示条 + 解除 Esc）。
-5. **一个 release 的并存期后删除渲染层路径**：并存期以 daemon 为权威，渲染层只能「加」不能「减」（不丢 Esc）；随后删除 `useEmergencyStop` 的武装路径与 `codemux:emergencyStopArmed` / `emergencyStopHeartbeat` 通道，禁止长期保留两个真来源。
+5. **一个 release 的并存期后删除渲染层路径**：并存期以 daemon 为权威，渲染层只能「加」不能「减」（不丢 Esc）；随后删除 `useEmergencyStop` 的武装路径与 `codemux:emergencyStopArmed` / `codemux:emergencyStopHeartbeat` 通道，禁止长期保留两个真来源。**已完成**（工单 04；daemon 权威版随 v0.4.9 发布后落地）：武装只剩 daemon 一个来源，心跳看门狗（`armed-heartbeat.ts`）随渲染层半边一起退役，活性判据是控制面链路。
 
 ## Consequences
 

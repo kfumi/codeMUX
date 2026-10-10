@@ -3,8 +3,8 @@
  * 与 `crates/daemon/src/builtin_mcp.rs` 的 `SERVER_NAME` / `LEGACY_SERVER_NAMES` 同源。
  *
  * 为什么历史名也要留在前端:轨迹是持久数据 —— 老会话里存的是改名前的全名
- * (`mcp__codemux-browser__computer_click`),改名后仍要认得,否则回看时活动标记与
- * 急停判定会静默失效(工单 16)。
+ * (`mcp__codemux-browser__computer_click`),改名后仍要认得,否则回看时工具名归类会
+ * 静默失效(工单 16;当年同一份名单还供「急停该不该武装」判定用,那条路径已随工单 04 退役)。
  */
 
 export const BUILTIN_MCP_SERVER_NAME = 'codemux-control';

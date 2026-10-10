@@ -17,7 +17,6 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-import { createArmedHeartbeat, type ArmedHeartbeatService } from './armed-heartbeat';
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { createComputerUseArming, type ComputerUseArming } from './computer-use-arming';
@@ -223,25 +222,10 @@ let automation: BrowserAutomationService | null = null;
 let emergencyStop: EmergencyStopService | null = null;
 /** 控制中提示条(工单 10):显示与否跟随急停的武装状态。 */
 let controlBanner: ControlBannerService | null = null;
-/** 武装心跳看门狗(工单 18):渲染层失联时由壳自己收起提示条并解除 Esc。 */
-let armedHeartbeat: ArmedHeartbeatService | null = null;
-/** 电脑控制「武装」真值(工单 03):提示条显隐与全局 Esc 的唯一出口(两个来源合成)。 */
+/** 电脑控制「武装」真值(工单 03/04):提示条显隐与全局 Esc 的唯一出口(只认 daemon 活动)。 */
 let computerUseArming: ComputerUseArming | null = null;
 /** 渲染层 console 落盘器(窗口可能重建,记录器本身无状态可复用)。 */
 let rendererLog: RendererLogRecorder | null = null;
-
-/**
- * 渲染层不会再驱动这套状态时的收尾(工单 18;工单 03 起只撤**渲染层这一半**)。
- *
- * 两个来源:看门狗超时(渲染层主线程卡死,只能靠「不再续期」推断)、渲染进程 gone
- * (直接证据,不必等超时)。
- *
- * 不能直接改屏幕状态:daemon 报「正在被驱动」时,没有渲染层也必须留着提示条与 Esc
- * (无人值守驱动正是本设计要覆盖的形态),所以这里只把渲染层的举手放下,由合成结果决定。
- */
-function dropRendererArming(reason: string): void {
-  computerUseArming?.dropRendererSource(reason);
-}
 
 /**
  * 壳直连 daemon 的 JSON POST(工单 06 急停):与自动化回包同一套回环 +
@@ -375,12 +359,6 @@ function createMainWindow(): BrowserWindow {
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     getRendererLog().record(level, message, line, sourceId);
   });
-  // 渲染进程挂了(工单 18):它这一半的武装已经没人能维持,而心跳看门狗要等到超时才有
-  // 反应 —— 这是最直接的证据,立刻撤掉渲染层这一半(daemon 那一半照旧,工单 03)。
-  window.webContents.on('render-process-gone', () => {
-    dropRendererArming('渲染进程已退出');
-  });
-
   // 开发态右键菜单:WebView2/Tauri dev 默认带「刷新/检查」,Electron 需自建。
   // 仅开发态注册;打包态不注册(页面内的自定义 React onContextMenu 不受影响)。
   if (!app.isPackaged) {
@@ -530,14 +508,11 @@ async function quitApplication(): Promise<void> {
   // 解除全局 Esc:退出后不该再占着这个键(也避免重入时残留注册)。
   emergencyStop?.setArmed(false);
   emergencyStop = null;
-  // 看门狗一起停:退出时不该再留一个计时器等「渲染层失联」。
-  armedHeartbeat?.stop();
-  armedHeartbeat = null;
   // 提示条跟着收掉:它是独立窗口,不该比应用活得久(这里是真销毁,不是隐藏)。
   controlBanner?.dispose();
   controlBanner = null;
-  // 武装真值自己不带资源(定时器/窗口都在上面几个服务里),置空只为让退出后的一切
-  // 合成路径都无处可去。
+  // 武装真值自己不带资源(窗口在 controlBanner 里),置空只为让退出后的一切合成路径
+  // 都无处可去(控制面链路的迟到回调也不该再去碰已经销毁的提示条)。
   computerUseArming = null;
   // 只停自有 child;attach 的外部 daemon 绝不动(stopManaged 语义保证)。
   try {
@@ -660,25 +635,12 @@ if (!gotLock) {
         else console.log(message);
       },
     });
-    // 武装心跳看门狗(工单 18):渲染层在武装期间持续发心跳(见
-    // src/hooks/useEmergencyStop.ts),这里负责「它不再发」的那一侧。工单 03 起它只撤
-    // **渲染层这一半**武装 —— daemon 报的活动由控制面链路守,不能被渲染层的死带走。
-    const armedHeartbeatService = createArmedHeartbeat({
-      onTimeout: () => {
-        dropRendererArming('武装心跳超时');
-      },
-      logger: { warn: (message) => console.warn(message) },
-    });
-    armedHeartbeat = armedHeartbeatService;
-
-    // 电脑控制「武装」真值(工单 03):提示条显隐与全局 Esc 的唯一出口。两个来源合成
-    // (daemon 的活动事件是权威;渲染层的旧路径在并存期只能「加」不能「减」),控制面
-    // 链路断开即 fail-hidden —— 看门狗守的对象从「渲染层心跳」换成了「daemon 链路」。
+    // 电脑控制「武装」真值(工单 03/04):提示条显隐与全局 Esc 的唯一出口 —— 只认
+    // daemon 的活动事件;链路断开即 fail-hidden(渲染层那条旧路径已退役,活性判据是
+    // 控制面链路本身:见 browser-automation.ts 的 Ping/Pong 保活与连接状态回调)。
     const computerUseArmingService = createComputerUseArming({
       emergencyStop: emergencyStopService,
       controlBanner,
-      armedHeartbeat: armedHeartbeatService,
-      isQuitting: () => quitting,
       log: (level, message) => {
         if (level === 'error') console.error(`[computer-use-arming] ${message}`);
         else if (level === 'warn') console.warn(`[computer-use-arming] ${message}`);
@@ -697,7 +659,6 @@ if (!gotLock) {
       logDir: resolveLogDir(),
     });
     unregisterBridge = registerShellBridge({
-      computerUseArming: computerUseArmingService,
       getAppDataDir: resolveAppDataDir,
       getLogDir: resolveLogDir,
       getMainWindow: () => mainWindow,

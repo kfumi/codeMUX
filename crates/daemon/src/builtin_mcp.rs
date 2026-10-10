@@ -14,7 +14,8 @@
 //! | Claude / Codex `mcp__<server>__<tool>` | `mcp__codemux-browser__computer_click` | `mcp__codemux-control__computer_click` |
 //! | OpenCode 等 `<server>_<tool>` | `codemux-browser_computer_click` | `codemux-control_computer_click` |
 //!
-//! 所以历史轨迹里的旧全名仍要认得(见 `src/lib/computerUseActivity.ts` 的旧名名单),
+//! 所以历史轨迹里的旧全名仍要认得(见 `src/lib/builtinMcp.ts` 的旧 server 名名单;渲染层
+//! 曾用它判定「急停该不该武装」,那条路径已随工单 04 退役),
 //! 旧 key 也保留为禁用名(见 [`LEGACY_SERVER_NAMES`])。
 //!
 //! **一个 server 而不是两个**:两族能力在开关、调用闸门、审批分级与清单过滤上早已

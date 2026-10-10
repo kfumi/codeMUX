@@ -250,22 +250,9 @@ export interface CodemuxDesktopBridge {
   browserRegisterGuest(webContentsId: number, browserId: string): Promise<void>;
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen(): Promise<{ image: string; width: number; height: number }>;
-  /**
-   * 全局 Esc 急停(工单 06/10;武装窗口口径见工单 15):「有回合在跑 **且**
-   * 系统级执行开启 **且** 这个回合里出现过 computer_* 调用」期间武装 —— 空闲或
-   * 纯聊天时 Esc 还给系统和别的应用。返回**实际**是否已武装(键被别的程序占用
-   * 时注册失败返回 false);壳侧控制中提示条跟随这个结果显示,武装多久就显示
-   * 多久,直到这次桌面操作结束。
-   */
-  setEmergencyStopArmed(armed: boolean): Promise<boolean>;
-  /**
-   * 武装心跳(工单 18):武装期间按固定周期调用,壳侧只在「真的还武装着」时续期并
-   * 返回 true;返回 false(看门狗已解除武装 / 注册失败)时,渲染层若仍需要 Esc 应
-   * 重新调用 setEmergencyStopArmed 声明。壳侧超过 ARMED_HEARTBEAT_TIMEOUT_MS 收不到
-   * 心跳就自己收起提示条并解除 Esc —— 提示条宣传的是 Esc 急停,不能让一个可能已经
-   * 失联的渲染层决定它还该不该留在屏幕上。
-   */
-  emergencyStopHeartbeat(): Promise<boolean>;
+  // 全局 Esc 急停的武装/心跳桥面已随工单 04 退役:提示条显隐与 Esc 由壳跟随 daemon 的
+  // 活动事件驱动(渲染层不再算「该不该武装」);这里只剩下面的 onEmergencyStop ——
+  // 旧 daemon 兜底路径(没有 /api/computer-use/estop)下的打断通知。
 
   // perf / devtools
   exportPerfSnapshot(path: string, content: string): Promise<null>;
