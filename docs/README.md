@@ -127,6 +127,7 @@
 | [2026-09-21-agent-task-board.md](specs/2026-09-21-agent-task-board.md) | 工作任务看板(Work Task):agent 驱动的委派与验收 |
 | [2026-09-30-turn-artifact-summary-v2.md](specs/2026-09-30-turn-artifact-summary-v2.md) | Turn 级产物汇总 v2:跨 Agent Kind 的解析统一(取代 2026-09-01) |
 | [2026-10-07-computer-use.md](specs/2026-10-07-computer-use.md) | 电脑控制（Computer Use） |
+| [2026-10-10-computer-use-activity-authority-in-daemon.md](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) | 电脑控制活动权威与急停上移到 Daemon（ADR 0018 的实现基线） |
 
 ### plans
 
@@ -202,6 +203,7 @@
 - [0015 — 模型能力目录只是建议，provider.models 始终是权威](adr/0015-model-catalog-is-advisory.md)
 - [0016 — 模型展示名来自目录，手写映射表退役](adr/0016-model-display-names-from-catalog.md)
 - [0017 — OpenCode 免费模型以虚拟供应商进入选择器，发送走原生 opencode provider](adr/0017-opencode-free-models-virtual-provider.md)
+- [0018 — 电脑控制「正在驱动」与急停的权威移入 daemon，壳退化为显示/输入适配器](adr/0018-computer-use-activity-authority-in-daemon.md)
 
 ### agents
 
