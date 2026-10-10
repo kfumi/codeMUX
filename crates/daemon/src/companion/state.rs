@@ -72,6 +72,13 @@ pub struct CompanionInner {
     pub control_sessions: crate::computer_use::guard::ControlSessions,
     /// 回环浏览器简化配对(工单 02):同机浏览器的待确认配对请求表。
     pub local_pairing: crate::companion::local_pairing::LocalPairingRegistry,
+    /// 界面订阅者计数(工单 19):键是**帧归属的那条流** —— 空串 = 控制面(壳收的
+    /// 那条流),非空 = 某个会话的会话流,与 `handle_socket` / `handle_control_socket`
+    /// 的分流一一对应。
+    ///
+    /// 「这条审批有没有界面能应答」只能看这个数,不能看广播通道有没有接收者 —— 壳的
+    /// 控制面连接长期挂在通道上,却永远收不到(也不该收到)会话帧。
+    pub ui_subscribers: Mutex<HashMap<String, usize>>,
 }
 
 impl CompanionInner {
@@ -103,6 +110,7 @@ impl CompanionInner {
             step_budget: crate::computer_use::guard::StepBudget::new(),
             control_sessions: crate::computer_use::guard::ControlSessions::new(),
             local_pairing: crate::companion::local_pairing::LocalPairingRegistry::new(),
+            ui_subscribers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -387,9 +395,142 @@ impl Default for CompanionState {
     }
 }
 
+impl CompanionInner {
+    /// 某条流的订阅者 +1,返回「之前就已经有人订阅」。
+    pub fn add_ui_subscriber(&self, channel: &str) -> bool {
+        let mut subscribers = self.ui_subscribers.lock().expect("ui subscriber lock");
+        let entry = subscribers.entry(channel.to_string()).or_insert(0);
+        let was_watched = *entry > 0;
+        *entry += 1;
+        was_watched
+    }
+
+    /// 某条流的订阅者 -1,返回「这条流现在还有没有人订阅」。
+    pub fn remove_ui_subscriber(&self, channel: &str) -> bool {
+        let mut subscribers = self.ui_subscribers.lock().expect("ui subscriber lock");
+        let Some(count) = subscribers.get_mut(channel) else {
+            return false;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            subscribers.remove(channel);
+            return false;
+        }
+        true
+    }
+
+    /// 这条流现在有没有界面在订阅。
+    pub fn has_ui_subscriber(&self, channel: &str) -> bool {
+        self.ui_subscribers
+            .lock()
+            .expect("ui subscriber lock")
+            .get(channel)
+            .is_some_and(|count| *count > 0)
+    }
+
+    /// 系统里还有没有任何界面可能看到审批卡。
+    ///
+    /// 两种可能:有人正在看这条会话(请求帧直接送到它面前),或者有控制面客户端(桌面
+    /// 壳在跑,用户可以打开这条会话看到卡片)。两者都没有 —— 比如定时任务/无人值守跑
+    /// 在没开壳的机器上 —— 那这条放行请求谁也看不到,不必让模型干等满审批超时。
+    pub fn has_approval_audience(&self, session_id: Option<&str>) -> bool {
+        self.has_ui_subscriber("")
+            || session_id.is_some_and(|session_id| self.has_ui_subscriber(session_id))
+    }
+
+    /// 系统里还有没有任何界面订阅着某条流(收尾时判断「审批卡已经无处可展示」)。
+    pub fn has_any_ui(&self) -> bool {
+        self.ui_subscribers
+            .lock()
+            .expect("ui subscriber lock")
+            .values()
+            .any(|count| *count > 0)
+    }
+
+    /// 界面全没了就把挂起的放行一起收掉(工单 19)。
+    /// 没人能应答时让模型干等满审批超时是纯粹的浪费:收掉 sender 让等待端走既有的
+    /// `dropped` 分支(文案「放行界面已断开」),fail closed。还有界面在看时不动作 ——
+    /// 用户仍有机会来点放行。返回收掉了几条。
+    pub async fn abandon_approvals_without_ui(&self) -> usize {
+        if self.has_any_ui() {
+            return 0;
+        }
+        self.approvals.abandon_all().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_subscribers_are_counted_per_connection() {
+        // 审批的「有没有人能应答」只看这个计数(工单 19):两个界面看同一会话时,走掉一个
+        // 不算「没人看了」;最后一个走了才算。
+        let state = CompanionState::new();
+        assert!(!state.inner.has_ui_subscriber("session-a"));
+        assert!(!state.inner.has_approval_audience(Some("session-a")));
+        assert!(!state.inner.has_approval_audience(None), "没有控制面客户端");
+
+        assert!(!state.inner.add_ui_subscriber("session-a"), "第一个订阅者");
+        assert!(state.inner.has_ui_subscriber("session-a"));
+        assert!(state.inner.has_approval_audience(Some("session-a")));
+        // 空串是控制面那条流:会话没人看,但有壳在跑 —— 用户还能打开会话看到卡片。
+        assert!(!state.inner.has_approval_audience(None));
+        assert!(!state.inner.add_ui_subscriber(""), "控制面客户端");
+        assert!(state.inner.has_approval_audience(None));
+
+        assert!(state.inner.add_ui_subscriber("session-a"), "第二个订阅者");
+        assert!(state.inner.remove_ui_subscriber("session-a"), "还剩一个");
+        assert!(state.inner.has_ui_subscriber("session-a"));
+
+        assert!(
+            !state.inner.remove_ui_subscriber("session-a"),
+            "最后一个走了"
+        );
+        assert!(!state.inner.has_ui_subscriber("session-a"));
+        assert!(
+            state.inner.has_approval_audience(Some("session-a")),
+            "壳还在跑:用户仍可打开这条会话放行"
+        );
+        assert!(!state.inner.remove_ui_subscriber(""), "控制面也走了");
+        assert!(!state.inner.has_approval_audience(Some("session-a")));
+
+        // 没人订阅时再摘一次不会把计数带成负数。
+        assert!(!state.inner.remove_ui_subscriber("session-a"));
+        assert!(!state.inner.has_ui_subscriber("session-b"));
+    }
+
+    #[tokio::test]
+    async fn approvals_are_abandoned_only_when_the_last_ui_is_gone() {
+        // 工单 19:界面全没了才把挂起的放行一起收掉 —— 还有界面在看时不能动手,用户
+        // 仍有机会来点放行(「两分钟内过来放行」是既有能力)。
+        let state = CompanionState::new();
+        let waiting = state.inner.approvals.register("req-x").await;
+        state.inner.add_ui_subscriber("");
+
+        assert_eq!(
+            state.inner.abandon_approvals_without_ui().await,
+            0,
+            "还有界面在看:不动手"
+        );
+
+        state.inner.remove_ui_subscriber("");
+        assert_eq!(
+            state.inner.abandon_approvals_without_ui().await,
+            1,
+            "最后一个界面走了:收掉挂起的放行"
+        );
+        assert!(
+            waiting.await.is_err(),
+            "等待端应收到通道关闭(走 dropped 分支)"
+        );
+        assert_eq!(
+            state.inner.abandon_approvals_without_ui().await,
+            0,
+            "已经空了:再收一次是空操作"
+        );
+    }
 
     #[test]
     fn queues_messages_while_turn_is_active() {

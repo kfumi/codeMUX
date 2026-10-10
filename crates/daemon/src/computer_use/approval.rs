@@ -282,7 +282,26 @@ pub async fn gate(
     }
 
     let request_id = Uuid::new_v4().to_string();
+    // 摘要只用于给用户看的文案(审批卡、拒绝理由),受众检查的报错也要用,所以先算好。
     let summary = action_summary(input.op, input.params);
+    // 这次放行有没有可能被谁看到?两条通路(工单 19):有人正看着这条会话(请求帧直接
+    // 送到它面前),或者有控制面客户端在跑(桌面壳,用户还能打开这条会话看到卡片)。
+    // 两者都没有 —— 定时任务/无人值守跑在没开壳的机器上 —— 那谁也看不到,不必让模型
+    // 白等满 APPROVAL_TIMEOUT:立刻按 no-ui 收口。有人可能看到时**保留整段等待窗口**,
+    // 「用户两分钟内过来放行」是既有能力,不能因为这条检查砍掉。
+    if !companion.inner.has_approval_audience(input.session_id) {
+        record_decision(
+            app,
+            input,
+            sensitive,
+            "no-ui",
+            false,
+            Some("没有能展示这条放行请求的界面"),
+        );
+        return Err(GateDenied::new(format!(
+            "「{summary}」需要人工放行,但没有订阅该会话的界面可以应答(没人应答一律不放行)。"
+        )));
+    }
     let redacted = redact_params(input.params);
     let spec = ApprovalRequestSpec {
         request_id: request_id.clone(),
@@ -305,6 +324,7 @@ pub async fn gate(
         .event_tx
         .send(build_approval_request_event(&spec, &redacted));
     if broadcast.is_err() {
+        // 竞态兜底:订阅者可能刚好在这一刻断开(正常路径已被上面的受众检查拦下)。
         companion.inner.approvals.abandon(&request_id).await;
         record_decision(
             app,
@@ -315,8 +335,7 @@ pub async fn gate(
             Some("没有订阅该会话的审批端"),
         );
         return Err(GateDenied::new(format!(
-            "「{}」需要人工放行,但没有订阅该会话的界面可应答(审批超时按拒绝处理)。",
-            summary
+            "「{summary}」需要人工放行,但没有订阅该会话的界面可以应答(没人应答一律不放行)。"
         )));
     }
 

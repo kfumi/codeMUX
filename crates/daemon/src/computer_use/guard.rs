@@ -346,6 +346,7 @@ impl ApprovalRegistry {
         *self.timeout.write().expect("approval timeout lock") = timeout;
     }
 
+    /// 登记一次挂起的人工放行。
     pub async fn register(&self, request_id: &str) -> oneshot::Receiver<ApprovalChoice> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(request_id.to_string(), tx);
@@ -362,6 +363,18 @@ impl ApprovalRegistry {
 
     pub async fn abandon(&self, request_id: &str) {
         self.pending.lock().await.remove(request_id);
+    }
+
+    /// 系统里已经没有能展示审批卡的界面了:所有挂起的放行一起收掉。
+    ///
+    /// 界面没了就永远没人能应答 —— 与其让模型干等满 [`APPROVAL_TIMEOUT`],不如立刻按
+    /// 「放行界面已断开」收口(fail closed)。收掉 sender 会让等待方拿到 `Err`,走既有的
+    /// `dropped` 分支。返回收掉了几条(诊断/测试用)。
+    pub async fn abandon_all(&self) -> usize {
+        let mut pending = self.pending.lock().await;
+        let count = pending.len();
+        pending.clear();
+        count
     }
 
     /// 记下「本会话记住」的只读操作键。
@@ -590,6 +603,22 @@ mod tests {
         assert!(rx.await.is_err(), "abandon 后等待端应收到通道关闭");
     }
 
+    #[tokio::test]
+    async fn abandoning_everything_denies_all_pending_requests() {
+        // 系统里已经没有能展示审批卡的界面了(工单 19):所有挂起的放行一起收掉 —— 等待端
+        // 拿到通道关闭,走既有的 dropped 分支,而不是干等到超时。
+        let registry = ApprovalRegistry::new();
+        let first = registry.register("req-a1").await;
+        let second = registry.register("req-a2").await;
+
+        assert_eq!(registry.abandon_all().await, 2);
+        assert!(first.await.is_err(), "挂起的放行应被收掉");
+        assert!(second.await.is_err(), "挂起的放行应被收掉");
+
+        // 收完就干净了:没有残留的 sender 让后来的决策误以为打中了什么。
+        assert_eq!(registry.abandon_all().await, 0);
+        assert!(!registry.resolve("req-a1", ApprovalChoice::Once).await);
+    }
     #[tokio::test]
     async fn session_memory_is_scoped_per_session() {
         let registry = ApprovalRegistry::new();

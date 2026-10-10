@@ -1,6 +1,9 @@
 //! 电脑控制审批闸门(工单 03)端到端契约:真实 daemon 上的「放行 → 执行」
 //! 「拦截 → 拒绝」「单步放行不被记住」「只读可本会话记住」四条路径。
 //!
+//! 工单 19 起还覆盖**受众**这一维:一条放行请求有没有界面能应答
+//! (`has_approval_audience`),决定它「立刻按没界面收口」还是「等满等待窗口」。
+//!
 //! 与 tests/browser_automation.rs 同一套夹具写法(HTTP 手写 + 控制面 WS),
 //! 但关注点在闸门本身而不是执行链路。
 
@@ -127,6 +130,19 @@ async fn connect_session(
         .await
         .expect("connect session ws");
     Box::pin(stream)
+}
+
+/// 等 daemon 侧真的把这条流记成「有界面在看」。连接建立与订阅记账是异步的,不等的话
+/// 断言会跟启动赛跑(先发请求,订阅才记上)。
+async fn wait_until_watched(daemon: &std::sync::Arc<DaemonState>, session_id: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if daemon.companion.inner.has_ui_subscriber(session_id) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("daemon 一直没把 {session_id} 记成被界面订阅");
 }
 
 /// 带会话归属的一次 execute(生产路径:MCP server 一定带 --session-id)。
@@ -541,6 +557,123 @@ async fn a_time_boxed_grant_covers_later_input_actions_in_the_same_turn() {
     )
     .await;
     let _ = pending.await;
+
+    stop(&fixture).await;
+}
+
+/// 工单 19:界面上只有**别的**会话时,这张审批卡谁也看不到 —— 广播有接收者(所以旧的
+/// 「广播失败就拒绝」兜底不会触发),但这个会话没有界面能应答,仍不该让模型白等满等待
+/// 窗口。这正是受众检查相对那个兜底多出来的那一格。
+#[tokio::test]
+async fn a_gate_with_no_ui_for_this_session_denies_immediately() {
+    let fixture = start_fixture().await;
+    // 把等待窗口拉长:这条用例要证明的是「根本没等」,不是「等到了超时」。
+    fixture
+        .daemon
+        .companion
+        .inner
+        .approvals
+        .set_timeout(Duration::from_secs(5));
+    let _other = connect_session(fixture.port, &fixture.token, "session-other").await;
+    wait_until_watched(&fixture.daemon, "session-other").await;
+
+    let started = std::time::Instant::now();
+    let (status, body) = execute_in_session(
+        fixture.port,
+        &fixture.token,
+        "session-headless",
+        "click",
+        "browser_click",
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(status, 403, "没有界面能放行时必须拒绝: {body:?}");
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("没有订阅该会话的界面"),
+        "文案要说明是没界面应答: {error}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "没人能看到这条放行请求时不该等满等待窗口,实际等了 {elapsed:?}"
+    );
+
+    stop(&fixture).await;
+}
+
+/// 工单 19:壳在跑(控制面订阅着)时**保留整段等待窗口** —— 会话当前没人看,但用户还能
+/// 在窗口期内打开这条会话看到卡片放行,这是既有能力,不能被受众检查砍掉。
+#[tokio::test]
+async fn a_running_shell_keeps_the_full_approval_window_open() {
+    let fixture = start_fixture().await;
+    let _control = connect_control(fixture.port, &fixture.token).await;
+    let started = std::time::Instant::now();
+    let (status, body) = execute_in_session(
+        fixture.port,
+        &fixture.token,
+        "session-unwatched",
+        "click",
+        "browser_click",
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(status, 403, "无人放行必须拒绝: {body:?}");
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("超时"),
+        "有壳在跑时应走完整等待窗口再超时: {error}"
+    );
+    assert!(
+        !error.contains("没有订阅该会话的界面"),
+        "壳在跑时不能说「没有界面能应答」: {error}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(300),
+        "应等满(测试里收敛过的)等待窗口,实际 {elapsed:?}"
+    );
+
+    stop(&fixture).await;
+}
+
+/// 工单 19:唯一能展示审批卡的界面断开(用户关掉会话/退出应用)时,挂起的放行立刻按
+/// 「放行界面已断开」收口,而不是让模型干等满等待窗口。
+#[tokio::test]
+async fn losing_the_last_ui_abandons_pending_approvals() {
+    const SESSION: &str = "session-orphan";
+    let fixture = start_fixture().await;
+    fixture
+        .daemon
+        .companion
+        .inner
+        .approvals
+        .set_timeout(Duration::from_secs(5));
+    let mut session_ws = connect_session(fixture.port, &fixture.token, SESSION).await;
+
+    let pending = tokio::spawn({
+        let token = fixture.token.clone();
+        let port = fixture.port;
+        async move { execute_in_session(port, &token, SESSION, "click", "browser_click").await }
+    });
+    let approval = read_event(&mut session_ws, "computer-use-approval-request").await;
+    assert_eq!(approval["event"]["op"], "click");
+
+    // 界面断开:这时系统里已经没有任何地方能展示这张审批卡了。
+    drop(session_ws);
+    let started = std::time::Instant::now();
+    let (status, body) = pending.await.expect("execute 应结束");
+    let elapsed = started.elapsed();
+    assert_eq!(status, 403, "界面没了必须拒绝: {body:?}");
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("放行界面已断开"),
+        "文案要说明是放行界面断开了: {error}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "界面断开后不该再等满等待窗口,实际等了 {elapsed:?}"
+    );
 
     stop(&fixture).await;
 }

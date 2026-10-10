@@ -1148,6 +1148,17 @@ fn control_session_id(session_id: Option<&str>) -> Option<String> {
 
 async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: String) {
     let companion_state = ctx.daemon.companion.clone();
+    // 订阅记账(工单 19):这条连接正在读这个会话,所以它是唯一可能应答本会话审批的
+    // 界面。收尾放在这个包装层,而不是服务循环里 —— 循环里有多条提前 return 路径。
+    companion_state.inner.add_ui_subscriber(&session_id);
+    serve_session_socket(&mut socket, &ctx, &session_id).await;
+    companion_state.inner.remove_ui_subscriber(&session_id);
+    companion_state.inner.abandon_approvals_without_ui().await;
+}
+
+/// 会话 WS 的服务循环(订阅记账与收尾见 [`handle_socket`])。
+async fn serve_session_socket(socket: &mut WebSocket, ctx: &ServerContext, session_id: &str) {
+    let companion_state = ctx.daemon.companion.clone();
     let mut rx = companion_state.inner.event_tx.subscribe();
 
     let initial_events = {
@@ -1159,7 +1170,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             .and_then(|db| {
                 operations::fetch_session_timeline(
                     &db,
-                    &session_id,
+                    session_id,
                     operations::TimelineDirection::Tail,
                     None,
                     operations::DEFAULT_SESSION_TIMELINE_LIMIT,
@@ -1185,7 +1196,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     // hundreds of events per second while the flag itself rarely changes, so
     // mirroring it on every event doubled the WS frame rate for no information
     // gain — and every extra frame costs the renderer a synchronous JSON.parse.
-    let last_sent_running = companion_state.is_turn_active(&session_id);
+    let last_sent_running = companion_state.is_turn_active(session_id);
     let state_payload = serde_json::json!({
         "type": "state",
         "sessionId": session_id,
@@ -1246,6 +1257,18 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
 /// 会话事件不下发(壳不是会话客户端)。
 async fn handle_control_socket(mut socket: WebSocket, ctx: ServerContext) {
     let companion_state = ctx.daemon.companion.clone();
+    // 控制面连接(壳)也算「界面」:会话没人看时,用户还能打开那条会话看到审批卡。
+    companion_state.inner.add_ui_subscriber("");
+    serve_control_socket(&mut socket, &companion_state).await;
+    companion_state.inner.remove_ui_subscriber("");
+    companion_state.inner.abandon_approvals_without_ui().await;
+}
+
+/// 控制面 WS 的服务循环(订阅记账与收尾见 [`handle_control_socket`])。
+async fn serve_control_socket(
+    socket: &mut WebSocket,
+    companion_state: &crate::companion::state::CompanionState,
+) {
     let mut rx = companion_state.inner.event_tx.subscribe();
 
     let hello = serde_json::json!({ "type": "hello", "role": "control" });
