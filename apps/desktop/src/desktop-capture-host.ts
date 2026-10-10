@@ -18,7 +18,10 @@ import { parseWindowIdentities, type WindowIdentity } from './window-identity';
 
 const execFileAsync = promisify(execFile);
 
-const FOREGROUND_WINDOW_SCRIPT = `Add-Type @"
+// 与身份枚举同一条规矩:脚本第一行把子进程 stdout 编码钉成 UTF-8,否则中文窗口
+// 标题经 Node 按 UTF-8 解码会变成乱码(Windows PowerShell 5.1 默认按 OEM 代码页写)。
+const FOREGROUND_WINDOW_SCRIPT = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+Add-Type @\"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -49,17 +52,27 @@ try {
  * 顶层窗口 → 进程身份(工单 11)。一次调用枚举全部句柄,然后**一次性**取
  * Win32_Process 快照(逐窗口查 CIM 会慢一个数量级)。失败返回空行,调用方按
  * 「身份未知」处理(daemon 退回按标题裁决,不会因此拒掉一切)。
+ * 另外每条都读标题与 `IsIconic`:Electron 的 `desktopCapturer` **不列最小化窗口**,
+ * 只有这里能拿到它们 —— 标题是模型辨认最小化窗口的唯一线索(见 `desktop-capture.ts`)。
+ *
+ * 脚本第一行把子进程的 stdout 编码钉成 UTF-8:Node 按 UTF-8 解码 stdout,而
+ * Windows PowerShell 5.1 默认按 OEM 代码页写 —— 中文标题会变成乱码,而标题正是
+ * 模型辨认最小化窗口的唯一依据(实测:不钉编码时 `任务切换` 会变成 `�����л�`)。
  */
-const WINDOW_IDENTITY_SCRIPT = `Add-Type @"
+const WINDOW_IDENTITY_SCRIPT = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+Add-Type @"
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public struct CxIdRect { public int Left, Top, Right, Bottom; }
 public class CxEnum {
   public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out CxIdRect rect);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   public static List<IntPtr> TopLevel() {
     List<IntPtr> handles = new List<IntPtr>();
     EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) { handles.Add(hWnd); return true; }, IntPtr.Zero);
@@ -83,7 +96,11 @@ $rows = foreach ($h in [CxEnum]::TopLevel()) {
   }
   $rect = New-Object CxIdRect
   [void][CxEnum]::GetWindowRect($h, [ref]$rect)
-  [pscustomobject]@{ hwnd = [int64]$h; processId = [int]$ownerPid; parentProcessId = $parent; processName = $name; x = $rect.Left; y = $rect.Top; width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top }
+  # 标题 + 最小化标记:最小化窗口没有截图来源,这两项是模型唯一的辨认依据。
+  $title = New-Object System.Text.StringBuilder 512
+  [void][CxEnum]::GetWindowText($h, $title, 512)
+  $minimized = [bool][CxEnum]::IsIconic($h)
+  [pscustomobject]@{ hwnd = [int64]$h; processId = [int]$ownerPid; parentProcessId = $parent; processName = $name; title = $title.ToString(); minimized = $minimized; x = $rect.Left; y = $rect.Top; width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top }
 }
 @($rows) | ConvertTo-Json -Compress`;
 

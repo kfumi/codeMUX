@@ -27,6 +27,15 @@ export interface WindowIdentity {
   processName?: string;
   /** 窗口矩形:模型按截图定位点击时靠它换算坐标,不必自己猜缩放。 */
   bounds?: WindowBounds;
+  /**
+   * 窗口标题。存在的原因:**最小化窗口只能靠 PowerShell 的 `EnumWindows` 枚举
+   * 出来**(Electron 的 `desktopCapturer` 不列最小化窗口),这类窗口没有截图
+   * 来源 id,标题就是模型辨认它的唯一线索 —— 认出来之后按 `hwnd` 走电脑控制的
+   * 背景动作(不需要画面)。
+   */
+  title?: string;
+  /** 窗口是否最小化(`IsIconic`):截不到画面,但背景动作按 `hwnd` 照样能操作它。 */
+  minimized?: boolean;
 }
 
 /** 拼进 payload 的身份字段(身份缺失时不带任何字段,daemon 按标题回退裁决)。 */
@@ -72,6 +81,20 @@ function asNumber(value: unknown): number | undefined {
   return Number.isFinite(numeric) ? numeric : undefined;
 }
 
+/** 标题读数:非空字符串才带(trim 后为空当没读到 —— 空标题对模型毫无用处)。 */
+function asTitle(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * 布尔读数:**只接受真正的布尔**。JSON 里的 `minimized` 由 PowerShell 的 `[bool]`
+ * 产出,不存在 `"true"`/`1` 这种形状;一旦放行字符串,`"false"` 也会被当成最小化
+ * (与 `asNumber` 一样宁缺勿错:错的最小化标记会把无关窗口灌进清单)。
+ */
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 /**
  * 解析 PowerShell 枚举输出(数组或单个对象都接受);任何一条不合法就跳过。
  * 输出里 `-1`/`0` 这类伪 pid 一律丢弃 —— 宁缺勿错(错的身份会让 daemon 误放行)。
@@ -99,12 +122,16 @@ export function parseWindowIdentities(raw: string): WindowIdentity[] {
         ? record.processName.trim()
         : undefined;
     const bounds = asBounds(record);
+    const title = asTitle(record.title);
+    const minimized = asBoolean(record.minimized);
     identities.push({
       hwnd,
       processId,
       ...(parentProcessId !== undefined ? { parentProcessId } : {}),
       ...(processName !== undefined ? { processName } : {}),
       ...(bounds !== undefined ? { bounds } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(minimized !== undefined ? { minimized } : {}),
     });
   }
   return identities;

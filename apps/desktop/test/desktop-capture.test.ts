@@ -54,6 +54,61 @@ describe('listDesktopSources', () => {
       expect(call[0].thumbnailSize).toEqual({ width: 0, height: 0 });
     }
   });
+
+  it('appends minimized windows Electron cannot list, with windowId but no id/bounds', async () => {
+    // Electron 的 desktopCapturer 不列最小化窗口,PowerShell 的 EnumWindows 列 ——
+    // 少了这一步,最小化窗口在清单里就不存在,模型只能自己写 shell 脚本找窗口。
+    const captureDeps = deps({
+      readWindowIdentities: async () => [
+        {
+          hwnd: 300,
+          processId: 4242,
+          parentProcessId: 100,
+          processName: 'notepad.exe',
+          title: '无标题 - 记事本',
+          minimized: true,
+        },
+      ],
+    });
+    const result = await listDesktopSources(captureDeps);
+
+    expect(result).toEqual([
+      { id: 'screen:0:0', name: '整个屏幕', kind: 'screen', displayId: '7' },
+      { id: 'window:100:0', name: '记事本', kind: 'window' },
+      {
+        // 没有 id(截不到画面);也没有 bounds(最小化窗口的 GetWindowRect 是
+        // -32000 哨兵值,带上会把坐标换算引到屏幕外)。
+        name: '无标题 - 记事本',
+        kind: 'window',
+        windowId: 300,
+        processId: 4242,
+        parentProcessId: 100,
+        processName: 'notepad.exe',
+        minimized: true,
+        capturable: false,
+      },
+    ]);
+  });
+
+  it('does not append minimized identities without a title, nor windows already listed', async () => {
+    const captureDeps = deps({
+      readWindowIdentities: async () => [
+        // 没标题:EnumWindows 里全是这种不可见辅助窗口,放开会灌进模型上下文。
+        { hwnd: 300, processId: 1, minimized: true },
+        { hwnd: 301, processId: 1, title: '   ', minimized: true },
+        // 没最小化:它本该由 Electron 来源覆盖,身份表不负责补。
+        { hwnd: 302, processId: 1, title: '普通窗口' },
+        // 已在来源清单里的窗口(hwnd 与 window:100:0 对齐)不重复出现。
+        { hwnd: 100, processId: 1, title: '记事本', minimized: true },
+      ],
+    });
+    const result = await listDesktopSources(captureDeps);
+
+    expect(result).toEqual([
+      { id: 'screen:0:0', name: '整个屏幕', kind: 'screen', displayId: '7' },
+      { id: 'window:100:0', name: '记事本', kind: 'window', windowId: 100, processId: 1 },
+    ]);
+  });
 });
 
 describe('captureDesktop', () => {
@@ -285,6 +340,24 @@ describe('窗口进程身份与矩形', () => {
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
       expect(outcome.payload).not.toHaveProperty('processId');
+    }
+  });
+
+  it('names the minimized window and the windowId route instead of sending the model back for a list', async () => {
+    const captureDeps = deps({
+      readWindowIdentities: async () => [
+        { hwnd: 300, processId: 4242, title: '无标题 - 记事本', minimized: true },
+      ],
+    });
+    const outcome = await captureDesktop(captureDeps, { sourceId: 'window:300:0' });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      // 最小化窗口永远不在来源清单里,「再取一次清单」是死胡同。
+      expect(outcome.error).toContain('最小化');
+      expect(outcome.error).toContain('capturable:false');
+      expect(outcome.error).toContain('windowId=300');
+      expect(outcome.error).toContain('computer_type');
     }
   });
 });

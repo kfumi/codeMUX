@@ -19,6 +19,7 @@ describe('isComputerUseToolName', () => {
     expect(isComputerUseToolName('mcp__codemux-control__computer_screenshot')).toBe(true);
     expect(isComputerUseToolName('mcp__codemux-control__computer_set_value')).toBe(true);
     expect(isComputerUseToolName('codemux-control_computer_launch')).toBe(true);
+    expect(isComputerUseToolName('mcp__codemux-control__computer_save_screenshot')).toBe(true);
     expect(isComputerUseToolName('codemux_control_computer_type')).toBe(true);
   });
 

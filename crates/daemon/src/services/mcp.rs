@@ -714,7 +714,7 @@ mod tests {
             config.computer_use.system_execution_enabled = true;
         }
         let servers = get_mcp_servers_impl(&state).unwrap();
-        assert_eq!(servers[0].tools.len(), 24, "{:?}", servers[0].tools);
+        assert_eq!(servers[0].tools.len(), 25, "{:?}", servers[0].tools);
         assert!(
             servers[0].apps.claude
                 && servers[0].apps.codex

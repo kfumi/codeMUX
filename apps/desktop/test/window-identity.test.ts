@@ -80,6 +80,37 @@ describe('parseWindowIdentities', () => {
     expect(parseWindowIdentities('   ')).toEqual([]);
     expect(parseWindowIdentities('Get-CimInstance : 拒绝访问')).toEqual([]);
   });
+
+  it('keeps the title and the minimized flag (minimized windows have no capture source)', () => {
+    const rows = parseWindowIdentities(
+      JSON.stringify([
+        { hwnd: 900, processId: 42, title: '无标题 - 记事本', minimized: true },
+        { hwnd: 901, processId: 42, title: '   ', minimized: false },
+        { hwnd: 902, processId: 42, title: null, minimized: 'true' },
+      ]),
+    );
+    expect(rows[0]).toEqual({
+      hwnd: 900,
+      processId: 42,
+      title: '无标题 - 记事本',
+      minimized: true,
+    });
+    // 标题空白当没读到;minimized:false 是合法读数,照实带上。
+    expect(rows[1]).toEqual({ hwnd: 901, processId: 42, minimized: false });
+    // 非布尔的 minimized(JSON 里不存在这种形状)一律不带,别把 "true" 当真。
+    expect(rows[2]).toEqual({ hwnd: 902, processId: 42 });
+  });
+
+  it('trims the title and drops non-boolean minimized readings', () => {
+    const rows = parseWindowIdentities(
+      JSON.stringify([
+        { hwnd: 910, processId: 7, title: '  设置  ', minimized: 1 },
+        { hwnd: 911, processId: 7, title: 123, minimized: true },
+      ]),
+    );
+    expect(rows[0]).toEqual({ hwnd: 910, processId: 7, title: '设置' });
+    expect(rows[1]).toEqual({ hwnd: 911, processId: 7, minimized: true });
+  });
 });
 
 describe('来源 id ↔ 窗口句柄', () => {

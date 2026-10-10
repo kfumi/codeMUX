@@ -11,8 +11,10 @@
 //! 本模块的协议解析是纯函数;真正拉起子进程的部分由集成测试用真实二进制覆盖
 //! (`tests/computer_use_driver.rs`)。
 
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
@@ -118,12 +120,73 @@ struct DriverProcess {
     last_id: u64,
 }
 
+/// 测试用假驱动:按工具名回预置回包,并记下调用顺序。
+///
+/// 为什么要有它:桌面工具面的关键不变量(翻译/裁决/闸门的**顺序**、脱敏之后的
+/// 整形、「写剪贴板失败就不粘贴」这类跨步契约)以前只能靠真驱动 + 真窗口观测,
+/// 没驱动的环境(CI)只能整条跳过 —— 回归点也就没人守。装上它之后,`execute`
+/// 的整条链在没有驱动、没有桌面的机器上也能跑。
+///
+/// 生产路径永不安装它:它只是 [`DriverHost`] 上的一个可选替身。
+#[derive(Default)]
+pub struct DriverStub {
+    responses: StdMutex<HashMap<String, Value>>,
+    calls: StdMutex<Vec<(String, Value)>>,
+}
+
+impl DriverStub {
+    /// 预置某个驱动工具的回包(整份 MCP 形状,含 `content` / `isError`)。
+    pub fn respond(&self, tool: &str, payload: Value) {
+        self.responses
+            .lock()
+            .expect("stub lock")
+            .insert(tool.to_string(), payload);
+    }
+
+    /// 预置「驱动报错」:等价于驱动回一个 `isError` 回包。
+    pub fn fail(&self, tool: &str, message: &str) {
+        self.respond(
+            tool,
+            json!({ "content": [{ "type": "text", "text": message }], "isError": true }),
+        );
+    }
+
+    /// 收到的调用(按顺序):断言「调了哪个工具、参数是什么、有没有多调」。
+    pub fn calls(&self) -> Vec<(String, Value)> {
+        self.calls.lock().expect("stub lock").clone()
+    }
+
+    /// 是否调过某个工具。
+    pub fn called(&self, tool: &str) -> bool {
+        self.calls
+            .lock()
+            .expect("stub lock")
+            .iter()
+            .any(|(name, _)| name == tool)
+    }
+
+    fn record(&self, name: &str, arguments: Value) -> Result<Value, String> {
+        self.calls
+            .lock()
+            .expect("stub lock")
+            .push((name.to_string(), arguments));
+        let responses = self.responses.lock().expect("stub lock");
+        match responses.get(name) {
+            Some(payload) => Ok(payload.clone()),
+            // 没预置就是失败:静默给个空回包会让契约测试变成假通过。
+            None => Err(format!("stub 驱动没有预置 {name} 的回包")),
+        }
+    }
+}
+
 /// 驱动宿主:串行持有子进程 + 急停信号。
 pub struct DriverHost {
     process: Mutex<Option<DriverProcess>>,
     stopping: AtomicBool,
     kill_signal: Notify,
     last_error: StdMutex<Option<String>>,
+    /// 测试替身:装上之后 [`DriverHost::call_tool`] 不再碰子进程(见 [`DriverStub`])。
+    stub: StdMutex<Option<Arc<DriverStub>>>,
 }
 
 impl Default for DriverHost {
@@ -139,6 +202,7 @@ impl DriverHost {
             stopping: AtomicBool::new(false),
             kill_signal: Notify::new(),
             last_error: StdMutex::new(None),
+            stub: StdMutex::new(None),
         }
     }
 
@@ -150,8 +214,22 @@ impl DriverHost {
         self.last_error.lock().expect("driver error lock").clone()
     }
 
+    /// 装上假驱动并返回它的句柄(只给测试用;生产路径不调用)。
+    pub fn install_stub(&self) -> Arc<DriverStub> {
+        let stub = Arc::new(DriverStub::default());
+        *self.stub.lock().expect("stub lock") = Some(stub.clone());
+        stub
+    }
+
+    fn stub(&self) -> Option<Arc<DriverStub>> {
+        self.stub.lock().expect("stub lock").clone()
+    }
+
     /// 是否正在运行(子进程句柄在手且未被急停)。
     pub async fn is_running(&self) -> bool {
+        if self.stub().is_some() {
+            return true;
+        }
         self.process.lock().await.is_some() && !self.stopping.load(Ordering::SeqCst)
     }
 
@@ -267,6 +345,9 @@ impl DriverHost {
 
     /// 转发一次工具调用;驱动未运行时明确报错(不静默)。
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value, String> {
+        if let Some(stub) = self.stub() {
+            return stub.record(name, arguments);
+        }
         if self.stopping.load(Ordering::SeqCst) {
             return Err("驱动已急停:先重新启动驱动再操作".to_string());
         }

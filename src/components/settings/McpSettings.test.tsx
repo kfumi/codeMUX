@@ -57,6 +57,7 @@ const mockState = {
         'computer_drag',
         'computer_set_value',
         'computer_launch',
+        'computer_save_screenshot',
       ],
     },
   ],
@@ -140,7 +141,7 @@ describe('McpSettingsPanel', () => {
     expect(lockIcon).toBeTruthy();
 
     // 工具数由 daemon 现算(方案 A):徽章给数量,tooltip 里是全部工具名。
-    expect(screen.getByText('· 24 个工具')).toBeTruthy();
+    expect(screen.getByText('· 25 个工具')).toBeTruthy();
     // 内置行只展示命令形态:绝对安装路径不进页面(真实命令在 tooltip 里)。
     expect(screen.getByText('codemux-daemon mcp-control --app-data-dir <数据目录>')).toBeTruthy();
     expect(screen.queryByText(/resources\/daemon/)).toBeNull();

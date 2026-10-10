@@ -1,12 +1,12 @@
 //! 唯一的系统内置 MCP server(`codemux-daemon mcp-control` 子命令):会话驱动内置
 //! 浏览器与桌面应用/窗口的单一工具面,承载两族工具 —— 浏览器级 10 个(`browser_*`)
-//! 与电脑控制 14 个(`computer_*`)。
+//! 与电脑控制 15 个(`computer_*`)。
 //!
 //! 服务名 `codemux-control`(2026-10 由 `codemux-browser` 改名):取设置页
 //! 「浏览器**控制**」与「电脑**控制**」的公共词 —— 两族工具各自挂在其中一个开关下,
 //! 用任何一个单边词命名都会把另一半说错(候选评估见工单 16)。
 //!
-//! **改名只动 server key,不动工具名**:`tools/list` 里 24 个 `name` 一个没变;
+//! **改名只动 server key,不动工具名**:改名当次 `tools/list` 里 24 个 `name` 一个没变;
 //! 变的是各运行时拼出来的全名(前缀由 key 派生):
 //!
 //! | 形态 | 改前 | 改后 |
@@ -419,12 +419,12 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "computer_windows",
-            "description": "列出桌面上的屏幕与窗口(来源 id、标题、所属进程与窗口矩形 bounds)。只读,不改动任何窗口。截取或点击某个窗口前先用它取 sourceId 与 bounds。宿主自身(CodeMUX)的窗口不在清单里,属于设计如此。",
+            "description": "列出桌面上的屏幕与窗口(来源 id、标题、所属进程与窗口矩形 bounds)。只读,不改动任何窗口。截取或点击某个窗口前先用它取 sourceId 与 bounds。宿主自身(CodeMUX)的窗口不在清单里,属于设计如此。**最小化的窗口也在清单里**:它截不到画面,所以没有来源 id、带 `capturable:false` 且不带 bounds —— 这种窗口直接按 `windowId` 走背景动作(computer_elements / computer_type / computer_click 对最小化窗口一样有效),不要为了截到它去改窗口状态,也不要退回 shell 脚本。",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {
             "name": "computer_screenshot",
-            "description": "截取桌面画面(默认主屏,可指定 computer_windows 给出来源 id)。只读;返回图片与元数据。width/height 是图像像素,windowBounds 是该窗口在系统坐标(鼠标坐标系)里的矩形 —— 需要按截图定位坐标时用 windowBounds 换算:x = windowBounds.x + 图像像素x × windowBounds.width ÷ width。整屏截图在前台是受保护应用(密码管理器、CodeMUX 自身等)时会被拒绝,此时改用窗口来源。窗口最小化或已关闭时返回错误。",
+            "description": "截取桌面画面(默认主屏,可指定 computer_windows 给出来源 id)。只读;返回图片与元数据。width/height 是图像像素,windowBounds 是该窗口在系统坐标(鼠标坐标系)里的矩形 —— 需要按截图定位坐标时用 windowBounds 换算:x = windowBounds.x + 图像像素x × windowBounds.width ÷ width。整屏截图在前台是受保护应用(密码管理器、CodeMUX 自身等)时会被拒绝,此时改用窗口来源。窗口最小化或已关闭时截不到(错误会说明这一点):最小化窗口要操作就按它的 windowId 走背景动作,不要退回 shell 脚本。要把窗口画面写成文件用 computer_save_screenshot —— 本工具只把图交给模型,写不出文件。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -444,7 +444,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "computer_elements",
-            "description": "读取某个窗口的可访问性元素树(role/label/value/frame/element_index)并附窗口截图。**这是桌面动作的目标来源**:windowId 与 processId 从 computer_windows 取。任何用 elementIndex 的动作都必须先用本工具取一次(索引按窗口缓存,动作后失效,要重新取);像素坐标必须取本工具回图里的窗口内像素(左上角原点),不要拿整屏截图的坐标来算。回图与树可能自报不完整(truncated/degraded/escalation):树不完整时「没看到某个元素」不能当成不存在;树为空(ax_tree_empty)说明该窗口没有可访问性节点(画布/视频/自绘),按回图用像素坐标动作。readValue 可按控件名精确读一个值(唯一匹配才给;敏感控件拒绝读)。",
+            "description": "读取某个窗口的可访问性元素树(role/label/value/actions/element_index,文本由 CodeMUX 按脱敏后的数据渲染)并附窗口截图。**这是桌面动作的目标来源**:windowId 与 processId 从 computer_windows 取。任何用 elementIndex 的动作都必须先用本工具取一次,并把回包里的 `snapshotId` 一起原样带上(缺 snapshotId 驱动直接拒;索引按窗口缓存、动作后失效,过期快照驱动会判失效,那就重新取一次);像素坐标必须取本工具回图里的窗口内像素(左上角原点),不要拿整屏截图的坐标来算。回图与树可能自报不完整(表头里的 完整/已截断):树不完整时「没看到某个元素」不能当成不存在;树为空说明该窗口没有可访问性节点(画布/视频/自绘),按回图用像素坐标动作。敏感控件(密码/验证码/登录等)的值一律显示为 `<已脱敏:敏感控件>`:那不是故障,是设计如此。readValue 可按控件名精确读一个值(唯一匹配才给;敏感控件拒绝读)。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -470,7 +470,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "computer_wait",
-            "description": "等待窗口里的一个条件成立(只读轮询):text_present / text_absent(按 label 或值的子串)、value_equals / value_changed(按控件名精确匹配,唯一命中才算)。超时不等于成功;返回 status=timeout 或 reason=incomplete_tree(树不完整,无法证明不存在)时都要先 computer_elements 看一眼再决定下一步,不要盲目重试。",
+            "description": "等待窗口里的一个条件成立(只读轮询):text_present / text_absent(按 label 或值的子串)、value_equals / value_changed(按控件名精确匹配,唯一命中才算)。超时不等于成功;返回 status=timeout 或 reason=incomplete_tree(树不完整,无法证明不存在)时都要先 computer_elements 看一眼再决定下一步,不要盲目重试。谓词落在敏感控件上会被拒(status=refused,reason=sensitive_refused):value_* 要靠读值才判得了,text_present 的子串匹配等于逐字试探,两条路都不给。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -501,54 +501,57 @@ fn tool_definitions() -> Value {
                     "button": { "type": "string", "description": "left(默认)、right、middle" },
                     "count": { "type": "number", "description": "点击次数,默认 1;双击用 2" },
                     "deliveryMode": { "type": "string", "description": "background(默认)或 foreground" },
-                    "snapshotId": { "type": "string", "description": "computer_elements 回包里的 snapshot_id;带上可让驱动校验索引未过期" },
+                    "snapshotId": { "type": "string", "description": "**给 elementIndex 时必带**:computer_elements 回包里的 snapshotId(成对才被驱动接受,过期快照会被判失效)" },
                 },
                 "required": ["processId", "windowId"],
             },
         },
         {
             "name": "computer_type",
-            "description": "向窗口输入文字(不抢焦点;XAML/UWP 目标必须给 elementIndex,驱动会走 Value 模式)。只输入文字,回车/Tab 这类按键用 computer_key。输入内容不进日志与审批历史。",
+            "description": "向窗口输入文字(不抢焦点;XAML/UWP 目标必须给 elementIndex,且必须与 computer_elements 回包里的 snapshotId 成对)。只输入文字,回车/Tab 这类按键用 computer_key。输入内容不进日志与审批历史。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "processId": { "type": "number" },
                     "windowId": { "type": "number" },
                     "elementIndex": { "type": "number", "description": "目标输入控件;XAML/UWP 目标必填" },
+                    "snapshotId": { "type": "string", "description": "computer_elements 回包里的 snapshotId;给 elementIndex 时必须一起带(缺它驱动会拒)" },
                     "text": { "type": "string" },
                     "delayMs": { "type": "number", "description": "逐字符间隔,默认 30,上限 200" },
                     "deliveryMode": { "type": "string" },
                 },
-                "required": ["processId", "text"],
+                "required": ["processId", "windowId", "text"],
             },
         },
         {
             "name": "computer_key",
-            "description": "向窗口发送一个按键或组合键(key + modifiers,如 key=return;key=s + modifiers=[ctrl])。目标不需要在前台。带 Ctrl/Win 的组合键在旧式 Win32 目标上会短暂切换前台后再还原。不确定结果时先 computer_elements 看状态,不要重放。",
+            "description": "向窗口发送一个按键或组合键(key + modifiers,如 key=return;key=s + modifiers=[ctrl])。目标不需要在前台。给 elementIndex 时必须与 computer_elements 回包里的 snapshotId 成对。带 Ctrl/Win 的组合键在旧式 Win32 目标上会短暂切换前台后再还原。不确定结果时先 computer_elements 看状态,不要重放。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "processId": { "type": "number" },
                     "windowId": { "type": "number" },
                     "elementIndex": { "type": "number" },
+                    "snapshotId": { "type": "string", "description": "computer_elements 回包里的 snapshotId;给 elementIndex 时必须一起带(缺它驱动会拒)" },
                     "key": { "type": "string", "description": "return、tab、escape、up/down/left/right、space、delete、home、end、pageup、pagedown、f1-f12、字母或数字" },
                     "modifiers": { "type": "array", "items": { "type": "string" }, "description": "ctrl、shift、alt、win 的组合" },
                     "deliveryMode": { "type": "string" },
                 },
-                "required": ["processId", "key"],
+                "required": ["processId", "windowId", "key"],
             },
         },
         {
             "name": "computer_paste",
-            "description": "把文本经系统剪贴板粘贴进目标窗口的当前焦点控件(对话、原生保存框这类只认粘贴的控件用它)。**会覆盖系统剪贴板**;粘贴对象是窗口里当前有焦点的控件,所以先用 computer_elements 确认焦点位置。内容不落日志。",
+            "description": "把文本经系统剪贴板粘贴进目标窗口的当前焦点控件(对话、原生保存框这类只认粘贴的控件用它):先把文本写进系统剪贴板,再向窗口投一次 Ctrl+V。**会覆盖系统剪贴板**;写剪贴板失败就不粘贴(不会留下半截状态)。粘贴对象是窗口里当前有焦点的控件,先用 computer_elements 确认焦点位置。默认 background;驱动报 background_unavailable 时才改用 foreground(会短暂抢焦点)。内容不落日志。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "processId": { "type": "number" },
                     "windowId": { "type": "number" },
-                    "text": { "type": "string" },
+                    "text": { "type": "string", "description": "要粘贴的文本(先写进系统剪贴板)" },
+                    "deliveryMode": { "type": "string", "description": "background(默认,不抢焦点)或 foreground(驱动报 background_unavailable 时才用)" },
                 },
-                "required": ["processId", "text"],
+                "required": ["processId", "windowId", "text"],
             },
         },
         {
@@ -560,12 +563,13 @@ fn tool_definitions() -> Value {
                     "processId": { "type": "number" },
                     "windowId": { "type": "number" },
                     "elementIndex": { "type": "number" },
+                    "snapshotId": { "type": "string", "description": "computer_elements 回包里的 snapshotId;给 elementIndex 时必须一起带(缺它驱动会拒)" },
                     "direction": { "type": "string", "description": "up、down、left、right" },
                     "by": { "type": "string", "description": "page(默认)或 line" },
                     "amount": { "type": "number", "description": "滚动量,默认 1" },
                     "deliveryMode": { "type": "string" },
                 },
-                "required": ["processId", "direction"],
+                "required": ["processId", "windowId", "direction"],
             },
         },
         {
@@ -583,7 +587,7 @@ fn tool_definitions() -> Value {
                     "durationMs": { "type": "number", "description": "默认 500" },
                     "deliveryMode": { "type": "string" },
                 },
-                "required": ["processId", "fromX", "fromY", "toX", "toY"],
+                "required": ["processId", "windowId", "fromX", "fromY", "toX", "toY"],
             },
         },
         {
@@ -596,9 +600,9 @@ fn tool_definitions() -> Value {
                     "windowId": { "type": "number" },
                     "elementIndex": { "type": "number" },
                     "value": { "type": "string" },
-                    "snapshotId": { "type": "string" },
+                    "snapshotId": { "type": "string", "description": "**必带**:computer_elements 回包里的 snapshotId(本工具按 elementIndex 寻址,驱动只认成对)" },
                 },
-                "required": ["processId", "windowId", "elementIndex", "value"],
+                "required": ["processId", "windowId", "elementIndex", "value", "snapshotId"],
             },
         },
         {
@@ -611,6 +615,20 @@ fn tool_definitions() -> Value {
                     "path": { "type": "string" },
                     "launchPath": { "type": "string" },
                 },
+            },
+        },
+        {
+            "name": "computer_save_screenshot",
+            "description": "把某个窗口的画面写成 PNG 文件(后台截取,不抢焦点)。「截图存盘」用它:computer_screenshot 只把图交给模型,写不出文件。processId/windowId 从 computer_windows 取;路径由你给,驱动直接写盘,同一路径会覆盖同名文件。只做窗口级 —— 整屏落盘不走这里(那会绕过前台受保护应用的整屏拒拍),整屏请用 computer_screenshot。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "processId": { "type": "number" },
+                    "windowId": { "type": "number" },
+                    "path": { "type": "string", "description": "PNG 写入路径(绝对路径,如 C:\\\\Users\\\\me\\\\Desktop\\\\shot.png)" },
+                    "maxImageDimension": { "type": "number", "description": "长边上限,默认 0 = 原始分辨率" },
+                },
+                "required": ["processId", "windowId", "path"],
             },
         },
     ])
@@ -941,6 +959,30 @@ async fn call_tool(
     })
 }
 
+/// daemon 自己的补充字段 → 一条给模型看的 text。
+///
+/// 整形只保留 `content`,而这些字段挂在顶层(`readValue`、`redactedValues`、
+/// `hiddenProtected`)或 `structuredContent` 里(`computer_wait` 的 evidence),
+/// 不折进来它们就是死参数 —— schema 与技能都在宣传 `readValue`。
+fn desktop_enrichment(payload: &Value) -> Option<String> {
+    let mut extra = serde_json::Map::new();
+    for key in ["readValue", "redactedValues", "hiddenProtected"] {
+        if let Some(value) = payload.get(key) {
+            extra.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(evidence) = payload
+        .get("structuredContent")
+        .and_then(|state| state.get("evidence"))
+    {
+        extra.insert("evidence".to_string(), evidence.clone());
+    }
+    if extra.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&Value::Object(extra)).ok()
+}
+
 /// 桌面工具的回包已经是 MCP 形状(content 数组,可能带图):原样带走,只把
 /// 驱动的 isError 如实转成工具错误。
 ///
@@ -957,6 +999,11 @@ pub(crate) fn shape_desktop_payload(payload: &Value) -> Value {
         .cloned()
         .unwrap_or_else(|| json!([{ "type": "text", "text": "驱动没有返回内容" }]));
     let mut shaped = json!({ "content": content });
+    if let Some(extra) = desktop_enrichment(payload) {
+        if let Some(content) = shaped.get_mut("content").and_then(Value::as_array_mut) {
+            content.push(json!({ "type": "text", "text": extra }));
+        }
+    }
     if is_error {
         shaped["isError"] = json!(true);
     }
@@ -1235,14 +1282,14 @@ mod tests {
         let observation_only = names(false, true, false);
         assert_eq!(observation_only.len(), 3, "{observation_only:?}");
 
-        // 电脑控制 + 系统级执行:驱动面出现,合计 14 个 computer_*。
+        // 电脑控制 + 系统级执行:驱动面出现,合计 15 个 computer_*(11 驱动面 + 1 落盘)。
         let driver_only = names(false, true, true);
-        assert_eq!(driver_only.len(), 14, "{driver_only:?}");
+        assert_eq!(driver_only.len(), 15, "{driver_only:?}");
 
         // 三开:与静态表逐字一致(过滤只做删减,不改顺序、不动 schema)。
         let full = names(true, true, true);
         assert_eq!(full, config_names(None));
-        assert_eq!(full.len(), 24);
+        assert_eq!(full.len(), 25);
     }
 
     /// 设置页拿到的工具名:与 `tools/list` 同源,且随开关走(工单 16)。
@@ -1261,10 +1308,10 @@ mod tests {
 
         let full = entry(true, true, true);
         assert_eq!(full.tools, config_names(None));
-        assert_eq!(full.tools.len(), 24);
+        assert_eq!(full.tools.len(), 25);
         assert_eq!(entry(true, false, false).tools.len(), 10);
         assert_eq!(entry(false, true, false).tools.len(), 3);
-        assert_eq!(entry(false, true, true).tools.len(), 14);
+        assert_eq!(entry(false, true, true).tools.len(), 15);
         assert!(entry(false, false, false).tools.is_empty());
 
         // 配置读不到:按全量列,与 `tools/list` 的失败开口一致。
@@ -1352,14 +1399,14 @@ mod tests {
         // 开关改了(daemon 落盘),重新列清单就跟着变 —— 只列一次的老客户端
         // 仍按启动时的清单跑,调用侧由端点闸门兜底。
         write_switches(dir.path(), true, true, true);
-        assert_eq!(listed_names(&runtime).await.len(), 24);
+        assert_eq!(listed_names(&runtime).await.len(), 25);
     }
 
     #[tokio::test]
     async fn an_unreadable_config_keeps_every_tool_visible() {
         // 失败开口:工具面静默缺失比多列几个更贵(工单 05/07 两次事故)。
         let runtime = runtime_at(1);
-        assert_eq!(listed_names(&runtime).await.len(), 24);
+        assert_eq!(listed_names(&runtime).await.len(), 25);
     }
 
     #[test]
@@ -1522,5 +1569,22 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("没有返回内容"));
+
+        // daemon 自己的补充字段不能跟着 structuredContent 一起丢。
+        let enriched = json!({
+            "content": [{ "type": "text", "text": "tree_markdown" }],
+            "readValue": { "name": "收件人", "value": "alice@example.com" },
+            "redactedValues": 2,
+            "structuredContent": { "status": "matched", "evidence": "已保存" },
+        });
+        let shaped = shape_desktop_payload(&enriched);
+        let extra = shaped["content"]
+            .as_array()
+            .and_then(|items| items.last())
+            .and_then(|item| item["text"].as_str())
+            .unwrap_or_default();
+        assert!(extra.contains("alice@example.com"), "{extra}");
+        assert!(extra.contains("已保存"), "{extra}");
+        assert!(extra.contains("\"redactedValues\":2"), "{extra}");
     }
 }

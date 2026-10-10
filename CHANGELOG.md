@@ -83,6 +83,7 @@
 - 开发模式性能诊断覆盖层（FPS、渲染时长等）
 - 前端日志按模块前缀输出（`[agentStore]`、`[CodeMuxThread]` 等）
 - Sidecar 日志包含会话初始化、输入发送、错误信息，并对大内容智能截断
+- 电脑控制新增**假驱动**（`DriverHost::install_stub`）：契约测试不再需要真驱动与真桌面。原先只能靠真驱动 + 真窗口观测的不变量（翻译/裁决/闸门的顺序、脱敏之后的整形、`elementIndex` 与 `snapshotId` 的成对纪律、「写剪贴板失败就不粘贴」）现在在任何机器上都能跑，不必再整条跳过
 
 #### 键盘快捷键
 - 新增可改键的快捷键系统：9 条内置命令（后退 / 前进、新建会话、打开设置、搜索、折叠侧边栏 / 侧面板、停止生成、聚焦输入框），每条都能在「设置 → 快捷键」里重绑、禁用或恢复默认
@@ -92,6 +93,10 @@
 - 「设置 → 快捷键」分区按分组列出全部命令：点键位即进入录制，行尾图标单独禁用或恢复该命令，标题栏右侧一键恢复全部默认
 - 键位提示跟随改键：侧栏「新对话 / 搜索」在该行悬停或键盘聚焦时显示当前键位，标题栏、设置与停止按钮的 tooltip 及 `aria-keyshortcuts` 同步更新
 - 决策与取舍见 [ADR 0013](docs/adr/0013-user-configurable-keyboard-shortcuts.md)
+
+#### MCP 与内置自动化
+- 新增 `computer_save_screenshot`：把某个窗口的画面直接落盘成 PNG（后台截取、不抢焦点），「截图存盘」类任务不再需要模型自己拼 shell 脚本；只做窗口级，整屏仍走 `computer_screenshot`（保留前台受保护应用的整屏拒拍）。内置 MCP 的电脑控制工具由 14 增至 15
+- 电脑控制的元素级动作（`computer_type` / `computer_key` / `computer_scroll` / `computer_click` / `computer_set_value`）明确 `elementIndex` 必须与 `computer_elements` 回包里的 `snapshotId` 成对：`computer_elements` 的回执现在带上 `snapshotId`，缺配对在本地即被拒并给出可行动的措辞（此前会带着驱动的 `bare element_index is not accepted` 失败）
 
 ### Changed
 
@@ -129,6 +134,10 @@
 - 修复 OpenCode 会话中断后残留孤儿进程的问题
 - 修复 Codex 会话历史恢复时上下文丢失的问题
 - 修复重复权限请求导致前端重复弹窗的问题
+- 修复 `computer_launch` 永远失败（报「缺少必填参数 processId」）：目标窗口的解析跑在启动应用的裁决之前，使 launch 分支成了死代码；现在按工具分派，启动应用不再需要 processId，被拒时的文案也不再误导模型去列窗口
+- 修复桌面元素级动作必然失败：`elementIndex` 与驱动的 `snapshotId` 配对纪律此前没有落到工具面（`computer_type` / `computer_key` / `computer_scroll` 连参数都没有），模型只能退回像素坐标
+- 修复电脑控制的敏感值脱敏形同虚设：`computer_elements` 此前转发驱动自己渲染的元素树文本（里面带 `value="原始值"`），而脱敏只作用于结构化元素 —— 密码、验证码这类值会原样进入模型上下文与会话记录。现在模型可见的树文本由 CodeMUX 用已脱敏的结构化元素自己渲染，值不可能泄漏（拿不到结构化树时宁可不给文本）；`computer_wait` 的 `value_equals` / `value_changed` 与 `text_present` / `text_absent` 落在敏感控件上也改为直接拒绝（`reason=sensitive_refused`），不再把控件的值当证据回给模型，也堵掉用子串逐字试探读值的通道
+- 修复 `computer_paste` 是死工具：它在工具清单、审批摘要与技能文档里都宣传着，但参数翻译表里没有它的分支，调用必然被本地拒成「translate 不认识桌面工具 computer_paste」（403）。现在按设计实现成两步（先把文本写进系统剪贴板，再向窗口投一次 Ctrl+V），并补上必填的 `windowId` 与可选的 `deliveryMode`（驱动报 `background_unavailable` 时可显式升级）；写剪贴板失败就**不粘贴**，文案说清「你的剪贴板没有被改动」并给出替代路径（驱动 v0.30.1 的 `clipboard_write` 在部分环境恒定报 `OSError(5) 拒绝访问`，那种环境会明确报错而不是静默失败）
 
 ## [0.1.0] - 2026-06-07
 

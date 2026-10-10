@@ -35,6 +35,7 @@ export const COMPUTER_USE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'computer_drag',
   'computer_set_value',
   'computer_launch',
+  'computer_save_screenshot',
 ]);
 
 export function isComputerUseToolName(toolName: string): boolean {

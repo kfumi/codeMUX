@@ -60,6 +60,7 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   browser_select: '选择选项',
   computer_windows: '桌面窗口',
   computer_screenshot: '桌面截图',
+  computer_save_screenshot: '截图存盘',
   computer_active_window: '当前窗口',
   computer_apps: '应用列表',
   computer_elements: '界面元素',

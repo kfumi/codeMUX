@@ -153,15 +153,26 @@ pub fn action_summary(op: &str, params: &serde_json::Value) -> String {
         "desktop-scroll" => "在窗口里滚动".to_string(),
         "desktop-drag" => "在窗口里拖拽".to_string(),
         "desktop-set-value" => "设置窗口里控件的值".to_string(),
-        "desktop-launch" => {
-            let name = params
-                .get("name")
-                .or_else(|| params.get("path"))
-                .or_else(|| params.get("launchPath"))
+        "desktop-save-screenshot" => {
+            let path = params
+                .get("path")
                 .and_then(|value| value.as_str())
                 .unwrap_or("?");
-            format!("启动应用 {name}")
+            let window = params
+                .get("windowId")
+                .and_then(|value| value.as_u64())
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "?".to_string());
+            format!("把窗口 {window} 的画面写成 {path}")
         }
+        "desktop-launch" => match params
+            .as_object()
+            .map(|args| super::desktop::launch_address(args))
+        {
+            // 与调用侧同一份地址解析:审批卡上显示的值必须就是真正会启动的那个。
+            Some(Ok((_, value))) => format!("启动应用 {value}"),
+            _ => "启动应用(缺 name/path/launchPath)".to_string(),
+        },
         other => format!("执行 {other}"),
     }
 }
