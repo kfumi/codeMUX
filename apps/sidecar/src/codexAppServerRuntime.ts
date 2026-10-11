@@ -121,6 +121,16 @@ type CollaborationModeMask = {
 const FALLBACK_PLAN_MODE_MASK: CollaborationModeMask = { name: 'Plan', mode: 'plan' };
 const FALLBACK_DEFAULT_MODE_MASK: CollaborationModeMask = { name: 'Default', mode: 'default' };
 
+/**
+ * 归属冲突：另一个 codex 进程（桌面端 / CLI / 另一个 CodeMUX 实例）正持有该
+ * thread 的写锁。codex 的原文是 `thread-store conflict: thread <id> already
+ * has an active writer`。
+ */
+const THREAD_WRITER_CONFLICT_PATTERN = /active writer|thread-store conflict/i;
+/** 归属冲突的有限重试：冲突常常只是另一个进程正在释放写锁。 */
+const THREAD_WRITER_CONFLICT_ATTEMPTS = 3;
+const THREAD_WRITER_CONFLICT_RETRY_DELAYS_MS = [250, 750];
+
 type PendingPlanApproval = {
   requestId: string;
   /** `abort` signals the transport died while the approval was pending. */
@@ -214,6 +224,8 @@ export class CodexAppServerRuntime {
   private transport: AppServerTransport | null = null;
   private approvalBridge: CodexAppServerApprovalBridge | null = null;
   private threadId: string | null = null;
+  /** 已提示过的 native_session_rebuilt 事件（previous id + reason），避免重复刷时间线。 */
+  private rebuildNotices = new Set<string>();
   private activeTurn: ActiveTurnState | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking' }>();
   private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
@@ -394,31 +406,41 @@ export class CodexAppServerRuntime {
     await this.resolveCollaborationModes(transport);
 
     if (result.rebuilt) {
-      // Issue 04: resume failed — the native thread was rebuilt under a new
-      // id. The CodeMUX event timeline is untouched; surface the rebuild as a
-      // system status hint so the UI can explain the mapping change.
-      this.emitEvent({
-        type: 'system_event',
-        subtype: 'native_session_rebuilt',
-        session_id: requestedConfig.sessionId ?? '',
-        content: 'Codex 原生会话恢复失败，已重建会话。对话历史保持完整。',
-        agent_kind: 'codex',
-        previous_agent_session_id: result.rebuilt.previousAgentSessionId,
-        agent_session_id: result.threadId,
-        reason: result.rebuilt.reason,
-      });
+      // Issue 04: resume failed — the native thread was rebuilt under a new id.
+      // The CodeMUX event timeline is untouched; surface the rebuild once per
+      // (previous id, reason) pair so repeated opens of the same broken binding
+      // do not keep appending the same bubble.
+      const noticeKey = `${result.rebuilt.previousAgentSessionId}\n${result.rebuilt.reason}`;
+      if (!this.rebuildNotices.has(noticeKey)) {
+        this.rebuildNotices.add(noticeKey);
+        this.emitEvent({
+          type: 'system_event',
+          subtype: 'native_session_rebuilt',
+          session_id: requestedConfig.sessionId ?? '',
+          content: 'Codex 原生会话恢复失败，已重建会话。对话历史保持完整。',
+          agent_kind: 'codex',
+          previous_agent_session_id: result.rebuilt.previousAgentSessionId,
+          agent_session_id: result.threadId,
+          reason: result.rebuilt.reason,
+        });
+      }
     }
 
     process.stderr.write(
       `[codex-app-server] Session ensured: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${result.threadId} resumed=${result.resumed} rebuilt=${result.rebuilt ? 'true' : 'false'}\n`,
     );
     writeLog('[codex-app-server]', `[perf] codex ensure total elapsed_ms=${Date.now() - ensureStartedAt}`);
-    this.emitEvent({
-      type: 'agent_session_mapping',
-      app_session_id: requestedConfig.sessionId ?? '',
-      agent_kind: 'codex',
-      agent_session_id: result.threadId,
-    });
+    // 重建出来的 thread 在 app-server 退出前没有 rollout 落盘，无法当作原生身份
+    // 持久化：写 mapping 只会把旧绑定（写锁释放后仍可恢复的那条）永久丢掉，并让
+    // 下一次打开必然再重建一次。所以重建时保留旧绑定不改写。
+    if (!result.rebuilt) {
+      this.emitEvent({
+        type: 'agent_session_mapping',
+        app_session_id: requestedConfig.sessionId ?? '',
+        agent_kind: 'codex',
+        agent_session_id: result.threadId,
+      });
+    }
 
     this.emitEvent({ type: 'mcp_status_update', servers: {}, status: 'ready' });
     this.emitEvent({
@@ -1535,29 +1557,54 @@ export class CodexAppServerRuntime {
       throw new Error('App-server transport was not established');
     }
     if (config.agentSessionId) {
-      try {
-        const result = await transport.request<{ thread?: { id?: string } }>(
-          'thread/resume',
-          { threadId: config.agentSessionId, ...threadParams },
-        );
-        const threadId = readStringRecordField(result.thread, 'id');
-        if (threadId) {
+      let attempt = 0;
+      // 内层循环要么返回、要么抛错，没有正常出口。
+      while (true) {
+        attempt += 1;
+        try {
+          const result = await transport.request<{ thread?: { id?: string } }>(
+            'thread/resume',
+            { threadId: config.agentSessionId, ...threadParams },
+          );
+          const threadId = readStringRecordField(result.thread, 'id');
+          if (!threadId) {
+            throw new Error('thread/resume succeeded but returned no thread id');
+          }
           return { threadId, resumed: true, rebuilt: null };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          // 归属冲突不是「原生会话消失」，而是「别人正开着它」：写锁释放后这条
+          // 线程仍可恢复，改绑只会把会话永久指向一个进程内临时 thread。先有限
+          // 重试，仍冲突就报错，让用户去关掉占用它的进程。
+          if (THREAD_WRITER_CONFLICT_PATTERN.test(reason)) {
+            const retryDelayMs = THREAD_WRITER_CONFLICT_RETRY_DELAYS_MS[attempt - 1];
+            if (retryDelayMs !== undefined) {
+              process.stderr.write(
+                `[codex-app-server] thread/resume blocked by another writer for ${config.agentSessionId}; retrying in ${retryDelayMs}ms\n`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+              continue;
+            }
+            process.stderr.write(
+              `[codex-app-server] thread/resume blocked by another writer for ${config.agentSessionId}; keeping the native binding\n`,
+            );
+            throw new Error(
+              `Codex 原生会话正被其他进程占用，CodeMUX 无法接管：${reason}。请先关闭 Codex 桌面端 / CLI 里打开的这个任务，再重新打开本会话。`,
+            );
+          }
+          // Issue 04: the mapped native session is gone (e.g. history rotated or
+          // the rollout file was removed). Fall back to a fresh thread so the
+          // conversation can continue — the minted thread is deliberately NOT
+          // persisted as the new binding (see `ensure`).
+          process.stderr.write(
+            `[codex-app-server] thread/resume failed for ${config.agentSessionId}; rebuilding native session: ${reason}\n`,
+          );
+          return {
+            threadId: await this.startThread(transport, threadParams),
+            resumed: false,
+            rebuilt: { previousAgentSessionId: config.agentSessionId, reason },
+          };
         }
-        throw new Error('thread/resume succeeded but returned no thread id');
-      } catch (error) {
-        // Issue 04: the mapped native session is gone (e.g. history rotated or
-        // the rollout file was removed). Fall back to a fresh thread and swap
-        // the mapping so the conversation can continue.
-        const reason = error instanceof Error ? error.message : String(error);
-        process.stderr.write(
-          `[codex-app-server] thread/resume failed for ${config.agentSessionId}; rebuilding native session: ${reason}\n`,
-        );
-        return {
-          threadId: await this.startThread(transport, threadParams),
-          resumed: false,
-          rebuilt: { previousAgentSessionId: config.agentSessionId, reason },
-        };
       }
     }
     return {

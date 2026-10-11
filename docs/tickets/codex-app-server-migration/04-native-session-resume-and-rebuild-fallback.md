@@ -11,3 +11,5 @@
 - [x] resume 失败：新建 thread、更新 agent_session_mapping、emit `native_session_rebuilt` System Event
 - [x] 单测覆盖 resume 成功与失败降级路径
 - [x] UI 可投影 System Event 为可读状态提示（非助手正文）
+
+**修订（2026-10-11）：** 本条的「resume 失败即替换 mapping」已收窄 —— 归属冲突（`active writer`）不重建不改绑；原生会话消失才 mint 兜底，且不再改写 mapping。见 `docs/adr/0010-codex-app-server-transport.md` 同日期修订节。

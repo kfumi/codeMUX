@@ -50,3 +50,12 @@ Codex SDK 路径无法实现工具级 Interactive Request 审批、Plan Mode 闭
 - **默认档收紧**：默认 workflowMode 由 `full-access` 改为 `auto`（即官方保守默认「请求批准」，workspace-write + on-request），前后端 `CODEX_DEFAULT_PERMISSIONS` 与 Rust 侧 `default_codex_workflow_mode` serde 默认同步；`mapExecutionModeToPermissionConfig` 的 `full_access` 分支改为显式 full-access 配置，不再展开默认值。
 - **选择器收敛**：桌面 `AgentPermissionSelector` 只展示官方三档入口并采用官方文案（请求批准 / 帮我批准 / 完全访问，第三档官方原文为「完全访问权限」，取短形）；read-only 不再常驻，仅存量 read-only 快照的会话保留退出口（与遗留 plan 入口同款模式）。计划模式入口移入 composer「+」菜单（`onActivatePlanMode`），独立「计划」toggle 按钮移除，开启后在权限下拉右侧显示可点击关闭的激活 chip；权限选择器不再镜像 plan 状态（含切档不翻转 plan），始终显示当前 Workflow 档。
 - **兼容性**：枚举 id 不改名、read-only 档保留，存量 permission snapshot 迁移映射（sandbox 三元组 → 档位）不受影响。
+
+## 修订（2026-10-11）：resume 失败细分，且不再替换 mapping
+
+Decision 3 的「失败即 mint 新 thread、替换 mapping」把两类本质不同的失败混为一谈，实测中把导入会话的原生绑定永久换掉了（详见 `docs/research/2026-10-11-codex-imported-session-rebuild-loop.md`）：
+
+- **归属冲突**（codex 原文 `thread-store conflict: thread <id> already has an active writer`，即该线程正被 Codex 桌面端 / CLI 持有写锁）：属于**临时**状态，写锁释放后原 thread 仍可恢复。改为有限重试（3 次，250/750ms）后报错交还用户（提示先关闭占用它的进程），**不重建、不改绑**。
+- **原生会话消失**（如 `no rollout found for thread id <id>`、`thread not found`）：保留 Issue 04 的 mint 兜底，但 **不再替换 `agent_session_mapping`**。app-server 进程内 `thread/start` 出来的 thread 在首个 rollout 落盘前无法被下一个进程 resume，把它写成原生身份等于永久丢掉旧绑定（旧线程的写锁释放后再也回不去），并让每次打开都重建一次、时间线反复出现 `native_session_rebuilt`。该提示改为按 (previous id, reason) 去重，每个 sidecar 进程只提示一次。
+
+保留旧绑定的副作用：对「另一进程稍后释放写锁」的场景，下次打开即可恢复原原生线程；对「旧 thread 确实消失」的场景，会话继续在 CodeMUX 时间线推进，`复制原生会话ID` 与 token 用量仍指向旧 id（CodeMUX 时间线始终是权威历史）。

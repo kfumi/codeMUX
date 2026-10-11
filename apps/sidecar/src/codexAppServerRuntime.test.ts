@@ -319,12 +319,9 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
             reason: expect.stringContaining('thread not found'),
           }),
         );
-        // The mapping must point at the rebuilt thread.
-        expect(events).toContainEqual(
-          expect.objectContaining({
-            type: 'agent_session_mapping',
-            agent_session_id: 'thread_new',
-          }),
+        // 重建的 thread 在 rollout 落盘前无法恢复：不改写 mapping，旧绑定保留。
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'agent_session_mapping' }),
         );
 
         // Turns continue on the rebuilt thread.
@@ -332,6 +329,118 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         await runtime.sendInput('continue');
         const turnStarts = receivedRequests(readLog(), 'turn/start');
         expect(turnStarts[0]?.params).toMatchObject({ threadId: 'thread_new' });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'a writer-conflict thread/resume retries and fails without rebuilding or rebinding',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_new' } } },
+          'thread/resume': {
+            error: {
+              code: -32000,
+              message: 'thread-store conflict: thread thread_busy already has an active writer',
+            },
+          },
+        },
+      };
+      const { runtime, events, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await expect(runtime.ensure(ensureCommand({ agentSessionId: 'thread_busy' })))
+          .rejects.toThrow(/正被其他进程占用/);
+
+        // 有限重试后仍冲突：绝不重建（thread/start），也不改写 mapping。
+        expect(receivedRequests(readLog(), 'thread/resume')).toHaveLength(3);
+        expect(receivedRequests(readLog(), 'thread/start')).toHaveLength(0);
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'system_event', subtype: 'native_session_rebuilt' }),
+        );
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'agent_session_mapping' }),
+        );
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'a transient writer conflict is retried and resumes the same native thread',
+    async () => {
+      const scenario = {
+        responseSequences: {
+          'thread/resume': [
+            {
+              error: {
+                code: -32000,
+                message: 'thread-store conflict: thread thread_existing already has an active writer',
+              },
+            },
+            { result: { thread: { id: 'thread_existing' } } },
+          ],
+        },
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_new' } } },
+        },
+      };
+      const { runtime, events, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand({ agentSessionId: 'thread_existing' }));
+
+        expect(receivedRequests(readLog(), 'thread/resume')).toHaveLength(2);
+        expect(receivedRequests(readLog(), 'thread/start')).toHaveLength(0);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'agent_session_mapping',
+            agent_session_id: 'thread_existing',
+          }),
+        );
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'system_event', subtype: 'native_session_rebuilt' }),
+        );
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'repeated ensures on an unrestorable native session emit the rebuild notice once',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_new' } } },
+          'thread/resume': {
+            error: { code: -32000, message: 'no rollout found for thread id thread_gone' },
+          },
+        },
+      };
+      const { runtime, events, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand({ agentSessionId: 'thread_gone' }));
+        expect(receivedRequests(readLog(), 'thread/start')).toHaveLength(1);
+
+        // 再次打开（fingerprint 变化触发重新 ensure）仍要重建，但提示只发一次。
+        await runtime.ensure(
+          ensureCommand({ agentSessionId: 'thread_gone', reasoningEffort: 'high' }),
+        );
+
+        const rebuildNotices = events.filter(
+          (event) => event.type === 'system_event' && event.subtype === 'native_session_rebuilt',
+        );
+        expect(rebuildNotices).toHaveLength(1);
+        expect(receivedRequests(readLog(), 'thread/start')).toHaveLength(2);
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'agent_session_mapping' }),
+        );
       } finally {
         await runtime.shutdown();
       }
