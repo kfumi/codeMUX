@@ -76,6 +76,7 @@
 | [2026-10-09-reference-plugin-method-inventory.md](research/2026-10-09-reference-plugin-method-inventory.md) | 参考插件方法面清单与 CodeMUX 差异（工单 13 附件） |
 | [2026-10-10-esc-as-stop-key-assessment.md](research/2026-10-10-esc-as-stop-key-assessment.md) | Esc 作为「停止」键的可行性评估（Ctrl+. 现状、Esc 多义冲突与固定系统键方案） |
 | [2026-10-11-codex-imported-session-rebuild-loop.md](research/2026-10-11-codex-imported-session-rebuild-loop.md) | 导入的 Codex 会话「原生会话已重建」死循环与「未找到任务路径」根因排查（实测证据链、代码链路、处置与遗留） |
+| [2026-10-11-github-pages-landing-page.md](research/2026-10-11-github-pages-landing-page.md) | GitHub Pages 用于 CodeMUX 项目落地页的可行性调研 |
 
 ### specs
 
