@@ -39,6 +39,26 @@ describe('daemon client', () => {
     );
   });
 
+  it('requests an authenticated image preview by absolute path', async () => {
+    const dataUrl = 'data:image/png;base64,UE5H';
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ dataUrl }), { status: 200 }),
+    );
+
+    const client = createDaemonClient(config);
+    const result = await client.previewImageFile('C:\\Users\\me\\Desktop\\shot.png');
+
+    expect(result).toBe(dataUrl);
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:9240/api/files/image-preview',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        body: JSON.stringify({ path: 'C:\\Users\\me\\Desktop\\shot.png' }),
+      }),
+    );
+  });
+
   it('sends messages to companion route', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('', { status: 202 }));
 

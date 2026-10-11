@@ -206,6 +206,67 @@ describe('toolHeaderSummary', () => {
     expect(summary.text).not.toContain('mcp__');
   });
 
+  it('为 codemux-control 的全部工具别名提供简短中文名称', () => {
+    const tools: [string, string][] = [
+      ['browser_list', '浏览器页面列表'],
+      ['browser_eval', '执行页面脚本'],
+      ['browser_screenshot', '浏览器页面截图'],
+      ['browser_input', '模拟浏览器输入'],
+      ['browser_cdp', '执行浏览器 CDP 命令'],
+      ['browser_snapshot', '读取页面快照'],
+      ['browser_click', '点击页面元素'],
+      ['browser_type', '输入页面文字'],
+      ['browser_scroll', '滚动浏览器页面'],
+      ['browser_select', '选择页面选项'],
+      ['computer_windows', '桌面窗口列表'],
+      ['computer_screenshot', '桌面截图'],
+      ['computer_save_screenshot', '保存窗口截图'],
+      ['computer_active_window', '查看当前窗口'],
+      ['computer_apps', '查看桌面应用'],
+      ['computer_elements', '读取窗口元素'],
+      ['computer_wait', '等待窗口条件'],
+      ['computer_click', '点击窗口元素'],
+      ['computer_type', '向窗口输入文字'],
+      ['computer_key', '发送键盘按键'],
+      ['computer_paste', '粘贴文本'],
+      ['computer_scroll', '滚动窗口内容'],
+      ['computer_drag', '拖动窗口元素'],
+      ['computer_set_value', '设置控件值'],
+      ['computer_launch', '启动桌面应用'],
+    ];
+
+    for (const [tool, label] of tools) {
+      expect(getToolDisplayName(`codemux-control_${tool}`)).toBe(label);
+      expect(getToolDisplayName(`mcp__codemux-control__${tool}`)).toBe(label);
+      expect(getToolActionLabel(`codemux-control_${tool}`)).toBe(label);
+      expect(getToolActionLabel(`mcp__codemux-control__${tool}`)).toBe(label);
+    }
+  });
+
+  it('电脑启动摘要优先显示应用名，并在缺少应用名时回退到 path 或 launchPath', () => {
+    const named = getToolHeaderSummary('codemux-control_computer_launch', {
+      name: 'Notepad',
+      path: 'C:/Program Files/Notepad++/notepad++.exe',
+    });
+    expect(named.displayName).toBe('启动桌面应用');
+    expect(named.text).toBe('Notepad');
+    expect(named.consumedKeys).toEqual(['name']);
+
+    const path = getToolHeaderSummary('mcp__codemux-control__computer_launch', {
+      path: 'C:/Program Files/Notepad++/notepad++.exe',
+    });
+    expect(path.text).toBe('notepad++.exe');
+    expect(path.fullPath).toBe('C:/Program Files/Notepad++/notepad++.exe');
+    expect(path.consumedKeys).toEqual(['path']);
+
+    const launchPath = getToolHeaderSummary('computer_launch', {
+      launchPath: 'D:/Tools/notepad.exe',
+    });
+    expect(launchPath.text).toBe('notepad.exe');
+    expect(launchPath.fullPath).toBe('D:/Tools/notepad.exe');
+    expect(launchPath.consumedKeys).toEqual(['launchPath']);
+  });
+
   it('内置 server 的工具用工具自己的标签,而不是 server 段(工单 16)', () => {
     // 卡片标题:两族工具过去都显示 server 段,看不出在干什么。
     expect(
@@ -215,9 +276,9 @@ describe('toolHeaderSummary', () => {
       getToolHeaderSummary('mcp__codemux-control__computer_screenshot', {}).displayName,
     ).toBe('桌面截图');
     // OpenCode 一类的连写形态同样认。
-    expect(getToolHeaderSummary('codemux-control_computer_click', {}).displayName).toBe('点击');
+    expect(getToolHeaderSummary('codemux-control_computer_click', {}).displayName).toBe('点击窗口元素');
     // 改名前的历史轨迹仍按工具标签显示(轨迹是持久数据)。
-    expect(getToolHeaderSummary('mcp__codemux-browser__computer_type', {}).displayName).toBe('输入');
+    expect(getToolHeaderSummary('mcp__codemux-browser__computer_type', {}).displayName).toBe('向窗口输入文字');
     // 折叠行措辞保持 server 段,不跟着变(非目标)。
     expect(getToolGroupPhrase('mcp__codemux-control__computer_click', 2)).toBe(
       '调用 2 次 codemux-control',

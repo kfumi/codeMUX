@@ -76,6 +76,7 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
         .route("/workspace/files/write", post(write_workspace_file))
         .route("/workspace/files/delete", post(delete_workspace_file))
         .route("/workspace/files/list", post(list_workspace_directory))
+        .route("/files/image-preview", post(preview_image_file))
         // Git
         .route("/workspace/git/changed-files", post(git_changed_files))
         .route(
@@ -789,6 +790,24 @@ async fn read_workspace_file(
     let content = crate::services::file::read_file(body.path, body.base_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!({ "content": content })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImagePreviewRequest {
+    path: String,
+}
+
+async fn preview_image_file(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ImagePreviewRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let data_url =
+        crate::services::file::read_image_preview(body.path).map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "dataUrl": data_url })))
 }
 
 #[derive(Debug, Deserialize)]

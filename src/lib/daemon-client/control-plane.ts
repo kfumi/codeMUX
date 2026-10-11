@@ -88,6 +88,13 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
       });
       return result.content;
     },
+    previewImageFile: async (path: string) => {
+      const result = await fetch<{ dataUrl: string }>(config, '/files/image-preview', {
+        method: 'POST',
+        body: JSON.stringify({ path }),
+      });
+      return result.dataUrl;
+    },
     writeWorkspaceFile: (path: string, content: string, basePath?: string) =>
       fetch(config, '/workspace/files/write', {
         method: 'POST',

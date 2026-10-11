@@ -115,7 +115,7 @@ describe('浏览器工具 header 摘要', () => {
     const { container } = renderWithTooltip(
       <ToolCallCard toolName={'browser_click'} input={{ elementId: 'e3', browserId: 'b-1' }} status={'done'} />,
     );
-    expect(screen.getByText('点击元素')).toBeTruthy();
+    expect(screen.getByText('点击页面元素')).toBeTruthy();
     expect(screen.getByText('e3')).toBeTruthy();
     fireEvent.click(within(container).getByRole('button'));
     expect(container.textContent).not.toContain('elementId');
@@ -124,7 +124,7 @@ describe('浏览器工具 header 摘要', () => {
     renderWithTooltip(
       <ToolCallCard toolName={'browser_type'} input={{ elementId: 'e1', text: 'hello' }} status={'done'} />,
     );
-    expect(screen.getByText('输入文字')).toBeTruthy();
+    expect(screen.getByText('输入页面文字')).toBeTruthy();
     expect(screen.queryByText('hello')).toBeNull();
   });
   it('快照工具显示中文名', () => {

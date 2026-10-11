@@ -5,6 +5,7 @@ import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { buildConversationTurns } from '../../../lib/conversationTurns';
 import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
+import { extractToolResultMedia } from './toolResultMedia';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
@@ -681,6 +682,10 @@ function stringifyToolResultContent(content: unknown): string {
 
   // Handle array of text blocks (Claude Code format for Agent tool results)
   if (Array.isArray(content)) {
+    if (extractToolResultMedia(content).images.length > 0) {
+      return JSON.stringify(content);
+    }
+
     const textParts = content
       .filter((block): block is Record<string, unknown> => isRecord(block) && block.type === 'text' && typeof block.text === 'string')
       .map((block) => block.text as string);

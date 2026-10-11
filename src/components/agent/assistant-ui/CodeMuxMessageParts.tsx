@@ -1,7 +1,7 @@
 import type { AgentMessage } from '../../../stores/agentStore';
 import { MarkdownText, CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Streamdown } from 'streamdown';
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   ToolFallbackContent,
   ToolFallbackResult,
@@ -19,9 +19,12 @@ import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, 
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { TodoToolList } from '../TodoToolList';
 import { BrowserToolResult } from '../BrowserToolResult';
+import { ImageAttachmentPreview } from './ImageAttachmentPreview';
+import { extractToolResultMedia, type ToolResultMedia } from './toolResultMedia';
 import { isBrowserToolName } from '../../../lib/browserToolShots';
 import { getTodoListForTool, readTodoExplanation } from '../../../lib/todoToolArgs';
-import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool, normalizeToolName } from '../toolHeaderSummary';
+import { builtinMcpToolSegment } from '@/lib/builtinMcp';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { cn } from '../../../lib/utils';
@@ -247,6 +250,8 @@ export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamSt
   };
 }
 
+const EMPTY_TOOL_RESULT_MEDIA: ToolResultMedia = { images: [] };
+
 function CodeMuxToolCallMessagePartImpl({
   toolName,
   toolCallId,
@@ -266,6 +271,50 @@ function CodeMuxToolCallMessagePartImpl({
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
   const isBrowserTool = isBrowserToolName(toolName);
   const headerSummary = getToolHeaderSummary(toolName, args);
+  const canPreviewToolResultImages = isToolResultImagePreviewTarget(toolName);
+  const resultMedia = useMemo(
+    () => canPreviewToolResultImages ? extractToolResultMedia(result) : EMPTY_TOOL_RESULT_MEDIA,
+    [canPreviewToolResultImages, result],
+  );
+  const resolvedStatus: ToolCallMessagePartStatus | undefined = resolveToolStatus(status, result, isError);
+  const [toolDetailsOpen, setToolDetailsOpen] = useState(resolvedStatus?.type === 'requires-action');
+  const [loadedPathImage, setLoadedPathImage] = useState<{ path: string; src: string } | null>(null);
+  const [pathImageLoadState, setPathImageLoadState] = useState<{
+    path: string;
+    state: 'loading' | 'error';
+  } | null>(null);
+  const pathImage = canPreviewToolResultImages && resultMedia.images.length === 0
+    ? getToolResultImagePath(toolName, args, result, resolvedStatus, isError)
+    : undefined;
+  const isImageOnlyPreviewPanel = isToolResultImageOnlyPanel(toolName, resultMedia, pathImage);
+
+  useEffect(() => {
+    if (resolvedStatus?.type === 'requires-action') {
+      setToolDetailsOpen(true);
+    }
+  }, [resolvedStatus?.type]);
+
+  useEffect(() => {
+    if (!toolDetailsOpen || !pathImage || loadedPathImage?.path === pathImage) return;
+
+    let active = true;
+    setPathImageLoadState({ path: pathImage, state: 'loading' });
+    void import('@/lib/facades/daemon-facade')
+      .then(({ daemonFacade }) => daemonFacade.previewImageFile(pathImage))
+      .then((src) => {
+      if (!active) return;
+      setLoadedPathImage({ path: pathImage, src });
+      setPathImageLoadState(null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPathImageLoadState({ path: pathImage, state: 'error' });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [toolDetailsOpen, pathImage, loadedPathImage?.path]);
   // 委派（Task/Agent）工具行由委派卡片取代：一个段里的委派由卡片表达（组头 + 拓扑 + 步骤），
   // 工具行只会重复它的信息，卡片节点才是打开预览的入口。
   //
@@ -279,7 +328,6 @@ function CodeMuxToolCallMessagePartImpl({
   if (delegatedSubagentId !== undefined) {
     return null;
   }
-  const resolvedStatus: ToolCallMessagePartStatus | undefined = resolveToolStatus(status, result, isError);
   const askQuestions = getAskUserQuestions(toolName, args);
   if (askQuestions && sessionId && toolCallId) {
     const resultContent = typeof result === 'string' ? result : result == null ? undefined : stringifyResult(result);
@@ -329,7 +377,7 @@ function CodeMuxToolCallMessagePartImpl({
   const exitPlanModePlanContent = toolName === 'ExitPlanMode' ? getStringArg(args, 'plan') ?? '' : '';
 
   return (
-    <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
+    <ToolFallbackRoot open={toolDetailsOpen} onOpenChange={setToolDetailsOpen}>
       <ToolFallbackTrigger toolName={toolName} status={resolvedStatus}>
         {exitPlanModePlanFilePath ? (
           <TooltipHint content={exitPlanModePlanFilePath}>
@@ -397,7 +445,7 @@ function CodeMuxToolCallMessagePartImpl({
           </span>
         )}
       </ToolFallbackTrigger>
-      <ToolFallbackContent scrollable={!codeFilePath && !isShellCommandPanel}>
+      <ToolFallbackContent scrollable={!codeFilePath && !isShellCommandPanel && !isImageOnlyPreviewPanel}>
         {isShellCommandPanel ? (
           <ToolFallbackCommandOutput
             command={shellCommand}
@@ -407,8 +455,10 @@ function CodeMuxToolCallMessagePartImpl({
           <TodoToolList items={todoItems} explanation={readTodoExplanation(args)} />
         ) : (
           <>
-            {resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}
-            {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
+            {!isImageOnlyPreviewPanel && resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}
+            {!isImageOnlyPreviewPanel && resolvedStatus?.type !== 'incomplete' && (
+              <ToolCodeDiff toolName={toolName} input={args} />
+            )}
             {isBrowserTool ? (
               <BrowserToolResult
                 toolName={toolName}
@@ -418,10 +468,47 @@ function CodeMuxToolCallMessagePartImpl({
                 afterShot={afterShot}
               />
             ) : (
-              (!codeFilePath || resolvedStatus?.type === 'incomplete') && (
-              <ToolFallbackResult result={stringifyResult(result)} />
-              ))
-            }
+              <>
+                {canPreviewToolResultImages && resultMedia.images.length > 0 && (
+                  <div data-slot="tool-result-images" className="flex flex-wrap gap-2">
+                    {resultMedia.images.map((image, index) => {
+                      const alt = image.name ?? getToolResultImageAlt(args, index);
+                      return (
+                        <ImageAttachmentPreview
+                          key={image.src}
+                          src={image.src}
+                          alt={alt}
+                          thumbnailClassName="h-auto max-h-40 w-auto max-w-full"
+                          imageClassName="h-auto max-h-40 w-auto max-w-full object-contain"
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {canPreviewToolResultImages && resultMedia.images.length === 0 && (
+                  <>
+                    {pathImage && loadedPathImage?.path === pathImage && (
+                      <div data-slot="tool-result-images" className="flex flex-wrap gap-2">
+                        <ImageAttachmentPreview
+                          src={loadedPathImage.src}
+                          alt={getToolResultImageAlt(args, 0)}
+                          thumbnailClassName="h-auto max-h-40 w-auto max-w-full"
+                          imageClassName="h-auto max-h-40 w-auto max-w-full object-contain"
+                        />
+                      </div>
+                    )}
+                    {pathImage && pathImageLoadState?.path === pathImage && (
+                      <p data-slot="tool-result-image-status" className="text-ui-caption text-muted-foreground">
+                        {pathImageLoadState.state === 'loading' ? '正在加载图片预览…' : '图片预览加载失败'}
+                      </p>
+                    )}
+                  </>
+                )}
+                {!isImageOnlyPreviewPanel && (!codeFilePath || resolvedStatus?.type === 'incomplete') && (
+                  <ToolFallbackResult result={stringifyResult(result, resultMedia)} />
+                )}
+              </>
+            )}
           </>
         )}
       </ToolFallbackContent>
@@ -764,9 +851,16 @@ function getAskUserQuestions(toolName: string, args: Record<string, unknown>): A
   return questions.length > 0 ? questions : null;
 }
 
-function stringifyResult(result: unknown): string | undefined {
+function stringifyResult(
+  result: unknown,
+  media: ToolResultMedia = EMPTY_TOOL_RESULT_MEDIA,
+): string | undefined {
   if (result == null) {
     return undefined;
+  }
+
+  if (media.images.length > 0) {
+    return media.text;
   }
 
   if (typeof result === 'string') {
@@ -901,6 +995,55 @@ function resolveToolStatus(
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function isToolResultImagePreviewTarget(toolName: string): boolean {
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  const normalizedName = builtinSegment ?? normalizeToolName(toolName);
+  return normalizedName === 'computer_save_screenshot' || normalizedName === 'Read';
+}
+
+function isToolResultImageOnlyPanel(
+  toolName: string,
+  resultMedia: ToolResultMedia,
+  pathImage: string | undefined,
+): boolean {
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  const normalizedName = builtinSegment ?? normalizeToolName(toolName);
+  return normalizedName === 'computer_save_screenshot'
+    || (normalizedName === 'Read' && (resultMedia.images.length > 0 || pathImage !== undefined));
+}
+
+function getToolResultImagePath(
+  toolName: string,
+  args: Record<string, unknown>,
+  result: unknown,
+  status: ToolCallMessagePartStatus | undefined,
+  isError?: boolean,
+): string | undefined {
+  if (isError || status?.type !== 'complete') return undefined;
+
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  const normalizedName = builtinSegment ?? normalizeToolName(toolName);
+  if (normalizedName === 'computer_save_screenshot') {
+    return getStringArg(args, 'path');
+  }
+
+  if (normalizedName !== 'Read') return undefined;
+  const resultText = typeof result === 'string' ? result : stringifyResult(result) ?? '';
+  if (!resultText.toLowerCase().includes('image read successfully')) return undefined;
+
+  return getStringArg(args, 'file_path')
+    ?? getStringArg(args, 'filePath')
+    ?? getStringArg(args, 'path');
+}
+
+function getToolResultImageAlt(args: Record<string, unknown>, index: number): string {
+  const path = getStringArg(args, 'file_path')
+    ?? getStringArg(args, 'filePath')
+    ?? getStringArg(args, 'path');
+  if (path) return getSummaryFileName(path);
+  return index === 0 ? '工具返回图片' : `工具返回图片 ${index + 1}`;
 }
 
 function getSummaryFileName(path: string): string {

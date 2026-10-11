@@ -1,10 +1,36 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { ToolFallback } from './tool-fallback';
 
+afterEach(cleanup);
+
 describe('ToolFallbackTrigger', () => {
+  it('codemux-control 电脑工具使用电脑图标和中文名称', () => {
+    render(
+      <ToolFallback.Root>
+        <ToolFallback.Trigger toolName="codemux-control_computer_windows" />
+      </ToolFallback.Root>,
+    );
+
+    const trigger = screen.getByRole('button', { name: '桌面窗口列表' });
+    expect(trigger.querySelector('svg.lucide-monitor-smartphone')).toBeTruthy();
+    expect(trigger.textContent).not.toContain('codemux-control_computer_windows');
+  });
+
+  it('codemux-control 浏览器工具使用浏览器图标和中文名称', () => {
+    render(
+      <ToolFallback.Root>
+        <ToolFallback.Trigger toolName="mcp__codemux-control__browser_snapshot" />
+      </ToolFallback.Root>,
+    );
+
+    const trigger = screen.getByRole('button', { name: '读取页面快照' });
+    expect(trigger.querySelector('svg.lucide-globe')).toBeTruthy();
+    expect(trigger.textContent).not.toContain('codemux-control');
+  });
+
   it('动作图标带光学对齐微调（CJK 字形带比行盒中心偏上）', () => {
     render(<ToolFallback.Root>
       <ToolFallback.Trigger toolName="Read" />

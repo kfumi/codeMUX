@@ -48,31 +48,31 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   close_agent: '关闭子智能体',
   resume_agent: '恢复子智能体',
   view_image: '查看图片',
-  browser_list: '浏览器页面',
-  browser_eval: '执行脚本',
-  browser_screenshot: '页面截图',
-  browser_input: '模拟输入',
-  browser_cdp: 'CDP 命令',
+  browser_list: '浏览器页面列表',
+  browser_eval: '执行页面脚本',
+  browser_screenshot: '浏览器页面截图',
+  browser_input: '模拟浏览器输入',
+  browser_cdp: '执行浏览器 CDP 命令',
   browser_snapshot: '读取页面快照',
-  browser_click: '点击元素',
-  browser_type: '输入文字',
-  browser_scroll: '滚动页面',
-  browser_select: '选择选项',
-  computer_windows: '桌面窗口',
+  browser_click: '点击页面元素',
+  browser_type: '输入页面文字',
+  browser_scroll: '滚动浏览器页面',
+  browser_select: '选择页面选项',
+  computer_windows: '桌面窗口列表',
   computer_screenshot: '桌面截图',
-  computer_save_screenshot: '截图存盘',
-  computer_active_window: '当前窗口',
-  computer_apps: '应用列表',
-  computer_elements: '界面元素',
-  computer_wait: '等待条件',
-  computer_click: '点击',
-  computer_type: '输入',
-  computer_key: '按键',
-  computer_paste: '粘贴',
-  computer_scroll: '滚动',
-  computer_drag: '拖拽',
-  computer_set_value: '设值',
-  computer_launch: '启动',
+  computer_save_screenshot: '保存窗口截图',
+  computer_active_window: '查看当前窗口',
+  computer_apps: '查看桌面应用',
+  computer_elements: '读取窗口元素',
+  computer_wait: '等待窗口条件',
+  computer_click: '点击窗口元素',
+  computer_type: '向窗口输入文字',
+  computer_key: '发送键盘按键',
+  computer_paste: '粘贴文本',
+  computer_scroll: '滚动窗口内容',
+  computer_drag: '拖动窗口元素',
+  computer_set_value: '设置控件值',
+  computer_launch: '启动桌面应用',
   js: '运行 JS',
   js_repl: '运行 JS',
   js_repl_reset: '重置 JS',
@@ -108,6 +108,11 @@ export function normalizeToolName(toolName: string): string {
 }
 
 export function getToolDisplayName(toolName: string): string {
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  if (builtinSegment) {
+    return BUILT_IN_TOOL_DISPLAY_NAMES[builtinSegment] ?? builtinSegment;
+  }
+
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__');
     return parts[1] || toolName;
@@ -131,7 +136,8 @@ function builtinToolLabel(toolName: string): string | undefined {
 }
 
 export function getToolHeaderSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
-  if (toolName.startsWith('mcp__')) {
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  if (toolName.startsWith('mcp__') && !builtinSegment) {
     const queryKey = firstPresentKey(input, ['query', 'libraryName', 'libraryId', 'url', 'path']);
     const query = queryKey ? asDisplayText(input[queryKey]) : '';
 
@@ -142,7 +148,7 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
     };
   }
 
-  const normalizedToolName = normalizeToolName(toolName);
+  const normalizedToolName = builtinSegment ?? normalizeToolName(toolName);
   const summary = (() => {
     switch (normalizedToolName) {
       case 'Read':
@@ -252,7 +258,10 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
         };
       }
 
-default:
+      case 'computer_launch':
+        return fromFirstKey(input, ['name', 'path', 'launchPath']);
+
+      default:
         return fromFirstKey(input, ['description', 'pattern', 'query', 'url', 'file_path', 'path', 'prompt', 'command']);
     }
   })();
@@ -454,7 +463,8 @@ const TOOL_GROUP_PHRASES: Record<string, (count: number) => string> = {
 
 export function getToolGroupPhrase(toolName: string, count: number): string {
   if (toolName.startsWith('mcp__')) {
-    return `调用 ${count} 次 ${getToolDisplayName(toolName)}`;
+    const serverName = toolName.split('__')[1] || toolName;
+    return `调用 ${count} 次 ${serverName}`;
   }
   const phrase = TOOL_GROUP_PHRASES[normalizeToolName(toolName)];
   return phrase ? phrase(count) : `${getToolDisplayName(toolName)} ${count} 次`;

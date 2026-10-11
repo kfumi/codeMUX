@@ -336,6 +336,48 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
+  it('preserves image blocks in tool results for tool-result previews', () => {
+    const imageContent = [
+      { type: 'image', data: 'UE5H', mimeType: 'image/png' },
+      { type: 'text', text: 'Screenshot saved' },
+    ];
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-image-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-image-1', name: 'Read', input: { file_path: 'screen.png' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-image-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-image-1', content: imageContent as unknown as string }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const toolCall = messages.flatMap((message) => message.content).find((part) => part.type === 'tool-call');
+    expect(toolCall).toMatchObject({
+      type: 'tool-call',
+      result: JSON.stringify(imageContent),
+    });
+  });
+
   it('renders assistant narration before a finished tool when events follow store timeline order', () => {
     const events: AgentMessage[] = [
       {

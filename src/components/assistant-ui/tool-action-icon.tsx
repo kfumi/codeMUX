@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import { getToolAction, normalizeToolName, type ToolAction } from '@/components/agent/toolHeaderSummary';
+import { builtinMcpToolSegment } from '@/lib/builtinMcp';
 import { cn } from '@/lib/utils';
 
 const ICONS: Record<ToolAction, LucideIcon> = {
@@ -39,16 +40,31 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   ExitPlanMode: CheckSquare,
   AskUserQuestion: CircleHelp,
   request_user_input: CircleHelp,
-  browser_list: MonitorSmartphone,
-  browser_eval: MonitorSmartphone,
-  browser_screenshot: MonitorSmartphone,
-  browser_input: MonitorSmartphone,
-  browser_cdp: MonitorSmartphone,
-  browser_snapshot: MonitorSmartphone,
-  browser_click: MonitorSmartphone,
-  browser_type: MonitorSmartphone,
-  browser_scroll: MonitorSmartphone,
-  browser_select: MonitorSmartphone,
+  browser_list: Globe,
+  browser_eval: Globe,
+  browser_screenshot: Globe,
+  browser_input: Globe,
+  browser_cdp: Globe,
+  browser_snapshot: Globe,
+  browser_click: Globe,
+  browser_type: Globe,
+  browser_scroll: Globe,
+  browser_select: Globe,
+  computer_windows: MonitorSmartphone,
+  computer_screenshot: MonitorSmartphone,
+  computer_save_screenshot: MonitorSmartphone,
+  computer_active_window: MonitorSmartphone,
+  computer_apps: MonitorSmartphone,
+  computer_elements: MonitorSmartphone,
+  computer_wait: MonitorSmartphone,
+  computer_click: MonitorSmartphone,
+  computer_type: MonitorSmartphone,
+  computer_key: MonitorSmartphone,
+  computer_paste: MonitorSmartphone,
+  computer_scroll: MonitorSmartphone,
+  computer_drag: MonitorSmartphone,
+  computer_set_value: MonitorSmartphone,
+  computer_launch: MonitorSmartphone,
 };
 
 /**
@@ -64,6 +80,9 @@ export function ToolActionIcon({
   toolName: string;
   className?: string;
 }) {
-  const Icon = TOOL_ICONS[normalizeToolName(toolName)] ?? ICONS[getToolAction(toolName)];
+  const builtinSegment = builtinMcpToolSegment(toolName);
+  const Icon = (builtinSegment ? TOOL_ICONS[builtinSegment] : undefined)
+    ?? TOOL_ICONS[normalizeToolName(toolName)]
+    ?? ICONS[getToolAction(toolName)];
   return <Icon aria-hidden className={cn('shrink-0 size-[1.08em]', className)} />;
 }

@@ -2,7 +2,12 @@
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CheckSquare, SquareTerminal } from 'lucide-react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockPreviewImageFile } = vi.hoisted(() => ({ mockPreviewImageFile: vi.fn() }));
+vi.mock('@/lib/facades/daemon-facade', () => ({
+  daemonFacade: { previewImageFile: mockPreviewImageFile },
+}));
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -77,6 +82,7 @@ describe('getStreamStatusDisplay', () => {
 describe('CodeMuxToolCallMessagePart', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
+    mockPreviewImageFile.mockReset();
   });
 
   afterEach(() => {
@@ -107,6 +113,155 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(argsBlock?.textContent).toContain('内部子智能体提示词');
     expect(argsBlock?.className).not.toContain('justify-end');
     expect(resultBlock?.textContent).toContain('子智能体最终结果');
+  });
+
+  it('电脑启动工具把应用名摘要显示在工具名右侧', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="codemux-control_computer_launch"
+        args={{ name: 'Notepad' }}
+        result="started"
+      />,
+    );
+
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    expect(trigger?.textContent).toContain('启动桌面应用');
+    expect(trigger?.textContent).toContain('Notepad');
+  });
+
+  it('保存截图工具从实际路径参数加载图片并可点击预览', async () => {
+    mockPreviewImageFile.mockResolvedValueOnce('data:image/png;base64,UE5H');
+    const path = String.raw`C:\Users\94910\Desktop\notepad_test123.png`;
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="codemux-control_computer_save_screenshot"
+        args={{ path }}
+        result=""
+      />,
+    );
+
+    expect(mockPreviewImageFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /保存窗口截图/ }));
+    const preview = await screen.findByRole('button', { name: '预览图片 notepad_test123.png' });
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,UE5H');
+    expect(preview.className).toContain('max-h-40');
+    expect(preview.querySelector('img')?.className).toContain('object-contain');
+    const contentBody = container.querySelector('[data-slot="tool-fallback-content"]')?.firstElementChild;
+    expect(contentBody?.className).not.toContain('overflow-y-auto');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
+    expect(mockPreviewImageFile).toHaveBeenCalledWith(path);
+  });
+
+  it('Read 工具返回成功文本时按图片路径加载并可点击预览', async () => {
+    mockPreviewImageFile.mockResolvedValueOnce('data:image/png;base64,UE5H');
+    const path = String.raw`C:\Users\94910\Desktop\notepad_test123.png`;
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Read"
+        args={{ filePath: path }}
+        result="Image read successfully"
+      />,
+    );
+
+    expect(mockPreviewImageFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /读取/ }));
+    const preview = await screen.findByRole('button', { name: '预览图片 notepad_test123.png' });
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,UE5H');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
+    expect(mockPreviewImageFile).toHaveBeenCalledWith(path);
+  });
+
+  it('Read 普通文本文件时仍展示参数和结果', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Read"
+        args={{ filePath: 'C:/Users/94910/Desktop/notes.txt' }}
+        result="普通文本内容"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /读取/ }));
+
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')?.textContent).toContain('普通文本内容');
+    expect(container.querySelector('[data-slot="tool-result-images"]')).toBeNull();
+    expect(mockPreviewImageFile).not.toHaveBeenCalled();
+  });
+
+  it('保存截图工具展开后只显示图片，并可点击预览', () => {
+    const screenshot = 'UE5H';
+    const result = JSON.stringify({
+      content: [
+        { type: 'image', data: screenshot, mimeType: 'image/png' },
+        { type: 'text', text: '截图已保存' },
+      ],
+    });
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="codemux-control_computer_save_screenshot"
+        args={{ path: 'D:/Desktop/screenshot.png', processId: 1, windowId: 2 }}
+        result={result}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /保存窗口截图/ }));
+    const preview = screen.getByRole('button', { name: '预览图片 screenshot.png' });
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,UE5H');
+    expect(preview.className).toContain('max-h-40');
+    expect(preview.querySelector('img')?.className).toContain('max-h-40');
+    const contentBody = container.querySelector('[data-slot="tool-fallback-content"]')?.firstElementChild;
+    expect(contentBody?.className).not.toContain('overflow-y-auto');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
+    expect(container.textContent).not.toContain(screenshot);
+    expect(mockPreviewImageFile).not.toHaveBeenCalled();
+
+    fireEvent.click(preview);
+    expect(screen.getAllByAltText('screenshot.png')).toHaveLength(2);
+  });
+
+  it('读取图片文件时只显示图片，并可点击预览', () => {
+    const result = JSON.stringify([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'UE5H' } },
+      { type: 'text', text: 'Image read successfully' },
+    ]);
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Read"
+        args={{ file_path: 'D:/Desktop/notepad.png' }}
+        result={result}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /读取/ }));
+    const preview = screen.getByRole('button', { name: '预览图片 notepad.png' });
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,UE5H');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
+    expect(container.textContent).not.toContain('UE5H');
+    expect(mockPreviewImageFile).not.toHaveBeenCalled();
+
+    fireEvent.click(preview);
+    expect(screen.getAllByAltText('notepad.png')).toHaveLength(2);
+  });
+
+  it('图片读取失败时也隐藏参数和结果，只保留图片加载提示', async () => {
+    mockPreviewImageFile.mockRejectedValueOnce(new Error('图片预览接口暂不可用'));
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Read"
+        args={{ filePath: String.raw`C:\Users\94910\Desktop\notepad_test123.png` }}
+        result="Image read successfully"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /读取/ }));
+
+    expect(await screen.findByText('图片预览加载失败')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
   });
 
   it('普通工具参数和结果保持原始详情样式，不使用子智能体对话式气泡或 Markdown 渲染', () => {

@@ -682,6 +682,8 @@ export const daemonFacade = {
 
   readFile: async (path: string, basePath?: string) =>
     (await ensureDaemonClient()).readWorkspaceFile(path, basePath),
+  previewImageFile: async (path: string) =>
+    (await ensureDaemonClient()).previewImageFile(path),
   writeFile: async (path: string, content: string, basePath?: string) => {
     await (await ensureDaemonClient()).writeWorkspaceFile(path, content, basePath);
   },
