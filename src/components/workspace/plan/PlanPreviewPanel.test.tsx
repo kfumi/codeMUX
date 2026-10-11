@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PlanPreviewPanel } from './PlanPreviewPanel';
@@ -11,6 +12,23 @@ vi.mock('../../preview/FileView', () => ({
   FileView: ({ content }: { content: string }) => (
     <div data-testid="file-view-stub">{content}</div>
   ),
+}));
+
+const providerProps: { documentPath?: string } = {};
+
+vi.mock('../../assistant-ui/markdown-image', () => ({
+  // markdown-text 的 img 覆盖也要满足，否则导入整条链会因缺少导出而失败。
+  CodeMuxMarkdownImage: () => null,
+  MarkdownImageDocumentProvider: ({
+    documentPath,
+    children,
+  }: {
+    documentPath: string;
+    children: ReactNode;
+  }) => {
+    providerProps.documentPath = documentPath;
+    return <div data-testid="markdown-image-document">{children}</div>;
+  },
 }));
 
 describe('PlanPreviewPanel', () => {
@@ -24,6 +42,8 @@ describe('PlanPreviewPanel', () => {
 
     expect(screen.getByTestId('file-preview-markdown')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Design Doc' })).toBeTruthy();
+    expect(screen.getByTestId('markdown-image-document')).toBeTruthy();
+    expect(providerProps.documentPath).toBe('D:/project/codeMUX/docs/design.md');
   });
 
   it('keeps long markdown content inside the preview width', () => {

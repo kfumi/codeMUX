@@ -8,6 +8,7 @@ import { code } from "@streamdown/code";
 import { memo } from "react";
 import { cn } from "@/lib/utils";
 import { CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS, CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from "./markdown-link";
+import { CodeMuxMarkdownImage } from "./markdown-image";
 
 const defaultComponents = {
   h1: ({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
@@ -113,14 +114,20 @@ export const CODEMUX_MARKDOWN_STREAMDOWN_PROPS: Omit<
 
 /**
  * 文件预览（FileEditorPanel / PlanPreviewPanel 等）专用的 Streamdown 配置：
- * 与消息渲染共用样式与组件，但 rehype 插件关闭相对路径链接化——
- * 预览文档里的相对路径保持普通文本，不做解析。
+ * 与消息渲染共用样式，但 rehype 插件关闭相对路径链接化——预览文档里的相对路径保持
+ * 普通文本，不做解析；img 换成读盘渲染的 CodeMuxMarkdownImage（文档内相对图片地址）。
  */
 export const CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS: Omit<
   StreamdownProps,
   "children" | "mode"
 > = {
   ...CODEMUX_MARKDOWN_STREAMDOWN_PROPS,
+  // 文件预览专用：本地图片地址已在 rehype 阶段改写成假 origin，这里换成读盘渲染的
+  // 图片组件（消息渲染继续用 Streamdown 默认 img）。
+  components: {
+    ...CODEMUX_MARKDOWN_COMPONENTS,
+    img: CodeMuxMarkdownImage,
+  } as never,
   rehypePlugins: CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS,
 };
 

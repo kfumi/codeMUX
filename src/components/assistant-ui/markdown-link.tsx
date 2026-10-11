@@ -11,6 +11,12 @@ import { TooltipHint } from '@/components/ui/tooltip';
 import { FileTypeIcon } from './file-type-icon';
 
 const LOCAL_FILE_LINK_ORIGIN = 'https://codemux.local-file';
+// 本地图片需要一个 sanitize/harden 都放行的假 origin：Streamdown 默认 rehype 管线里的
+// rehype-harden 只把 `/`、`./`、`../` 开头的地址当相对地址解析（见 rehype-harden
+// parseUrl），`public/demo/a.png` 这类裸相对路径会被判成非法 URL 并整块替换成
+// `[Image blocked: alt]` 占位符。先把本地图片地址改写成 https 假 origin，
+// 再由 CodeMuxMarkdownImage 解析成绝对路径去读文件。
+export const LOCAL_IMAGE_ORIGIN = 'https://codemux.local-image';
 
 export type CodemuxLocalFileLinkPluginOptions = {
   /** 相对路径解析为绝对路径并链接化（仅消息渲染开启；文件预览保持只链接绝对路径） */
@@ -35,10 +41,19 @@ export const CODEMUX_MARKDOWN_REHYPE_PLUGINS: CodemuxRehypePluginList = [
   ...Object.values(defaultRehypePlugins),
 ];
 
-// 文件预览管线（FileEditorPanel / PlanPreviewPanel）：维持旧行为，只链接绝对路径
+// 文件预览管线（FileEditorPanel / PlanPreviewPanel）：维持旧行为，只链接绝对路径；
+// 本地图片地址改写成假 origin，由 CodeMuxMarkdownImage 读盘渲染。
+//
+// 两条改写都必须排在 rehype-raw **之后**：文档里的裸 HTML（README 顶部的 Logo
+// `<img>`、手写 `<a>`）只有 raw 跑完才成为元素，排在前面会漏掉它们，harden 仍会把
+// 相对地址替换成 `[Image blocked: ...]` / `[blocked]`。因此这里显式展开默认管线的
+// 顺序，而不是整体 Object.values。
 export const CODEMUX_FILE_PREVIEW_REHYPE_PLUGINS: CodemuxRehypePluginList = [
+  defaultRehypePlugins.raw,
   [codemuxLocalFileLinkRehypePlugin, { linkRelativeFilePaths: false }],
-  ...Object.values(defaultRehypePlugins),
+  [codemuxLocalImageRehypePlugin, {}],
+  defaultRehypePlugins.sanitize,
+  defaultRehypePlugins.harden,
 ];
 
 type CodeMuxMarkdownLinkProps = AnchorHTMLAttributes<HTMLAnchorElement>;
@@ -132,6 +147,74 @@ export function normalizeLocalMarkdownHref(href?: string): string | null {
 
 export function encodeLocalMarkdownHrefForSanitize(href: string): string {
   return `${LOCAL_FILE_LINK_ORIGIN}/?path=${encodeURIComponent(href)}`;
+}
+
+/**
+ * 判定 Markdown 图片地址里的本地路径：
+ * - 相对路径、`/` 开头路径、Windows 盘符路径、`file://` 都算本地；
+ * - http(s)/data/blob 等带协议的地址返回 null（交给浏览器与 harden 默认白名单）；
+ * - 已是假 origin 的地址返回 null，保证插件幂等。
+ */
+export function normalizeLocalImageMarkdownSrc(src?: string): string | null {
+  if (!src) {
+    return null;
+  }
+
+  const trimmed = src.trim();
+  if (!trimmed || trimmed.startsWith('#')) {
+    return null;
+  }
+
+  if (trimmed.startsWith(`${LOCAL_IMAGE_ORIGIN}/?path=`)) {
+    return null;
+  }
+
+  if (trimmed.startsWith('file://')) {
+    return normalizeWindowsDrivePrefix(safeDecodeURIComponent(trimmed.slice('file://'.length)));
+  }
+
+  const decoded = safeDecodeURIComponent(trimmed);
+  if (isWindowsAbsolutePath(decoded) || decoded.startsWith('/')) {
+    return decoded;
+  }
+
+  if (/^[a-z][a-z\d+.-]*:/i.test(decoded)) {
+    return null;
+  }
+
+  return decoded;
+}
+
+export function encodeLocalImageSrcForSanitize(path: string): string {
+  return `${LOCAL_IMAGE_ORIGIN}/?path=${encodeURIComponent(path)}`;
+}
+
+export function codemuxLocalImageRehypePlugin() {
+  return (tree: unknown) => {
+    rewriteLocalImageSources(tree);
+  };
+}
+
+function rewriteLocalImageSources(node: unknown): void {
+  if (!isRecord(node)) {
+    return;
+  }
+
+  if (node.type === 'element' && node.tagName === 'img' && isRecord(node.properties)) {
+    const src = node.properties.src;
+    if (typeof src === 'string') {
+      const path = normalizeLocalImageMarkdownSrc(src);
+      if (path) {
+        node.properties.src = encodeLocalImageSrcForSanitize(path);
+      }
+    }
+  }
+
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      rewriteLocalImageSources(child);
+    }
+  }
 }
 
 type LocalFileLinkDetails = {

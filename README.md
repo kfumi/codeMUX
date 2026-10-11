@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="crates/daemon/icons/128x128@2x.png" width="120" alt="CodeMUX Logo">
+  <img src="apps/desktop/build/icons/128x128@2x.png" width="120" alt="CodeMUX Logo">
 </p>
 
 <h1 align="center">CodeMUX</h1>

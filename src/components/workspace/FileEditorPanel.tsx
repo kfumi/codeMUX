@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 
 import { CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS } from '../assistant-ui/markdown-text';
+import { MarkdownImageDocumentProvider } from '../assistant-ui/markdown-image';
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
@@ -144,20 +145,25 @@ export function FileEditorPanel({ tab }: { tab: SidePanelTab }) {
       <div className="min-h-0 flex-1 overflow-hidden">
         {markdownFile && viewMode === 'preview' ? (
           <div data-testid="markdown-file-preview" className="h-full overflow-auto">
-            <div className="mx-auto w-full max-w-3xl px-6 py-5 text-ui-body leading-6 text-foreground/88">
-              <Streamdown
-                mode="static"
-                className="aui-md min-w-0 max-w-full"
-                components={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.components}
-                plugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.plugins}
-                shikiTheme={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.shikiTheme}
-                controls={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.controls}
-                rehypePlugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.rehypePlugins}
-                linkSafety={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.linkSafety}
-              >
-                {content.trim()}
-              </Streamdown>
-            </div>
+            <MarkdownImageDocumentProvider
+              documentPath={tab.filePath ?? tab.title}
+              projectPath={tab.projectPath}
+            >
+              <div className="mx-auto w-full max-w-3xl px-6 py-5 text-ui-body leading-6 text-foreground/88">
+                <Streamdown
+                  mode="static"
+                  className="aui-md min-w-0 max-w-full"
+                  components={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.components}
+                  plugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.plugins}
+                  shikiTheme={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.shikiTheme}
+                  controls={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.controls}
+                  rehypePlugins={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.rehypePlugins}
+                  linkSafety={CODEMUX_FILE_PREVIEW_STREAMDOWN_PROPS.linkSafety}
+                >
+                  {content.trim()}
+                </Streamdown>
+              </div>
+            </MarkdownImageDocumentProvider>
           </div>
         ) : (
           <EditableFileView

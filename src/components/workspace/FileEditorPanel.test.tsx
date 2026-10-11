@@ -20,6 +20,24 @@ vi.mock('../preview/FileView', () => ({
   EditableFileView: () => <div data-testid="editable-file-view" />,
 }));
 
+const providerProps: { documentPath?: string; projectPath?: string } = {};
+
+vi.mock('../assistant-ui/markdown-image', () => ({
+  MarkdownImageDocumentProvider: ({
+    documentPath,
+    projectPath,
+    children,
+  }: {
+    documentPath: string;
+    projectPath?: string;
+    children: ReactNode;
+  }) => {
+    providerProps.documentPath = documentPath;
+    providerProps.projectPath = projectPath;
+    return <div data-testid="markdown-image-document">{children}</div>;
+  },
+}));
+
 vi.mock('../assistant-ui/markdown-text', () => ({
   CODEMUX_MARKDOWN_STREAMDOWN_PROPS: {
     components: {},
@@ -65,6 +83,8 @@ describe('FileEditorPanel', () => {
     );
 
     expect(screen.getByTestId('markdown-file-preview')).toBeTruthy();
+    expect(screen.getByTestId('markdown-image-document')).toBeTruthy();
+    expect(providerProps.documentPath).toBe('D:/project/app/README.md');
     expect(screen.queryByTestId('editable-file-view')).toBeNull();
 
     fireEvent.click(screen.getByRole('tab', { name: '源码' }));
