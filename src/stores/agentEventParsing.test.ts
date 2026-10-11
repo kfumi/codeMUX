@@ -20,6 +20,19 @@ describe('interrupt marker detection', () => {
     expect(isInterruptMarker(' [Request interrupted by user] ')).toBe(true);
     expect(isInterruptMarker('request interrupted by user')).toBe(false);
   });
+
+  it('也认 Codex 注入的中断块（<turn_aborted>…</turn_aborted>）', () => {
+    const codexMarker = [
+      '<turn_aborted>',
+      'The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.',
+      '</turn_aborted>',
+    ].join('\n');
+
+    expect(isInterruptMarker(codexMarker)).toBe(true);
+    expect(isInterruptMarker(`  ${codexMarker}\n`)).toBe(true);
+    // 块后面还跟着用户正文时（中断后接着打字）那是真实发言，不是中断信号。
+    expect(isInterruptMarker(`${codexMarker}\n继续修测试`)).toBe(false);
+  });
 });
 
 describe('collapsePersistedCompactMarkers', () => {
@@ -203,6 +216,74 @@ describe('parseSdkUserMessage', () => {
       kind: 'user',
       data: { content: 'Design the feature.' },
     });
+  });
+
+  it('keeps the Codex <turn_aborted> signal verbatim so it renders as an interrupt', () => {
+    const marker = [
+      '<turn_aborted>',
+      'The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background.',
+      '</turn_aborted>',
+    ].join('\n');
+
+    const parsed = parseSdkUserMessage({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'input_text', text: marker }],
+      },
+      parent_tool_use_id: null,
+    });
+
+    expect(parsed).toEqual({ kind: 'user', data: { content: marker } });
+    expect(isInterruptMarker((parsed as { data: { content: string } }).data.content)).toBe(true);
+  });
+
+  it('strips the Codex <turn_aborted> block when the user kept typing', () => {
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: [
+                '<turn_aborted>',
+                'The user interrupted the previous turn on purpose.',
+                '</turn_aborted>',
+                '',
+                '把导航条也修一下。',
+              ].join('\n'),
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: { content: '把导航条也修一下。' },
+    });
+  });
+
+  it('keeps a mid-message quote of the Codex <turn_aborted> text untouched', () => {
+    const quoted = [
+      '日志里出现了这段文字：',
+      '<turn_aborted>',
+      'The user interrupted the previous turn on purpose.',
+      '</turn_aborted>',
+      '这是什么？',
+    ].join('\n');
+
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'input_text', text: quoted }],
+        },
+        parent_tool_use_id: null,
+      }),
+    ).toEqual({ kind: 'user', data: { content: quoted } });
   });
 
   it('extracts Claude base64 image blocks as user attachments', () => {

@@ -31,6 +31,16 @@ export function hasVisibleConversationEvents(
 
 const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
 
+/**
+ * Codex 注入在用户消息里的中断块（不是用户打的字）：`<turn_aborted>` / `<turn_cancelled>` /
+ * `<task_aborted>` 包住的一段说明。Claude 的同类信号是 `[Request interrupted by user]`，
+ * 两者走同一条中断渲染（见 `isInterruptMarker`）。
+ */
+const CODEX_ABORT_TAG = '(?:turn_aborted|turn_cancelled|task_aborted)';
+const CODEX_ABORT_BLOCK_RE = new RegExp(`<${CODEX_ABORT_TAG}>[\\s\\S]*?</${CODEX_ABORT_TAG}>`, 'g');
+/** 注入位置固定在消息开头，剥块时只认开头的那个（正文里引用这段文字的不动）。 */
+const CODEX_ABORT_PREFIX_RE = new RegExp(`^\\s*<${CODEX_ABORT_TAG}>[\\s\\S]*?</${CODEX_ABORT_TAG}>\\s*`);
+
 export type SessionSummaryDiff = {
   file: string;
   patch?: string;
@@ -62,7 +72,9 @@ export type ParsedStoreEvent =
 
 export function isInterruptMarker(text: string): boolean {
   const trimmed = text.trim();
-  return trimmed === INTERRUPT_MARKER || trimmed.startsWith('[Request interrupted by user');
+  return trimmed === INTERRUPT_MARKER
+    || trimmed.startsWith('[Request interrupted by user')
+    || isCodexTurnAbortedMarker(trimmed);
 }
 
 export function shouldSuppressLiveEventWhileStopped(kind: string): boolean {
@@ -111,7 +123,9 @@ export function stripSwitchBriefingPrefix(text: string): string {
 function displayUserText(text: string): string {
   return stripSwitchBriefingPrefix(
     stripAttachmentEnrichmentContext(
-      stripCodexCollaborationPolicyBlock(text),
+      stripCodexCollaborationPolicyBlock(
+        stripCodexTurnAbortedBlock(text),
+      ),
     ),
   );
 }
@@ -263,6 +277,31 @@ export function isAgentInjectedUserMessage(text: string): boolean {
 
 export function stripCodexCollaborationPolicyBlock(text: string): string {
   return text.replace(CODEX_COLLABORATION_POLICY_RE, '').trimStart();
+}
+
+/**
+ * 整条消息是否只有 Codex 注入的中断块（`<turn_aborted>…</turn_aborted>`）。
+ *
+ * 只有这种「纯信号」才算中断：块后面还跟着用户正文时那条消息是真实发言（注入块由
+ * `stripCodexTurnAbortedBlock` 从开头剥掉），不能把用户写的话一起吞成中断提示。
+ */
+function isCodexTurnAbortedMarker(text: string): boolean {
+  if (text.length === 0) {
+    return false;
+  }
+
+  return text.replace(CODEX_ABORT_BLOCK_RE, '').trim().length === 0;
+}
+
+/**
+ * 从**消息开头**剥掉 Codex 注入的中断块，只留用户自己写的内容；没有可留的正文时原样返回
+ * —— 纯信号那条消息要留给 `isInterruptMarker` 认（界面据此渲染中断提示而不是用户气泡）。
+ *
+ * 只认开头的块：用户在正文里引用这段文字（提问、贴日志）时不能被当成注入块删掉。
+ */
+function stripCodexTurnAbortedBlock(text: string): string {
+  const stripped = text.replace(CODEX_ABORT_PREFIX_RE, '').trim();
+  return stripped.length > 0 ? stripped : text;
 }
 
 /**

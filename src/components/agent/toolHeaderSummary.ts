@@ -19,6 +19,10 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   Grep: '搜索文本',
   Bash: '终端',
   shell_command: '终端',
+  shell: '终端',
+  exec_command: '终端',
+  exec: '终端',
+  write_stdin: '向命令输入',
   apply_patch: '应用补丁',
   Agent: '子智能体',
   Task: '任务',
@@ -170,6 +174,8 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
       case 'Bash':
       case 'shell_command':
       case 'shell':
+      case 'exec_command':
+      case 'exec':
         return shellCommandSummary(normalizedToolName, input);
 
       case 'Agent':
@@ -311,19 +317,37 @@ function readSummary(input: Record<string, unknown>): ToolHeaderSummary {
   };
 }
 
+/**
+ * 命令所在的参数名。Codex 的 unified exec 用 `cmd`，`exec` 把要跑的东西写在 `input`（JS）里。
+ * 头部摘要与展开面板共用这份键序，避免两边各取一个字段、摘要和面板显示不同的命令。
+ */
+const SHELL_COMMAND_KEYS = ['command', 'cmd', 'script', 'input'];
+
+/**
+ * 这几个命令工具的原始参数仍留在展开面板里：命令之外还有 workdir / max_output_tokens 这类
+ * 有用信息。其余（Bash 等）只把命令提到头部，参数不再重复一遍。
+ */
+const SHELL_COMMAND_ARGS_KEPT_TOOL_NAMES = new Set(['shell_command', 'exec_command', 'exec']);
+
 function shellCommandSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
-  const key = firstPresentKey(input, ['command', 'cmd', 'script', 'description']);
+  const key = firstPresentKey(input, [...SHELL_COMMAND_KEYS, 'description']);
   if (!key) return { consumedKeys: [] };
 
   return {
     text: asDisplayText(input[key]),
-    consumedKeys: toolName === 'shell_command' ? [] : Object.keys(input),
+    consumedKeys: SHELL_COMMAND_ARGS_KEPT_TOOL_NAMES.has(toolName) ? [] : Object.keys(input),
   };
 }
 
+/**
+ * 命令类工具的统一判据。含 Codex unified exec 的 `exec_command` / `exec`：它们与
+ * `shell_command` / Bash 是同一类动作（跑命令），卡片因此走同一条「终端面板」渲染。
+ * 只认精确名字，`mcp__<server>__exec` 这类第三方工具不受影响。
+ */
+const SHELL_COMMAND_TOOL_NAMES = new Set(['Bash', 'shell', 'shell_command', 'exec_command', 'exec']);
+
 export function isShellCommandTool(toolName: string): boolean {
-  const normalizedToolName = normalizeToolName(toolName);
-  return normalizedToolName === 'Bash' || normalizedToolName === 'shell_command' || normalizedToolName === 'shell';
+  return SHELL_COMMAND_TOOL_NAMES.has(normalizeToolName(toolName));
 }
 
 const FILE_MUTATION_KEYS = new Set([
@@ -352,7 +376,7 @@ export function isFileMutationTool(toolName: string, args?: Record<string, unkno
 }
 
 export function getShellCommand(input: Record<string, unknown>): string | undefined {
-  const key = firstPresentKey(input, ['command', 'cmd', 'script']);
+  const key = firstPresentKey(input, SHELL_COMMAND_KEYS);
   if (!key) return undefined;
 
   const command = asDisplayText(input[key]);
@@ -434,6 +458,9 @@ const TOOL_GROUP_PHRASES: Record<string, (count: number) => string> = {
   Grep: (n) => `搜索 ${n} 次文本`,
   Bash: (n) => `运行 ${n} 个命令`,
   shell_command: (n) => `运行 ${n} 个命令`,
+  shell: (n) => `运行 ${n} 个命令`,
+  exec_command: (n) => `运行 ${n} 个命令`,
+  exec: (n) => `运行 ${n} 个命令`,
   apply_patch: (n) => `应用 ${n} 次补丁`,
   Agent: (n) => `派发 ${n} 个子智能体`,
   subagent: (n) => `派发 ${n} 个子智能体`,
@@ -501,6 +528,9 @@ const TOOL_ACTION_BY_NAME: Record<string, ToolAction> = {
   apply_patch: 'edit',
   Bash: 'run',
   shell_command: 'run',
+  shell: 'run',
+  exec_command: 'run',
+  exec: 'run',
   js: 'run',
   js_repl: 'run',
   js_repl_reset: 'run',

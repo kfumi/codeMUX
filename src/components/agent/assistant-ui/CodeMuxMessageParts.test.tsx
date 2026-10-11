@@ -520,6 +520,125 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(container.textContent).not.toContain('"timeout_ms"');
     expect(container.textContent).not.toContain('"workdir"');
   });
+  it('Codex unified exec 的 exec_command 走同一条终端面板：命令在标题右侧，展开是命令 + 输出', () => {
+    const command = 'Get-Content -Raw src/components/agent/toolHeaderSummary.ts';
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="exec_command"
+        args={{ cmd: command, max_output_tokens: 30000, workdir: 'D:\\project\\ai-code\\codeMUX' }}
+        result={{ output: 'export const SHELL = 1;\n', session_id: 16043 }}
+      />,
+    );
+
+    const param = screen.getByText(command);
+    expect(param.className).toContain('truncate');
+    expect(container.textContent).not.toContain('"workdir"');
+
+    fireEvent.click(within(container).getByRole('button', { name: /终端/ }));
+
+    const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+    expect(panel?.textContent).toContain(`$ ${command}`);
+    expect(panel?.textContent).toContain('export const SHELL = 1;');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.textContent).not.toContain('结果：');
+  });
+
+  it('Codex exec 把 JS 输入当命令展示：头部摘要 + 终端面板', () => {
+    const jsInput = 'const r = await tools.exec_command({ cmd: "git status --short" }); r.output';
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="exec"
+        args={{ input: jsInput }}
+        result={{ output: ' M src/App.tsx', session_id: 7 }}
+      />,
+    );
+
+    expect(screen.getByText(jsInput)).toBeTruthy();
+
+    fireEvent.click(within(container).getByRole('button', { name: /终端/ }));
+
+    const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+    expect(panel?.textContent).toContain(`$ ${jsInput}`);
+    expect(panel?.textContent).toContain('M src/App.tsx');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+  });
+
+  it('Codex write_stdin 只映射工具名：中文名做动作词，参数仍按 JSON 展开', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="write_stdin"
+        args={{ chars: '', session_id: 16043, yield_time_ms: 1000 }}
+        result="ok"
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: /向命令输入/ });
+    expect(container.querySelector('[data-slot="tool-fallback-command"]')).toBeNull();
+
+    fireEvent.click(trigger);
+
+    expect(container.querySelector('[data-slot="tool-fallback-command"]')).toBeNull();
+    expect(container.textContent).toContain('"session_id"');
+  });
+  it('Codex exec 的 input_text 结果块被拍平成可读输出，不再渲染 JSON 转储', () => {
+    const jsInput = 'const r = await tools.exec_command({cmd:"npx vitest run",workdir:"D:/project/ai-code/codeMUX"}); text(JSON.stringify(r));';
+    // Codex unified exec 的结果：文本块数组，块内是「JSON 信封 + 内层 output」。
+    const frames = [
+      { text: 'Script completed\nWall time 10.4 seconds\noutput:\n', type: 'input_text' },
+      {
+        text: JSON.stringify({
+          chunk_id: '0c3d9a',
+          wall_time_seconds: 10.0056401,
+          session_id: 90398,
+          original_token_count: 11,
+          output: '\n RUN  v4.1.8 D:/project/ai-code/codeMUX\n\n\n',
+        }),
+        type: 'input_text',
+      },
+    ];
+
+    // 侧车把内容块整份 JSON.stringify 过来（历史落盘同形）；原始数组形状也要认。
+    for (const result of [JSON.stringify(frames), frames]) {
+      const { container, unmount } = renderWithTooltip(
+        <CodeMuxToolCallMessagePart toolName="exec" args={{ input: jsInput }} result={result} />,
+      );
+
+      fireEvent.click(within(container).getByRole('button', { name: /终端/ }));
+
+      const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+      expect(panel?.textContent).toContain('Script completed');
+      expect(panel?.textContent).toContain('RUN  v4.1.8 D:/project/ai-code/codeMUX');
+      expect(panel?.textContent).not.toContain('chunk_id');
+      expect(panel?.textContent).not.toContain('input_text');
+      expect(panel?.textContent).not.toContain('"type"');
+      unmount();
+    }
+  });
+
+  it('非终端工具（write_stdin）的结果块同样拍平文本块，不渲染 JSON 转储', () => {
+    const frames = [
+      { text: 'Wall time 0.4 seconds\noutput:\n', type: 'input_text' },
+      {
+        text: JSON.stringify({ chunk_id: 'a1b2', session_id: 90398, output: 'y\n' }),
+        type: 'input_text',
+      },
+    ];
+
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="write_stdin"
+        args={{ chars: 'y\n', session_id: 90398, yield_time_ms: 1000 }}
+        result={JSON.stringify(frames)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /向命令输入/ }));
+
+    const resultBlock = container.querySelector('[data-slot="tool-fallback-result"]');
+    expect(resultBlock?.textContent).toContain('Wall time 0.4 seconds');
+    expect(resultBlock?.textContent).not.toContain('input_text');
+    expect(resultBlock?.textContent).not.toContain('chunk_id');
+  });
 
   it('pi 落盘前的工具结果按 content 文本块展开，不渲染成 JSON 转储', () => {
     const command = 'cd /tmp && head -c 500 comments.txt';

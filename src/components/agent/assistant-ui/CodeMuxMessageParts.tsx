@@ -864,7 +864,17 @@ function stringifyResult(
   }
 
   if (typeof result === 'string') {
-    return result;
+    // 结果可能是「文本块数组」的转储串（Codex 的 app-server 就把内容块整份
+    // JSON.stringify 过来，历史落盘的也是同形）：能拍平成文本就拍平，
+    // 别让 `[{"type":"input_text",…}]` 出现在「结果」里。
+    const parsed = tryParseJson(result);
+    const flattened = parsed === undefined ? undefined : flattenContentBlocks(parsed);
+    return flattened ?? result;
+  }
+
+  const flattened = flattenContentBlocks(result);
+  if (flattened !== undefined) {
+    return flattened;
   }
 
   try {
@@ -886,6 +896,15 @@ function formatShellCommandOutput(result: unknown): string | undefined {
     }
 
     return result;
+  }
+
+  if (Array.isArray(result)) {
+    // Codex 的 unified exec（`exec` / `exec_command`）把结果直接摊成块数组
+    // `[{"type":"input_text","text":…}]`，没有 `content` 信封。
+    const blocks = flattenContentBlocks(result);
+    if (blocks !== undefined) {
+      return blocks;
+    }
   }
 
   if (isRecord(result)) {
@@ -911,8 +930,15 @@ function formatShellCommandOutput(result: unknown): string | undefined {
 }
 
 /**
+ * 工具结果里的文本块类型：pi / Claude 用 `text`，Codex 的 Responses 形状（含 unified exec
+ * 的 `exec` / `exec_command` / `write_stdin` 结果）用 `input_text`；`output_text` 一并认，
+ * 免得换个信封又渲染成 JSON 转储。
+ */
+const TOOL_RESULT_TEXT_BLOCK_TYPES = new Set(['text', 'input_text', 'output_text']);
+
+/**
  * `[{type:"text",text}]` → 文本；`text` 字符串 → 原样；不可识别时返回 undefined。
- * 与 `convertAgentEvents.ts` 的 `stringifyToolResultContent` 同口径。
+ * 每个块先拆掉 JSON 信封（见 `unwrapToolResultEnvelope`）再按行拼接。
  */
 function flattenContentBlocks(content: unknown): string | undefined {
   if (typeof content === 'string') {
@@ -926,11 +952,36 @@ function flattenContentBlocks(content: unknown): string | undefined {
   const textParts = content
     .filter(
       (block): block is Record<string, unknown> =>
-        isRecord(block) && block.type === 'text' && typeof block.text === 'string',
+        isRecord(block)
+        && typeof block.type === 'string'
+        && TOOL_RESULT_TEXT_BLOCK_TYPES.has(block.type)
+        && typeof block.text === 'string',
     )
-    .map((block) => block.text as string);
+    .map((block) => unwrapToolResultEnvelope(block.text as string));
 
   return textParts.length > 0 ? textParts.join('\n') : undefined;
+}
+
+/**
+ * 拆掉工具结果里的「JSON 信封 + 内层 output」。
+ *
+ * Codex unified exec 的一帧输出长这样：
+ * `{"chunk_id":"0c3d9a","wall_time_seconds":10.0,"session_id":90398,"output":"…"}`。
+ * 终端面板与「结果」区要读的是输出本身，信封里的元信息（chunk_id / session_id / 计时）
+ * 没有阅读价值，所以按与记录分支同一组键（`stdout` / `stderr` / `output`）拆掉外层；
+ * 普通文本（不是 JSON 信封）原样返回。
+ */
+function unwrapToolResultEnvelope(text: string): string {
+  const parsed = tryParseJson(text);
+  if (!isRecord(parsed)) {
+    return text;
+  }
+
+  const parts = ['stdout', 'stderr', 'output']
+    .map((key) => parsed[key])
+    .filter((value): value is string => typeof value === 'string');
+
+  return parts.length > 0 ? parts.join('\n') : text;
 }
 
 /**

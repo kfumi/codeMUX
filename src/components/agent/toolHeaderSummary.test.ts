@@ -96,6 +96,10 @@ describe('toolHeaderSummary', () => {
     expect(isShellCommandTool('bash')).toBe(true);
     expect(isShellCommandTool('shell_command')).toBe(true);
     expect(isShellCommandTool('shell')).toBe(true);
+    expect(isShellCommandTool('exec_command')).toBe(true);
+    expect(isShellCommandTool('exec')).toBe(true);
+    // write_stdin 不是「跑什么命令」，只做名字映射。
+    expect(isShellCommandTool('write_stdin')).toBe(false);
     expect(isShellCommandTool('Grep')).toBe(false);
 
     expect(getShellCommand({
@@ -103,7 +107,59 @@ describe('toolHeaderSummary', () => {
       command: 'git status --short',
     })).toBe('git status --short');
     expect(getShellCommand({ cmd: 'pwd' })).toBe('pwd');
+    // `exec` 把要跑的内容写在 `input`（JS）里；头部摘要与展开面板共用同一份键序。
+    expect(getShellCommand({ input: 'await tools.exec_command({ cmd: "git status" })' }))
+      .toBe('await tools.exec_command({ cmd: "git status" })');
     expect(getShellCommand({ description: 'No command field' })).toBeUndefined();
+  });
+
+  it('Codex unified exec 的 exec_command / exec 按命令工具展示：命令就是头部摘要', () => {
+    const execCommand = getToolHeaderSummary('exec_command', {
+      cmd: 'Get-Content -Raw src/components/agent/toolHeaderSummary.ts',
+      max_output_tokens: 30_000,
+      workdir: 'D:/project/ai-code/codeMUX',
+    });
+
+    expect(execCommand.displayName).toBe('终端');
+    expect(execCommand.text).toBe('Get-Content -Raw src/components/agent/toolHeaderSummary.ts');
+    // Codex 的命令工具把命令之外的参数（workdir 等）留在展开面板里。
+    expect(execCommand.consumedKeys).toEqual([]);
+    expect(getToolActionLabel('exec_command')).toBe('运行');
+    expect(getToolActionLabel('exec_command', { running: true })).toBe('正在运行');
+    expect(getToolAction('exec_command')).toBe('run');
+    expect(getToolGroupPhrase('exec_command', 3)).toBe('运行 3 个命令');
+
+    const execInput = 'const r = await tools.exec_command({ cmd: "git status --short" }); r.output';
+    const exec = getToolHeaderSummary('exec', { input: execInput });
+    expect(exec.displayName).toBe('终端');
+    expect(exec.text).toBe(execInput);
+    expect(getToolActionLabel('exec')).toBe('运行');
+    expect(getToolGroupPhrase('exec', 1)).toBe('运行 1 个命令');
+
+    // `shell` 同族：过去只被命令面板认，没有中文名与动作词。
+    expect(getToolDisplayName('shell')).toBe('终端');
+    expect(getToolActionLabel('shell')).toBe('运行');
+
+    // 命令里带 apply_patch 时仍算文件改动（与 Bash / shell_command 同口径）。
+    expect(isFileMutationTool('exec_command', {
+      cmd: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/a.ts\n+export {}\n*** End Patch\nPATCH",
+    })).toBe(true);
+  });
+
+  it('Codex write_stdin 只映射工具名，不当作命令工具', () => {
+    expect(getToolDisplayName('write_stdin')).toBe('向命令输入');
+    expect(getToolActionLabel('write_stdin')).toBe('向命令输入');
+    expect(getToolAction('write_stdin')).toBe('use');
+
+    const summary = getToolHeaderSummary('write_stdin', {
+      chars: '',
+      session_id: 16043,
+      yield_time_ms: 1000,
+    });
+    expect(summary.displayName).toBe('向命令输入');
+    // 会话输入内容不是「跑什么命令」，不占头部摘要；参数照旧在展开面板可见。
+    expect(summary.text).toBeUndefined();
+    expect(summary.consumedKeys).toEqual([]);
   });
 
   it('prefers command over description in Bash header summaries', () => {

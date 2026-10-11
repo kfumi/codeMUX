@@ -272,6 +272,24 @@ describe('buildConversationTurns', () => {
     expect(turns.map((turn) => turn.status)).toEqual(['interrupted', 'running']);
   });
 
+  it('Codex 的 <turn_aborted> 信号不新开回合，只把当前回合标成被中断', () => {
+    const turns = buildConversationTurns([
+      user('first'),
+      assistant([{ type: 'text', text: 'partial' }]),
+      user(
+        '<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>',
+        'user-turn-aborted',
+      ),
+    ], { isRunning: false });
+
+    // 是真实用户发言的话这里会开出第二个回合。
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.termination).toEqual({
+      kind: 'interrupted',
+      reason: 'Request interrupted by user.',
+    });
+  });
+
   it('does not split on tool results and retains unknown events as diagnostics', () => {
     const turns = buildConversationTurns([
       { kind: 'system', data: { type: 'system', subtype: 'init', uuid: 'init-1', session_id: 'session-1', tools: [], model: '', cwd: '', permissionMode: '' } },

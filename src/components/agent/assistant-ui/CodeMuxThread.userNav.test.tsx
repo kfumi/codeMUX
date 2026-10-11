@@ -113,4 +113,22 @@ describe('buildUserNavItems 过滤压缩相关的非用户发言', () => {
     expect(items.map((item) => item.eventIndex)).toEqual([0]);
     expect(items.map((item) => item.title)).toEqual(['唯一一条真实发言']);
   });
+
+  it('Codex 的 <turn_aborted> 注入消息不产生导航项', () => {
+    const aborted = user([
+      '<turn_aborted>',
+      'The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background.',
+      '</turn_aborted>',
+    ].join('\n'));
+    const events: AgentMessage[] = [
+      user('唯一一条真实发言'),
+      aborted,
+      assistant('assistant-1', '回答'),
+    ];
+
+    const items = buildUserNavItems(events);
+
+    expect(items.map((item) => item.eventIndex)).toEqual([0]);
+    expect(items.map((item) => item.title)).toEqual(['唯一一条真实发言']);
+  });
 });
