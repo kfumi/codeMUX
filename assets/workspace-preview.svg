@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">CodeMUX 工作台界面示意</title>
+  <desc id="desc">合成的演示项目，展示项目会话、Agent 回复和工具调用卡片。</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="1" stop-color="#f7f8fa"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd263"/>
+      <stop offset="1" stop-color="#f3ad22"/>
+    </linearGradient>
+  </defs>
+  <rect width="1440" height="900" fill="url(#surface)"/>
+  <rect width="1440" height="50" fill="#fbfbfc"/>
+  <path d="M0 49.5h1440" stroke="#e6e8eb"/>
+  <g fill="none" stroke="#707983" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+    <path d="M25 17h17v16H25zM29 21h9M29 25h9M29 29h6"/>
+    <path d="m78 17-6 8 6 8M94 17l6 8-6 8"/>
+    <path d="M1402 18v15m-7.5-7.5h15"/>
+    <circle cx="1363" cy="25" r="7"/>
+  </g>
+  <text x="54" y="31" fill="#27303a" font-family="Arial, Microsoft YaHei, sans-serif" font-size="15" font-weight="700">CodeMUX</text>
+  <text x="118" y="31" fill="#98a0a9" font-family="Arial, sans-serif" font-size="12">/</text>
+  <text x="135" y="31" fill="#39434f" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">demo-project</text>
+  <rect x="0" y="50" width="247" height="850" fill="#fbfbfc"/>
+  <path d="M246.5 50v850" stroke="#e4e6e9"/>
+  <rect x="13" y="72" width="219" height="38" rx="7" fill="#f0f1f3"/>
+  <g fill="none" stroke="#59626e" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6">
+    <path d="M28 84h14v14H28zM32 88h6M32 92h6"/>
+    <circle cx="35" cy="132" r="7"/>
+    <path d="m31 132 3 3 5-6"/>
+    <path d="M28 171h14M28 177h14M31 168v12M39 168v12"/>
+    <path d="M28 216h14v14H28zM31 220h8M31 224h8"/>
+  </g>
+  <text x="54" y="96" fill="#202630" font-family="Arial, Microsoft YaHei, sans-serif" font-size="13">新建会话</text>
+  <text x="54" y="137" fill="#505a66" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">搜索</text>
+  <text x="54" y="178" fill="#505a66" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">自动化</text>
+  <text x="54" y="227" fill="#505a66" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">待办任务</text>
+  <text x="20" y="271" fill="#858d96" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11">项目</text>
+  <text x="217" y="271" fill="#65707b" font-family="Arial, sans-serif" font-size="18">+</text>
+  <path d="m27 292 4 4-4 4M41 293h11v10H41z" fill="none" stroke="#7c8792" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+  <text x="62" y="302" fill="#3d4651" font-family="Arial, sans-serif" font-size="12">demo-project</text>
+  <rect x="14" y="324" width="218" height="35" rx="6" fill="#f2f3f5"/>
+  <circle cx="31" cy="341" r="4" fill="url(#gold)"/>
+  <text x="45" y="345" fill="#343d47" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11">完善接口错误处理</text>
+  <circle cx="31" cy="382" r="4" fill="#a8b0b9"/>
+  <text x="45" y="386" fill="#707a85" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11">补充登录流程测试</text>
+  <circle cx="31" cy="423" r="4" fill="#a8b0b9"/>
+  <text x="45" y="427" fill="#707a85" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11">整理 API 文档</text>
+  <path d="M0 849h247" stroke="#e6e8eb"/>
+  <circle cx="24" cy="874" r="3" fill="#8b95a0"/>
+  <text x="36" y="878" fill="#818a94" font-family="Arial, Microsoft YaHei, sans-serif" font-size="10">daemon 已连接</text>
+  <g transform="translate(278 74)">
+    <rect width="1107" height="45" rx="7" fill="#fff" stroke="#e8eaed"/>
+    <text x="16" y="28" fill="#3d4650" font-family="Arial, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">完善接口错误处理</text>
+    <rect x="930" y="10" width="76" height="25" rx="12" fill="#edf7f1"/>
+    <circle cx="945" cy="22.5" r="3" fill="#60b883"/>
+    <text x="954" y="26" fill="#43865f" font-family="Arial, sans-serif" font-size="10">Codex</text>
+    <text x="1030" y="26" fill="#8a939d" font-family="Arial, sans-serif" font-size="10">⋯</text>
+  </g>
+  <g transform="translate(438 168)">
+    <text x="0" y="0" fill="#6e7883" font-family="Arial, sans-serif" font-size="10" letter-spacing="1.5">TASK</text>
+    <rect x="230" y="-18" width="649" height="75" rx="13" fill="#f3f4f6"/>
+    <text x="254" y="12" fill="#333c46" font-family="Arial, Microsoft YaHei, sans-serif" font-size="13">请梳理服务层的错误处理方式，并补上对应测试。</text>
+    <text x="254" y="37" fill="#727c87" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11">先检查现有接口，再按项目约定实现。</text>
+    <g transform="translate(0 112)">
+      <circle cx="10" cy="4" r="9" fill="#f8e9c7"/>
+      <path d="m10-2 2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#d59b24"/>
+      <text x="31" y="8" fill="#303943" font-family="Arial, Microsoft YaHei, sans-serif" font-size="14" font-weight="600">先明确现有边界，再保持行为一致。</text>
+      <text x="31" y="38" fill="#65707b" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">我会检查错误类型、调用入口和当前测试，补齐可恢复错误与用户提示的覆盖。</text>
+    </g>
+    <g transform="translate(31 194)">
+      <rect width="813" height="95" rx="9" fill="#fff" stroke="#e3e6e9"/>
+      <rect width="813" height="34" rx="9" fill="#fafbfc"/>
+      <path d="M0 34h813" stroke="#e8eaed"/>
+      <path d="M14 12h12v12H14zM17 15h6M17 18h6" fill="none" stroke="#697480" stroke-width="1.3"/>
+      <text x="36" y="23" fill="#525d68" font-family="Arial, Microsoft YaHei, sans-serif" font-size="11" font-weight="600">已检查 4 个文件</text>
+      <rect x="671" y="9" width="128" height="17" rx="4" fill="#eff7f1"/>
+      <text x="681" y="21" fill="#528664" font-family="Arial, sans-serif" font-size="9">探索完成 · 查看结果</text>
+      <text x="17" y="57" fill="#929aa3" font-family="Arial, sans-serif" font-size="10">src/services</text>
+      <text x="101" y="57" fill="#46515d" font-family="Arial, sans-serif" font-size="10">errorHandler.ts</text>
+      <text x="264" y="57" fill="#929aa3" font-family="Arial, sans-serif" font-size="10">src/tests</text>
+      <text x="329" y="57" fill="#46515d" font-family="Arial, sans-serif" font-size="10">errorHandler.test.ts</text>
+      <text x="17" y="78" fill="#929aa3" font-family="Arial, sans-serif" font-size="10">src/api</text>
+      <text x="65" y="78" fill="#46515d" font-family="Arial, sans-serif" font-size="10">client.ts</text>
+      <text x="264" y="78" fill="#929aa3" font-family="Arial, sans-serif" font-size="10">src/types</text>
+      <text x="323" y="78" fill="#46515d" font-family="Arial, sans-serif" font-size="10">errors.ts</text>
+    </g>
+    <g transform="translate(0 632)">
+      <rect width="879" height="57" rx="9" fill="#fff" stroke="#e2e5e9"/>
+      <text x="19" y="33" fill="#a0a7b0" font-family="Arial, Microsoft YaHei, sans-serif" font-size="12">输入消息或任务指令…</text>
+      <circle cx="844" cy="28" r="16" fill="#f1b82e"/>
+      <path d="M844 36V20m-6 6 6-6 6 6" fill="none" stroke="#352a12" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+    </g>
+  </g>
+  <rect x="1260" y="840" width="154" height="28" rx="14" fill="#fff" stroke="#e4e7eb"/>
+  <circle cx="1277" cy="854" r="4" fill="#65bd84"/>
+  <text x="1288" y="858" fill="#596570" font-family="Arial, sans-serif" font-size="9">LOCAL WORKSPACE</text>
+</svg>

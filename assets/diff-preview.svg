@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">CodeMUX 代码审查界面示意</title>
+  <desc id="desc">演示如何查看文件变更和代码差异。</desc>
+  <rect width="1200" height="720" fill="#f8f9fb"/>
+  <rect width="1200" height="46" fill="#fff"/>
+  <path d="M0 45.5h1200" stroke="#e6e8eb"/>
+  <text x="23" y="29" fill="#343d47" font-family="Arial, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">代码审查</text>
+  <rect x="1017" y="12" width="70" height="23" rx="11" fill="#eaf7ef"/>
+  <text x="1031" y="28" fill="#42875e" font-family="Arial, sans-serif" font-size="10">+ 18</text>
+  <text x="1103" y="28" fill="#a36d6d" font-family="Arial, sans-serif" font-size="10">− 4</text>
+  <rect x="0" y="46" width="282" height="674" fill="#fbfbfc"/>
+  <path d="M281.5 46v674" stroke="#e3e6e9"/>
+  <text x="23" y="80" fill="#7f8994" font-family="Arial, sans-serif" font-size="10" letter-spacing="1">CHANGED FILES</text>
+  <rect x="12" y="98" width="257" height="38" rx="5" fill="#eef0f3"/>
+  <text x="25" y="122" fill="#404a55" font-family="Arial, sans-serif" font-size="11">src/services/errorHandler.ts</text>
+  <text x="230" y="122" fill="#55936c" font-family="Arial, sans-serif" font-size="9">+12</text>
+  <text x="25" y="160" fill="#737e89" font-family="Arial, sans-serif" font-size="11">src/tests/errorHandler.test.ts</text>
+  <text x="230" y="160" fill="#55936c" font-family="Arial, sans-serif" font-size="9">+6</text>
+  <text x="25" y="198" fill="#737e89" font-family="Arial, sans-serif" font-size="11">src/types/errors.ts</text>
+  <text x="230" y="198" fill="#a36d6d" font-family="Arial, sans-serif" font-size="9">−4</text>
+  <g transform="translate(313 77)">
+    <rect width="856" height="590" rx="7" fill="#fff" stroke="#e2e5e9"/>
+    <rect width="856" height="42" rx="7" fill="#fbfbfc"/>
+    <path d="M0 41.5h856" stroke="#e5e8eb"/>
+    <text x="17" y="26" fill="#515c67" font-family="Arial, sans-serif" font-size="11">src/services/errorHandler.ts</text>
+    <text x="805" y="26" fill="#85909a" font-family="Arial, sans-serif" font-size="10">⋯</text>
+    <rect x="1" y="43" width="854" height="28" fill="#f2f4f6"/>
+    <text x="19" y="62" fill="#8e98a2" font-family="monospace" font-size="10">@@ -18,6 +18,12 @@</text>
+    <g font-family="monospace" font-size="11">
+      <rect x="1" y="72" width="854" height="26" fill="#fdf0f0"/>
+      <text x="18" y="90" fill="#a3aab2">−</text><text x="49" y="90" fill="#88919b">18</text><text x="88" y="90" fill="#9b5555">throw new Error(message);</text>
+      <rect x="1" y="99" width="854" height="26" fill="#e9f7ed"/>
+      <text x="18" y="117" fill="#52946b">+</text><text x="49" y="117" fill="#778f7f">18</text><text x="88" y="117" fill="#36784f">if (error instanceof NetworkError) {</text>
+      <rect x="1" y="126" width="854" height="26" fill="#e9f7ed"/>
+      <text x="18" y="144" fill="#52946b">+</text><text x="49" y="144" fill="#778f7f">19</text><text x="88" y="144" fill="#36784f">  return toUserMessage(error);</text>
+      <rect x="1" y="153" width="854" height="26" fill="#e9f7ed"/>
+      <text x="18" y="171" fill="#52946b">+</text><text x="49" y="171" fill="#778f7f">20</text><text x="88" y="171" fill="#36784f">}</text>
+      <text x="18" y="207" fill="#c0c6cd"> </text><text x="49" y="207" fill="#9da5ad">21</text><text x="88" y="207" fill="#5d6873">return { kind: "unknown", message };</text>
+      <text x="18" y="239" fill="#c0c6cd"> </text><text x="49" y="239" fill="#9da5ad">22</text><text x="88" y="239" fill="#5d6873">}</text>
+    </g>
+    <rect x="1" y="265" width="854" height="28" fill="#f2f4f6"/>
+    <text x="19" y="284" fill="#8e98a2" font-family="monospace" font-size="10">@@ -31,3 +37,8 @@</text>
+    <g font-family="monospace" font-size="11">
+      <text x="18" y="323" fill="#c0c6cd"> </text><text x="49" y="323" fill="#9da5ad">31</text><text x="88" y="323" fill="#5d6873">export function report(error: Error) {</text>
+      <rect x="1" y="337" width="854" height="26" fill="#e9f7ed"/>
+      <text x="18" y="355" fill="#52946b">+</text><text x="49" y="355" fill="#778f7f">32</text><text x="88" y="355" fill="#36784f">  if (error.name === "AbortError") return;</text>
+      <rect x="1" y="364" width="854" height="26" fill="#e9f7ed"/>
+      <text x="18" y="382" fill="#52946b">+</text><text x="49" y="382" fill="#778f7f">33</text><text x="88" y="382" fill="#36784f">  logger.warn("Request failed", { error });</text>
+      <text x="18" y="419" fill="#c0c6cd"> </text><text x="49" y="419" fill="#9da5ad">34</text><text x="88" y="419" fill="#5d6873">}</text>
+    </g>
+    <rect x="16" y="510" width="824" height="53" rx="6" fill="#f7f8fa"/>
+    <circle cx="36" cy="536" r="7" fill="#dcefe2"/>
+    <path d="m33 536 2 2 4-5" fill="none" stroke="#4d9566" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+    <text x="52" y="540" fill="#596570" font-family="Arial, Microsoft YaHei, sans-serif" font-size="10">改动可逐行检查 · 由你决定如何合并</text>
+  </g>
+  <text x="24" y="696" fill="#97a0a9" font-family="Arial, sans-serif" font-size="9" letter-spacing="1.1">CODEMUX / DIFF PREVIEW</text>
+</svg>
