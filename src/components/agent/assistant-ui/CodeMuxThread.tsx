@@ -2456,6 +2456,7 @@ function StreamingContent({
     <ActivityStepThinking
       text={visibleThinking}
       streaming={isRunning}
+      previewText={revealedThinking}
       body={
         <pre className="whitespace-pre-wrap font-sans text-ui-body leading-relaxed text-muted-foreground">
           {revealedThinking}

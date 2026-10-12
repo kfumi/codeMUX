@@ -117,14 +117,14 @@ function ToolFallbackTrigger({
     // 徽标刻意**不是** flex 容器：flex 容器的基线取自第一个 flex item，而 SVG 的
     // 基线在底边，`items-baseline` 会把图标顶到「失败」上方。普通行内 span 的基线
     // 就是它自己的文字基线，外层文字区的 `items-baseline` 才能把「失败」和动作词
-    // 对齐；图标退回行内元素、用 `align-middle` 在文字上做视觉居中。
+    // 对齐；图标退回行内元素、用 `align-middle` 居中，再轻微上移补偿小字号下的视觉下沉。
     <span
       data-slot="tool-fallback-status"
       role="status"
       aria-live="polite"
       className="shrink-0 text-ui-caption text-destructive"
     >
-      <XCircleIcon className="mr-1 inline-block size-3 align-middle" aria-hidden />
+      <XCircleIcon className="mr-1 inline-block size-3 align-middle -translate-y-[0.06em]" aria-hidden />
       失败
     </span>
   ) : isCancelled ? (

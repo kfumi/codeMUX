@@ -1120,7 +1120,9 @@ html.cmx-panel-resizing webview {
   border-radius: 9999px;
 }
 
-/* 窄容器：三列拓扑回退成单列竖排（主 Agent → 竖线 → 节点列）。 */
+/* 窄容器：三列拓扑回退成单列竖排（主 Agent → 竖线 → 节点列）。连接线统一落在
+   主 Agent 图标的中线上：connector 的 24px 左缩进 = 节点列 38px 缩进 - 14px 分支线。
+   首节点在桌面横排时不需要上半段，窄屏竖排则要补上，才能把主干接到首个子智能体。 */
 @container subagent-activity (max-width: 520px) {
   .subagent-activity-header {
     flex-wrap: wrap;
@@ -1144,12 +1146,16 @@ html.cmx-panel-resizing webview {
   }
 
   .subagent-topology-agents {
-    padding-left: 26px;
+    padding-left: 38px;
   }
 
   .subagent-topology-node::before,
   .subagent-topology-node::after {
     left: -14px;
+  }
+
+  .subagent-topology-node:first-child::before {
+    display: block;
   }
 
   .subagent-topology-branch {
