@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
 import App from './App';
+import { useNavigationStore } from './stores/navigationStore';
 
 vi.mock('sonner', () => ({
   Toaster: () => <div>toaster</div>,
@@ -44,6 +45,11 @@ vi.mock('./components/layout/MainLayout', () => ({
 
 vi.mock('./components/layout/Sidebar', () => ({
   Sidebar: () => <div>sidebar</div>,
+}));
+
+vi.mock('./components/settings/SettingsDialog', () => ({
+  SettingsSidebar: () => <div>settings sidebar</div>,
+  SettingsContent: () => <div>settings content</div>,
 }));
 
 vi.mock('./components/ui/tooltip', () => ({
@@ -90,17 +96,27 @@ vi.mock('./stores/agentStore', () => ({
 }));
 
 vi.mock('./stores/newSessionStore', () => ({
-  useNewSessionStore: (selector: (state: {
-    isDraftOpen: boolean;
-    draftProjectId: string | null;
-    openDraft: ReturnType<typeof vi.fn>;
-    closeDraft: ReturnType<typeof vi.fn>;
-  }) => unknown) => selector({
-    isDraftOpen: false,
-    draftProjectId: null,
-    openDraft: vi.fn(),
-    closeDraft: vi.fn(),
-  }),
+  useNewSessionStore: Object.assign(
+    (selector: (state: {
+      isDraftOpen: boolean;
+      draftProjectId: string | null;
+      openDraft: ReturnType<typeof vi.fn>;
+      closeDraft: ReturnType<typeof vi.fn>;
+    }) => unknown) => selector({
+      isDraftOpen: false,
+      draftProjectId: null,
+      openDraft: vi.fn(),
+      closeDraft: vi.fn(),
+    }),
+    {
+      getState: () => ({
+        isDraftOpen: false,
+        draftProjectId: null,
+        openDraft: vi.fn(),
+        closeDraft: vi.fn(),
+      }),
+    },
+  ),
 }));
 
 vi.mock('./stores/projectStore', () => ({
@@ -175,6 +191,15 @@ vi.mock('./stores/skillStore', () => ({
 }));
 
 describe('App', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  beforeEach(() => {
+    useNavigationStore.getState().reset();
+    window.history.replaceState(null, '', '/');
+  });
+
   it('渲染时在 UpdaterProvider 内将更新入口传给主布局', async () => {
 
     render(<App />);
@@ -184,5 +209,24 @@ describe('App', () => {
 
     expect(updateEntry).toBeTruthy();
     expect(updaterProvider.contains(updateEntry)).toBe(true);
+  });
+
+  it('浏览器返回手势会回退应用内页面并留在当前页面', async () => {
+    const store = useNavigationStore.getState();
+    const initialLocation = store.current;
+    store.navigate({ ...initialLocation, view: 'settings' });
+
+    const pushState = vi.spyOn(window.history, 'pushState');
+    render(<App />);
+    const guardEntriesBeforePop = pushState.mock.calls.length;
+    expect(guardEntriesBeforePop).toBeGreaterThan(0);
+
+    window.history.back();
+
+    await waitFor(() => {
+      expect(useNavigationStore.getState().current).toEqual(initialLocation);
+    });
+    expect(window.location.pathname).toBe('/');
+    expect(pushState).toHaveBeenCalledTimes(guardEntriesBeforePop + 1);
   });
 });

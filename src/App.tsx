@@ -1,5 +1,5 @@
 import { Sparkles } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { toast, Toaster } from 'sonner';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -15,6 +15,7 @@ import { useEmergencyStop } from './hooks/useEmergencyStop';
 import { useModelDisplayNames } from './hooks/useModelDisplayNames';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
+import { isElectronDesktop } from './lib/desktop-bridge';
 import type { AgentInputPayload } from './types/agentInput';
 import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
@@ -246,6 +247,27 @@ function App() {
     const location = goBack();
     if (location) applyNavigationLocation(location);
   }, [applyNavigationLocation, goBack]);
+  const handleBackRef = useRef(handleBack);
+
+  useEffect(() => {
+    handleBackRef.current = handleBack;
+  }, [handleBack]);
+
+  useEffect(() => {
+    if (isElectronDesktop() || !window.history?.pushState) return;
+
+    const restoreBackGuard = () => {
+      window.history.pushState({ codemuxBackGuard: true }, '', window.location.href);
+    };
+    const handleBrowserBack = () => {
+      handleBackRef.current();
+      restoreBackGuard();
+    };
+
+    restoreBackGuard();
+    window.addEventListener('popstate', handleBrowserBack);
+    return () => window.removeEventListener('popstate', handleBrowserBack);
+  }, []);
 
   const handleForward = useCallback(() => {
     const location = goForward();
