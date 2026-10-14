@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Check, ChevronDown, RotateCcw } from 'lucide-react';
+import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
   ACCENTS,
@@ -44,40 +44,56 @@ const ROW_PADDING = 'px-4 py-3.5';
 
 const THEME_LABELS: Record<Theme, string> = { Light: '浅色', Dark: '深色', System: '跟随系统' };
 
-/** 缩略图里那扇假窗口 —— 纯示意,颜色是画出来的,不是真实表面。 */
-function MiniWindow({ variant }: { variant: 'light' | 'dark' }) {
-  const isLight = variant === 'light';
-  const chrome = isLight ? 'border-black/[0.06]' : 'border-white/[0.06]';
-  const sidebar = isLight ? 'bg-[hsl(218_18%_93%)]' : 'bg-[hsl(220_7%_7%)]';
-  const page = isLight ? 'bg-[hsl(220_20%_97%)]' : 'bg-[hsl(220_7%_8%)]';
-  const strong = isLight ? 'bg-[hsl(222_18%_10%/0.5)]' : 'bg-[hsl(220_10%_88%/0.6)]';
-  const weak = isLight ? 'bg-[hsl(222_18%_10%/0.25)]' : 'bg-[hsl(220_10%_88%/0.3)]';
-  const dots = isLight
-    ? ['bg-[hsl(358_70%_62%)]', 'bg-[hsl(38_88%_55%)]', 'bg-[hsl(142_55%_40%)]']
-    : ['bg-[hsl(358_74%_70%)]', 'bg-[hsl(38_94%_58%)]', 'bg-[hsl(136_56%_47%)]'];
+/**
+ * 缩略图配色 —— 画的是「一扇应用窗口的样子」，不是真实表面，所以用字面量而不是
+ * 主题 token：一扇浅色窗口在深色主题下也必须是浅色的。强调色的部分反而走
+ * `bg-primary`，跟着用户选的强调色走。
+ */
+const SHOT = {
+  light: {
+    window: '#ffffff',
+    fill: 'rgb(13 13 13 / 0.05)',
+    line: 'rgb(13 13 13 / 0.14)',
+    dot: 'rgb(13 13 13 / 0.12)',
+  },
+  dark: {
+    window: '#191919',
+    fill: 'rgb(255 255 255 / 0.07)',
+    line: 'rgb(255 255 255 / 0.18)',
+    dot: 'rgb(255 255 255 / 0.16)',
+  },
+} as const;
 
+/**
+ * 一扇应用窗口的示意画：左上角一个图标圆点、下面几行内容、底部一条输入框
+ * 带着发送圆点。
+ *
+ * 之前画的是「浏览器窗口」—— 三个红黄绿圆点 + 左侧栏 + 右侧文字行。放到 72px
+ * 宽的方块里这套语言完全不成立：圆点只剩 4px、侧栏挤成一条，缩出来是一团噪点，
+ * 根本看不出这是自己的应用。对照参考图改成上面这套。
+ */
+function WindowShot({ variant }: { variant: 'light' | 'dark' }) {
+  const c = SHOT[variant];
   return (
-    <div className={cn('flex h-full w-full flex-col', page)}>
-      <div className={cn('flex h-2 shrink-0 items-center gap-[3px] border-b px-1', chrome)}>
-        {dots.map((dot) => (
-          <span key={dot} className={cn('h-1 w-1 rounded-full', dot)} />
-        ))}
-      </div>
-      <div className="flex min-h-0 flex-1">
-        <div className={cn('w-[38%] shrink-0 border-r', chrome, sidebar)}>
-          <span className={cn('mx-1 mt-1 block h-[2px] w-1/2 rounded-full', strong)} />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-[3px] p-1">
-          <span className={cn('block h-[2px] w-3/4 rounded-full', strong)} />
-          <span className={cn('block h-[2px] w-1/2 rounded-full', weak)} />
-          <span className={cn('block h-[2px] w-2/3 rounded-full', weak)} />
-        </div>
-      </div>
+    <div className="relative h-full w-full overflow-hidden" style={{ backgroundColor: c.window }}>
+      <span className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.dot }} />
+      <span className="absolute left-1.5 right-1.5 top-6 flex flex-col gap-1">
+        <span className="h-[3px] w-full rounded-full bg-primary" />
+        <span className="h-[3px] w-3/4 rounded-full" style={{ backgroundColor: c.line }} />
+        <span className="h-[3px] w-5/6 rounded-full bg-primary" />
+        <span className="h-[3px] w-1/2 rounded-full" style={{ backgroundColor: c.line }} />
+      </span>
+      <span
+        className="absolute inset-x-1.5 bottom-1.5 flex h-3 items-center justify-end rounded-md px-1"
+        style={{ backgroundColor: c.fill }}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+      </span>
     </div>
   );
 }
 
-/** 模式选择:Codex 用一排缩略图,选中项套主色描边,缩略图本身不带文字标签。 */
+/** 模式选择：Codex 是一排应用窗口缩略图，选中项套主色描边。 */
 function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; onClick: () => void }) {
   return (
     <TooltipHint content={THEME_LABELS[theme]}>
@@ -87,27 +103,22 @@ function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; 
         aria-pressed={active}
         aria-label={THEME_LABELS[theme]}
         className={cn(
-          'relative block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-normal',
-          active ? 'border-transparent ring-2 ring-primary' : 'border-border hover:border-foreground/25',
+          'relative block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg transition-shadow duration-normal',
+          active ? 'ring-2 ring-primary' : 'ring-1 ring-border hover:ring-foreground/25',
         )}
       >
         {theme === 'System' ? (
-          // 跟随系统 = 同一扇窗口左右两半各是一种主题，和 Codex 的第二张缩略图一致。
+          // 跟随系统 = 同一扇窗口左右两半各是一种主题。
           <div className="flex h-full w-full">
-            <div className="w-1/2 overflow-hidden border-r border-border">
-              <MiniWindow variant="light" />
+            <div className="w-1/2 overflow-hidden">
+              <WindowShot variant="light" />
             </div>
             <div className="w-1/2 overflow-hidden">
-              <MiniWindow variant="dark" />
+              <WindowShot variant="dark" />
             </div>
           </div>
         ) : (
-          <MiniWindow variant={theme === 'Light' ? 'light' : 'dark'} />
-        )}
-        {active && (
-          <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-elevation-subtle">
-            <Check className="h-2.5 w-2.5" strokeWidth={3} />
-          </span>
+          <WindowShot variant={theme === 'Light' ? 'light' : 'dark'} />
         )}
       </button>
     </TooltipHint>
@@ -177,15 +188,31 @@ function NumberField({
   );
 }
 
-/** 对比度滑块:轨道由外面画(已填充段 + 空轨道),input 只负责把手与交互。 */
+/**
+ * 对比度滑块。
+ *
+ * 轨道和把手全部自己画，`<input type="range">` 只作为透明的一层盖在上面负责
+ * 拖拽、键盘与无障碍。之前让 input 自己画轨道、`appearance: none` 之后再用
+ * `::-webkit-slider-thumb` + `margin-top` 去把把手拉回正中 —— WebKit 对这个
+ * 组合的居中并不保证，结果就是把手浮在轨道下面半截，看着没跟线对齐。
+ * 现在两条都用 `top-1/2 -translate-y-1/2`，位置是算出来的而不是调出来的。
+ *
+ * 配色照参考图：已填充段与把手都是 ink，未填充段是控件底色，把手带一圈表面色
+ * 的环 —— 所以在深色下环是深色的，浅色下是白圈。
+ */
 function ContrastControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
   const percent = ((value - CONTRAST_MIN) / (CONTRAST_MAX - CONTRAST_MIN)) * 100;
   return (
     <div className="flex w-full max-w-64 items-center gap-3">
-      <div className="relative flex-1">
-        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-[hsl(var(--surface-edge))]">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+      <div className="relative h-4 flex-1">
+        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-foreground" style={{ width: `${percent}%` }} />
         </div>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[hsl(var(--background))] bg-foreground shadow-elevation-subtle"
+          style={{ left: `${percent}%` }}
+        />
         <input
           type="range"
           min={CONTRAST_MIN}
@@ -194,8 +221,9 @@ function ContrastControl({ value, onChange }: { value: number; onChange: (value:
           value={value}
           aria-label="对比度"
           onChange={(event) => onChange(Number(event.target.value))}
-          className="contrast-slider relative h-4 w-full cursor-pointer appearance-none rounded-full bg-transparent"
+          className="contrast-slider peer absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-full opacity-0"
         />
+        <span className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2" />
       </div>
       <output className="w-8 text-ui-body tabular-nums text-foreground" aria-live="polite">
         {value}

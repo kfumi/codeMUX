@@ -131,8 +131,21 @@ describe('ThemeToggle', () => {
     expect(setUiFontSize).toHaveBeenCalledWith(16);
   });
 
-  it('高级区默认摊开,可以收起', () => {
+  it('对比度滑块的轨道与把手都是自绘的,input 只当命中区', () => {
     render(<ThemeToggle />);
+
+    const slider = screen.getByRole('slider', { name: '对比度' });
+    // 原生把手必须彻底不参与布局 —— 之前正是它和自绘轨道各自居中,
+    // 把手浮在轨道下面半截(见 92dd39c 的修复说明)。
+    expect(slider.className).toContain('opacity-0');
+
+    // 自绘把手:aria-hidden 的定位圆点,left 跟着当前值走。
+    const thumb = document.querySelector('span[aria-hidden="true"].rounded-full.border-2');
+    expect(thumb).not.toBeNull();
+    expect((thumb as HTMLElement).style.left).toBe('45%');
+  });
+
+  it('高级区默认摊开,可以收起', () => {    render(<ThemeToggle />);
 
     const trigger = screen.getByText('高级').closest('button');
     expect(trigger).toHaveProperty('ariaExpanded', 'true');
