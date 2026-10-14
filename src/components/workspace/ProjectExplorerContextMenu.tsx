@@ -69,11 +69,11 @@ export function ProjectExplorerContextMenu({
   };
 
   return (
-    <ContextMenuContent className="surface-panel z-180 min-w-40 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
+    <ContextMenuContent className="surface-panel z-180 min-w-40 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
       <ContextMenuItem onClick={onOpen}>打开</ContextMenuItem>
       <ContextMenuSub>
         <ContextMenuSubTrigger>打开方式</ContextMenuSubTrigger>
-        <ContextMenuSubContent className="surface-panel min-w-36 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md">
+        <ContextMenuSubContent className="surface-panel min-w-36 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md">
           <ContextMenuItem
             icon={<FILE_EXPLORER_OPTION.Icon className="h-3.5 w-3.5" />}
             onClick={() => void openWithTarget(path, 'file_explorer')}

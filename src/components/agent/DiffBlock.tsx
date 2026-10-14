@@ -37,13 +37,13 @@ export function DiffBlock({ filePath, oldContent, newContent }: DiffBlockProps) 
               let prefix = ' ';
               let prefixClass = 'text-muted-foreground/25';
               if (change.added) {
-                bgClass = 'bg-[hsl(var(--success)/0.06)]';
+                bgClass = 'bg-diff-added/12';
                 prefix = '+';
-                prefixClass = 'text-[hsl(var(--success)/0.6)]';
+                prefixClass = 'text-diff-added';
               } else if (change.removed) {
-                bgClass = 'bg-[hsl(var(--destructive)/0.06)]';
+                bgClass = 'bg-diff-removed/12';
                 prefix = '-';
-                prefixClass = 'text-[hsl(var(--destructive)/0.6)]';
+                prefixClass = 'text-diff-removed';
               }
               return (
                 <div key={`${i}-${j}`} className={`px-3 py-0.5 ${bgClass}`}>

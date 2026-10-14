@@ -12,12 +12,16 @@ import { useShellLayoutStore } from '../../stores/shellLayoutStore';
 import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
+import { NavRail, type NavRailTarget } from './NavRail';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
 import { TitleBar, type TitleBarNavigation } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
 const SIDEBAR_DEFAULT = 300;
+
+/** 自绘标题栏高度 —— 抽屉/遮罩要落在它下面，控件才不会被盖住。 */
+const TITLE_BAR_HEIGHT_CLASS = 'top-12';
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, width));
@@ -44,6 +48,9 @@ interface MainLayoutProps {
   sidePanelProjectPath?: string | null;
   sidePanelScopeId?: string;
   todos?: TodoItem[];
+  /** 导航栏当前高亮项与切换回调（缺省时不渲染导航栏）。 */
+  navRailTarget?: NavRailTarget;
+  onNavRailSelect?: (target: NavRailTarget) => void;
 }
 
 export function MainLayout({
@@ -57,6 +64,8 @@ export function MainLayout({
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
   todos,
+  navRailTarget,
+  onNavRailSelect,
 }: MainLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   // 侧栏收起状态落在布局 store：它是可绑定命令（折叠/展开侧边栏），
@@ -129,17 +138,12 @@ export function MainLayout({
 
   // 侧栏是否可见:桌面看收起状态,窄屏看抽屉开关。
   const sidebarVisible = isNarrow ? narrowSidebarOpen : !sidebarCollapsed;
-  // 控制条(收起/后退/前进)的落点:桌面收起到标题栏,窄屏关抽屉时落标题栏、
-  // 开抽屉时落抽屉内部。
-  const controlsInTitleBar = isNarrow ? !narrowSidebarOpen : sidebarCollapsed;
   const hostForm = useDaemonConnectionStore((state) => state.hostForm);
   const windowMaximized = useWindowMaximized();
-  // 圆角缺口(主面板左上/左下圆角 + 弧线分割线)是**窗口化桌面壳**专属的装饰:
-  // 靠这两个圆角把紧邻的侧栏表面露出来当缺口。窗口最大化、浏览器与手机形态,
-  // 以及侧栏收起/窄屏抽屉时,面板左缘就是窗口或视口边缘,圆角只会剩一条没来由
-  // 的缺角,所以这些情况一律直线到底。
+  // 内容面的圆角裁切与页面浮层:主聊天区从窗口边缘「浮起来」。窗口最大化、
+  // 浏览器与手机形态时,内容面贴满视口,圆角只会剩一条没来由的缺角,所以直线到底。
   const sidebarDocked = sidebar != null && sidebarVisible && !isNarrow;
-  const showsCornerNotch = sidebarDocked && hostForm === 'desktop' && !windowMaximized;
+  const contentFloats = sidebarDocked && hostForm === 'desktop' && !windowMaximized;
 
   const sidebarToggleButton = sidebar != null ? (
     <TooltipHint content={sidebarVisible ? `收起侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}` : `展开侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}`}>
@@ -193,151 +197,115 @@ export function MainLayout({
   ) : null;
 
   return (
-    <div className={cn('app-shell flex bg-background text-foreground', isNarrow ? 'h-[100dvh]' : 'h-screen')}>
-      {/* 桌面:侧栏展开时把控制条浮在侧栏左上角(CSS 固定定位,与侧栏同层)。 */}
-      {sidebar != null && sidebarVisible && !isNarrow && (
-        <div className="fixed left-2 top-2 z-40">
-          {sidebarControls}
-        </div>
+    <div
+      className={cn(
+        'app-shell flex flex-col bg-background text-foreground',
+        isNarrow ? 'h-[100dvh]' : 'h-screen',
       )}
+    >
+      {/*
+       * 标题栏跨全宽，位于导航栏与侧栏之上 —— 与 Codex 的原生 caption 同构。
+       * 控件（收起/后退/前进/会话头/主题切换）因此永远落在这一条里，
+       * 不再需要「侧栏展开时浮在侧栏左上角」的那套定位。
+       */}
+      <TitleBar
+        leftContent={sidebarControls}
+        rightContent={headerContent}
+        projectOpenPath={projectOpenPath}
+        sidePanelAvailable={sidePanelAvailable}
+        todos={todos}
+      />
 
-      {/* 窄屏:抽屉打开时页面上盖一层遮罩,点它收起抽屉(触屏的常见手势)。 */}
-      {sidebar != null && isNarrow && narrowSidebarOpen && (
-        <div
-          aria-hidden="true"
-          onClick={() => setNarrowSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-[hsl(var(--surface-shadow-strong)/0.42)] backdrop-blur-[1px]"
-        />
-      )}
-
-      {sidebar != null && (
-        <aside
-          className={cn(
-            // 这块常驻侧栏刻意不用 backdrop-blur：桌面形态下它背后只有 .app-shell / body 的平整
-            // 纯色（globals.css:107 --color-background、251-263 body background-image:none、
-            // 318-321 .app-shell），blur 对纯色是恒等变换；而它面积大、桌面形态下常驻，整屏模糊
-            // 只有开销没有观感收益。窄屏抽屉复用同一 className，靠 88% 不透明底色已足够可读。
-            // 不变量见 MainLayout.test.tsx（含源码级契约）。
-            'overflow-hidden bg-[hsl(var(--surface-2)/0.88)]',
-            isNarrow
-              // 抽屉宽度跟随视口但稍宽于桌面侧栏默认值;触控行高保持与桌面一致,
-              // 不再全局强制 44px 按钮高度(会把分组标题、隐藏的 hover 按钮一起撑高)。
-              ? 'fixed inset-y-0 left-0 z-50 w-[92vw] max-w-96 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]'
-              : 'relative shrink-0',
-            sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-slow ease-motion-in-out',
-          )}
-          style={isNarrow
-            ? {
-                transform: narrowSidebarOpen ? 'translateX(0)' : 'translateX(-101%)',
-                opacity: narrowSidebarOpen ? 1 : 0,
-                visibility: narrowSidebarOpen ? 'visible' : 'hidden',
-              }
-            : {
-                width: sidebarCollapsed ? 0 : sidebarWidth,
-                opacity: sidebarCollapsed ? 0 : 1,
-                transitionDuration: sidebarInstant ? '0ms' : undefined,
-              }}
-          aria-hidden={isNarrow ? !narrowSidebarOpen : sidebarCollapsed}
-        >
+      <div className="relative flex min-h-0 flex-1">
+        {/* 窄屏:抽屉打开时页面上盖一层遮罩,点它收起抽屉(触屏的常见手势)。
+            遮罩从标题栏下方开始,标题栏控件保持可点。 */}
+        {sidebar != null && isNarrow && narrowSidebarOpen && (
           <div
-            className="relative z-10 flex h-full flex-col"
-            style={isNarrow ? undefined : { width: sidebarWidth }}
+            aria-hidden="true"
+            onClick={() => setNarrowSidebarOpen(false)}
+            className={cn('fixed inset-x-0 bottom-0 z-40 bg-[hsl(var(--surface-shadow-strong)/0.42)] backdrop-blur-[1px]', TITLE_BAR_HEIGHT_CLASS)}
+          />
+        )}
+
+        {sidebar != null && navRailTarget && onNavRailSelect && (
+          <NavRail activeTarget={navRailTarget} onSelect={onNavRailSelect} />
+        )}
+
+        {sidebar != null && (
+          <aside
+            className={cn(
+              // 这块常驻侧栏刻意不用 backdrop-blur：桌面形态下它背后只有 .app-shell / body 的平整
+              // 纯色，blur 对纯色是恒等变换；而它面积大、桌面形态下常驻，整屏模糊
+              // 只有开销没有观感收益。窄屏抽屉复用同一 className，靠 88% 不透明底色已足够可读。
+              // 不变量见 MainLayout.test.tsx（含源码级契约）。
+              // 侧栏与导航栏共用**窗口表面**（Codex 的 rail 与 sidebar 同色，
+              // 只有内容面浮起来）；选中态由 `--sidebar-muted` 承担。
+              'overflow-hidden bg-[hsl(var(--sidebar-bg))]',
+              isNarrow
+                // 抽屉宽度跟随视口但稍宽于桌面侧栏默认值；顶部让出标题栏那条，
+                // 底部的收起按钮因此留在标题栏里，不用在抽屉里复制一份。
+                ? cn('fixed bottom-0 left-0 z-50 w-[92vw] max-w-96 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]', TITLE_BAR_HEIGHT_CLASS)
+                : 'relative shrink-0 border-r border-[hsl(var(--layout-divider))]',
+              sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-slow ease-motion-in-out',
+            )}
+            style={isNarrow
+              ? {
+                  transform: narrowSidebarOpen ? 'translateX(0)' : 'translateX(-101%)',
+                  opacity: narrowSidebarOpen ? 1 : 0,
+                  visibility: narrowSidebarOpen ? 'visible' : 'hidden',
+                }
+              : {
+                  width: sidebarCollapsed ? 0 : sidebarWidth,
+                  opacity: sidebarCollapsed ? 0 : 1,
+                  transitionDuration: sidebarInstant ? '0ms' : undefined,
+                }}
+            aria-hidden={isNarrow ? !narrowSidebarOpen : sidebarCollapsed}
           >
-            {/* 窄屏:抽屉盖住了标题栏,收起按钮必须放在抽屉内部才点得到。
-                Sidebar 自身的顶部留白(pt-11)正好让出这一条控制区。 */}
-            {isNarrow && (
-              <div className="absolute left-2 top-2 z-40">
-                {sidebarControls}
+            <div
+              className="relative z-10 flex h-full flex-col"
+              style={isNarrow ? undefined : { width: sidebarWidth }}
+            >
+              {sidebar}
+            </div>
+            {/* 窄屏不做拖拽改宽:抽屉宽度由视口决定。 */}
+            {!isNarrow && (
+              <div
+                className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
+                onMouseDown={handleSidebarMouseDown}
+              >
+                <div className="absolute left-1/2 top-[var(--radius-content)] bottom-[var(--radius-content)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-normal group-hover:bg-primary/22" />
               </div>
             )}
-            {sidebar}
-          </div>
-          {/* 窄屏不做拖拽改宽:抽屉宽度由视口决定。 */}
-          {!isNarrow && (
-            <div
-              className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
-              onMouseDown={handleSidebarMouseDown}
-            >
-              <div className="absolute left-1/2 top-[var(--radius-2xl)] bottom-[var(--radius-2xl)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-normal group-hover:bg-primary/22" />
-            </div>
-          )}
-        </aside>
-      )}
+          </aside>
+        )}
 
-      <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--surface-2)/0.88)]">
-        <section
-          className={cn(
-            'relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[hsl(var(--background))]',
-            showsCornerNotch && 'rounded-tl-2xl rounded-bl-2xl',
-          )}
-        >
-          {/* 分割线：直线段用 1px 实线保持锐利；圆角形态下两个圆角段用 1.5px 的
-              SVG 弧线补偿抗锯齿覆盖率损耗（斜线段每个像素只被覆盖约一半，需要更
-              宽的墨量才能与直线段视觉等粗）。尺寸绑定 --radius-2xl，与圆角对齐。
-              侧栏没有停靠（收起/抽屉）时面板左缘就是窗口边缘，不画任何分割线。 */}
-          {sidebarDocked && (
-            <div
-              aria-hidden="true"
-              className={cn(
-                'pointer-events-none absolute left-0 z-30 w-px bg-[hsl(var(--layout-divider))]',
-                showsCornerNotch
-                  ? 'top-[var(--radius-2xl)] bottom-[var(--radius-2xl)]'
-                  : 'inset-y-0',
-              )}
-            />
-          )}
-          {showsCornerNotch && (
-            <>
-              <svg
-                aria-hidden="true"
-                className="pointer-events-none absolute left-0 top-0 z-30"
-                style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
-                viewBox="0 0 12 12"
-                fill="none"
-              >
-                <path
-                  d="M0.5 12 A11.5 11.5 0 0 1 12 0.5"
-                  stroke="hsl(var(--layout-divider))"
-                  strokeWidth="1.5"
-                  vectorEffect="non-scaling-stroke"
+        {/*
+          外层容器的底色是 **窗口表面**（Codex 的 `--surface`：导航栏、侧栏、
+          内容面之间的「空气」都是它），内容面本身才是浮在上面那块更亮的面 ——
+          浅色下面板比窗口亮、深色下亮一点。把这两层摆反的话，浮起的观感会完全
+          消失（浅色下面板比窗口暗，等于一个洞）。
+        */}
+        <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--background))]">
+          <section
+            data-content-surface
+            data-floats={String(contentFloats)}
+            className="content-surface-root relative flex min-w-0 flex-1 flex-col bg-[hsl(var(--surface-1))] shadow-elevation-content"
+          >
+            <div className="content-surface flex min-h-0 flex-1 flex-col overflow-hidden">
+              <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--surface-1))]">
+                {/* 窄屏下聊天列不再要求最小宽度,否则 420px 视口里会被挤出横向滚动。 */}
+                <div className={cn('flex flex-1 flex-col bg-[hsl(var(--surface-1))]', isNarrow ? 'min-w-0' : 'min-w-110')}>
+                  {children}
+                </div>
+                <SidePanel
+                  projectPath={sidePanelProjectPath}
+                  scopeId={sidePanelScopeId}
+                  isVisible={sidePanelAvailable}
                 />
-              </svg>
-              <svg
-                aria-hidden="true"
-                className="pointer-events-none absolute bottom-0 left-0 z-30"
-                style={{ width: 'var(--radius-2xl)', height: 'var(--radius-2xl)' }}
-                viewBox="0 0 12 12"
-                fill="none"
-              >
-                <path
-                  d="M0.5 0 A11.5 11.5 0 0 0 12 11.5"
-                  stroke="hsl(var(--layout-divider))"
-                  strokeWidth="1.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            </>
-          )}
-          <TitleBar
-            leftContent={controlsInTitleBar ? sidebarControls : undefined}
-            rightContent={headerContent}
-            projectOpenPath={projectOpenPath}
-            sidePanelAvailable={sidePanelAvailable}
-            todos={todos}
-          />
-
-          <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
-            {/* 窄屏下聊天列不再要求最小宽度,否则 420px 视口里会被挤出横向滚动。 */}
-            <div className={cn('flex flex-1 flex-col bg-[hsl(var(--background))]', isNarrow ? 'min-w-0' : 'min-w-110')}>
-              {children}
+              </main>
             </div>
-            <SidePanel
-              projectPath={sidePanelProjectPath}
-              scopeId={sidePanelScopeId}
-              isVisible={sidePanelAvailable}
-            />
-          </main>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   );

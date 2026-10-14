@@ -46,14 +46,15 @@ function walkSourceFiles(dir: string): string[] {
 }
 
 describe('动效 token 源码契约', () => {
-  it('globals.css 定义了三档时长与三种缓动的原始值', () => {
+  it('globals.css 定义了三档时长与四条 Codex 缓动的原始值', () => {
     expect(GLOBALS_CSS).toContain('--motion-duration-fast: 150ms;');
     expect(GLOBALS_CSS).toContain('--motion-duration-normal: 200ms;');
     expect(GLOBALS_CSS).toContain('--motion-duration-slow: 300ms;');
-    expect(GLOBALS_CSS).toContain('--motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);');
-    expect(GLOBALS_CSS).toContain('--motion-ease-in: cubic-bezier(0.4, 0, 1, 1);');
-    expect(GLOBALS_CSS).toContain('--motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);');
-    expect(GLOBALS_CSS).toContain('--motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);');
+    // 四条曲线的取值对齐 Codex；时长仍是 150/200/300ms 三档。
+    expect(GLOBALS_CSS).toContain('--motion-ease-out: cubic-bezier(0.19, 1, 0.22, 1);');
+    expect(GLOBALS_CSS).toContain('--motion-ease-in: cubic-bezier(0.8, 0, 0.4, 1);');
+    expect(GLOBALS_CSS).toContain('--motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);');
+    expect(GLOBALS_CSS).toContain('--motion-ease-standard: cubic-bezier(0.65, 0, 0.4, 1);');
   });
 
   it('@theme 把原始值映射成 duration-* / ease-motion-* 工具类', () => {

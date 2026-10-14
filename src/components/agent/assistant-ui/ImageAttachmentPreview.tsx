@@ -26,7 +26,7 @@ export function ImageAttachmentPreview({
           type="button"
           onClick={() => setOpen(true)}
           className={cn(
-            'group/image relative block overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))] shadow-[0_10px_24px_-18px_hsl(var(--surface-shadow-strong)/0.5)] transition-all hover:-translate-y-0.5 hover:border-border hover:shadow-[0_18px_34px_-22px_hsl(var(--surface-shadow-strong)/0.58)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55',
+            'group/image relative block overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))] shadow-elevation-subtle transition-all hover:-translate-y-0.5 hover:border-border hover:shadow-elevation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55',
             thumbnailClassName,
           )}
           aria-label={`预览图片 ${alt}`}
@@ -42,7 +42,7 @@ export function ImageAttachmentPreview({
         <DialogContent
           overlayClassName="z-[250] bg-black/72 backdrop-blur-sm"
           closeClassName="rounded-md bg-white/10 text-white/85 opacity-100 hover:bg-white/18 hover:text-white data-[state=open]:bg-white/10 data-[state=open]:text-white/85 focus:ring-white/30 focus:ring-offset-0"
-          className="z-[260] flex h-[min(88vh,54rem)] w-[min(92vw,72rem)] max-w-none items-center justify-center border-border/35 bg-black/92 p-3 text-white shadow-[0_30px_90px_-36px_black] dark:bg-black/92 sm:rounded-lg"
+          className="z-[260] flex h-[min(88vh,54rem)] w-[min(92vw,72rem)] max-w-none items-center justify-center border-border/35 bg-black/92 p-3 text-white shadow-elevation-prominent dark:bg-black/92 sm:rounded-lg"
         >
           <DialogTitle className="sr-only">{alt}</DialogTitle>
           <img

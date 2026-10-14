@@ -18,6 +18,7 @@ import {
   resolveBootIsDark,
   syncThemeChrome,
 } from './themeBoot';
+import { CODEX_DARK_SEEDS, CODEX_LIGHT_SEEDS } from './colorDerivation';
 
 const indexHtml = readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
 
@@ -131,10 +132,13 @@ describe('themeBoot', () => {
     expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_LIGHT);
   });
 
-  it('mirrors the app background tokens so the pre-CSS frame matches the app', () => {
-    // 浅色 --background: 0 0% 100%;深色 --background: 0 0% 9.4%(src/styles/globals.css)
-    expect(APP_BACKGROUND_LIGHT).toBe('hsl(0 0% 100%)');
-    expect(APP_BACKGROUND_DARK).toBe('hsl(0 0% 9.4%)');
+  it('mirrors the surface seed so the pre-CSS frame matches the app', () => {
+    // 首帧底色必须等于 colorDerivation 的 surface 种子，否则滚动回弹会露出一帧异色。
+    expect(APP_BACKGROUND_LIGHT.toLowerCase()).toBe(CODEX_LIGHT_SEEDS.surface.toLowerCase());
+    expect(APP_BACKGROUND_DARK.toLowerCase()).toBe(CODEX_DARK_SEEDS.surface.toLowerCase());
+    // 启动画面与 html 底色同值，两边都不跳色。
+    expect(BOOT_BACKGROUND_LIGHT).toBe(APP_BACKGROUND_LIGHT);
+    expect(BOOT_BACKGROUND_DARK).toBe(APP_BACKGROUND_DARK);
   });
 });
 

@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { WebPairingConfirmHost } from './components/bootstrap/WebPairingConfirmHost';
 import { DaemonStatusOverlay } from './components/layout/DaemonStatusOverlay';
 import { MainLayout } from './components/layout/MainLayout';
+import { navTargetForView, type NavRailTarget } from './components/layout/NavRail';
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
@@ -213,6 +214,22 @@ function App() {
       sidePanel: getSidePanelNavigation('home'),
     });
   }, [commitNavigation, navigationLocation]);
+
+  /**
+   * 导航栏（`src/components/layout/NavRail.tsx`）的四个落点。
+   * 自动化与工单原本是侧栏顶部的文字按钮，现在提到导航栏；这里保留
+   * `handleOpenAutomation` / `handleOpenTodoBoard` 两个具名回调，命令面板与
+   * 快捷键仍按名字引用它们，不受导航形态变化影响。
+   */
+  const handleNavRailSelect = useCallback(
+    (target: NavRailTarget) => {
+      if (target === 'settings') return handleOpenSettings();
+      if (target === 'automation') return handleOpenAutomation();
+      if (target === 'todo') return handleOpenTodoBoard();
+      return handleReturnToApp();
+    },
+    [handleOpenAutomation, handleOpenSettings, handleOpenTodoBoard, handleReturnToApp],
+  );
 
   const handleAutomationTaskChange = useCallback((taskId: string | null) => {
     commitNavigation({
@@ -498,11 +515,10 @@ function App() {
               onNewSession={() => handleNewSession()}
               onNewSessionInProject={(projectId) => handleNewSession(projectId)}
               onSelectSession={handleSelectSession}
-              onOpenSettings={handleOpenSettings}
-              onOpenAutomation={handleOpenAutomation}
-              onOpenTodoBoard={handleOpenTodoBoard}
             />
           )}
+          navRailTarget={navTargetForView(activeView)}
+          onNavRailSelect={handleNavRailSelect}
           sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
           sidePanelAvailable={activeView === 'app'}
           sidePanelProjectPath={sidePanelProjectPath}

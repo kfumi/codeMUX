@@ -684,7 +684,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                 templateId={selectedFreeModel.providerTemplateId}
                 name={selectedFreeModel.group}
                 size={14}
-                className="h-5 w-5 rounded-[5px]"
+                className="h-5 w-5 rounded-2xs"
               />
               <span className="truncate">{selectedFreeModel.name}</span>
             </span>
@@ -694,7 +694,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                 templateId={provider.builtin_template_id}
                 name={provider.name}
                 size={14}
-                className="h-5 w-5 rounded-[5px]"
+                className="h-5 w-5 rounded-2xs"
               />
               <span className="truncate">
                 {resolveModelDisplayName({
@@ -718,7 +718,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                     templateId={item.builtin_template_id}
                     name={item.name}
                     size={14}
-                    className="h-5 w-5 rounded-[5px]"
+                    className="h-5 w-5 rounded-2xs"
                   />
                   <span>
                     {resolveModelDisplayName({
@@ -742,7 +742,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                     templateId={model.providerTemplateId}
                     name={model.group}
                     size={14}
-                    className="h-5 w-5 rounded-[5px]"
+                    className="h-5 w-5 rounded-2xs"
                   />
                   <span>{model.name}</span>
                 </span>

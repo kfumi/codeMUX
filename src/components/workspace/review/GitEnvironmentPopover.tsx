@@ -291,8 +291,8 @@ function EnvironmentSection({
             </span>
             <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
             <span className="shrink-0 font-mono text-ui-caption">
-              <span className="text-[hsl(var(--success))]">+{formatDelta(totals.additions)}</span>
-              <span className="ml-2 text-[hsl(var(--destructive))]">-{formatDelta(totals.deletions)}</span>
+              <span className="text-diff-added">+{formatDelta(totals.additions)}</span>
+              <span className="ml-2 text-diff-removed">-{formatDelta(totals.deletions)}</span>
             </span>
             <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
           </button>
@@ -319,7 +319,7 @@ function EnvironmentSection({
               align="start"
               side="left"
               sideOffset={8}
-              className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
+              className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
             >
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/65" />
@@ -491,7 +491,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
           align="end"
           side="bottom"
           sideOffset={8}
-          className="w-84 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
+          className="w-84 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
         >
           <EnvironmentSection
             gitLoadState={gitLoadState}

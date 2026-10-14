@@ -212,7 +212,7 @@ export function AgentPermissionSelector({
               side="top"
               sideOffset={8}
               align="start"
-              className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--surface-shadow-strong)/0.55)] backdrop-blur-lg"
+              className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-elevation backdrop-blur-lg"
             >
               {options.map((option) => {
                 const active = selectedMode === option.mode;

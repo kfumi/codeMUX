@@ -35,7 +35,7 @@ const DropdownMenuContent = React.forwardRef<
         event.preventDefault()
       }}
       className={cn(
-        'pointer-events-auto surface-panel z-160 min-w-40 rounded-md border bg-popover p-1 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.18)] dark:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.6)] animate-in fade-in fill-mode-both duration-fast ease-motion-out',
+        'pointer-events-auto surface-panel z-160 min-w-40 rounded-md border bg-popover p-1 shadow-elevation animate-in fade-in fill-mode-both duration-fast ease-motion-out',
         className,
       )}
       {...props}

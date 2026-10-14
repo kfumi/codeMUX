@@ -46,7 +46,7 @@ export function AgentSelector({ value, onChange, variant = 'inline', disabled = 
           'inline-flex items-center text-sm text-foreground/84 transition-all duration-normal',
           disabled && 'cursor-not-allowed opacity-50',
           isFloating
-            ? 'group relative justify-center rounded-lg border border-border/60 bg-card p-4 shadow-[0_14px_34px_-26px_hsl(var(--surface-shadow-strong)/0.26)] hover:border-[hsl(var(--primary)/0.28)] hover:shadow-[0_18px_42px_-28px_hsl(var(--surface-shadow-strong)/0.32),0_0_0_3px_hsl(var(--primary)/0.06)]'
+            ? 'group relative justify-center rounded-lg border border-border/60 bg-card p-4 shadow-elevation hover:border-[hsl(var(--primary)/0.28)] hover:shadow-elevation-prominent'
             : isHero
             ? 'group relative justify-center'
             : 'h-9 gap-1.5 rounded-md px-3 py-2 text-sm outline-none hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-0 dark:hover:bg-neutral-800 dark:hover:text-neutral-100',
@@ -80,7 +80,7 @@ export function AgentSelector({ value, onChange, variant = 'inline', disabled = 
       </DropdownMenuTrigger>
       <DropdownMenuContent className={cn(
         (isFloating || isHero) &&
-          'rounded-lg border border-border/60 bg-popover p-1.5 shadow-[0_18px_44px_-26px_hsl(var(--surface-shadow-strong)/0.36)]',
+          'rounded-lg border border-border/60 bg-popover p-1.5 shadow-elevation',
       )}>
         {SELECTABLE_AGENTS.map((agent) => (
           <DropdownMenuItem key={agent.kind} onClick={() => onChange(agent.kind)}>

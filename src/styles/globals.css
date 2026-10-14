@@ -76,7 +76,12 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
+/*
+ * `static` 而不是默认的按需产出：圆角阶梯是**完整的一档一档**，即使某一档当前
+ * 没有组件用到也要留在产物里 —— 否则「这一档没人用」会诱使后来的人绕过阶梯直接
+ * 写任意值圆角，把阶梯契约从内部悄悄破掉。
+ */
+@theme static {
   --font-sans: var(--font-ui);
   --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Consolas, monospace;
   --text-code: var(--code-font-size);
@@ -105,7 +110,11 @@
   --text-3xl--line-height: 1.2;
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
+  /* 三档文字层级的第三档（最浅）。主文字 foreground、次级 muted-foreground、
+     第三级 foreground-tertiary —— 对应 Codex 的 textForegroundTertiary。 */
+  --color-foreground-tertiary: hsl(var(--foreground-tertiary));
   --color-border: hsl(var(--border));
+  --color-border-light: hsl(var(--border-light));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   --color-primary: hsl(var(--primary));
@@ -118,6 +127,13 @@
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-accent: hsl(var(--accent));
   --color-accent-foreground: hsl(var(--accent-foreground));
+  /* 强调色的三个浓度档 —— 全部由 accent + surface 派生，换强调色时一起变。 */
+  --color-accent-bg: hsl(var(--accent-bg));
+  --color-accent-bg-hover: hsl(var(--accent-bg-hover));
+  --color-accent-bg-active: hsl(var(--accent-bg-active));
+  /* 图标的两个弱化档，对应 Codex 的 iconSecondary / iconTertiary。 */
+  --color-icon-secondary: hsl(var(--icon-secondary));
+  --color-icon-tertiary: hsl(var(--icon-tertiary));
   --color-popover: hsl(var(--popover));
   --color-popover-foreground: hsl(var(--popover-foreground));
   --color-card: hsl(var(--card));
@@ -125,11 +141,58 @@
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
   --color-glow: hsl(var(--glow));
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 6px);
+  /* diff 增删色：与状态色（success/destructive）分开，用户可在外观设置里单独配。 */
+  --color-diff-added: hsl(var(--diff-added));
+  --color-diff-removed: hsl(var(--diff-removed));
+
+  /*
+   * 圆角阶梯（Codex 的 --radius-*-base）。
+   *
+   * 八档基准值：2 / 4 / 6 / 8 / 12 / 16 / 24 / 32px。`--radius-scale` 是用户的
+   * 三档缩放偏好（sharp .75 / soft 1 / round 1.35），整条阶梯按它**等比**缩放，
+   * 所以换档只改「有多圆」，不改「哪一档用在哪」。
+   *
+   * Superellipse 渐进增强：支持 `corner-shape: superellipse()` 的引擎上整条阶梯
+   * 放大 1.25 倍并启用超椭圆角（Codex 的做法），不支持的退回标准圆角 1 倍。
+   * 浏览器宿主（PC / 移动）由下方的 `@supports not` 分支强制退回 1 倍 ——
+   * 与 Codex 一致。
+   */
+  --radius-2xs: calc(0.125rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-xs: calc(0.25rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-sm: calc(0.375rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-md: calc(0.5rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-lg: calc(0.75rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-xl: calc(1rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-2xl: calc(1.5rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-3xl: calc(2rem * var(--radius-scale) * var(--radius-superellipse-scale));
+  --radius-full: 9999px;
+  /* 内容面（主聊天区）的圆角：Codex 的 12px 基数 × 1.25 超椭圆 = 15px。
+     写成基准值而不是 15px 字面量，才能跟整条阶梯一起受两个缩放因子影响。 */
+  --radius-content: calc(0.9375rem * var(--radius-scale) * var(--radius-superellipse-scale));
+
+  /*
+   * 描边式 elevation —— 「浮起来但不脏」的三段式：
+   *   ① 0.5px 描边打底（用 border-heavy 的墨色，不是黑）
+   *   ② 近距离小模糊（0–3px 位移、2–8px 模糊）
+   *   ③ 超大 spread 极低透明度（模拟窗口的环境光）
+   * 三个 alpha 抽成变量，深色下整体加重（见 .dark），几何不变。
+   */
+  --elevation-stroke-alpha: 0.55;
+  --elevation-near-alpha: 0.04;
+  --elevation-wide-alpha: 0.05;
+  --shadow-elevation-subtle: 0 0 0 0.5px hsl(var(--surface-edge) / var(--elevation-stroke-alpha)),
+    0 1px 2px hsl(var(--surface-shadow-strong) / var(--elevation-near-alpha)),
+    0 0 12px hsl(var(--surface-shadow-strong) / var(--elevation-wide-alpha));
+  --shadow-elevation: 0 0 0 0.5px hsl(var(--surface-edge) / var(--elevation-stroke-alpha)),
+    0 3px 7.5px hsl(var(--surface-shadow-strong) / var(--elevation-near-alpha)),
+    0 0 20px hsl(var(--surface-shadow-strong) / var(--elevation-wide-alpha));
+  --shadow-elevation-prominent: 0 0 0 1px hsl(var(--surface-edge) / var(--elevation-stroke-alpha)),
+    0 2px 8px hsl(var(--surface-shadow-strong) / var(--elevation-near-alpha)),
+    0 4px 80px 8px hsl(var(--surface-shadow-strong) / var(--elevation-wide-alpha));
+  /* 内容面：比浮层更克制的一档，只在「内容从窗口边缘浮起」时用。 */
+  --shadow-elevation-content: 0 0 0 0.5px hsl(var(--surface-edge) / var(--elevation-stroke-alpha)),
+    0 2px 6px hsl(var(--surface-shadow-strong) / var(--elevation-near-alpha)),
+    0 8px 32px -12px hsl(var(--surface-shadow-strong) / var(--elevation-wide-alpha));
 
   /* 动效语义 token：时长三档 + 缓动三种（原始值定义在下方 :root，与外观变量同处）。
      新代码一律用 duration-fast|normal|slow 与 ease-motion-*，不再写字面量时长或
@@ -145,108 +208,154 @@
 }
 
 @layer base {
+  /*
+   * 静态兜底值 —— 与 `src/lib/colorDerivation.ts` 在默认种子下的派生结果逐位一致。
+   *
+   * 颜色体系的唯一真相是那 4 个种子（surface / ink / accent / contrast）与派生公式；
+   * 这里的字面量只是「JS 还没跑」那一瞬的首帧兜底，改色请改派生公式，不要改这里
+   * （改了会被 colorDerivation.test.ts 的冻结表与 Codex 对拍用例发现）。
+   */
   :root {
     --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
     --ui-font-size: 14px;
     --code-font-size: 13px;
+    /* 圆角阶梯的两个缩放因子。用户的 sharp/soft/round 偏好写 --radius-scale
+       （见 appearanceStore）；超椭圆放大因子由下方的 @supports 分支改写。 */
+    --radius-scale: 1;
+    --radius-superellipse-scale: 1;
     /* 动效语义 token（原始值）。@theme 里映射为 duration-fast|normal|slow 与
-       ease-motion-* 工具类；reduced-motion 的降速/停用见本文件同名媒体查询。 */
+       ease-motion-* 工具类；reduced-motion 的降速/停用见本文件同名媒体查询。
+       四条曲线的取值对齐 Codex，含义见各行注释。 */
     --motion-duration-fast: 150ms;
     --motion-duration-normal: 200ms;
     --motion-duration-slow: 300ms;
-    --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-    --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
-    --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-    --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-    --background: 0 0% 100%;
-    --foreground: 220 7% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 7% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 7% 11%;
-    --primary: 220 7% 11%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 95%;
-    --secondary-foreground: 220 7% 11%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 220 5% 42%;
-    --accent: 0 0% 94%;
-    --accent-foreground: 220 7% 11%;
-    --destructive: 1 74% 52%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 143 100% 32%;
-    --warning: 45 96% 40%;
-    --border: 0 0% 90%;
-    --input: 0 0% 89%;
-    --ring: 220 7% 11%;
-    --radius: 0.625rem;
-    --glow: 220 7% 11%;
-    --content-width: 47.5rem;
-    --sidebar-bg: 0 0% 95%;
-    --sidebar-fg: 220 7% 14%;
-    --sidebar-border: 0 0% 89%;
-    --sidebar-muted: 0 0% 92%;
-    --sidebar-accent: 220 7% 11%;
-    --sidebar-glow: 220 7% 11%;
-    --settings-sidebar-bg: 0 0% 96%;
-    --shell-bg: none;
-    --surface-1: 0 0% 100%;
-    --surface-2: 0 0% 96.5%;
-    --surface-3: 0 0% 93%;
-    --surface-shadow: 0 0% 10%;
+    --motion-ease-out: cubic-bezier(0.19, 1, 0.22, 1); /* 进入 / 悬停 */
+    --motion-ease-in: cubic-bezier(0.8, 0, 0.4, 1); /* 退出 */
+    --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* snappy：尺寸 / 宽度 */
+    --motion-ease-standard: cubic-bezier(0.65, 0, 0.4, 1); /* 移动 / 位移 */
+    --background: 0 0% 98.82%;
+    --foreground: 0 0% 5.1%;
+    --foreground-tertiary: 0 0% 52.55%;
+    --card: 0 0% 99.22%;
+    --card-foreground: 0 0% 5.1%;
+    --popover: 0 0% 99.22%;
+    --popover-foreground: 0 0% 5.1%;
+    --primary: 216.83 92.2% 59.8%;
+    --primary-foreground: 0 0% 98.82%;
+    --secondary: 0 0% 98.82%;
+    --secondary-foreground: 0 0% 5.1%;
+    --muted: 0 0% 98.82%;
+    --muted-foreground: 0 0% 33.73%;
+    --accent: 215 75% 93.73%;
+    --accent-foreground: 0 0% 5.1%;
+    --accent-bg: 215 75% 93.73%;
+    --accent-bg-hover: 216.92 76.47% 93.33%;
+    --accent-bg-active: 215.17 78.38% 92.75%;
+    --destructive: 1.19 68.33% 43.33%;
+    --destructive-foreground: 0 0% 98.82%;
+    --success: 145.79 78.1% 26.86%;
+    --warning: 35.45 91.67% 32.94%;
+    --diff-added: 143.7 100% 31.76%;
+    --diff-removed: 1.19 68.33% 43.33%;
+    --border: 0 0% 91.37%;
+    --border-light: 0 0% 94.12%;
+    --input: 0 0% 91.37%;
+    --ring: 216.83 92.2% 59.8%;
+    --glow: 216.83 92.2% 59.8%;
+    --content-width: 48rem;
+    --sidebar-bg: 0 0% 98.82%;
+    --sidebar-fg: 0 0% 5.1%;
+    --sidebar-border: 0 0% 91.37%;
+    --sidebar-muted: 0 0% 98.82%;
+    --sidebar-accent: 216.83 92.2% 59.8%;
+    --sidebar-glow: 216.83 92.2% 59.8%;
+    --settings-sidebar-bg: 0 0% 98.82%;
+    --shell-bg: 0 0% 98.82%;
+    --surface-1: 0 0% 99.22%;
+    --surface-2: 0 0% 98.82%;
+    --surface-3: 0 0% 94.12%;
+    --surface-shadow: 0 0% 0%;
     --surface-shadow-strong: 0 0% 0%;
-    --surface-edge: 0 0% 88%;
-    --surface-glow: 220 7% 11%;
+    --surface-edge: 0 0% 87.84%;
+    --surface-glow: 216.83 92.2% 59.8%;
+    --icon-secondary: 0 0% 33.73%;
+    --icon-tertiary: 0 0% 52.55%;
     --layout-divider: var(--border);
-    --codemux-directive-accent: 221 83% 46%;
-    --codemux-directive-bg: 214 100% 93%;
-    --codemux-directive-border: 214 100% 82%;
-    --codemux-link: 220 7% 11%;
+    --scrim: rgb(0 0 0 / 0.098);
+    --codemux-directive-accent: 216.83 92.2% 59.8%;
+    --codemux-directive-bg: 215 75% 93.73%;
+    --codemux-directive-border: 0 0% 91.37%;
+    --codemux-link: 216.83 92.2% 59.8%;
   }
 
   .dark {
-    --background: 0 0% 9.4%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 12.9%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 15.7%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 0 0% 100%;
-    --primary-foreground: 220 7% 11%;
-    --secondary: 0 0% 12.9%;
-    --secondary-foreground: 0 0% 94%;
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 68%;
-    --accent: 0 0% 16.5%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 1 100% 70%;
-    --destructive-foreground: 0 0% 10%;
-    --success: 142 55% 52%;
-    --warning: 45 96% 58%;
-    --border: 0 0% 16%;
-    --input: 0 0% 17%;
-    --ring: 0 0% 100%;
-    --glow: 0 0% 100%;
-    --sidebar-bg: 0 0% 5.1%;
-    --sidebar-fg: 0 0% 92%;
-    --sidebar-border: 0 0% 13%;
-    --sidebar-muted: 0 0% 11%;
-    --sidebar-accent: 0 0% 100%;
-    --sidebar-glow: 0 0% 100%;
-    --settings-sidebar-bg: 0 0% 6.5%;
-    --shell-bg: none;
-    --surface-1: 0 0% 11%;
-    --surface-2: 0 0% 12.9%;
-    --surface-3: 0 0% 15.7%;
-    --surface-shadow: 0 0% 2%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 92.94%;
+    --foreground-tertiary: 0 0% 46.27%;
+    --card: 0 0% 11.37%;
+    --card-foreground: 0 0% 92.94%;
+    --popover: 0 0% 11.37%;
+    --popover-foreground: 0 0% 92.94%;
+    --primary: 216.83 92.2% 59.8%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 3.14%;
+    --secondary-foreground: 0 0% 92.94%;
+    --muted: 0 0% 7.84%;
+    --muted-foreground: 0 0% 65.88%;
+    --accent: 217.02 62.67% 14.71%;
+    --accent-foreground: 0 0% 92.94%;
+    --accent-bg: 217.02 62.67% 14.71%;
+    --accent-bg-hover: 217.65 61.45% 16.27%;
+    --accent-bg-active: 217.09 61.8% 17.45%;
+    --destructive: 1.28 94.95% 61.18%;
+    --destructive-foreground: 0 0% 0%;
+    --success: 144.09 55.92% 51.96%;
+    --warning: 39.44 74.17% 52.94%;
+    --diff-added: 144.09 55.92% 51.96%;
+    --diff-removed: 1.28 94.95% 61.18%;
+    --border: 0 0% 7.84%;
+    --border-light: 0 0% 3.92%;
+    --input: 0 0% 7.84%;
+    --ring: 217.24 40.09% 57.45%;
+    --glow: 216.83 92.2% 59.8%;
+    --sidebar-bg: 0 0% 0%;
+    --sidebar-fg: 0 0% 92.94%;
+    --sidebar-border: 0 0% 7.84%;
+    --sidebar-muted: 0 0% 6.67%;
+    --sidebar-accent: 217.04 92% 75.49%;
+    --sidebar-glow: 216.83 92.2% 59.8%;
+    --settings-sidebar-bg: 0 0% 0%;
+    --shell-bg: 0 0% 0%;
+    --surface-1: 0 0% 11.76%;
+    --surface-2: 0 0% 6.67%;
+    --surface-3: 0 0% 7.84%;
+    --surface-shadow: 0 0% 0%;
     --surface-shadow-strong: 0 0% 0%;
-    --surface-edge: 0 0% 20%;
-    --surface-glow: 0 0% 100%;
+    --surface-edge: 0 0% 14.51%;
+    --surface-glow: 216.83 92.2% 59.8%;
+    /* 深色下同样的黑色投影几乎看不见，所以三段 alpha 整体加重（几何不变）。
+       Codex 的做法是换成内发光，这里用更重的描边 + 投影达到同样的「浮起」读数。 */
+    --elevation-stroke-alpha: 0.6;
+    --elevation-near-alpha: 0.3;
+    --elevation-wide-alpha: 0.35;
+    --icon-secondary: 0 0% 65.88%;
+    --icon-tertiary: 0 0% 47.45%;
     --layout-divider: var(--border);
-    --codemux-directive-accent: 211 100% 72%;
-    --codemux-directive-bg: 211 68% 28%;
-    --codemux-directive-border: 211 68% 43%;
-    --codemux-link: 211 100% 72%;
+    --scrim: rgb(237 237 237 / 0.104);
+    --codemux-directive-accent: 217.04 92% 75.49%;
+    --codemux-directive-bg: 217.02 62.67% 14.71%;
+    --codemux-directive-border: 0 0% 7.84%;
+    --codemux-link: 217.04 92% 75.49%;
+  }
+
+  /*
+   * Superellipse 渐进增强的**默认值**放在 `@layer base` 内（1 倍、标准圆角）；
+   * 真正改写成 1.25 倍 + superellipse 的那条规则放在 `@layer base` **之外**
+   * （见文件中部），因为无 layer 的规则在层叠里优先级更高，才能可靠盖过这里。
+   */
+  :root {
+    --radius-superellipse-scale: 1;
+    --corner-shape: round;
   }
 
   * {
@@ -296,6 +405,30 @@
   }
 }
 
+/*
+ * Superellipse 渐进增强 —— 刻意放在 `@layer base` 之外：无 layer 的规则在层叠里
+ * 优先级更高，才能可靠盖过 `@layer base :root` 的默认值 1。
+ *
+ * 支持 `corner-shape: superellipse()` 的引擎（Electron 桌面 / Chromium 移动端）上，
+ * 整条圆角阶梯放大 1.25 倍并启用超椭圆角 —— Codex 的做法。
+ *
+ * **只对桌面壳生效**（`html[data-host='desktop']`）：PC 浏览器与移动端按设计
+ * 强制退回 1 倍标准圆角。`data-host` 由首帧引导脚本写入（见 themeBoot.ts），
+ * 所以 JS 起来之前圆角就已经是对的，不存在「先 1 倍后 1.25 倍」的跳变。
+ */
+@supports (corner-shape: superellipse(1.5)) {
+  html[data-host='desktop'] {
+    --radius-superellipse-scale: 1.25;
+    --corner-shape: superellipse(1.5);
+  }
+
+  html[data-host='desktop'] *,
+  html[data-host='desktop'] *::before,
+  html[data-host='desktop'] *::after {
+    corner-shape: var(--corner-shape);
+  }
+}
+
 input[type='password']::-ms-reveal {
   display: none;
 }
@@ -311,6 +444,38 @@ input[type='password']::-ms-reveal {
   -webkit-app-region: no-drag;
 }
 
+/* 外观设置里的对比度滑块。
+   `appearance: none` 之后浏览器不再画任何东西 —— 轨道和滑块都得自己给，否则
+   控件只剩一条灰杠、没有把手，用户看不出当前值在哪。焦点环用不透明主色，
+   满足 WCAG 2.2 SC 2.4.11 的 3:1。 */
+.contrast-slider {
+  background: hsl(var(--surface-edge));
+}
+
+.contrast-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  border: 2px solid hsl(var(--background));
+  background: var(--color-primary);
+  box-shadow: var(--shadow-elevation-subtle);
+  appearance: none;
+}
+
+.contrast-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  border: 2px solid hsl(var(--background));
+  background: var(--color-primary);
+  box-shadow: var(--shadow-elevation-subtle);
+}
+
+.contrast-slider:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
 /* 面板拖拽改宽期间(拖拽逻辑见 SidePanel):内置浏览器是独立 guest,指针移到
    网页上时宿主 document 收不到 mouse 事件。同步禁用 webview 的指针事件,让
    拖拽全程的事件都落在宿主文档里;ResizeOverlay 是第二重保险。 */
@@ -323,16 +488,45 @@ html.cmx-panel-resizing webview {
 }
 
 .composer-glow:focus-within {
-  border-color: hsl(var(--ring) / 0.3);
-  box-shadow:
-    0 3px 7.5px hsl(var(--surface-shadow-strong) / 0.04),
-    0 0 20px hsl(var(--surface-shadow-strong) / 0.05);
+  border-color: var(--color-ring);
+  box-shadow: var(--shadow-elevation);
 }
 
-.dark .composer-glow:focus-within {
-  box-shadow:
-    0 3px 7.5px hsl(var(--surface-shadow-strong) / 0.3),
-    0 0 20px hsl(var(--surface-shadow-strong) / 0.35);
+/*
+ * 内容面（主聊天区）的圆角裁切 —— 三个 token 驱动，**拆成两层**：
+ *
+ * `.content-surface-root`（外层）只管变量与圆角形状，`.content-surface`（内层）
+ * 才施加 clip-path。原因是 `clip-path` 会把元素**连同 box-shadow 一起裁掉** ——
+ * 阴影画在同一个元素上的话，浮层的「描边 + 超大 spread 低透明度」会被圆角切掉，
+ * 页面浮层等于白加。外层留圆角与 elevation，内层做裁切，两件事互不干扰。
+ *
+ * `inset(… round …)` 而不是 `border-radius`：圆角是**裁切**出来的，侧栏那条 1px
+ * 分隔线画在它下面就能严丝合缝，不需要旧实现里那两段手写 SVG 弧线去补偿抗锯齿
+ * 覆盖率损耗。
+ *
+ * 起始侧 = 靠近侧栏的一边，终止侧 = 靠近窗口边缘的一边；`--content-radius-max`
+ * 是两者的较大值。非对称状态由这两个 token 自动适配，组件不用写分支。
+ */
+.content-surface-root {
+  --content-radius-start: 0px;
+  --content-radius-end: 0px;
+  --content-radius-max: max(var(--content-radius-start), var(--content-radius-end));
+  border-start-end-radius: var(--content-radius-end);
+  border-end-end-radius: var(--content-radius-end);
+  border-start-start-radius: var(--content-radius-start);
+  border-end-start-radius: var(--content-radius-start);
+}
+
+.content-surface-root[data-floats='true'] {
+  --content-radius-start: var(--radius-content);
+  --content-radius-end: 0px;
+}
+
+.content-surface {
+  clip-path: inset(
+    0 round var(--content-radius-start) var(--content-radius-end) var(--content-radius-end)
+      var(--content-radius-start)
+  );
 }
 
 .app-shell {
@@ -340,43 +534,41 @@ html.cmx-panel-resizing webview {
   isolation: isolate;
 }
 
-.surface-panel {
-  border-color: hsl(var(--border) / 0.6);
-  background: hsl(var(--surface-1));
-  box-shadow: 0 1px 2px hsl(var(--surface-shadow-strong) / 0.05);
-  transition:
-    background-color var(--motion-duration-normal) var(--motion-ease-out),
-    border-color var(--motion-duration-normal) var(--motion-ease-out),
-    box-shadow var(--motion-duration-normal) var(--motion-ease-out);
-}
+/*
+ * 面板类工具（`.surface-panel` 等）放进 `@layer components`。
+ *
+ * 这一步不是洁癖：无 layer 的规则在层叠里**永远赢过** Tailwind 的 utilities，
+ * 于是挂在 `.surface-panel` 上的 `shadow-elevation` / `bg-popover` 会静默失效，
+ * 调用方以为改了就其实没改。放进 components 层后，utility 才是「后手覆盖」，
+ * 语义与 Tailwind 自己的分层一致。
+ */
+@layer components {
+  /* 面板：Codex 的「描边式 elevation」—— 0.5px 描边 + 近距小模糊 + 超大 spread
+     低透明度。深色下 alpha 由 --elevation-* 变量整体加重，不再需要单独的 dark 分支。 */
+  .surface-panel {
+    border-color: var(--color-border);
+    background: hsl(var(--surface-1));
+    box-shadow: var(--shadow-elevation-subtle);
+    transition:
+      background-color var(--motion-duration-normal) var(--motion-ease-out),
+      border-color var(--motion-duration-normal) var(--motion-ease-out),
+      box-shadow var(--motion-duration-normal) var(--motion-ease-out);
+  }
 
-.dark .surface-panel {
-  border-color: hsl(var(--surface-edge) / 0.5);
-  background: hsl(var(--surface-2));
-  box-shadow: 0 1px 2px hsl(var(--surface-shadow-strong) / 0.35);
-}
+  .surface-panel-muted {
+    background: hsl(var(--surface-2));
+  }
 
-.surface-panel-muted {
-  background: hsl(var(--surface-2));
-}
-
-.dark .surface-panel-muted {
-  background: hsl(var(--surface-1));
-}
-
-.surface-interactive:hover {
-  border-color: hsl(var(--border));
-  background: hsl(var(--surface-2));
-}
-
-.dark .surface-interactive:hover {
-  border-color: hsl(var(--surface-edge));
-  background: hsl(var(--surface-3));
+  /* hover 一律往 ink 方向加深，不换色相 —— Codex 的悬停纪律。 */
+  .surface-interactive:hover {
+    border-color: hsl(var(--surface-edge));
+    background: hsl(var(--surface-3));
+  }
 }
 
 /* 设置页软瓦片(参考 PI-Desktop / Codex 的"无分割线"分层):
-   用前景色 4% 混合的色调层代替描边卡片,亮暗主题自动适配;
-   交互瓦片 hover 加深到 6.5%。 */
+   用墨色低 alpha 混合的色调层代替描边卡片 —— 与 Codex 的 hover 公式同源
+   (ink 的 .04 → .065),亮暗主题自动适配。 */
 .settings-tile {
   background: hsl(var(--foreground) / 0.04);
 }
@@ -427,7 +619,7 @@ html.cmx-panel-resizing webview {
 /* 滚动条平时隐去，悬停滚动容器或滑块时才显形（参考风格的 6-8px 细滚动条） */
 *::-webkit-scrollbar-thumb {
   background: transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
 }
@@ -464,7 +656,7 @@ html.cmx-panel-resizing webview {
 .aui-tool-command-scroll::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.28);
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background-clip: padding-box;
 }
 
@@ -637,7 +829,7 @@ html.cmx-panel-resizing webview {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground) / 0.55);
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: var(--radius-sm);
   border-top-right-radius: inherit;
   background: hsl(var(--muted) / 0.55);
   pointer-events: none;
@@ -900,7 +1092,7 @@ html.cmx-panel-resizing webview {
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: hsl(var(--surface-3));
   color: hsl(var(--muted-foreground));
 }
@@ -930,7 +1122,7 @@ html.cmx-panel-resizing webview {
 
 .subagent-topology-connector {
   height: 2px;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: hsl(var(--border));
 }
 
@@ -1029,7 +1221,7 @@ html.cmx-panel-resizing webview {
   width: 10px;
   height: 10px;
   border: 2px solid hsl(var(--surface-1));
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: hsl(var(--muted-foreground));
 }
 
@@ -1117,7 +1309,7 @@ html.cmx-panel-resizing webview {
   border: 1.5px solid hsl(var(--border));
   /* 运行中的弧线与「运行中」状态点同色（黄），整块卡片只有一个「运行中」色调。 */
   border-top-color: hsl(var(--warning));
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 /* 窄容器：三列拓扑回退成单列竖排（主 Agent → 竖线 → 节点列）。连接线统一落在

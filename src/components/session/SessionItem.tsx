@@ -279,7 +279,7 @@ export function SessionItem({
               </div>
             </HoverCardTrigger>
           </ContextMenuTrigger>
-          <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
+          <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
             <ContextMenuItem icon={<PinIcon className="h-3.5 w-3.5" />} onClick={handleTogglePinned}>
               {session.is_pinned ? '取消置顶' : '置顶'}
             </ContextMenuItem>

@@ -46,7 +46,7 @@ export function BrowserElementPills({ sessionId }: BrowserElementPillsProps) {
       {open ? (
         <div
           role="tooltip"
-          className="surface-panel absolute bottom-full left-0 z-190 mb-1.5 w-72 max-w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-border/55 p-1.5 shadow-[0_14px_36px_-24px_hsl(var(--surface-shadow-strong)/0.45)]"
+          className="surface-panel absolute bottom-full left-0 z-190 mb-1.5 w-72 max-w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-border/55 p-1.5 shadow-elevation"
         >
           <ul className="flex flex-col gap-0.5">
             {elements.map((element) => (

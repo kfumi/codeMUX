@@ -344,9 +344,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               </div>
             </div>
 
-            <DraftWorkspaceToolbar />
-
-            <CodeMuxComposer
+            {/*
+              两段式输入区：上下文条（发到哪个项目/工作树/分支）在上、输入框在下，
+              各自是**独立的一块面**，中间留 2px 的缝。间距由这里的 gap-0.5
+              统一表达 —— 两个组件都不再自带外边距，避免两层各减一次。
+            */}
+            <div className="flex flex-col gap-0.5">
+              <DraftWorkspaceToolbar />
+              <CodeMuxComposer
               key={draftRevision}
               sessionId={NEW_SESSION_DRAFT_SESSION_ID}
               agentKind={selectedAgentKind}
@@ -391,7 +396,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onPlanModeChange={setSelectedPlanMode}
                 />
               )}
-            />
+              />
+            </div>
           </div>
         </div>
       </CodeMuxAssistantRuntimeProvider>

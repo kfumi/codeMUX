@@ -4,14 +4,19 @@ import { Check, Minus, Monitor, Moon, Plus, RotateCcw, Sun } from 'lucide-react'
 import {
   ACCENTS,
   type AccentKey,
+  accentSwatch,
   CODE_FONT_SIZE_MAX,
   CODE_FONT_SIZE_MIN,
+  CONTRAST_MAX,
+  CONTRAST_MIN,
   type ContentWidthKey,
+  type DiffColorKey,
+  RADIUS_PREVIEW,
   type RadiusKey,
-  RADII,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
 } from '../../lib/appearance';
+import { SEMANTIC_SEEDS } from '../../lib/colorDerivation';
 import { cn } from '../../lib/utils';
 import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -145,9 +150,22 @@ function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: bo
   );
 }
 
-function AccentSwatch({ accent, active, onClick }: { accent: AccentKey; active: boolean; onClick: () => void }) {
+function AccentSwatch({
+  accent,
+  active,
+  onClick,
+  currentTheme,
+}: {
+  accent: AccentKey;
+  active: boolean;
+  onClick: () => void;
+  currentTheme: Theme;
+}) {
   const preset = ACCENTS[accent];
-  return (
+  // 圆点必须反映**当前主题**下真正生效的那个值（Codex 的强调色明暗同值，
+// 其余预设不同）—— 固定用 light 会让深色用户看到的色板与实际不符。
+const swatch = accentSwatch(accent, currentTheme === 'Dark');
+return (
     <button
       type="button"
       onClick={onClick}
@@ -161,9 +179,9 @@ function AccentSwatch({ accent, active, onClick }: { accent: AccentKey; active: 
           !active && 'group-hover:scale-105',
         )}
         style={{
-          backgroundColor: preset.swatch,
+          backgroundColor: swatch,
           boxShadow: active
-            ? `0 0 0 2px hsl(var(--background)), 0 0 0 4px ${preset.swatch}`
+            ? `0 0 0 2px hsl(var(--background)), 0 0 0 4px ${swatch}`
             : `inset 0 0 0 1px hsl(var(--foreground)/0.1)`,
         }}
       >
@@ -208,6 +226,65 @@ const RADIUS_OPTIONS: { value: RadiusKey; label: string }[] = [
   { value: 'round', label: '圆润' },
 ];
 
+/** 四组 diff 取色器：新增/删除 × 浅色/深色。 */
+const DIFF_COLOR_FIELDS: {
+  key: DiffColorKey;
+  label: string;
+  fallback: string;
+}[] = [
+  { key: 'lightAdded', label: '浅色 · 新增', fallback: SEMANTIC_SEEDS.light.diffAdded },
+  { key: 'lightRemoved', label: '浅色 · 删除', fallback: SEMANTIC_SEEDS.light.diffRemoved },
+  { key: 'darkAdded', label: '深色 · 新增', fallback: SEMANTIC_SEEDS.dark.diffAdded },
+  { key: 'darkRemoved', label: '深色 · 删除', fallback: SEMANTIC_SEEDS.dark.diffRemoved },
+];
+
+function DiffColorField({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  fallback: string;
+  onChange: (value: string | undefined) => void;
+}) {
+  const current = value ?? fallback;
+  const customized = value !== undefined;
+  return (
+    <div className="flex items-center gap-3">
+      <label
+        className="relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-md border border-border"
+        style={{ backgroundColor: current }}
+      >
+        <input
+          type="color"
+          value={current}
+          aria-label={label}
+          onChange={(event) => onChange(event.target.value)}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        />
+      </label>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-ui-caption text-foreground">{label}</span>
+        <span className="font-mono text-code text-muted-foreground uppercase">{current}</span>
+      </div>
+      {customized && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={`${label}恢复默认`}
+          onClick={() => onChange(undefined)}
+          className="text-muted-foreground"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
   { value: 'fixed', label: '定宽' },
   { value: 'stream', label: '流式' },
@@ -222,6 +299,8 @@ export function ThemeToggle() {
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
+  const setContrast = useAppearanceStore((state) => state.setContrast);
+  const setDiffColor = useAppearanceStore((state) => state.setDiffColor);
   const setUiFontFamily = useAppearanceStore((state) => state.setUiFontFamily);
   const setUiFontSize = useAppearanceStore((state) => state.setUiFontSize);
   const setCodeFontSize = useAppearanceStore((state) => state.setCodeFontSize);
@@ -246,7 +325,43 @@ export function ThemeToggle() {
               key={key}
               accent={key}
               active={prefs.accent === key}
+              currentTheme={currentTheme}
               onClick={() => setAccent(key)}
+            />
+          ))}
+        </div>
+      </FormSection>
+
+      <FormSection label="对比度" hint="0–100，整体加重或减轻边界与次级文字">
+        <div className="flex items-center gap-3 rounded-xl settings-tile px-3 py-2.5">
+          <input
+            type="range"
+            min={CONTRAST_MIN}
+            max={CONTRAST_MAX}
+            step={1}
+            value={prefs.contrast}
+            aria-label="对比度"
+            onChange={(event) => setContrast(Number(event.target.value))}
+            className="contrast-slider h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full"
+          />
+          <output className="w-10 text-ui-body tabular-nums text-foreground" aria-live="polite">
+            {prefs.contrast}
+          </output>
+        </div>
+        <p className="text-ui-caption text-muted-foreground">
+          调低让界面更安静，调高让边界与次级文字更清楚 —— 不用换主题就能调到舒服的程度。
+        </p>
+      </FormSection>
+
+      <FormSection label="diff 配色" hint="代码增删行的颜色，与状态色分开">
+        <div className="grid grid-cols-2 gap-x-5 gap-y-3 rounded-xl settings-tile p-3">
+          {DIFF_COLOR_FIELDS.map((field) => (
+            <DiffColorField
+              key={field.key}
+              label={field.label}
+              value={prefs.diff[field.key]}
+              fallback={field.fallback}
+              onChange={(value) => setDiffColor(field.key, value)}
             />
           ))}
         </div>
@@ -327,7 +442,7 @@ export function ThemeToggle() {
               preview={
                 <span
                   className="h-6 w-6 border-2 border-foreground/55"
-                  style={{ borderRadius: RADII[opt.value] }}
+                  style={{ borderRadius: RADIUS_PREVIEW[opt.value] }}
                 />
               }
             />

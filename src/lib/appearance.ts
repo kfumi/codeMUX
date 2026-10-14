@@ -1,11 +1,31 @@
+import {
+  CODEX_DARK_SEEDS,
+  CODEX_LIGHT_SEEDS,
+  SEMANTIC_SEEDS,
+  type SemanticOverrides,
+  type ThemeSeeds,
+  deriveThemeTokens,
+} from './colorDerivation';
 import type { Theme } from '../types/provider';
 
-export type AccentKey = 'azure' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'graphite';
+export type AccentKey =
+  | 'codex'
+  | 'azure'
+  | 'cyan'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'graphite';
 export type RadiusKey = 'sharp' | 'soft' | 'round';
 export type ContentWidthKey = 'fixed' | 'stream';
 
 export interface AppearancePrefs {
   accent: AccentKey;
+  /** 0–100 的整体浓淡旋钮，驱动所有 alpha 步进（Codex 同名旋钮）。 */
+  contrast: number;
+  /** diff 新增/删除色，按明暗各存一套；缺省字段回落到语义种子。 */
+  diff: DiffColors;
   uiFontFamily: string;
   uiFontSize: number;
   codeFontSize: number;
@@ -13,13 +33,15 @@ export interface AppearancePrefs {
   contentWidth: ContentWidthKey;
 }
 
+export type DiffColorKey = 'lightAdded' | 'lightRemoved' | 'darkAdded' | 'darkRemoved';
+
+export type DiffColors = Partial<Record<DiffColorKey, string>>;
+
 export interface AccentPreset {
   name: string;
+  /** hex；由 `colorDerivation` 继续派生出悬停底 / 焦点环 / 强调背景。 */
   light: string;
   dark: string;
-  lightForeground: string;
-  darkForeground: string;
-  swatch: string;
 }
 
 export const SYSTEM_FONT_STACK =
@@ -40,52 +62,76 @@ export const BUILT_IN_FONT_FAMILIES: Record<string, string> = {
 };
 
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
-  azure: { name: '天蓝', light: '209 99% 40%', dark: '209 92% 58%', lightForeground: '0 0% 100%', darkForeground: '0 0% 100%', swatch: '#0169CC' },
-  cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(192 75% 42%)' },
-  emerald: { name: '翠绿', light: '152 56% 40%', dark: '152 56% 50%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(152 56% 40%)' },
-  amber: { name: '琥珀', light: '36 80% 42%', dark: '38 90% 58%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(36 80% 42%)' },
-  rose: { name: '玫红', light: '346 70% 50%', dark: '346 70% 65%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(346 70% 50%)' },
-  violet: { name: '紫罗兰', light: '262 55% 55%', dark: '262 60% 68%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(262 55% 55%)' },
-  graphite: { name: '石墨', light: '220 7% 11%', dark: '0 0% 100%', lightForeground: '0 0% 100%', darkForeground: '220 7% 11%', swatch: '#1a1c1f' },
+  // Codex / ChatGPT 的默认强调色。放在第一位且作为默认值 —— 整套换色的意义
+  // 就是「开箱即与 Codex 一致」，默认给别的色会让第一次打开的人看到半成品。
+  codex: { name: 'Codex', light: '#3a83f7', dark: '#3a83f7' },
+  azure: { name: '天蓝', light: '#0169cb', dark: '#3197f6' },
+  cyan: { name: '青碧', light: '#1b9bbb', dark: '#3ccadd' },
+  emerald: { name: '翠绿', light: '#2d9f6a', dark: '#38c784' },
+  amber: { name: '琥珀', light: '#c17c15', dark: '#f4ae34' },
+  rose: { name: '玫红', light: '#d92650', dark: '#e46784' },
+  violet: { name: '紫罗兰', light: '#7b4dcb', dark: '#a07cde' },
+  graphite: { name: '石墨', light: '#1a1b1e', dark: '#ffffff' },
 };
+
+/** 色板圆点直接用 hex，不再维护第二份 swatch。 */
+export const accentSwatch = (accent: AccentKey, isDark: boolean): string =>
+  isDark ? ACCENTS[accent].dark : ACCENTS[accent].light;
 
 export const UI_FONT_SIZE_MIN = 12;
 export const UI_FONT_SIZE_MAX = 18;
 export const CODE_FONT_SIZE_MIN = 10;
 export const CODE_FONT_SIZE_MAX = 20;
 
+export const CONTRAST_MIN = 0;
+export const CONTRAST_MAX = 100;
+export const CONTRAST_DEFAULT = 45;
+/**
+ * 深色比浅色高 15 —— Codex 的所有预设都是这个关系（浅 45 / 深 60）：
+ * 纯黑底上同样的墨色 alpha 看起来更淡，所以要补一档才达到同样的通透度。
+ */
+export const DARK_CONTRAST_OFFSET = 15;
+
+/**
+ * 三档圆角是 Codex 刻度的**缩放档**，不是具体值：整条阶梯等比缩放，
+ * 所以换档只改「有多圆」，不改「哪一档用在哪」。
+ */
+export const RADIUS_SCALES: Record<RadiusKey, number> = {
+  sharp: 0.75,
+  soft: 1,
+  round: 1.35,
+};
+
+/** 设置面板里三档圆角的字面量预览（阶梯 md 档 × 各档缩放系数）。 */
 export const RADII: Record<RadiusKey, string> = {
-  sharp: '0.25rem',
+  sharp: '0.375rem',
   soft: '0.5rem',
-  round: '0.85rem',
+  round: '0.675rem',
+};
+
+/** 三档圆角的预览半径：阶梯 md 档（8px 基准）乘以缩放系数。 */
+export const RADIUS_PREVIEW: Record<RadiusKey, string> = {
+  sharp: `${(0.5 * RADIUS_SCALES.sharp).toFixed(3)}rem`,
+  soft: `${(0.5 * RADIUS_SCALES.soft).toFixed(3)}rem`,
+  round: `${(0.5 * RADIUS_SCALES.round).toFixed(3)}rem`,
 };
 
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
-  fixed: '52rem',
+  fixed: '48rem',
   stream: '100%',
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {
-  accent: 'graphite',
+  accent: 'codex',
+  contrast: CONTRAST_DEFAULT,
+  // 空对象 = 完全跟随语义种子；用户改过的键才会被写进来。
+  diff: {},
   uiFontFamily: '',
   uiFontSize: 14,
   codeFontSize: 13,
   radius: 'soft',
   contentWidth: 'fixed',
 };
-
-const DIRECTIVE_CHIP_COLORS = {
-  light: {
-    accent: '221 83% 46%',
-    background: '214 100% 93%',
-    border: '214 100% 82%',
-  },
-  dark: {
-    accent: '211 100% 72%',
-    background: '211 68% 28%',
-    border: '211 68% 43%',
-  },
-} as const;
 
 const STORAGE_KEY = 'codemux:appearance';
 
@@ -113,6 +159,45 @@ export function formatFontFamilyForCss(family: string): string {
   return `'${escaped}'`;
 }
 
+/** 把偏好折成 4 个种子 —— 界面与表面的色值到这里为止，全交给派生引擎。 */
+export function seedsForPrefs(prefs: AppearancePrefs, isDark: boolean): ThemeSeeds {
+  const base = isDark ? CODEX_DARK_SEEDS : CODEX_LIGHT_SEEDS;
+  const contrast = isDark
+    ? Math.min(CONTRAST_MAX, clampContrast(prefs.contrast) + DARK_CONTRAST_OFFSET)
+    : clampContrast(prefs.contrast);
+  return { ...base, accent: ACCENTS[prefs.accent][isDark ? 'dark' : 'light'], contrast };
+}
+
+/** 当前主题下生效的 diff 配色（用户覆盖优先，缺省回落到语义种子）。 */
+export function semanticOverridesForPrefs(prefs: AppearancePrefs, isDark: boolean): SemanticOverrides {
+  const keys: DiffColorKey[] = isDark ? ['darkAdded', 'darkRemoved'] : ['lightAdded', 'lightRemoved'];
+  const seed = isDark ? SEMANTIC_SEEDS.dark : SEMANTIC_SEEDS.light;
+  return {
+    diffAdded: prefs.diff[keys[0]] ?? seed.diffAdded,
+    diffRemoved: prefs.diff[keys[1]] ?? seed.diffRemoved,
+  };
+}
+
+/** 只接受 `#rrggbb`；其余一律忽略，避免坏值写进 CSS。 */
+export function isHexColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+export function sanitizeDiffColors(value: unknown): DiffColors {
+  if (!value || typeof value !== 'object') return {};
+  const parsed = value as Record<string, unknown>;
+  const result: DiffColors = {};
+  for (const key of ['lightAdded', 'lightRemoved', 'darkAdded', 'darkRemoved'] as DiffColorKey[]) {
+    if (isHexColor(parsed[key])) result[key] = (parsed[key] as string).trim().toLowerCase();
+  }
+  return result;
+}
+
+export function clampContrast(value: number): number {
+  if (!Number.isFinite(value)) return CONTRAST_DEFAULT;
+  return Math.min(CONTRAST_MAX, Math.max(CONTRAST_MIN, Math.round(value)));
+}
+
 export function loadPrefs(): AppearancePrefs {
   if (typeof window === 'undefined') return DEFAULT_PREFS;
   try {
@@ -121,6 +206,10 @@ export function loadPrefs(): AppearancePrefs {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
       accent: isValidAccent(parsed.accent) ? parsed.accent : DEFAULT_PREFS.accent,
+      contrast: clampContrast(
+        typeof parsed.contrast === 'number' ? parsed.contrast : CONTRAST_DEFAULT,
+      ),
+      diff: sanitizeDiffColors(parsed.diff),
       uiFontFamily: resolveStoredUiFontFamily(parsed),
       uiFontSize: resolveStoredUiFontSize(parsed.uiFontSize, parsed.fontSize),
       codeFontSize: resolveStoredCodeFontSize(parsed.codeFontSize),
@@ -150,19 +239,17 @@ export function resolveIsDark(theme: Theme | undefined): boolean {
 export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const accent = ACCENTS[prefs.accent];
-  const accentColor = isDark ? accent.dark : accent.light;
-  const accentForeground = isDark ? accent.darkForeground : accent.lightForeground;
 
-  root.style.setProperty('--primary', accentColor);
-  root.style.setProperty('--primary-foreground', accentForeground);
-  root.style.setProperty('--ring', accentColor);
-  root.style.setProperty('--glow', accentColor);
-  const directiveChipColors = isDark ? DIRECTIVE_CHIP_COLORS.dark : DIRECTIVE_CHIP_COLORS.light;
-  root.style.setProperty('--codemux-directive-accent', directiveChipColors.accent);
-  root.style.setProperty('--codemux-directive-bg', directiveChipColors.background);
-  root.style.setProperty('--codemux-directive-border', directiveChipColors.border);
-  root.style.setProperty('--radius', RADII[prefs.radius]);
+  const tokens = deriveThemeTokens(
+    seedsForPrefs(prefs, isDark),
+    isDark,
+    semanticOverridesForPrefs(prefs, isDark),
+  );
+  for (const [name, value] of Object.entries(tokens)) {
+    root.style.setProperty(name, value);
+  }
+
+  root.style.setProperty('--radius-scale', String(RADIUS_SCALES[prefs.radius]));
   root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
   root.style.setProperty('--font-ui', buildUiFontFamily(prefs.uiFontFamily));
   root.style.setProperty('--ui-font-size', `${clampUiFontSize(prefs.uiFontSize)}px`);

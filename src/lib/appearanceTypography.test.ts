@@ -99,7 +99,10 @@ describe('界面字号令牌守卫', () => {
 
   it('每个字号令牌都派生自 --ui-font-size 或 --code-font-size', () => {
     const css = readFileSync(GLOBALS_CSS, 'utf8');
-    const themeStart = css.indexOf('@theme {');
+    // 字号令牌所在的块写作 `@theme static {`（圆角阶梯要求整条阶梯无条件进产物，
+    // 所以用了 Tailwind 的 static 变体）。这里按两种写法都能取到，别把契约
+    // 绑死在其中一种拼写上。
+    const themeStart = Math.max(css.indexOf('@theme static {'), css.indexOf('@theme {'));
     const themeEnd = css.indexOf('\n}', themeStart);
     expect(themeStart).toBeGreaterThan(-1);
     expect(themeEnd).toBeGreaterThan(themeStart);

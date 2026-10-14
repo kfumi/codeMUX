@@ -1,4 +1,4 @@
-import { ListTodo, MessageSquarePlus, Search, Settings, Timer } from 'lucide-react';
+import { MessageSquarePlus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { openDialog } from '../../lib/desktopDialogs';
@@ -7,9 +7,9 @@ import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useSho
 import { useChatSearchStore } from '../../stores/chatSearchStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { selectAttentionCount, useWorkTaskStore } from '../../stores/workTaskStore';
+import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { Project } from '../../types/project';
-import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '../ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
@@ -21,22 +21,18 @@ interface SidebarProps {
   onNewSession: () => void;
   onNewSessionInProject: (projectId: string) => void;
   onSelectSession: (sessionId: string, projectId: string | null) => void;
-  onOpenSettings: () => void;
-  onOpenAutomation: () => void;
-  onOpenTodoBoard: () => void;
 }
 
-export function Sidebar({
-  onNewSession,
-  onNewSessionInProject,
-  onSelectSession,
-  onOpenSettings,
-  onOpenAutomation,
-  onOpenTodoBoard,
-}: SidebarProps) {
+/**
+ * 侧栏 = **随导航栏当前项切换的上下文侧栏**。
+ *
+ * 顶层的会话 / 自动化 / 工单与置底的设置已经提到导航栏
+ * （`src/components/layout/NavRail.tsx`），这里只保留「在当前上下文里做什么」：
+ * 新对话、搜索，以及项目/会话两级树。
+ */
+export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
-  const attentionCount = useWorkTaskStore((state) => selectAttentionCount(state.tasks));
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const chatSearchOpen = useChatSearchStore((state) => state.isOpen);
@@ -50,8 +46,6 @@ export function Sidebar({
   const newSessionHint = useShortcutHint('newSession');
   const newSessionAria = useShortcutAriaKeyshortcuts('newSession');
   const searchAria = useShortcutAriaKeyshortcuts('openSearch');
-  const settingsHint = useShortcutHint('openSettings');
-  const settingsAria = useShortcutAriaKeyshortcuts('openSettings');
   const [explorerProject, setExplorerProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -91,7 +85,8 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="space-y-0 px-3 pb-1.5 pt-11">
+      {/* 顶部的控件区已经随标题栏上移，这里只留一行内边距。 */}
+      <div className="space-y-0 px-3 pb-1.5 pt-3">
         <button
           type="button"
           onClick={onNewSession}
@@ -122,27 +117,6 @@ export function Sidebar({
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={onOpenAutomation}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
-        >
-          <Timer className="h-4 w-4" />
-          <span className="flex-1 text-left">自动化</span>
-        </button>
-        <button
-          type="button"
-          onClick={onOpenTodoBoard}
-          className="flex w-full items-center gap-2 rounded-md border-[hsl(var(--sidebar-border))]/48 px-2.5 py-1.5 text-sm font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
-        >
-          <ListTodo className="h-4 w-4" />
-          <span className="flex-1 text-left">待办任务</span>
-          {attentionCount > 0 && (
-            <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-destructive px-1 text-destructive-foreground text-ui-caption font-medium">
-              {attentionCount > 99 ? '99+' : attentionCount}
-            </span>
-          )}
-        </button>
       </div>
 
       <div className="flex-1 overflow-auto px-3 pb-3 scroll-smooth">
@@ -170,17 +144,6 @@ export function Sidebar({
         </Tooltip>
         <div className="flex-1" />
         <CompanionSidebarButton />
-        <TooltipHint content={`打开设置${settingsHint ? ` · ${settingsHint}` : ''}`}>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            aria-keyshortcuts={settingsAria ?? undefined}
-            className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            <span>设置</span>
-          </button>
-        </TooltipHint>
       </div>
 
       <ChatSearchDialog

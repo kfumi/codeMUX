@@ -171,16 +171,27 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
     setBranchOpen(false);
   };
 
-  const pickerButtonClass = 'inline-flex h-8 max-w-44 items-center gap-1.5 rounded-lg border border-border/55 bg-[hsl(var(--surface-2))]/72 px-2.5 text-ui-caption text-foreground/82 transition-colors hover:bg-muted/52';
+  // 上下文条里的 chip：**无边框、无底色**，靠悬停才浮出底 —— 这是 Codex 的做法。
+  // 三个 chip（项目 / 工作树 / 分支）共用下面那一块面，不再各带一个边框。
+  const chipClass = 'inline-flex h-7 max-w-44 items-center gap-1.5 rounded-md px-2 text-ui-caption text-foreground transition-colors duration-fast hover:bg-[hsl(var(--surface-3))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45';
 
   const isLocalSelected = draftWorkspace.kind === 'local';
   const isWorktreeSelected = draftWorkspace.kind === 'worktree';
 
   return (
-    <div className={cn('mb-3 flex flex-wrap items-center gap-2', className)} data-testid="draft-workspace-toolbar">
+    <div
+      className={cn(
+        // 上下文条是输入区**上方那块独立的面**（Codex 的两段式输入区）：
+        // 底色、圆角与下面的输入框分开，靠 2px 的缝表达「这是两件事」。
+        'flex flex-wrap items-center gap-1 rounded-lg bg-[hsl(var(--surface-2))] px-1.5 py-1',
+        className,
+      )}
+      data-testid="draft-workspace-toolbar"
+      data-context-bar
+    >
       <Popover open={projectOpen} onOpenChange={setProjectOpen}>
         <PopoverTrigger asChild>
-          <button type="button" className={pickerButtonClass} data-testid="draft-project-picker">
+          <button type="button" className={chipClass} data-testid="draft-project-picker">
             {draftProject ? (
               <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             ) : (
@@ -251,7 +262,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
         <>
           <Popover open={worktreeOpen} onOpenChange={setWorktreeOpen}>
             <PopoverTrigger asChild>
-              <button type="button" className={pickerButtonClass} data-testid="draft-worktree-picker">
+              <button type="button" className={chipClass} data-testid="draft-worktree-picker">
                 {isWorktreeSelected ? (
                   <GitBranchPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 ) : (
@@ -310,7 +321,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
           {isWorktreeMode ? (
             <Popover open={branchOpen} onOpenChange={setBranchOpen}>
               <PopoverTrigger asChild>
-                <button type="button" className={pickerButtonClass} data-testid="draft-branch-picker">
+                <button type="button" className={chipClass} data-testid="draft-branch-picker">
                   <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate">{branchPickerLabel}</span>
                   <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/70" />

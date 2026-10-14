@@ -43,7 +43,7 @@ export function UsageHeatmapLegend({ thresholds }: UsageHeatmapLegendProps) {
       <span>少</span>
       {[0, 1, 2, 3, 4].map((level) => (
         <TooltipHint key={level} content={ranges[level]}>
-          <div className={cn('h-[13px] w-[13px] rounded-[2px]', LEVEL_BG[level])} />
+          <div className={cn('h-[13px] w-[13px] rounded-2xs', LEVEL_BG[level])} />
         </TooltipHint>
       ))}
       <span>多</span>
@@ -285,7 +285,7 @@ export function UsageHeatmap({ data, tokenMap, tokenThresholds }: UsageHeatmapPr
                       <TooltipTrigger asChild>
                         <div
                           className={cn(
-                            'rounded-[2px]',
+                            'rounded-2xs',
                             cell.isFuture
                               ? 'bg-transparent'
                               : LEVEL_BG[tokenLevel(cell.tokens, thresholds)],

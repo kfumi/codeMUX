@@ -20,7 +20,7 @@ function localDateString(daysAgo: number): string {
 
 /** 已渲染格子的颜色类（排除未来日期的透明格子）。 */
 function renderedCellClasses(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll<HTMLElement>('div.rounded-\\[2px\\]'))
+  return Array.from(container.querySelectorAll<HTMLElement>('div.rounded-2xs'))
     .map((cell) => cell.className)
     .filter((className) => !className.includes('bg-transparent'));
 }

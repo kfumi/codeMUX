@@ -242,7 +242,7 @@ function GitModelSelect() {
                 templateId={provider.builtin_template_id}
                 name={provider.name}
                 size={14}
-                className="h-5 w-5 rounded-[5px]"
+                className="h-5 w-5 rounded-2xs"
               />
               <span className="truncate">
                 {resolveModelDisplayName({
@@ -266,7 +266,7 @@ function GitModelSelect() {
                     templateId={item.builtin_template_id}
                     name={item.name}
                     size={14}
-                    className="h-5 w-5 rounded-[5px]"
+                    className="h-5 w-5 rounded-2xs"
                   />
                   <span>
                     {resolveModelDisplayName({

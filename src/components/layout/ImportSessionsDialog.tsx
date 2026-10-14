@@ -212,7 +212,7 @@ export function ImportSessionsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="z-[240]"
-        className="z-[240] max-w-3xl gap-0 overflow-hidden rounded-xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)]"
+        className="z-[240] max-w-3xl gap-0 overflow-hidden rounded-xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-elevation-prominent"
         closeClassName="right-5 top-5"
         onCloseAutoFocus={(event) => event.preventDefault()}
         onOpenAutoFocus={(event) => event.preventDefault()}

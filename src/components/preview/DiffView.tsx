@@ -70,8 +70,8 @@ function DiffStatsHeader({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2 text-xs text-muted-foreground/60">
-      <span className="text-[hsl(var(--success))]">+{additions}</span>
-      <span className="text-[hsl(var(--destructive))]">-{deletions}</span>
+      <span className="text-diff-added">+{additions}</span>
+      <span className="text-diff-removed">-{deletions}</span>
       {actions ? <div className="ml-auto flex items-center">{actions}</div> : null}
     </div>
   );

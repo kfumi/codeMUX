@@ -722,7 +722,7 @@ function ScrollToBottomButton({
         type="button"
         variant="outline"
         size="icon"
-        className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:bg-[hsl(var(--surface-3))] hover:text-foreground disabled:invisible"
+        className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-elevation-subtle transition-all hover:-translate-y-0.5 hover:bg-[hsl(var(--surface-3))] hover:text-foreground disabled:invisible"
         data-testid="scroll-to-bottom"
         aria-label="滚动到底部"
         disabled={isAtBottom}
@@ -1130,7 +1130,7 @@ function UserEditComposer({ message, sourceEventIndex }: { message: MessageState
         }}
         className="flex w-full max-w-[min(42rem,100%)] justify-end"
       >
-        <div className="w-full rounded-xl rounded-tr-md bg-muted p-3 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.42)]">
+        <div className="w-full rounded-xl rounded-tr-md bg-muted p-3 shadow-elevation">
           <LexicalComposerInput
             submitMode="enter"
             autoFocus
@@ -1751,7 +1751,7 @@ function MessageNav({
               />
             </button>
             {previewEventIndex === item.eventIndex ? (
-              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-80 max-w-[calc(100vw-6rem)] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards duration-normal ease-motion-out">
+              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-80 max-w-[calc(100vw-6rem)] -translate-y-1/2 overflow-hidden rounded-lg border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-elevation backdrop-blur-md animate-in fade-in fill-mode-forwards duration-normal ease-motion-out">
                 <div className="block w-full min-w-0 truncate whitespace-nowrap text-xs font-semibold leading-5 text-foreground">
                   {item.title}
                 </div>

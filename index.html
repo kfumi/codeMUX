@@ -13,7 +13,7 @@
       源码见 src/lib/themeBoot.ts 的 THEME_BOOT_SCRIPT:两处不一致时
       src/lib/themeBoot.test.ts 的「逐字包含」断言会失败。
     -->
-    <script>(function(){try{var r=document.documentElement;var s=null;try{s=window.localStorage.getItem('codemux:theme')}catch(e){}var q=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var d=s==='Dark'?true:s==='Light'?false:q;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';r.style.backgroundColor=d?'hsl(0 0% 9.4%)':'hsl(0 0% 100%)';r.style.setProperty('--boot-bg',d?'#111111':'#f2f2f2')}catch(e){}})();</script>
+    <script>(function(){try{var r=document.documentElement;var s=null;try{s=window.localStorage.getItem('codemux:theme')}catch(e){}var q=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var d=s==='Dark'?true:s==='Light'?false:q;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';r.style.backgroundColor=d?'#000000':'#fcfcfc';r.style.setProperty('--boot-bg',d?'#000000':'#fcfcfc');var h=null;try{h=window.localStorage.getItem('codemux:host')}catch(e){}if(h==='desktop'||h==='browser'||h==='mobile'){r.dataset.host=h}}catch(e){}})();</script>
     <style>
       /* 启动加载态(与 Electron 主窗口同窗):JS bundle 解析期间 #root 为空,
          先展示 logo 扫光加载画面,React 挂载后由选择器自动隐藏并淡出。

@@ -93,7 +93,7 @@ export function QueuedMessages({ sessionId, onEdit }: QueuedMessagesProps) {
     <>
       <div
         ref={panelRef}
-        className="mx-auto mb-0 w-[calc(100%-1.5rem)] overflow-hidden rounded-t-2xl rounded-b-none border border-b-0 border-border/70 bg-[hsl(var(--surface-1))]/90 shadow-[0_16px_40px_-32px_hsl(var(--surface-shadow-strong)/0.6)]"
+        className="mx-auto mb-0 w-[calc(100%-1.5rem)] overflow-hidden rounded-t-2xl rounded-b-none border border-b-0 border-border/70 bg-[hsl(var(--surface-1))]/90 shadow-elevation"
         data-testid="queued-messages"
       >
       <div className="flex items-center justify-between border-b border-border/45 px-3 py-2">
@@ -288,7 +288,7 @@ function QueuedMessageGhost({
 
   return (
     <div
-      className="pointer-events-none fixed z-100 flex items-center gap-2 rounded-xl border border-primary/55 bg-[hsl(var(--surface-1))]/96 px-2.5 py-2 text-xs text-foreground shadow-[0_18px_38px_-16px_hsl(var(--surface-shadow-strong)/0.78)] backdrop-blur-md"
+      className="pointer-events-none fixed z-100 flex items-center gap-2 rounded-xl border border-primary/55 bg-[hsl(var(--surface-1))]/96 px-2.5 py-2 text-xs text-foreground shadow-elevation backdrop-blur-md"
       style={style}
       aria-hidden="true"
     >

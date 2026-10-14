@@ -569,7 +569,7 @@ export function CodeMuxComposer({
         <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
             className={cn(
-              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border border-border/82 bg-[hsl(var(--surface-1))]/94 p-2.5 transition-all duration-normal',
+              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-xl border border-border bg-[hsl(var(--surface-1))] p-2.5 shadow-elevation-prominent transition-all duration-normal',
             )}
           >
             <input
@@ -687,7 +687,7 @@ export function CodeMuxComposer({
                   side="top"
                   sideOffset={8}
                   align="start"
-                  className="w-44 overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1 shadow-[0_18px_46px_-28px_hsl(var(--surface-shadow-strong)/0.48)] backdrop-blur-lg"
+                  className="w-44 overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1 shadow-elevation backdrop-blur-lg"
                 >
                   <button
                     type="button"
@@ -784,7 +784,7 @@ export function CodeMuxComposer({
                       className={cn(
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal active:scale-95',
                         hasInput && !disabled && !loading
-                          ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
+                          ? 'bg-primary text-primary-foreground shadow-elevation-subtle hover:bg-primary/94'
                           : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
                       )}
                       aria-label="发送"
@@ -1020,7 +1020,7 @@ export function ComposerAttachmentPreview() {
             thumbnailClassName="h-18 w-18"
           />
         ) : (
-          <div className="flex h-18 w-18 overflow-hidden rounded-lg border border-border/70 bg-[hsl(var(--surface-2))] shadow-[0_8px_22px_-18px_hsl(var(--surface-shadow-strong)/0.45)]">
+          <div className="flex h-18 w-18 overflow-hidden rounded-lg border border-border/70 bg-[hsl(var(--surface-2))] shadow-elevation-subtle">
             <AttachmentPrimitive.unstable_Thumb className="flex h-full w-full items-center justify-center text-xs text-muted-foreground" />
           </div>
         )}
@@ -1139,7 +1139,7 @@ function TriggerMenu({
   let index = 0;
 
   return (
-    <div className="absolute bottom-full left-0 right-0 z-50 mb-3 max-h-[min(28rem,calc(100vh-6rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--surface-shadow-strong)/0.5)] backdrop-blur-lg">
+    <div className="absolute bottom-full left-0 right-0 z-50 mb-3 max-h-[min(28rem,calc(100vh-6rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-elevation backdrop-blur-lg">
       <div className="max-h-[inherit] overflow-y-auto py-2">
         {totalItems === 0 ? (
           <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">

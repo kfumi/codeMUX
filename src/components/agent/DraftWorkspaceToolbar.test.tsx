@@ -127,4 +127,21 @@ describe('DraftWorkspaceToolbar', () => {
     });
     expect(screen.queryByTestId('draft-branch-picker')).toBeNull();
   });
+
+  it('renders as a context bar of borderless chips rather than three bordered buttons', () => {
+    render(<DraftWorkspaceToolbar />);
+
+    const bar = screen.getByTestId('draft-workspace-toolbar');
+    // 「独立的一块面」：底色 + 圆角，与下面那块输入框分开。
+    expect(bar.getAttribute('data-context-bar')).toBe('true');
+    expect(bar.className).toContain('bg-[hsl(var(--surface-2))]');
+    expect(bar.className).toContain('rounded-lg');
+
+    // chip 无边框、无常驻底色，只有悬停时才浮出来。
+    const chip = screen.getByTestId('draft-project-picker');
+    const base = chip.className.split('hover:')[0];
+    expect(chip.className).not.toContain('border');
+    expect(base).not.toContain('bg-');
+    expect(chip.className).toContain('hover:bg-[hsl(var(--surface-3))]');
+  });
 });

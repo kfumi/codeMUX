@@ -1146,7 +1146,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
   };
 
   return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-elevation-subtle animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
       <button
         className="group flex w-full items-center gap-3 bg-[hsl(var(--surface-2))]/72 px-3.5 py-2.5 text-left text-sm transition-[background-color,border-color] duration-normal hover:bg-[hsl(var(--surface-3))]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.35)] focus-visible:ring-inset"
         aria-expanded={expanded}
@@ -1161,10 +1161,10 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
         <span className="font-medium text-foreground/85">{diffs.length} 个文件已更改</span>
         <span className="ml-auto inline-flex items-center gap-1.5 tabular-nums">
           {totalAdditions > 0 && (
-            <span className="rounded-md bg-[hsl(var(--success)/0.11)] px-1.5 py-0.5 text-xs font-medium text-[hsl(var(--success))]">+{totalAdditions}</span>
+            <span className="rounded-md bg-diff-added/12 px-1.5 py-0.5 text-xs font-medium text-diff-added">+{totalAdditions}</span>
           )}
           {totalDeletions > 0 && (
-            <span className="rounded-md bg-[hsl(var(--destructive)/0.11)] px-1.5 py-0.5 text-xs font-medium text-[hsl(var(--destructive))]">−{totalDeletions}</span>
+            <span className="rounded-md bg-diff-removed/12 px-1.5 py-0.5 text-xs font-medium text-diff-removed">−{totalDeletions}</span>
           )}
           {totalAdditions === 0 && totalDeletions === 0 && (
             <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-muted-foreground/70">0</span>
@@ -1197,8 +1197,8 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
                 </span>
               </TooltipHint>
               <span className="inline-flex w-18 shrink-0 justify-end gap-1.5 tabular-nums">
-                <span className="rounded bg-[hsl(var(--success)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--success))]">+{stats.additions}</span>
-                <span className="rounded bg-[hsl(var(--destructive)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--destructive))]">−{stats.deletions}</span>
+                <span className="rounded bg-diff-added/10 px-1 py-0.5 text-right text-diff-added">+{stats.additions}</span>
+                <span className="rounded bg-diff-removed/10 px-1 py-0.5 text-right text-diff-removed">−{stats.deletions}</span>
               </span>
             </div>
           ))}

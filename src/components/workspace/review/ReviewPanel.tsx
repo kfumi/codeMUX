@@ -347,9 +347,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                     <span className={cn(
                       'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold',
                       file.status === 'added'
-                        ? 'bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]'
+                        ? 'bg-diff-added/15 text-diff-added'
                         : file.status === 'deleted'
-                          ? 'bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]'
+                          ? 'bg-diff-removed/15 text-diff-removed'
                           : 'bg-primary/10 text-primary',
                     )}>
                       {statusLabel(file.status)}
@@ -359,8 +359,8 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                       {name}
                       {directory && <span className="ml-2 text-sm text-muted-foreground/55">{directory}</span>}
                     </span>
-                    <span className="shrink-0 font-mono text-code text-[hsl(var(--success))]">+{file.additions}</span>
-                    <span className="shrink-0 font-mono text-code text-[hsl(var(--destructive))]">-{file.deletions}</span>
+                    <span className="shrink-0 font-mono text-code text-diff-added">+{file.additions}</span>
+                    <span className="shrink-0 font-mono text-code text-diff-removed">-{file.deletions}</span>
                     {expanded ? (
                       <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground/70" />
                     ) : (
@@ -396,7 +396,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                   </TooltipHint>
                 </div>
                 {expanded && (
-                  <div className="border-l-4 border-[hsl(var(--success))] bg-background">
+                  <div className="border-l-4 border-diff-added bg-background">
                     {detail?.loading ? (
                       <div className="px-4 py-5 text-sm text-muted-foreground/60">加载 Diff...</div>
                     ) : detail?.error ? (
@@ -419,8 +419,8 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       <div className="flex h-9 shrink-0 items-center justify-between border-t border-border/25 px-4 text-xs text-muted-foreground/60">
         <span>{files.length} 个文件</span>
         <div className="flex gap-2 font-mono text-code">
-          <span className="text-[hsl(var(--success))]">+{totals.additions}</span>
-          <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
+          <span className="text-diff-added">+{totals.additions}</span>
+          <span className="text-diff-removed">-{totals.deletions}</span>
         </div>
       </div>
       <ConfirmDialog

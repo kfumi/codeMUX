@@ -11,6 +11,7 @@
 import { create } from 'zustand';
 
 import { detectHostForm, readHostEnvironment, type HostForm } from '../lib/host/host-form';
+import { syncBootHostForm } from '../lib/themeBoot';
 
 export type DaemonConnectionStatus = 'idle' | 'connecting' | 'connected' | 'pairing' | 'error';
 
@@ -54,15 +55,23 @@ interface DaemonConnectionState {
   reset: () => void;
 }
 
+const INITIAL_HOST_FORM = detectHostForm(readHostEnvironment());
+// 首帧前把宿主形态写到 <html data-host>：圆角的超椭圆放大只对桌面壳生效
+// （见 globals.css 的 @supports 块），所以它必须在 JS 起来之前就位。
+syncBootHostForm(INITIAL_HOST_FORM);
+
 export const useDaemonConnectionStore = create<DaemonConnectionState>((set) => ({
   // 首屏渲染前就能给出正确形态(壳桥存在与否是同步可判的)。
-  hostForm: detectHostForm(readHostEnvironment()),
+  hostForm: INITIAL_HOST_FORM,
   status: 'idle',
   strategy: null,
   error: null,
   pairing: null,
 
-  begin: (hostForm) => set({ hostForm }),
+  begin: (hostForm) => {
+    syncBootHostForm(hostForm);
+    set({ hostForm });
+  },
   setConnecting: () => set({ status: 'connecting', error: null, pairing: null }),
   setConnected: (strategy) => set({ status: 'connected', strategy, error: null, pairing: null }),
   setPairingMode: (mode, message = null) => set({

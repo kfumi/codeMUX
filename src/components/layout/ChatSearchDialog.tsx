@@ -243,7 +243,7 @@ export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSe
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)] sm:rounded-2xl"
+        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-elevation-prominent sm:rounded-2xl"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>搜索聊天</DialogTitle>

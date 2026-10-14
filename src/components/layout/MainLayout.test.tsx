@@ -2,8 +2,9 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type ReactNode } from 'react';
 
 import { MainLayout } from './MainLayout';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
@@ -20,8 +21,15 @@ vi.mock('../../hooks/useWindowMaximized', () => ({
 vi.mock('./TitleBar', () => ({
   TitleBar: (props: Record<string, unknown>) => {
     titleBarProps.push(props);
-    return <div data-testid="title-bar" />;
+    return <div data-testid="title-bar">{props.leftContent as ReactNode}</div>;
   },
+}));
+
+vi.mock('./NavRail', () => ({
+  NavRail: ({ activeTarget }: { activeTarget: string }) => (
+    <nav data-testid="nav-rail" data-active={activeTarget} />
+  ),
+  NAV_RAIL_WIDTH: 56,
 }));
 
 vi.mock('../workspace/SidePanel', () => ({
@@ -30,13 +38,18 @@ vi.mock('../workspace/SidePanel', () => ({
   ),
 }));
 
+/** 标题栏里那条控制条（收起侧栏 + 后退/前进 + 附件）的容器。 */
+function controlsHost(): HTMLElement | null {
+  return document.querySelector('[data-testid="title-bar"]');
+}
+
 describe('MainLayout', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 820 });
-    // 默认代表「桌面壳 + 窗口化」:圆角缺口成立的那一种形态,其余形态各自覆盖。
+    // 默认代表「桌面壳 + 窗口化」:内容面浮起成立的那一种形态,其余形态各自覆盖。
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     // 侧栏收起/抽屉开合现在是布局 store 里的全局状态（可绑定命令要用），
     // 用例之间必须复位，否则前一个用例点过「收起侧栏」会漏给后面的用例。
@@ -49,7 +62,7 @@ describe('MainLayout', () => {
     cleanup();
   });
 
-  it('keeps the title bar inside the workspace instead of sizing it from sidebar props', () => {
+  it('keeps the title bar at the shell root instead of sizing it from sidebar props', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>} headerContent={<span>header</span>}>
         <div>content</div>
@@ -59,9 +72,12 @@ describe('MainLayout', () => {
     expect(titleBarProps).toHaveLength(1);
     expect(titleBarProps[0]).not.toHaveProperty('sidebarWidth');
     expect(titleBarProps[0]).not.toHaveProperty('sidebarInstant');
+    // 标题栏跨全宽：它必须是 app-shell 的直接子节点，而不是内容列里的一个。
+    const shell = document.querySelector('.app-shell');
+    expect(shell?.firstElementChild).toBe(document.querySelector('[data-testid="title-bar"]'));
   });
 
-  it('renders sidebar accessory next to the expanded sidebar toggle', () => {
+  it('puts the controls in the full-width title bar and drops the floating overlay', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>} sidebarAccessory={<button>更新</button>}>
         <div>content</div>
@@ -74,6 +90,8 @@ describe('MainLayout', () => {
     expect(toggle).toBeTruthy();
     expect(update?.textContent).toBe('更新');
     expect(toggle?.parentElement).toBe(update?.parentElement);
+    // 控件在标题栏里，不再有浮在侧栏左上角的那份副本。
+    expect(controlsHost()?.contains(toggle!)).toBe(true);
   });
 
   it('renders navigation controls beside the sidebar toggle', () => {
@@ -108,7 +126,7 @@ describe('MainLayout', () => {
     expect(onForward).not.toHaveBeenCalled();
   });
 
-  it('renders the sidebar as a translucent solid surface without backdrop blur', () => {
+  it('renders the sidebar on the window surface without backdrop blur', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -117,23 +135,39 @@ describe('MainLayout', () => {
 
     const sidebar = document.querySelector('aside');
 
-    // 这是不变量，不是「少写了一个类」：桌面形态下侧栏是 `relative shrink-0`（MainLayout.tsx:226），
-    // 背后只有 .app-shell 的 bg-background（MainLayout.tsx:196）与 body 的平整纯色
-    // （globals.css:107 --color-background: hsl(var(--background))，--background 是不透明常量
-    // 0 0% 100% / 0 0% 9.4%；globals.css:251-263 body background-image: none；
-    // globals.css:318-321 .app-shell isolation: isolate）。backdrop-filter 作用在纯色上是恒等变换，
-    // 侧栏上挂 blur 只有开销没有观感收益 —— 与 PI-Desktop 一致，本仓库把「**常驻布局表面**
-    // （尤其大面积）不得使用 backdrop-filter」当作不变量；一次性短命浮层、以及滚动容器上的
-    // sticky 头仍可保留（源码契约里列出了唯一豁免）。
-    expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+    // 这是不变量，不是「少写了一个类」：桌面形态下侧栏是 `relative shrink-0`（MainLayout.tsx），
+    // 背后只有 .app-shell 的 bg-background 与 body 的平整纯色。backdrop-filter 作用在纯色上是
+    // 恒等变换，侧栏上挂 blur 只有开销没有观感收益 —— 与 PI-Desktop 一致，本仓库把
+    // 「**常驻布局表面**（尤其大面积）不得使用 backdrop-filter」当作不变量；
+    // 一次性短命浮层、以及滚动容器上的 sticky 头仍可保留（源码契约里列出了唯一豁免）。
+    // 侧栏与导航栏共用**窗口表面**（Codex 的 rail/sidebar 同色），只有内容面浮起来。
+    expect(sidebar?.className).toContain('bg-[hsl(var(--sidebar-bg))]');
     expect(sidebar?.className).not.toContain('backdrop-blur');
-    expect(sidebar?.className).not.toContain('border-r');
+    // 圆角缺口已经由 clip-path 取代，分隔线改成侧栏自己的一条 border-r。
+    expect(sidebar?.className).toContain('border-r');
+    expect(sidebar?.className).toContain('border-[hsl(var(--layout-divider))]');
+  });
+
+  it('paints the content surface lighter than the window so it actually floats', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const shell = document.querySelector('.app-shell');
+    const section = document.querySelector('section');
+
+    // 这两层摆反的话（内容面比窗口暗）浮起观感会完全消失 —— 浅色下等于一个洞。
+    expect(shell?.className).toContain('bg-background');
+    expect(section?.className).toContain('bg-[hsl(var(--surface-1))]');
+    expect(section?.className).not.toContain('bg-[hsl(var(--background))]');
   });
 
   // 有意的源码级契约：className 断言只覆盖渲染出来的那个值，只有钉住源码文本才能在评审前拦住
   // 「往常驻布局表面加回 backdrop-blur-*」。口径与 PI-Desktop 一致 —— 常驻大面积表面一律用
   // 不透明/半透明底色表达层次，禁止 backdrop-filter。
-  // 唯一豁免：窄屏抽屉打开时的遮罩层那 1px 模糊（MainLayout.tsx:209，一次性短命浮层，不在本次范围）。
+  // 唯一豁免：窄屏抽屉打开时的遮罩层那 1px 模糊（一次性短命浮层）。
   it('keeps backdrop-blur off the resident surfaces in the MainLayout source', () => {
     // jsdom 下 import.meta.url 不是 file 地址（见 CodeMuxThread.navActiveSource.test.ts 的说明），
     // 测试根即仓库根，所以按 cwd 拼相对路径读源码，不引入新依赖。
@@ -152,7 +186,7 @@ describe('MainLayout', () => {
     expect(residentBlurLines).toEqual([]);
   });
 
-  it('keeps the workspace notch while the desktop shell is windowed', () => {
+  it('floats the content surface with clip-path while the desktop shell is windowed', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -160,16 +194,19 @@ describe('MainLayout', () => {
     );
 
     const section = document.querySelector('section');
-    const notchBackdrop = section?.parentElement;
+    const clipped = section?.querySelector('.content-surface');
 
-    expect(section?.className).toContain('rounded-tl-2xl');
-    expect(section?.className).toContain('rounded-bl-2xl');
-    expect(section?.className).toContain('overflow-hidden');
-    expect(section?.className).not.toContain('border-l');
-    expect(notchBackdrop?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+    expect(section?.dataset.contentSurface).toBe('true');
+    expect(section?.dataset.floats).toBe('true');
+    // 外层负责圆角形状 + elevation，内层负责 clip-path —— clip-path 会把阴影一起裁掉。
+    expect(section?.className).toContain('content-surface-root');
+    expect(section?.className).toContain('shadow-elevation-content');
+    expect(clipped).toBeTruthy();
+    // 旧的「圆角缺口 + 手写 SVG 弧线」整套已经删除，源码里不该再有那段 SVG。
+    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
   });
 
-  it('drops the notch and the corner arcs in browser-host forms', () => {
+  it('drops the content-surface radius in browser-host forms', () => {
     useDaemonConnectionStore.setState({ hostForm: 'browser' });
 
     render(
@@ -178,18 +215,10 @@ describe('MainLayout', () => {
       </MainLayout>,
     );
 
-    const section = document.querySelector('section');
-    const divider = section?.querySelector('div[aria-hidden="true"]');
-
-    expect(section?.className).not.toContain('rounded-tl-2xl');
-    expect(section?.className).not.toContain('rounded-bl-2xl');
-    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
-    // 侧栏仍然停靠,所以保留直线到底的分割线。
-    expect(divider?.className).toContain('w-px');
-    expect(divider?.className).toContain('inset-y-0');
+    expect(document.querySelector('section')?.dataset.floats).toBe('false');
   });
 
-  it('drops the notch on narrow viewports where the sidebar is a drawer', () => {
+  it('drops the content-surface radius on narrow viewports where the sidebar is a drawer', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
 
     render(
@@ -198,15 +227,10 @@ describe('MainLayout', () => {
       </MainLayout>,
     );
 
-    const section = document.querySelector('section');
-
-    expect(section?.className).not.toContain('rounded-tl-2xl');
-    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
-    // 抽屉收起时面板左缘就是视口边缘,没有需要分隔的侧栏。
-    expect(section?.querySelector('div[aria-hidden="true"]')).toBeNull();
+    expect(document.querySelector('section')?.dataset.floats).toBe('false');
   });
 
-  it('drops the notch once the shell window is maximized', () => {
+  it('drops the content-surface radius once the shell window is maximized', () => {
     windowState.maximized = true;
 
     render(
@@ -215,55 +239,58 @@ describe('MainLayout', () => {
       </MainLayout>,
     );
 
-    const section = document.querySelector('section');
-    const divider = section?.querySelector('div[aria-hidden="true"]');
-
-    expect(section?.className).not.toContain('rounded-tl-2xl');
-    expect(section?.className).not.toContain('rounded-bl-2xl');
-    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
-    expect(divider?.className).toContain('inset-y-0');
+    expect(document.querySelector('section')?.dataset.floats).toBe('false');
   });
 
-  it('drops the notch and its divider once the sidebar is collapsed', () => {
+  it('drops the content-surface radius once the sidebar is collapsed', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
       </MainLayout>,
     );
+
+    expect(document.querySelector('section')?.dataset.floats).toBe('true');
 
     fireEvent.click(document.querySelector('button[aria-label="收起侧栏"]')!);
 
-    const section = document.querySelector('section');
-
-    expect(section?.className).not.toContain('rounded-tl-2xl');
-    expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
-    expect(section?.querySelector('div[aria-hidden="true"]')).toBeNull();
+    expect(document.querySelector('section')?.dataset.floats).toBe('false');
   });
 
-  it('draws the workspace divider as a crisp straight run plus corner arcs that follow the radius', () => {
+  it('pins the narrow-screen drawer below the title bar so the controls stay clickable', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
       </MainLayout>,
     );
 
-    const section = document.querySelector('section');
-    const divider = section?.querySelector('div[aria-hidden="true"]');
+    const aside = document.querySelector('aside');
+    expect(aside?.className).toContain('top-12');
+    expect(aside?.className).toContain('bottom-0');
+    // 控制条只有标题栏里那一份 —— 抽屉不再复制（原先是为了盖住标题栏才复制的）。
+    expect(document.querySelectorAll('aside button[aria-label$="侧栏"]')).toHaveLength(0);
+    expect(document.querySelectorAll('button[aria-label$="侧栏"]')).toHaveLength(1);
+  });
 
-    expect(divider?.className).toContain('w-px');
-    expect(divider?.className).toContain('bg-[hsl(var(--layout-divider))]');
-    expect(divider?.className).toContain('top-[var(--radius-2xl)]');
-    expect(divider?.className).toContain('bottom-[var(--radius-2xl)]');
-    expect(divider?.className).toContain('pointer-events-none');
+  it('renders the nav rail only when the app supplies a target and a handler', () => {
+    const { unmount } = render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+    expect(document.querySelector('[data-testid="nav-rail"]')).toBeNull();
+    unmount();
 
-    const cornerArcs = Array.from(section?.querySelectorAll('svg[aria-hidden="true"] path') ?? []);
-    expect(cornerArcs).toHaveLength(2);
-    for (const arc of cornerArcs) {
-      expect(arc.getAttribute('d')).toMatch(/^M0\.5 (0|12) A11\.5 11\.5 0 0 [01] 12 (11\.5|0\.5)$/);
-      expect(arc.getAttribute('stroke')).toBe('hsl(var(--layout-divider))');
-      expect(arc.getAttribute('stroke-width')).toBe('1.5');
-      expect(arc.getAttribute('vector-effect')).toBe('non-scaling-stroke');
-    }
+    render(
+      <MainLayout sidebar={<div>sidebar</div>} navRailTarget="todo" onNavRailSelect={vi.fn()}>
+        <div>content</div>
+      </MainLayout>,
+    );
+    const rail = document.querySelector('[data-testid="nav-rail"]');
+    expect(rail?.getAttribute('data-active')).toBe('todo');
+    // 导航栏在侧栏之前 —— 它是最左边的顶层导航。
+    expect(rail?.nextElementSibling?.tagName).toBe('ASIDE');
   });
 
   it('keeps the sidebar width fixed when the window is maximized or restored', () => {
@@ -292,6 +319,6 @@ describe('MainLayout', () => {
       </MainLayout>,
     );
 
-    expect(screen.getByTestId('side-panel').getAttribute('data-visible')).toBe('false');
+    expect(document.querySelector('[data-testid="side-panel"]')?.getAttribute('data-visible')).toBe('false');
   });
 });

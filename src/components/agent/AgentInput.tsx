@@ -213,7 +213,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     className={cn(
                       'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal',
                       hasContent
-                        ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
+                        ? 'bg-primary text-primary-foreground shadow-elevation-subtle hover:bg-primary/94'
                         : 'cursor-not-allowed bg-muted/45 text-muted-foreground/28',
                     )}
                   >

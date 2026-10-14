@@ -115,7 +115,7 @@ export function FileEditorPanel({ tab }: { tab: SidePanelTab }) {
                 ? 'text-muted-foreground/55'
                 : isDirty
                   ? 'text-warning'
-                  : 'text-success/75',
+                  : 'text-success',
           )}
           aria-live="polite"
         >

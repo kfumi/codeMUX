@@ -77,6 +77,7 @@
 | [2026-10-10-esc-as-stop-key-assessment.md](research/2026-10-10-esc-as-stop-key-assessment.md) | Esc 作为「停止」键的可行性评估（Ctrl+. 现状、Esc 多义冲突与固定系统键方案） |
 | [2026-10-11-codex-imported-session-rebuild-loop.md](research/2026-10-11-codex-imported-session-rebuild-loop.md) | 导入的 Codex 会话「原生会话已重建」死循环与「未找到任务路径」根因排查（实测证据链、代码链路、处置与遗留） |
 | [2026-10-11-github-pages-landing-page.md](research/2026-10-11-github-pages-landing-page.md) | GitHub Pages 用于 CodeMUX 项目落地页的可行性调研 |
+| [2026-10-14-codex-desktop-ui-design-system.md](research/2026-10-14-codex-desktop-ui-design-system.md) | Codex/ChatGPT 桌面端 UI 设计体系逆向：主题引擎算法、色彩/圆角/间距/阴影/动效刻度与 CodeMUX 对齐建议 |
 
 ### specs
 
@@ -131,6 +132,7 @@
 | [2026-09-30-turn-artifact-summary-v2.md](specs/2026-09-30-turn-artifact-summary-v2.md) | Turn 级产物汇总 v2:跨 Agent Kind 的解析统一(取代 2026-09-01) |
 | [2026-10-07-computer-use.md](specs/2026-10-07-computer-use.md) | 电脑控制（Computer Use） |
 | [2026-10-10-computer-use-activity-authority-in-daemon.md](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) | 电脑控制活动权威与急停上移到 Daemon（ADR 0018 的实现基线） |
+| [2026-10-14-codex-ui-alignment.md](specs/2026-10-14-codex-ui-alignment.md) | 对齐 Codex/ChatGPT 桌面端设计体系：颜色算法派生、圆角刻度、描边式 elevation、导航栏与圆角内容面、composer 两层化 |
 
 ### plans
 
@@ -181,6 +183,7 @@
 | [codemux-managed-sdk-runtime](tickets/codemux-managed-sdk-runtime/) | 7 | [2026-08-05](specs/2026-08-05-codemux-managed-sdk-runtime.md) |
 | [codex-app-server-migration](tickets/codex-app-server-migration/) | 13 | [2026-08-22](specs/2026-08-22-codex-app-server-migration.md) |
 | [codex-collab-subagent-parity](tickets/codex-collab-subagent-parity/) | 3 | [2026-09-20](specs/2026-09-20-codex-collab-subagent-parity.md) |
+| [codex-ui-alignment](tickets/codex-ui-alignment/) | 8 | [2026-10-14](specs/2026-10-14-codex-ui-alignment.md) |
 | [companion-pairing-evolution](tickets/companion-pairing-evolution/) | 9 | [2026-08-16](specs/2026-08-16-companion-pairing-evolution.md) + [map](plans/2026-08-16-companion-pairing-evolution-map.md) |
 | [computer-use](tickets/computer-use/) | 19 | [2026-10-07](specs/2026-10-07-computer-use.md) |
 | [computer-use-activity-authority-in-daemon](tickets/computer-use-activity-authority-in-daemon/) | 5 | [2026-10-10](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) + [ADR 0018](adr/0018-computer-use-activity-authority-in-daemon.md) |

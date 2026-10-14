@@ -10,7 +10,7 @@ vi.mock('../../lib/shortcuts/shortcutPlatform', () => ({
   getShortcutPlatform: () => 'win32',
 }));
 
-// 这个文件只关心三个入口上的键位提示，子面板各自有测试。
+// 这个文件只关心上下文侧栏里剩下的两个入口上的键位提示，子面板各自有测试。
 vi.mock('../session/SessionList', () => ({ SessionList: () => <div /> }));
 vi.mock('../workspace/ProjectExplorer', () => ({ ProjectExplorer: () => <div /> }));
 vi.mock('../companion/CompanionSidebarButton', () => ({ CompanionSidebarButton: () => <div /> }));
@@ -29,8 +29,6 @@ function renderSidebar() {
         onNewSession={noop}
         onNewSessionInProject={noop}
         onSelectSession={noop}
-        onOpenSettings={noop}
-        onOpenAutomation={noop}
       />
     </TooltipProvider>,
   );
@@ -61,11 +59,20 @@ describe('Sidebar 的键位提示', () => {
     expect(hint.className).toContain('group-focus-visible:opacity-100');
   });
 
-  it('三个入口都写出 aria-keyshortcuts', () => {
+  it('剩余的两个入口都写出 aria-keyshortcuts', () => {
     renderSidebar();
 
     expect(rowButton('新对话').getAttribute('aria-keyshortcuts')).toBe('Control+N');
     expect(rowButton('搜索').getAttribute('aria-keyshortcuts')).toBe('Control+K');
-    expect(rowButton('设置').getAttribute('aria-keyshortcuts')).toBe('Control+,');
+  });
+
+  it('顶层导航已提到导航栏，侧栏不再有自动化 / 工单 / 设置入口', () => {
+    renderSidebar();
+
+    // 这三项搬到了 NavRail（见 NavRail.test.tsx）。这里钉住「不再重复出现」，
+    // 免得同一个入口同时挂在两个地方，用户看到两个去处。
+    for (const label of ['自动化', '待办任务', '工单', '设置']) {
+      expect(screen.queryByText(label), label).toBeNull();
+    }
   });
 });

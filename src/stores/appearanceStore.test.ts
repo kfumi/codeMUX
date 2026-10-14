@@ -3,8 +3,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { THEME_BOOT_STORAGE_KEY } from '../lib/themeBoot';
-import { ACCENTS } from '../lib/appearance';
+import { ACCENTS, DEFAULT_PREFS, loadPrefs, seedsForPrefs } from '../lib/appearance';
+import { deriveThemeTokens } from '../lib/colorDerivation';
 import type { AppConfig } from '../types/provider';
+
+/**
+ * 默认强调色下深浅两套种子给出同一个 `--primary`（Codex 的 `#3a83f7` 明暗同值），
+ * 所以「主题来源对不对」要看一个**深浅必然不同**的变量。
+ */
+const surfaceFor = (isDark: boolean) =>
+  deriveThemeTokens(seedsForPrefs(DEFAULT_PREFS, isDark), isDark)['--background'];
 
 // 只桩掉 settingsStore:appearanceStore 只需要它的 config 与订阅,拉真 store 会
 // 把整条 daemon 客户端链拖进测试。
@@ -46,27 +54,52 @@ describe('appearanceStore initial theme source', () => {
 
     await import('./appearanceStore');
 
-    const primary = document.documentElement.style.getPropertyValue('--primary');
-    expect(primary).toBe(ACCENTS.graphite.dark);
-    expect(primary).not.toBe(ACCENTS.graphite.light);
+    const background = document.documentElement.style.getPropertyValue('--background');
+    expect(background).toBe(surfaceFor(true));
+    expect(background).not.toBe(surfaceFor(false));
   });
 
   it('keeps using the system preference when nothing was cached', async () => {
     await import('./appearanceStore');
 
-    expect(document.documentElement.style.getPropertyValue('--primary')).toBe(ACCENTS.graphite.light);
+    expect(document.documentElement.style.getPropertyValue('--background')).toBe(surfaceFor(false));
   });
 
   it('defers to the daemon config once it arrives, even if the cache disagrees', async () => {
     window.localStorage.setItem(THEME_BOOT_STORAGE_KEY, 'Light');
     await import('./appearanceStore');
-    expect(document.documentElement.style.getPropertyValue('--primary')).toBe(ACCENTS.graphite.light);
+    expect(document.documentElement.style.getPropertyValue('--background')).toBe(surfaceFor(false));
 
     // 配置到手后重新初始化（模拟一次真实的冷启动：缓存旧了，配置才是真值）。
     vi.resetModules();
     configRef.current = { theme: 'Dark' } as AppConfig;
     await import('./appearanceStore');
 
-    expect(document.documentElement.style.getPropertyValue('--primary')).toBe(ACCENTS.graphite.dark);
+    expect(document.documentElement.style.getPropertyValue('--background')).toBe(surfaceFor(true));
+  });
+
+  it('persists the contrast knob and re-derives the surface family', async () => {
+    const { useAppearanceStore } = await import('./appearanceStore');
+    const defaultBorder = document.documentElement.style.getPropertyValue('--border');
+
+    useAppearanceStore.getState().setContrast(88);
+
+    expect(loadPrefs().contrast).toBe(88);
+    expect(useAppearanceStore.getState().prefs.contrast).toBe(88);
+    expect(document.documentElement.style.getPropertyValue('--border')).not.toBe(defaultBorder);
+
+    useAppearanceStore.getState().setContrast(5);
+    expect(document.documentElement.style.getPropertyValue('--border')).not.toBe(defaultBorder);
+
+    useAppearanceStore.getState().reset();
+    expect(loadPrefs().contrast).toBe(DEFAULT_PREFS.contrast);
+    expect(document.documentElement.style.getPropertyValue('--border')).toBe(defaultBorder);
+  });
+
+  it('exposes an accent preset per theme as plain hex', () => {
+    for (const preset of Object.values(ACCENTS)) {
+      expect(preset.light).toMatch(/^#[0-9a-f]{6}$/);
+      expect(preset.dark).toMatch(/^#[0-9a-f]{6}$/);
+    }
   });
 });

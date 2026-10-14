@@ -74,20 +74,33 @@ For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built
 
 ### UI Theming & Typography
 
-The app's appearance is user-configurable at runtime (theme, accent color, UI font family, UI/code font sizes, corner radius, content width) via `src/stores/appearanceStore.ts`, which writes CSS variables defined in `src/styles/globals.css`. Components must consume these tokens so new UI follows the user's appearance settings instead of fighting them. Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
+The app's appearance is user-configurable at runtime (theme, accent color, contrast knob, diff colors, UI font family, UI/code font sizes, corner-radius tier, content width) via `src/stores/appearanceStore.ts`, which writes CSS variables defined in `src/styles/globals.css`. Components must consume these tokens so new UI follows the user's appearance settings instead of fighting them. Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
 
-**Colors — always semantic tokens, never hard-coded palette values:**
+**Colors — derived from four seeds, never hand-picked:**
 
-- Use the mapped Tailwind utilities: `bg-background`, `text-foreground`, `text-muted-foreground`, `bg-card`, `bg-primary`, `text-primary-foreground`, `bg-secondary`, `text-destructive`, `text-success`, `text-warning`, `border-border`, etc.
-- Do NOT use hard-coded palette colors (`text-slate-500`, `bg-blue-600`, raw `#hex` or `hsl(...)` values) in component styles. They break dark mode and the user's accent-color setting.
-- Exception: content that is inherently colored (syntax highlighting, diff added/removed lines, accent swatches) may use fixed colors if they are intentional and work in both light and dark modes.
-- For layered surfaces use the existing classes (`surface-panel`, `surface-panel-muted`, `surface-interactive`) or `hsl(var(--surface-1|2|3))` — do not invent new grays.
+The palette is **derived**, not listed. `src/lib/colorDerivation.ts` holds the only color formulas; it transcribes Codex's `jba` (light) / `Nba` (dark) derivation. You configure four seeds and everything else falls out:
 
-**Text contrast — two tiers, no ad-hoc alpha:**
+| seed | light default | dark default |
+|---|---|---|
+| `--surface` (base surface) | `#fcfcfc` | `#000000` |
+| `--ink` (primary text) | `#0d0d0d` | `#ededed` |
+| accent (preset) | `#3a83f7` | `#3a83f7` |
+| `contrast` (0–100 knob) | 45 | 60 |
 
-- 文字颜色只有两档:主文字用 `text-foreground`(标题、标签、值、表格/日志正文),次级文字用 `text-muted-foreground`(说明、提示、时间戳、元信息、空状态)。层次靠字号(`text-ui-*`)与字重表达,不靠透明度。
-- 不要在文字上写 `text-foreground/45`、`text-muted-foreground/70` 这类透明度后缀。实测(浅色主题白底):`text-foreground/45` = 2.87:1、`/38` = 2.36:1、`/24` = 1.67:1、`text-muted-foreground/70` = 2.96:1,全部低于 WCAG AA 正文所需的 4.5:1;改成两档后为 17.2:1 / 5.5:1(暗色主题 17.8:1 / 8.0:1)。
-- 透明度只用于**表面层次**:背景(`bg-foreground/4`)、描边、分隔线、滚动条。语义色(`text-destructive`、`text-success`、`text-warning`、`text-primary`)按语义直接使用,不要叠加透明度。
+- Use the mapped Tailwind utilities: `bg-background`, `text-foreground`, `text-muted-foreground`, `text-foreground-tertiary`, `bg-card`, `bg-primary`, `text-primary-foreground`, `bg-accent-bg`, `bg-secondary`, `text-destructive`, `text-success`, `text-warning`, `border-border`, `text-diff-added`, `text-diff-removed`, etc.
+- **Never write a hex / `hsl(...)` / `rgb(...)` literal in a component.** Pick the semantic token whose *meaning* matches. Hard-coded values break dark mode, the accent setting, and the contrast knob.
+- Borders are translucent ink, not gray — that is why they look "通透". Never replace `border-border` with a gray token.
+- Hover always mixes toward `ink` (`hover:bg-[hsl(var(--surface-3))]` or `surface-interactive`), never a different hue.
+- Layered surfaces use the existing classes (`surface-panel`, `surface-panel-muted`, `surface-interactive`) or `hsl(var(--surface-1|2|3))` — do not invent new grays.
+- **Intentionally fixed colors** (they are semantic seeds, not derived): diff added/removed lines (user-configurable via `--diff-added` / `--diff-removed`), `--success` / `--warning` / `--destructive` status colors, syntax highlighting, accent swatches in the settings panel.
+- **Consumption contract:** tokens are bare HSL triplets consumed as `hsl(var(--token) / .6)`. The derivation pre-composites Codex's alpha onto `--surface` so this shape is preserved — hundreds of call sites rely on it. `--scrim` is the single exception: it is a self-contained `rgba()`, use it bare.
+- Changing a color means changing a **formula or a seed**, then updating the frozen expectation table in `colorDerivation.test.ts`. Do not hand-edit the `:root` / `.dark` fallbacks in `globals.css` — they are static mirrors of the default derivation and are covered by that test.
+
+**Text contrast — three tiers, no ad-hoc alpha:**
+
+- 文字颜色只有三档:主文字 `text-foreground`(标题、标签、值、表格/日志正文),次级 `text-muted-foreground`(说明、提示、时间戳、元信息、空状态),第三级 `text-foreground-tertiary`(占位符以外的极弱元信息)。层次靠字号(`text-ui-*`)与字重表达,不靠透明度。
+- 不要在文字上写 `text-foreground/45`、`text-muted-foreground/70` 这类透明度后缀。实测(浅色主题白底):`text-foreground/45` = 2.87:1、`/38` = 2.36:1、`/24` = 1.67:1、`text-muted-foreground/70` = 2.96:1,全部低于 WCAG AA 正文所需的 4.5:1。改成档位后为 17.2:1 / 5.5:1 / 8.4:1(暗色主题 17.8:1 / 8.0:1 / 7.1:1)。
+- 透明度只用于**表面层次**:背景(`bg-foreground/4`)、描边、分隔线、滚动条。语义色按语义直接使用,不要叠加透明度。
 - 例外(可以更浅):禁用态(`disabled:opacity-*`)、输入框占位符、纯装饰性图标(空状态大图标除外,它承载信息)。
 
 **Font family:**
@@ -100,20 +113,27 @@ The app's appearance is user-configurable at runtime (theme, accent color, UI fo
 - Avoid hard-coded text sizes such as `text-[11px]` or inline `font-size` in UI components. The Tailwind `text-xs` through `text-3xl` utilities are also mapped to the global UI scale and may be used where their semantic size fits.
 - For code, paths, and numeric diff statistics that intentionally use the code style, use `font-mono text-code` so they follow the global code-font-size setting.
 
-**Corner radius:**
+**Corner radius — an eight-step ladder, two scale factors:**
 
-- Use Tailwind `rounded-sm|md|lg|xl|2xl`, which derive from the user's radius preference via `--radius`. Do not hard-code `border-radius` or `rounded-[Npx]` values.
+- Use the ladder utilities: `rounded-2xs|xs|sm|md|lg|xl|2xl|3xl` (2 / 4 / 6 / 8 / 12 / 16 / 24 / 32px) plus `rounded-full`. Never `rounded-[Npx]`, never a literal `border-radius:` — `radiusTokens.test.ts` enforces both.
+- Two factors scale the whole ladder: `--radius-scale` (the user's sharp 0.75 / soft 1 / round 1.35 preference) and `--radius-superellipse-scale` (1 by default, rewritten to 1.25 by the unlayered `@supports (corner-shape: superellipse(1.5))` block). So switching tiers changes *how round*, never *which step means what*.
+- The content surface clips its corners with `.content-surface` + `--content-radius-start` / `--content-radius-end` / `--content-radius-max` (`clip-path: inset(0 round …)`), driven by `data-floats`. Do not hand-place rounded corners on that section and do not reintroduce SVG arc workarounds.
+
+**Elevation — stroke-first, three tiers:**
+
+- Use `shadow-elevation-subtle`, `shadow-elevation`, `shadow-elevation-prominent` (and `shadow-elevation-content`). Each is `0.5px stroke + near small blur + huge-spread very-low alpha`; the three alpha factors live in `:root` / `.dark` so dark mode re-weights them without a second code path.
+- Do not write arbitrary `shadow-[…]` values on surfaces that float above content (menus, popovers, dialogs, cards). Directional shadows on edge-docked panels (drawer, side panel) and inner top highlights (`inset 0 1px 0 …`) are the only sanctioned exceptions.
 
 **Motion — semantic tokens, never literal durations or hand-written curves:**
 
-- Use the motion utilities for every transition/animation: durations `duration-fast` (150ms — hover, color/background changes), `duration-normal` (200ms — expand/collapse, slide-in, toast/dialog), `duration-slow` (300ms — panel switches, large-area reveals); easings `ease-motion-out` (enter/hover, default), `ease-motion-in` (exit), `ease-motion-in-out` (symmetric size/width transitions), `ease-motion-standard` (expand/collapse, Radix/assistant-ui).
+- Use the motion utilities for every transition/animation: durations `duration-fast` (150ms — hover, color/background changes), `duration-normal` (200ms — expand/collapse, slide-in, toast/dialog), `duration-slow` (300ms — panel switches, large-area reveals); easings `ease-motion-out` (`.19,1,.22,1` — enter/hover, default), `ease-motion-in` (`.8,0,.4,1` — exit), `ease-motion-in-out` (`.65,0,.4,1` — symmetric size/width transitions), `ease-motion-standard` (`.65,0,.35,1` — expand/collapse, Radix/assistant-ui).
 - `animate-in`/`animate-out` (tw-animate-css) read their duration and easing from the same `duration-*` / `ease-motion-*` utilities (`--tw-duration` / `--tw-ease`), so entrance animations use them too — never `animation-duration-[...]` or `[animation-timing-function:...]`.
 - Do not write literal numeric `duration-*` values, arbitrary square-bracket durations, hand-written `cubic-bezier(...)` easing utilities, or keyword easings. All motion stays ≤300ms and there are no decorative/continuous animations.
 - The raw values live in `:root` as `--motion-duration-*` / `--motion-ease-*`; the utilities are mapped in `@theme`. In plain CSS use `var(--motion-duration-fast)` etc. — do not re-declare values. `prefers-reduced-motion` handling is centralized in the `globals.css` media query; do not add per-component `motion-reduce:` guards for status animations.
 
 **When a token is missing:**
 
-- If a new semantic token is genuinely needed, add it to `@theme` plus `:root` and `.dark` in `src/styles/globals.css` and consume the generated utility — do not inline per-component values.
+- If a new semantic token is genuinely needed, decide first: does it need to react to the accent color (→ add a **seed** or extend a derivation formula in `colorDerivation.ts`) or is it a fixed semantic color (→ add it to `SemanticSeeds`)? Either way it ends up as a CSS variable, gets a `@theme` mapping, and the frozen expectation table in `colorDerivation.test.ts` is updated. Do not inline per-component values.
 
 ## Testing Guidelines
 
