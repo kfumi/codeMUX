@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
@@ -11,6 +11,7 @@ import {
   CONTRAST_MIN,
   type ContentWidthKey,
   RADIUS_PREVIEW,
+  resolveIsDark,
   type RadiusKey,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
@@ -46,45 +47,37 @@ const THEME_LABELS: Record<Theme, string> = { Light: '浅色', Dark: '深色', S
 
 /**
  * 缩略图配色 —— 画的是「一扇应用窗口的样子」，不是真实表面，所以用字面量而不是
- * 主题 token：一扇浅色窗口在深色主题下也必须是浅色的。强调色的部分反而走
+ * 主题 token：一扇浅色窗口在深色主题下也必须是浅色的。强调色的部分走
  * `bg-primary`，跟着用户选的强调色走。
  */
 const SHOT = {
-  light: {
-    window: '#ffffff',
-    fill: 'rgb(13 13 13 / 0.05)',
-    line: 'rgb(13 13 13 / 0.14)',
-    dot: 'rgb(13 13 13 / 0.12)',
-  },
-  dark: {
-    window: '#191919',
-    fill: 'rgb(255 255 255 / 0.07)',
-    line: 'rgb(255 255 255 / 0.18)',
-    dot: 'rgb(255 255 255 / 0.16)',
-  },
+  light: { window: '#ffffff', fill: 'rgb(13 13 13 / 0.05)', line: 'rgb(13 13 13 / 0.13)' },
+  dark: { window: '#191919', fill: 'rgb(255 255 255 / 0.07)', line: 'rgb(255 255 255 / 0.18)' },
 } as const;
 
 /**
- * 一扇应用窗口的示意画：左上角一个图标圆点、下面几行内容、底部一条输入框
- * 带着发送圆点。
+ * 一扇应用窗口的示意画，画在 72×48 的框里：左上角一个图标圆点、中间三行内容、
+ * 底部一条输入框带着发送圆点。
  *
- * 之前画的是「浏览器窗口」—— 三个红黄绿圆点 + 左侧栏 + 右侧文字行。放到 72px
- * 宽的方块里这套语言完全不成立：圆点只剩 4px、侧栏挤成一条，缩出来是一团噪点，
- * 根本看不出这是自己的应用。对照参考图改成上面这套。
+ * 尺寸是按这个框算死的一组数：图标 6..14、行 18..33、输入条 34..42。上一版用
+ * `top-6` + `gap-1` 排四行，行区一路撑到 48px，和 `bottom-1.5` 的输入条直接叠在
+ * 一起 —— 缩出来是一团糊。
+ *
+ * 之前画的还是「浏览器窗口」（红黄绿圆点 + 侧栏），放到 72px 里圆点只剩 4px、
+ * 侧栏挤成一条，根本看不出是自己的应用。
  */
 function WindowShot({ variant }: { variant: 'light' | 'dark' }) {
   const c = SHOT[variant];
   return (
-    <div className="relative h-full w-full overflow-hidden" style={{ backgroundColor: c.window }}>
-      <span className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.dot }} />
-      <span className="absolute left-1.5 right-1.5 top-6 flex flex-col gap-1">
+    <div className="relative h-full w-full" style={{ backgroundColor: c.window }}>
+      <span className="absolute left-1.5 top-1.5 h-2 w-2 rounded-full bg-foreground/15" />
+      <span className="absolute left-1.5 right-1.5 top-[18px] flex flex-col gap-[3px]">
         <span className="h-[3px] w-full rounded-full bg-primary" />
         <span className="h-[3px] w-3/4 rounded-full" style={{ backgroundColor: c.line }} />
-        <span className="h-[3px] w-5/6 rounded-full bg-primary" />
-        <span className="h-[3px] w-1/2 rounded-full" style={{ backgroundColor: c.line }} />
+        <span className="h-[3px] w-1/2 rounded-full bg-primary" />
       </span>
       <span
-        className="absolute inset-x-1.5 bottom-1.5 flex h-3 items-center justify-end rounded-md px-1"
+        className="absolute inset-x-1.5 bottom-1.5 flex h-2 items-center justify-end rounded-sm px-1"
         style={{ backgroundColor: c.fill }}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-primary" />
@@ -93,8 +86,18 @@ function WindowShot({ variant }: { variant: 'light' | 'dark' }) {
   );
 }
 
-/** 模式选择：Codex 是一排应用窗口缩略图，选中项套主色描边。 */
-function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; onClick: () => void }) {
+/** 模式选择：一排应用窗口缩略图，选中项套主色描边。 */
+function ModeThumb({
+  theme,
+  variant,
+  active,
+  onClick,
+}: {
+  theme: Theme;
+  variant: 'light' | 'dark';
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
     <TooltipHint content={THEME_LABELS[theme]}>
       <button
@@ -103,39 +106,56 @@ function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; 
         aria-pressed={active}
         aria-label={THEME_LABELS[theme]}
         className={cn(
-          'relative block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg transition-shadow duration-normal',
+          'block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg transition-shadow duration-normal',
           active ? 'ring-2 ring-primary' : 'ring-1 ring-border hover:ring-foreground/25',
         )}
       >
-        {theme === 'System' ? (
-          // 跟随系统 = 同一扇窗口左右两半各是一种主题。
-          <div className="flex h-full w-full">
-            <div className="w-1/2 overflow-hidden">
-              <WindowShot variant="light" />
-            </div>
-            <div className="w-1/2 overflow-hidden">
-              <WindowShot variant="dark" />
-            </div>
-          </div>
-        ) : (
-          <WindowShot variant={theme === 'Light' ? 'light' : 'dark'} />
-        )}
+        <WindowShot variant={variant} />
       </button>
     </TooltipHint>
   );
 }
 
+/** 系统偏好 —— 「跟随系统」那张缩略图要按当前实际解析成什么主题来画。 */
+function useSystemPrefersDark(): boolean {
+  const [dark, setDark] = useState(() => resolveIsDark('System'));
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setDark(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return dark;
+}
+
 function ModeRow({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
-  const order: Theme[] = ['Light', 'System', 'Dark'];
+  const systemDark = useSystemPrefersDark();
+  const variants: Record<Theme, 'light' | 'dark'> = {
+    Light: 'light',
+    Dark: 'dark',
+    // 跟随系统 = 按当前解析结果画一扇窗，而不是左右劈成两半（36px 宽的半扇窗
+    // 缩出来什么也看不清）。它和「浅色」长得像本身就是信息：告诉用户跟随系统
+    // 现在解析出来就是浅色。
+    System: systemDark ? 'dark' : 'light',
+  };
   return (
-    <div className={ROW_PADDING}>
-      <div className="text-ui-body font-medium text-foreground">模式</div>
-      <div className="mt-3 flex items-center gap-2.5">
-        {order.map((option) => (
-          <ModeThumb key={option} theme={option} active={theme === option} onClick={() => onChange(option)} />
-        ))}
-      </div>
-    </div>
+    <SettingsRow
+      className={ROW_PADDING}
+      label="模式"
+      control={
+        <div className="flex items-center gap-2.5">
+          {(['Light', 'System', 'Dark'] as Theme[]).map((option) => (
+            <ModeThumb
+              key={option}
+              theme={option}
+              variant={variants[option]}
+              active={theme === option}
+              onClick={() => onChange(option)}
+            />
+          ))}
+        </div>
+      }
+    />
   );
 }
 
@@ -197,15 +217,19 @@ function NumberField({
  * 组合的居中并不保证，结果就是把手浮在轨道下面半截，看着没跟线对齐。
  * 现在两条都用 `top-1/2 -translate-y-1/2`，位置是算出来的而不是调出来的。
  *
- * 配色照参考图：已填充段与把手都是 ink，未填充段是控件底色，把手带一圈表面色
+ * 配色照参考图：已填充段与把手都是 ink，未填充段是浅灰轨道，把手带一圈表面色
  * 的环 —— 所以在深色下环是深色的，浅色下是白圈。
+ *
+ * 空轨道不能用 `--muted`：浅色下它是 `0 0% 98.82%`，在白色卡片上等于没有，
+ * 整条滑块只剩一个孤零零的圆点。这里直接给 ink 的 12% —— 表面层次用透明度是
+ * AGENTS.md 明确允许的用法，明暗两套下都看得见。
  */
 function ContrastControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
   const percent = ((value - CONTRAST_MIN) / (CONTRAST_MAX - CONTRAST_MIN)) * 100;
   return (
     <div className="flex w-full max-w-64 items-center gap-3">
       <div className="relative h-4 flex-1">
-        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
+        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-[hsl(var(--foreground)/0.12)]">
           <div className="h-full rounded-full bg-foreground" style={{ width: `${percent}%` }} />
         </div>
         <span

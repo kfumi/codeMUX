@@ -49,6 +49,13 @@ describe('ThemeToggle', () => {
     setUiFontSize.mockClear();
     setContrast.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
+    // jsdom 没实现 matchMedia —— 「跟随系统」那张缩略图要按系统偏好画。
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       unobserve() {}
@@ -113,6 +120,30 @@ describe('ThemeToggle', () => {
     }
     expect(screen.getByRole('button', { name: '浅色' })).toHaveProperty('ariaPressed', 'true');
     expect(screen.getByRole('button', { name: '深色' })).toHaveProperty('ariaPressed', 'false');
+  });
+
+  it('每张缩略图画一扇完整的窗,不做左右对半切', () => {
+    render(<ThemeToggle />);
+
+    // 之前把「跟随系统」劈成两半 36px 的小窗,缩出来什么也看不清 —— 钉住每张
+    // 缩略图底下只有一扇窗。
+    for (const label of ['浅色', '深色', '跟随系统']) {
+      const thumb = screen.getByRole('button', { name: label });
+      expect(thumb.children).toHaveLength(1);
+    }
+  });
+
+  it('模式行是「标题在左、缩略图在右」的设置行,不是标题下再摆一排', () => {
+    render(<ThemeToggle />);
+
+    const thumb = screen.getByRole('button', { name: '浅色' });
+    const controlCell = thumb.closest('.grid');
+    expect(controlCell).not.toBeNull();
+    expect(controlCell!.textContent).toContain('模式');
+    // 三张缩略图都在同一行的控件格里（缩略图只有 aria-label，没有可见文字）
+    for (const label of ['浅色', '深色', '跟随系统']) {
+      expect(screen.getByRole('button', { name: label }).closest('.grid')).toBe(controlCell);
+    }
   });
 
   it('字号用数值框而不是步进器,并把越界值夹回区间', () => {
