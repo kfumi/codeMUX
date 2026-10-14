@@ -445,11 +445,12 @@ input[type='password']::-ms-reveal {
 }
 
 /* 外观设置里的对比度滑块。
-   `appearance: none` 之后浏览器不再画任何东西 —— 轨道和滑块都得自己给，否则
-   控件只剩一条灰杠、没有把手，用户看不出当前值在哪。焦点环用不透明主色，
-   满足 WCAG 2.2 SC 2.4.11 的 3:1。 */
+   `appearance: none` 之后浏览器不再画任何东西 —— 把手得自己给。轨道不是这个控件
+   的事:外面已经画好了「已填充段 + 空轨道」两层并用 pointer-events: none 让开，
+   这里保持透明,免得再叠一条灰杠。焦点环用不透明主色,满足 WCAG 2.2
+   SC 2.4.11 的 3:1。 */
 .contrast-slider {
-  background: hsl(var(--surface-edge));
+  background: transparent;
 }
 
 .contrast-slider::-webkit-slider-thumb {

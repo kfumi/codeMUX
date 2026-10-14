@@ -2,6 +2,24 @@ import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 
+/**
+ * Codex 式设置卡的表面:平面 + 发丝描边。
+ *
+ * Codex 的设置页不靠「深一点的底色」分层,而是让卡片与页面同底、只用一圈发丝描边
+ * 把它框出来,行与行之间同样用发丝线。`surface-1` 是派生体系里的「抬高一层」
+ * 表面,浅色下比页面略白、深色下比页面略亮,正好承担这个角色。
+ */
+export const SETTINGS_CARD_CLASS =
+  'rounded-xl border border-border bg-[hsl(var(--surface-1))]';
+
+/** 把若干 `SettingsRow` 装进一张 Codex 式设置卡,行间自动画发丝分隔线。 */
+export function SettingsCard({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    // overflow-hidden 让首尾行与分隔线跟着圆角裁切,否则分隔线会顶到圆角外面。
+    <div className={cn('overflow-hidden', SETTINGS_CARD_CLASS, className)}>{children}</div>
+  );
+}
+
 interface SettingsRowProps {
   /** 行标题:开关/选择器对应的设置项名称。 */
   label: ReactNode;
@@ -14,7 +32,7 @@ interface SettingsRowProps {
    * 默认(false)适合下拉这类需要整行宽度的控件。
    */
   inlineControl?: boolean;
-  /** 是否自带卡片底色(独立成块的行用;同一张卡片内的多行用 `divided`)。 */
+  /** 是否自带卡片(独立成块的单行用;同一张卡片内的多行用 `SettingsCard`)。 */
   surface?: boolean;
   /** 同一张卡片内的多行之间画分隔线。 */
   divided?: boolean;
@@ -44,8 +62,8 @@ export function SettingsRow({
     <div
       className={cn(
         'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 sm:gap-x-4 sm:gap-y-1',
-        surface && 'rounded-xl settings-tile px-4 py-3.5',
-        divided && 'border-t border-border/55 pt-3',
+        surface && cn(SETTINGS_CARD_CLASS, 'px-4 py-3.5'),
+        divided && 'border-t border-border pt-3.5',
         className,
       )}
     >

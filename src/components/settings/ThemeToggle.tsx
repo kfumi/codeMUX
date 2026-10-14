@@ -1,5 +1,5 @@
-import { type ReactNode } from 'react';
-import { Check, Minus, Monitor, Moon, Plus, RotateCcw, Sun } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { Check, ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
   ACCENTS,
@@ -22,201 +22,183 @@ import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import { Button } from '../ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { TooltipHint } from '../ui/tooltip';
 import { FontPicker } from './FontPicker';
+import { SettingsCard, SettingsRow } from './SettingsRow';
 
-interface FormSectionProps {
-  label: string;
-  hint?: string;
-  children: ReactNode;
+/**
+ * 外观设置页。
+ *
+ * 版式照抄 Codex 的「分组小标题 + 发丝描边卡片 + 左标题右控件」:一行一个设置项,
+ * 行与行之间用发丝线分隔,控件一律收到右列(下拉、数值框、滑块、开关),不再用
+ * 大标题 + 右侧说明 + 整块底色把每一项都撑成一个大色块。
+ */
+
+/** 分组小标题:Codex 用弱化的小标题分层,不是大标题。 */
+function GroupLabel({ children }: { children: ReactNode }) {
+  return <h3 className="px-0.5 text-ui-compact font-medium text-muted-foreground">{children}</h3>;
 }
 
-function FormSection({ label, hint, children }: FormSectionProps) {
+/** 卡内行的统一内边距 —— 与 `SettingsRow` 的 `surface` 单行保持一致。 */
+const ROW_PADDING = 'px-4 py-3.5';
+
+const THEME_LABELS: Record<Theme, string> = { Light: '浅色', Dark: '深色', System: '跟随系统' };
+
+/** 缩略图里那扇假窗口 —— 纯示意,颜色是画出来的,不是真实表面。 */
+function MiniWindow({ variant }: { variant: 'light' | 'dark' }) {
+  const isLight = variant === 'light';
+  const chrome = isLight ? 'border-black/[0.06]' : 'border-white/[0.06]';
+  const sidebar = isLight ? 'bg-[hsl(218_18%_93%)]' : 'bg-[hsl(220_7%_7%)]';
+  const page = isLight ? 'bg-[hsl(220_20%_97%)]' : 'bg-[hsl(220_7%_8%)]';
+  const strong = isLight ? 'bg-[hsl(222_18%_10%/0.5)]' : 'bg-[hsl(220_10%_88%/0.6)]';
+  const weak = isLight ? 'bg-[hsl(222_18%_10%/0.25)]' : 'bg-[hsl(220_10%_88%/0.3)]';
+  const dots = isLight
+    ? ['bg-[hsl(358_70%_62%)]', 'bg-[hsl(38_88%_55%)]', 'bg-[hsl(142_55%_40%)]']
+    : ['bg-[hsl(358_74%_70%)]', 'bg-[hsl(38_94%_58%)]', 'bg-[hsl(136_56%_47%)]'];
+
   return (
-    <section className="space-y-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-ui-title font-medium text-foreground">{label}</h3>
-        {hint && <span className="text-ui-caption text-right text-muted-foreground">{hint}</span>}
+    <div className={cn('flex h-full w-full flex-col', page)}>
+      <div className={cn('flex items-center gap-1 border-b px-2 py-1.5', chrome)}>
+        {dots.map((dot) => (
+          <span key={dot} className={cn('h-1.5 w-1.5 rounded-full', dot)} />
+        ))}
       </div>
-      {children}
-    </section>
+      <div className="flex flex-1">
+        <div className={cn('w-1/3 border-r', chrome, sidebar)} />
+        <div className="flex-1 space-y-1 p-2">
+          <span className={cn('block h-1 w-3/4 rounded-full', strong)} />
+          <span className={cn('block h-1 w-1/2 rounded-full', weak)} />
+        </div>
+      </div>
+    </div>
   );
 }
 
-const THEME_LABELS: Record<Theme, string> = { Light: '浅色', Dark: '深色', System: '跟随系统' };
-const THEME_ICONS: Record<Theme, typeof Sun> = { Light: Sun, Dark: Moon, System: Monitor };
-
-function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: boolean; onClick: () => void }) {
-  const Icon = THEME_ICONS[theme];
-  const isLight = theme === 'Light';
-  const isSystem = theme === 'System';
-
+/** 模式选择:Codex 用一排缩略图,选中项套主色描边,缩略图本身不带文字标签。 */
+function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={THEME_LABELS[theme]}
-      className={cn(
-        'group relative flex flex-col gap-3 rounded-xl border p-3 text-left transition-all duration-normal',
-        active
-          ? 'border-primary/55 bg-primary/[0.04] ring-1 ring-primary/35'
-          : 'border-transparent settings-tile settings-tile-hover',
-      )}
-    >
-      <div className="aspect-[4/3] w-full overflow-hidden rounded-md border border-border/45 bg-background">
-        {isSystem ? (
+    <TooltipHint content={THEME_LABELS[theme]}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        aria-label={THEME_LABELS[theme]}
+        className={cn(
+          'relative block aspect-[3/2] w-16 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-normal',
+          active ? 'border-transparent ring-2 ring-primary' : 'border-border hover:border-foreground/25',
+        )}
+      >
+        {theme === 'System' ? (
           <div className="flex h-full w-full">
-            <div className="flex flex-1 flex-col bg-[hsl(220_20%_97%)]">
-              <div className="flex items-center gap-1 border-b border-black/[0.06] px-2 py-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(358_70%_62%)]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(38_88%_55%)]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(142_55%_40%)]" />
-              </div>
-              <div className="flex flex-1">
-                <div className="w-1/3 border-r border-black/[0.06] bg-[hsl(218_18%_93%)]" />
-                <div className="flex-1 space-y-1 p-2">
-                  <span className="block h-1 w-3/4 rounded-full bg-[hsl(222_18%_10%/0.5)]" />
-                  <span className="block h-1 w-1/2 rounded-full bg-[hsl(222_18%_10%/0.25)]" />
-                </div>
-              </div>
+            <div className="w-1/2">
+              <MiniWindow variant="light" />
             </div>
-            <div className="flex flex-1 flex-col bg-[hsl(220_7%_8%)]">
-              <div className="flex items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(358_74%_70%)]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(38_94%_58%)]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(136_56%_47%)]" />
-              </div>
-              <div className="flex flex-1">
-                <div className="w-1/3 border-r border-white/[0.06] bg-[hsl(220_7%_7%)]" />
-                <div className="flex-1 space-y-1 p-2">
-                  <span className="block h-1 w-3/4 rounded-full bg-[hsl(220_10%_88%/0.6)]" />
-                  <span className="block h-1 w-1/2 rounded-full bg-[hsl(220_10%_88%/0.3)]" />
-                </div>
-              </div>
+            <div className="w-1/2">
+              <MiniWindow variant="dark" />
             </div>
           </div>
         ) : (
-          <div className={cn('flex h-full w-full flex-col', isLight ? 'bg-[hsl(220_20%_97%)]' : 'bg-[hsl(220_7%_8%)]')}>
-            <div
-              className={cn(
-                'flex items-center gap-1 border-b px-2 py-1.5',
-                isLight ? 'border-black/[0.06]' : 'border-white/[0.06]',
-              )}
-            >
-              <span className={cn('h-1.5 w-1.5 rounded-full', isLight ? 'bg-[hsl(358_70%_62%)]' : 'bg-[hsl(358_74%_70%)]')} />
-              <span className={cn('h-1.5 w-1.5 rounded-full', isLight ? 'bg-[hsl(38_88%_55%)]' : 'bg-[hsl(38_94%_58%)]')} />
-              <span className={cn('h-1.5 w-1.5 rounded-full', isLight ? 'bg-[hsl(142_55%_40%)]' : 'bg-[hsl(136_56%_47%)]')} />
-            </div>
-            <div className="flex flex-1">
-              <div
-                className={cn(
-                  'w-1/3 border-r',
-                  isLight ? 'border-black/[0.06] bg-[hsl(218_18%_93%)]' : 'border-white/[0.06] bg-[hsl(220_7%_7%)]',
-                )}
-              />
-              <div className="flex-1 space-y-1 p-2">
-                <span
-                  className={cn(
-                    'block h-1 w-3/4 rounded-full',
-                    isLight ? 'bg-[hsl(222_18%_10%/0.5)]' : 'bg-[hsl(220_10%_88%/0.6)]',
-                  )}
-                />
-                <span
-                  className={cn(
-                    'block h-1 w-1/2 rounded-full',
-                    isLight ? 'bg-[hsl(222_18%_10%/0.25)]' : 'bg-[hsl(220_10%_88%/0.3)]',
-                  )}
-                />
-              </div>
-            </div>
-          </div>
+          <MiniWindow variant={theme === 'Light' ? 'light' : 'dark'} />
         )}
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className={cn('h-3.5 w-3.5', active ? 'text-primary' : 'text-muted-foreground')} />
-          <span className={cn('text-ui-title font-medium', active ? 'text-foreground' : 'text-foreground')}>
-            {THEME_LABELS[theme]}
-          </span>
-        </div>
         {active && (
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <Check className="h-2.5 w-2.5" strokeWidth={3} />
           </span>
         )}
-      </div>
-    </button>
+      </button>
+    </TooltipHint>
   );
 }
 
-function AccentSwatch({
-  accent,
-  active,
-  onClick,
-  currentTheme,
-}: {
-  accent: AccentKey;
-  active: boolean;
-  onClick: () => void;
-  currentTheme: Theme;
-}) {
-  const preset = ACCENTS[accent];
-  // 圆点必须反映**当前主题**下真正生效的那个值（Codex 的强调色明暗同值，
-// 其余预设不同）—— 固定用 light 会让深色用户看到的色板与实际不符。
-const swatch = accentSwatch(accent, currentTheme === 'Dark');
-return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={preset.name}
-      className="group flex flex-col items-center gap-2"
-    >
-      <span
-        className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-full transition-transform duration-normal',
-          !active && 'group-hover:scale-105',
-        )}
-        style={{
-          backgroundColor: swatch,
-          boxShadow: active
-            ? `0 0 0 2px hsl(var(--background)), 0 0 0 4px ${swatch}`
-            : `inset 0 0 0 1px hsl(var(--foreground)/0.1)`,
-        }}
-      >
-        {active && <Check className="h-4 w-4 text-white drop-shadow-sm" strokeWidth={3} />}
-      </span>
-      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-        {preset.name}
-      </span>
-    </button>
-  );
-}
-
-interface OptionCardProps {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  preview: ReactNode;
-}
-
-function OptionCard({ label, active, onClick, preview }: OptionCardProps) {
+function ModeRow({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+  const order: Theme[] = ['Light', 'System', 'Dark'];
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        'flex flex-col items-center justify-center gap-2 rounded-lg border py-3 transition-all duration-normal',
-        active
-          ? 'border-primary/55 bg-primary/[0.05] ring-1 ring-primary/30'
-          : 'border-transparent settings-tile settings-tile-hover',
-      )}
-    >
-      {preview}
-      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground' : 'text-muted-foreground')}>{label}</span>
-    </button>
+    <div className={ROW_PADDING}>
+      <div className="text-ui-body font-medium text-foreground">模式</div>
+      <div className="mt-2.5 flex items-center gap-2">
+        {order.map((option) => (
+          <ModeThumb key={option} theme={option} active={theme === option} onClick={() => onChange(option)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 紧凑数值框:Codex 的字号是「小方框 + 右侧 px 后缀」,不是加减号步进器。 */
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (value: number) => void;
+}) {
+  // 编辑过程中允许中间态(清空、只填了个 1),失焦时回到受控值。
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label={label}
+        min={min}
+        max={max}
+        value={draft ?? String(value)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          const parsed = Number(next);
+          if (next !== '' && Number.isFinite(parsed)) {
+            onChange(Math.min(max, Math.max(min, Math.round(parsed))));
+          }
+        }}
+        onBlur={() => setDraft(null)}
+        className={cn(
+          'h-8 w-16 rounded-md border border-border bg-[hsl(var(--surface-2))] px-2 text-right',
+          'text-ui-body tabular-nums text-foreground transition-colors duration-fast ease-motion-out',
+          'hover:bg-[hsl(var(--surface-3))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+          '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+        )}
+        style={{ MozAppearance: 'textfield' }}
+      />
+      <span className="text-ui-caption text-muted-foreground">{unit}</span>
+    </div>
+  );
+}
+
+/** 对比度滑块:轨道由外面画(已填充段 + 空轨道),input 只负责把手与交互。 */
+function ContrastControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const percent = ((value - CONTRAST_MIN) / (CONTRAST_MAX - CONTRAST_MIN)) * 100;
+  return (
+    <div className="flex w-full max-w-64 items-center gap-3">
+      <div className="relative flex-1">
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-[hsl(var(--surface-edge))]">
+          <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+        </div>
+        <input
+          type="range"
+          min={CONTRAST_MIN}
+          max={CONTRAST_MAX}
+          step={1}
+          value={value}
+          aria-label="对比度"
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="contrast-slider relative h-1.5 w-full cursor-pointer appearance-none rounded-full bg-transparent"
+        />
+      </div>
+      <output className="w-8 text-ui-body tabular-nums text-foreground" aria-live="polite">
+        {value}
+      </output>
+    </div>
   );
 }
 
@@ -226,7 +208,14 @@ const RADIUS_OPTIONS: { value: RadiusKey; label: string }[] = [
   { value: 'round', label: '圆润' },
 ];
 
-/** 四组 diff 取色器：新增/删除 × 浅色/深色。 */
+const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
+  { value: 'fixed', label: '定宽' },
+  { value: 'stream', label: '流式' },
+];
+
+const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
+
+/** 四个 diff 取色器:浅色/深色 × 新增/删除。 */
 const DIFF_COLOR_FIELDS: {
   key: DiffColorKey;
   label: string;
@@ -252,9 +241,9 @@ function DiffColorField({
   const current = value ?? fallback;
   const customized = value !== undefined;
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2.5 rounded-lg border border-border bg-[hsl(var(--surface-2))] px-2.5 py-2">
       <label
-        className="relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-md border border-border"
+        className="relative h-6 w-6 shrink-0 cursor-pointer overflow-hidden rounded-md border border-border"
         style={{ backgroundColor: current }}
       >
         <input
@@ -265,9 +254,9 @@ function DiffColorField({
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
         />
       </label>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-col">
         <span className="text-ui-caption text-foreground">{label}</span>
-        <span className="font-mono text-code text-muted-foreground uppercase">{current}</span>
+        <span className="font-mono text-code uppercase text-muted-foreground">{current}</span>
       </div>
       {customized && (
         <Button
@@ -276,7 +265,7 @@ function DiffColorField({
           size="sm"
           aria-label={`${label}恢复默认`}
           onClick={() => onChange(undefined)}
-          className="text-muted-foreground"
+          className="ml-auto h-7 w-7 shrink-0 p-0 text-muted-foreground"
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
@@ -285,17 +274,11 @@ function DiffColorField({
   );
 }
 
-const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
-  { value: 'fixed', label: '定宽' },
-  { value: 'stream', label: '流式' },
-];
-
-const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
-
 export function ThemeToggle() {
   const config = useSettingsStore((state) => state.config);
   const setTheme = useSettingsStore((state) => state.setTheme);
   const currentTheme: Theme = config?.theme ?? 'System';
+  const isDark = currentTheme === 'Dark';
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
@@ -308,176 +291,203 @@ export function ThemeToggle() {
   const setContentWidth = useAppearanceStore((state) => state.setContentWidth);
   const reset = useAppearanceStore((state) => state.reset);
 
+  // Codex 默认就把「高级」摊开:这一页的设置量不大,藏起来只会让人多点一次。
+  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const accentHex = accentSwatch(prefs.accent, isDark).toUpperCase();
+
   return (
-    <div className="space-y-7">
-      <FormSection label="主题模式" hint="选择浅色、深色，或跟随系统偏好">
-        <div className="grid grid-cols-3 gap-2">
-          <ThemePreviewCard theme="Light" active={currentTheme === 'Light'} onClick={() => setTheme('Light')} />
-          <ThemePreviewCard theme="Dark" active={currentTheme === 'Dark'} onClick={() => setTheme('Dark')} />
-          <ThemePreviewCard theme="System" active={currentTheme === 'System'} onClick={() => setTheme('System')} />
-        </div>
-      </FormSection>
+    <div className="space-y-6">
+      <section className="space-y-2.5">
+        <GroupLabel>视觉风格</GroupLabel>
 
-      <FormSection label="强调色" hint="应用于按钮、链接与高亮元素">
-        <div className="flex flex-wrap gap-x-5 gap-y-3 rounded-xl settings-tile p-3">
-          {ACCENT_KEYS.map((key) => (
-            <AccentSwatch
-              key={key}
-              accent={key}
-              active={prefs.accent === key}
-              currentTheme={currentTheme}
-              onClick={() => setAccent(key)}
-            />
-          ))}
-        </div>
-      </FormSection>
+        <SettingsCard>
+          <ModeRow theme={currentTheme} onChange={setTheme} />
+        </SettingsCard>
 
-      <FormSection label="对比度" hint="0–100，整体加重或减轻边界与次级文字">
-        <div className="flex items-center gap-3 rounded-xl settings-tile px-3 py-2.5">
-          <input
-            type="range"
-            min={CONTRAST_MIN}
-            max={CONTRAST_MAX}
-            step={1}
-            value={prefs.contrast}
-            aria-label="对比度"
-            onChange={(event) => setContrast(Number(event.target.value))}
-            className="contrast-slider h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full"
+        <SettingsCard>
+          <SettingsRow
+            className={ROW_PADDING}
+            label="强调色"
+            description="按钮、链接与高亮元素使用的颜色。"
+            control={
+              <div className="flex items-center gap-2.5">
+                <Select value={prefs.accent} onValueChange={(value) => setAccent(value as AccentKey)}>
+                  <SelectTrigger
+                    aria-label="强调色"
+                    className="h-8 w-40 justify-between gap-2 rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ACCENT_KEYS.map((key) => (
+                      <SelectItem key={key} value={key}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="h-3.5 w-3.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: accentSwatch(key, isDark) }}
+                          />
+                          {ACCENTS[key].name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="font-mono text-code uppercase text-muted-foreground">{accentHex}</span>
+              </div>
+            }
           />
-          <output className="w-10 text-ui-body tabular-nums text-foreground" aria-live="polite">
-            {prefs.contrast}
-          </output>
-        </div>
-        <p className="text-ui-caption text-muted-foreground">
-          调低让界面更安静，调高让边界与次级文字更清楚 —— 不用换主题就能调到舒服的程度。
-        </p>
-      </FormSection>
 
-      <FormSection label="diff 配色" hint="代码增删行的颜色，与状态色分开">
-        <div className="grid grid-cols-2 gap-x-5 gap-y-3 rounded-xl settings-tile p-3">
-          {DIFF_COLOR_FIELDS.map((field) => (
-            <DiffColorField
-              key={field.key}
-              label={field.label}
-              value={prefs.diff[field.key]}
-              fallback={field.fallback}
-              onChange={(value) => setDiffColor(field.key, value)}
-            />
-          ))}
-        </div>
-      </FormSection>
+          <SettingsRow
+            divided
+            className={ROW_PADDING}
+            label="界面字体"
+            description="仅影响界面文字，代码与差异视图另用代码字体。"
+            control={<FontPicker value={prefs.uiFontFamily} onChange={setUiFontFamily} />}
+          />
 
-      <FormSection label="界面字体" hint="从本机已安装字体中选择，仅影响界面文字">
-        <FontPicker value={prefs.uiFontFamily} onChange={setUiFontFamily} />
-      </FormSection>
+          <SettingsRow
+            divided
+            className={ROW_PADDING}
+            label="圆角风格"
+            description="控制按钮、卡片与输入框的边角弧度。"
+            control={
+              <Select value={prefs.radius} onValueChange={(value) => setRadius(value as RadiusKey)}>
+                <SelectTrigger
+                  aria-label="圆角风格"
+                  className="h-8 w-40 justify-between rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RADIUS_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-3.5 w-3.5 shrink-0 border-2 border-foreground/55"
+                          style={{ borderRadius: RADIUS_PREVIEW[opt.value] }}
+                        />
+                        {opt.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
 
-      <FormSection label="界面字号" hint="12–18px，按 1px 调整">
-        <div className="flex w-fit items-center rounded-lg settings-tile">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="减小界面字号"
-            disabled={prefs.uiFontSize <= UI_FONT_SIZE_MIN}
-            onClick={() => setUiFontSize(prefs.uiFontSize - 1)}
-            className="h-9 w-9 rounded-none rounded-l-md"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <output className="w-16 text-center text-ui-body tabular-nums" aria-live="polite">
-            {prefs.uiFontSize}px
-          </output>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="增大界面字号"
-            disabled={prefs.uiFontSize >= UI_FONT_SIZE_MAX}
-            onClick={() => setUiFontSize(prefs.uiFontSize + 1)}
-            className="h-9 w-9 rounded-none rounded-r-md"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </FormSection>
+          <SettingsRow
+            divided
+            className={ROW_PADDING}
+            label="幕布宽度"
+            description={
+              prefs.contentWidth === 'fixed'
+                ? '定宽：对话消息与发送框宽度固定居中。'
+                : '流式：内容宽度尽量居中撑满中间区域。'
+            }
+            control={
+              <Select
+                value={prefs.contentWidth}
+                onValueChange={(value) => setContentWidth(value as ContentWidthKey)}
+              >
+                <SelectTrigger
+                  aria-label="幕布宽度"
+                  className="h-8 w-40 justify-between rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONTENT_WIDTH_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+        </SettingsCard>
+      </section>
 
-      <FormSection label="代码字体大小" hint="10–20px，按 1px 调整">
-        <div className="flex w-fit items-center rounded-lg settings-tile">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="减小代码字体大小"
-            disabled={prefs.codeFontSize <= CODE_FONT_SIZE_MIN}
-            onClick={() => setCodeFontSize(prefs.codeFontSize - 1)}
-            className="h-9 w-9 rounded-none rounded-l-md"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <output className="w-16 text-center text-ui-body tabular-nums" aria-live="polite">
-            {prefs.codeFontSize}px
-          </output>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="增大代码字体大小"
-            disabled={prefs.codeFontSize >= CODE_FONT_SIZE_MAX}
-            onClick={() => setCodeFontSize(prefs.codeFontSize + 1)}
-            className="h-9 w-9 rounded-none rounded-r-md"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </FormSection>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <CollapsibleTrigger
+          className={cn(
+            'flex items-center gap-1 px-0.5 text-ui-compact font-medium text-muted-foreground',
+            'transition-colors duration-fast ease-motion-out hover:text-foreground',
+          )}
+        >
+          高级
+          <ChevronDown
+            className={cn('h-3.5 w-3.5 transition-transform duration-normal ease-motion-in-out', advancedOpen && 'rotate-180')}
+          />
+        </CollapsibleTrigger>
 
-      <FormSection label="圆角风格" hint="控制按钮、卡片与输入框的边角弧度">
-        <div className="grid grid-cols-3 gap-2">
-          {RADIUS_OPTIONS.map((opt) => (
-            <OptionCard
-              key={opt.value}
-              label={opt.label}
-              active={prefs.radius === opt.value}
-              onClick={() => setRadius(opt.value)}
-              preview={
-                <span
-                  className="h-6 w-6 border-2 border-foreground/55"
-                  style={{ borderRadius: RADIUS_PREVIEW[opt.value] }}
+        <CollapsibleContent className="space-y-2.5 pt-2.5">
+          <SettingsCard>
+            <SettingsRow
+              className={ROW_PADDING}
+              label="界面字号"
+              description="调整界面文字的基础字号。"
+              control={
+                <NumberField
+                  label="界面字号"
+                  value={prefs.uiFontSize}
+                  min={UI_FONT_SIZE_MIN}
+                  max={UI_FONT_SIZE_MAX}
+                  unit="px"
+                  onChange={setUiFontSize}
                 />
               }
             />
-          ))}
-        </div>
-      </FormSection>
 
-      <FormSection label="幕布宽度" hint="控制消息幕布与输入区的内容宽度">
-        <div className="grid grid-cols-2 gap-2">
-          {CONTENT_WIDTH_OPTIONS.map((opt) => (
-            <OptionCard
-              key={opt.value}
-              label={opt.label}
-              active={prefs.contentWidth === opt.value}
-              onClick={() => setContentWidth(opt.value)}
-              preview={
-                <div className="flex h-6 w-10 items-center">
-                  {opt.value === 'fixed' ? (
-                    <div className="mx-auto h-3 w-5 rounded-sm border border-foreground/45" />
-                  ) : (
-                    <div className="h-3 w-full rounded-sm border border-foreground/45" />
-                  )}
-                </div>
+            <SettingsRow
+              divided
+              className={ROW_PADDING}
+              label="代码字体大小"
+              description="调整代码与差异视图中代码使用的基础字号。"
+              control={
+                <NumberField
+                  label="代码字体大小"
+                  value={prefs.codeFontSize}
+                  min={CODE_FONT_SIZE_MIN}
+                  max={CODE_FONT_SIZE_MAX}
+                  unit="px"
+                  onChange={setCodeFontSize}
+                />
               }
             />
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {prefs.contentWidth === 'fixed'
-            ? '定宽模式下，对话消息与发送框宽度固定居中。'
-            : '流式模式下，内容宽度尽量居中撑满中间区域。'}
-        </p>
-      </FormSection>
 
-      <div className="pt-2">
+            <SettingsRow
+              divided
+              className={ROW_PADDING}
+              label="对比度"
+              description="调低更安静，调高让边界与次级文字更清楚。"
+              control={<ContrastControl value={prefs.contrast} onChange={setContrast} />}
+            />
+          </SettingsCard>
+
+          <SettingsCard>
+            <div className={ROW_PADDING}>
+              <div className="text-ui-body font-medium text-foreground">差异标记</div>
+              <p className="mt-1 text-ui-caption leading-relaxed text-muted-foreground">
+                代码增删行的颜色，与状态色分开。
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {DIFF_COLOR_FIELDS.map((field) => (
+                  <DiffColorField
+                    key={field.key}
+                    label={field.label}
+                    value={prefs.diff[field.key]}
+                    fallback={field.fallback}
+                    onChange={(value) => setDiffColor(field.key, value)}
+                  />
+                ))}
+              </div>
+            </div>
+          </SettingsCard>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <div>
         <Button variant="ghost" size="sm" onClick={reset} className="gap-1.5 text-muted-foreground">
           <RotateCcw className="h-3.5 w-3.5" />
           恢复默认外观

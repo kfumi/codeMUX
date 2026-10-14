@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow } from './SettingsRow';
 
 afterEach(() => {
   cleanup();
@@ -51,14 +51,30 @@ describe('SettingsRow', () => {
     expect(controlCell.className).toContain('justify-self-end');
   });
 
-  it('surface 自带卡片底色,divided 画分隔线', () => {
+  it('surface 自带卡片描边,divided 画分隔线', () => {
     const { container } = render(
       <SettingsRow surface divided label="忽略证书校验" control={<span>控件</span>} />,
     );
 
     const row = container.firstElementChild as HTMLElement;
     expect(row.className).toContain('rounded-xl');
-    expect(row.className).toContain('settings-tile');
+    // Codex 式卡片:平面 + 发丝描边,不再靠 `settings-tile` 的深底色分层。
+    expect(row.className).toContain('border-border');
+    expect(row.className).toContain('bg-[hsl(var(--surface-1))]');
     expect(row.className).toContain('border-t');
+  });
+
+  it('SettingsCard 把多行收进同一张卡并裁掉圆角外的分隔线', () => {
+    const { container } = render(
+      <SettingsCard>
+        <SettingsRow label="第一行" control={<span>a</span>} />
+        <SettingsRow divided label="第二行" control={<span>b</span>} />
+      </SettingsCard>,
+    );
+
+    const card = container.firstElementChild as HTMLElement;
+    expect(card.className).toContain('overflow-hidden');
+    expect(card.className).toContain('rounded-xl');
+    expect(card.children).toHaveLength(2);
   });
 });
