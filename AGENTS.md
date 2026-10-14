@@ -74,7 +74,7 @@ For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built
 
 ### UI Theming & Typography
 
-The app's appearance is user-configurable at runtime (theme, accent color, contrast knob, diff colors, UI font family, UI/code font sizes, corner-radius tier, content width) via `src/stores/appearanceStore.ts`, which writes CSS variables defined in `src/styles/globals.css`. Components must consume these tokens so new UI follows the user's appearance settings instead of fighting them. Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
+The app's appearance is user-configurable at runtime (theme, accent color, contrast knob, UI font family, UI/code font sizes, corner-radius tier, content width) via `src/stores/appearanceStore.ts`, which writes CSS variables defined in `src/styles/globals.css`. Components must consume these tokens so new UI follows the user's appearance settings instead of fighting them. Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
 
 **Colors — derived from four seeds, never hand-picked:**
 
@@ -92,7 +92,7 @@ The palette is **derived**, not listed. `src/lib/colorDerivation.ts` holds the o
 - Borders are translucent ink, not gray — that is why they look "通透". Never replace `border-border` with a gray token.
 - Hover always mixes toward `ink` (`hover:bg-[hsl(var(--surface-3))]` or `surface-interactive`), never a different hue.
 - Layered surfaces use the existing classes (`surface-panel`, `surface-panel-muted`, `surface-interactive`) or `hsl(var(--surface-1|2|3))` — do not invent new grays.
-- **Intentionally fixed colors** (they are semantic seeds, not derived): diff added/removed lines (user-configurable via `--diff-added` / `--diff-removed`), `--success` / `--warning` / `--destructive` status colors, syntax highlighting, accent swatches in the settings panel.
+- **Intentionally fixed colors** (they are semantic seeds, not derived): diff added/removed lines (`--diff-added` / `--diff-removed`), `--success` / `--warning` / `--destructive` status colors, syntax highlighting, accent swatches in the settings panel. Diff and status are separate *variables* even where Codex's own palette happens to give them the same value — read the one that matches the meaning.
 - **Consumption contract:** tokens are bare HSL triplets consumed as `hsl(var(--token) / .6)`. The derivation pre-composites Codex's alpha onto `--surface` so this shape is preserved — hundreds of call sites rely on it. `--scrim` is the single exception: it is a self-contained `rgba()`, use it bare.
 - Changing a color means changing a **formula or a seed**, then updating the frozen expectation table in `colorDerivation.test.ts`. Do not hand-edit the `:root` / `.dark` fallbacks in `globals.css` — they are static mirrors of the default derivation and are covered by that test.
 

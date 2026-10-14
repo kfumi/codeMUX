@@ -10,13 +10,11 @@ import {
   CONTRAST_MAX,
   CONTRAST_MIN,
   type ContentWidthKey,
-  type DiffColorKey,
   RADIUS_PREVIEW,
   type RadiusKey,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
 } from '../../lib/appearance';
-import { SEMANTIC_SEEDS } from '../../lib/colorDerivation';
 import { cn } from '../../lib/utils';
 import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -60,16 +58,19 @@ function MiniWindow({ variant }: { variant: 'light' | 'dark' }) {
 
   return (
     <div className={cn('flex h-full w-full flex-col', page)}>
-      <div className={cn('flex items-center gap-1 border-b px-2 py-1.5', chrome)}>
+      <div className={cn('flex h-2 shrink-0 items-center gap-[3px] border-b px-1', chrome)}>
         {dots.map((dot) => (
-          <span key={dot} className={cn('h-1.5 w-1.5 rounded-full', dot)} />
+          <span key={dot} className={cn('h-1 w-1 rounded-full', dot)} />
         ))}
       </div>
-      <div className="flex flex-1">
-        <div className={cn('w-1/3 border-r', chrome, sidebar)} />
-        <div className="flex-1 space-y-1 p-2">
-          <span className={cn('block h-1 w-3/4 rounded-full', strong)} />
-          <span className={cn('block h-1 w-1/2 rounded-full', weak)} />
+      <div className="flex min-h-0 flex-1">
+        <div className={cn('w-[38%] shrink-0 border-r', chrome, sidebar)}>
+          <span className={cn('mx-1 mt-1 block h-[2px] w-1/2 rounded-full', strong)} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px] p-1">
+          <span className={cn('block h-[2px] w-3/4 rounded-full', strong)} />
+          <span className={cn('block h-[2px] w-1/2 rounded-full', weak)} />
+          <span className={cn('block h-[2px] w-2/3 rounded-full', weak)} />
         </div>
       </div>
     </div>
@@ -86,16 +87,17 @@ function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; 
         aria-pressed={active}
         aria-label={THEME_LABELS[theme]}
         className={cn(
-          'relative block aspect-[3/2] w-16 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-normal',
+          'relative block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-normal',
           active ? 'border-transparent ring-2 ring-primary' : 'border-border hover:border-foreground/25',
         )}
       >
         {theme === 'System' ? (
+          // 跟随系统 = 同一扇窗口左右两半各是一种主题，和 Codex 的第二张缩略图一致。
           <div className="flex h-full w-full">
-            <div className="w-1/2">
+            <div className="w-1/2 overflow-hidden border-r border-border">
               <MiniWindow variant="light" />
             </div>
-            <div className="w-1/2">
+            <div className="w-1/2 overflow-hidden">
               <MiniWindow variant="dark" />
             </div>
           </div>
@@ -103,7 +105,7 @@ function ModeThumb({ theme, active, onClick }: { theme: Theme; active: boolean; 
           <MiniWindow variant={theme === 'Light' ? 'light' : 'dark'} />
         )}
         {active && (
-          <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-elevation-subtle">
             <Check className="h-2.5 w-2.5" strokeWidth={3} />
           </span>
         )}
@@ -117,7 +119,7 @@ function ModeRow({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) =
   return (
     <div className={ROW_PADDING}>
       <div className="text-ui-body font-medium text-foreground">模式</div>
-      <div className="mt-2.5 flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2.5">
         {order.map((option) => (
           <ModeThumb key={option} theme={option} active={theme === option} onClick={() => onChange(option)} />
         ))}
@@ -192,7 +194,7 @@ function ContrastControl({ value, onChange }: { value: number; onChange: (value:
           value={value}
           aria-label="对比度"
           onChange={(event) => onChange(Number(event.target.value))}
-          className="contrast-slider relative h-1.5 w-full cursor-pointer appearance-none rounded-full bg-transparent"
+          className="contrast-slider relative h-4 w-full cursor-pointer appearance-none rounded-full bg-transparent"
         />
       </div>
       <output className="w-8 text-ui-body tabular-nums text-foreground" aria-live="polite">
@@ -215,65 +217,6 @@ const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
 
 const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
 
-/** 四个 diff 取色器:浅色/深色 × 新增/删除。 */
-const DIFF_COLOR_FIELDS: {
-  key: DiffColorKey;
-  label: string;
-  fallback: string;
-}[] = [
-  { key: 'lightAdded', label: '浅色 · 新增', fallback: SEMANTIC_SEEDS.light.diffAdded },
-  { key: 'lightRemoved', label: '浅色 · 删除', fallback: SEMANTIC_SEEDS.light.diffRemoved },
-  { key: 'darkAdded', label: '深色 · 新增', fallback: SEMANTIC_SEEDS.dark.diffAdded },
-  { key: 'darkRemoved', label: '深色 · 删除', fallback: SEMANTIC_SEEDS.dark.diffRemoved },
-];
-
-function DiffColorField({
-  label,
-  value,
-  fallback,
-  onChange,
-}: {
-  label: string;
-  value: string | undefined;
-  fallback: string;
-  onChange: (value: string | undefined) => void;
-}) {
-  const current = value ?? fallback;
-  const customized = value !== undefined;
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-border bg-[hsl(var(--surface-2))] px-2.5 py-2">
-      <label
-        className="relative h-6 w-6 shrink-0 cursor-pointer overflow-hidden rounded-md border border-border"
-        style={{ backgroundColor: current }}
-      >
-        <input
-          type="color"
-          value={current}
-          aria-label={label}
-          onChange={(event) => onChange(event.target.value)}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        />
-      </label>
-      <div className="flex min-w-0 flex-col">
-        <span className="text-ui-caption text-foreground">{label}</span>
-        <span className="font-mono text-code uppercase text-muted-foreground">{current}</span>
-      </div>
-      {customized && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`${label}恢复默认`}
-          onClick={() => onChange(undefined)}
-          className="ml-auto h-7 w-7 shrink-0 p-0 text-muted-foreground"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
 export function ThemeToggle() {
   const config = useSettingsStore((state) => state.config);
   const setTheme = useSettingsStore((state) => state.setTheme);
@@ -283,7 +226,6 @@ export function ThemeToggle() {
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
   const setContrast = useAppearanceStore((state) => state.setContrast);
-  const setDiffColor = useAppearanceStore((state) => state.setDiffColor);
   const setUiFontFamily = useAppearanceStore((state) => state.setUiFontFamily);
   const setUiFontSize = useAppearanceStore((state) => state.setUiFontSize);
   const setCodeFontSize = useAppearanceStore((state) => state.setCodeFontSize);
@@ -463,26 +405,6 @@ export function ThemeToggle() {
               description="调低更安静，调高让边界与次级文字更清楚。"
               control={<ContrastControl value={prefs.contrast} onChange={setContrast} />}
             />
-          </SettingsCard>
-
-          <SettingsCard>
-            <div className={ROW_PADDING}>
-              <div className="text-ui-body font-medium text-foreground">差异标记</div>
-              <p className="mt-1 text-ui-caption leading-relaxed text-muted-foreground">
-                代码增删行的颜色，与状态色分开。
-              </p>
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {DIFF_COLOR_FIELDS.map((field) => (
-                  <DiffColorField
-                    key={field.key}
-                    label={field.label}
-                    value={prefs.diff[field.key]}
-                    fallback={field.fallback}
-                    onChange={(value) => setDiffColor(field.key, value)}
-                  />
-                ))}
-              </div>
-            </div>
           </SettingsCard>
         </CollapsibleContent>
       </Collapsible>

@@ -1,8 +1,6 @@
 import {
   CODEX_DARK_SEEDS,
   CODEX_LIGHT_SEEDS,
-  SEMANTIC_SEEDS,
-  type SemanticOverrides,
   type ThemeSeeds,
   deriveThemeTokens,
 } from './colorDerivation';
@@ -24,18 +22,12 @@ export interface AppearancePrefs {
   accent: AccentKey;
   /** 0–100 的整体浓淡旋钮，驱动所有 alpha 步进（Codex 同名旋钮）。 */
   contrast: number;
-  /** diff 新增/删除色，按明暗各存一套；缺省字段回落到语义种子。 */
-  diff: DiffColors;
   uiFontFamily: string;
   uiFontSize: number;
   codeFontSize: number;
   radius: RadiusKey;
   contentWidth: ContentWidthKey;
 }
-
-export type DiffColorKey = 'lightAdded' | 'lightRemoved' | 'darkAdded' | 'darkRemoved';
-
-export type DiffColors = Partial<Record<DiffColorKey, string>>;
 
 export interface AccentPreset {
   name: string;
@@ -125,7 +117,6 @@ export const DEFAULT_PREFS: AppearancePrefs = {
   accent: 'codex',
   contrast: CONTRAST_DEFAULT,
   // 空对象 = 完全跟随语义种子；用户改过的键才会被写进来。
-  diff: {},
   uiFontFamily: '',
   uiFontSize: 14,
   codeFontSize: 13,
@@ -168,29 +159,9 @@ export function seedsForPrefs(prefs: AppearancePrefs, isDark: boolean): ThemeSee
   return { ...base, accent: ACCENTS[prefs.accent][isDark ? 'dark' : 'light'], contrast };
 }
 
-/** 当前主题下生效的 diff 配色（用户覆盖优先，缺省回落到语义种子）。 */
-export function semanticOverridesForPrefs(prefs: AppearancePrefs, isDark: boolean): SemanticOverrides {
-  const keys: DiffColorKey[] = isDark ? ['darkAdded', 'darkRemoved'] : ['lightAdded', 'lightRemoved'];
-  const seed = isDark ? SEMANTIC_SEEDS.dark : SEMANTIC_SEEDS.light;
-  return {
-    diffAdded: prefs.diff[keys[0]] ?? seed.diffAdded,
-    diffRemoved: prefs.diff[keys[1]] ?? seed.diffRemoved,
-  };
-}
-
 /** 只接受 `#rrggbb`；其余一律忽略，避免坏值写进 CSS。 */
 export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
-}
-
-export function sanitizeDiffColors(value: unknown): DiffColors {
-  if (!value || typeof value !== 'object') return {};
-  const parsed = value as Record<string, unknown>;
-  const result: DiffColors = {};
-  for (const key of ['lightAdded', 'lightRemoved', 'darkAdded', 'darkRemoved'] as DiffColorKey[]) {
-    if (isHexColor(parsed[key])) result[key] = (parsed[key] as string).trim().toLowerCase();
-  }
-  return result;
 }
 
 export function clampContrast(value: number): number {
@@ -209,7 +180,6 @@ export function loadPrefs(): AppearancePrefs {
       contrast: clampContrast(
         typeof parsed.contrast === 'number' ? parsed.contrast : CONTRAST_DEFAULT,
       ),
-      diff: sanitizeDiffColors(parsed.diff),
       uiFontFamily: resolveStoredUiFontFamily(parsed),
       uiFontSize: resolveStoredUiFontSize(parsed.uiFontSize, parsed.fontSize),
       codeFontSize: resolveStoredCodeFontSize(parsed.codeFontSize),
@@ -243,7 +213,6 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   const tokens = deriveThemeTokens(
     seedsForPrefs(prefs, isDark),
     isDark,
-    semanticOverridesForPrefs(prefs, isDark),
   );
   for (const [name, value] of Object.entries(tokens)) {
     root.style.setProperty(name, value);

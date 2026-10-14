@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX_DARK_SEEDS,
   CODEX_LIGHT_SEEDS,
+  SEMANTIC_SEEDS,
   type ThemeSeeds,
   derivePalette,
   deriveThemeTokens,
@@ -409,23 +410,30 @@ describe('colorDerivation', () => {
     });
   });
 
-  it('lets the user override only the diff colors without touching status colors', () => {
+it('keeps diff colors as fixed seeds: accent and contrast must not move them', () => {
+    // diff 增删色与状态色是这套设计语言的常量,不是旋钮的产物。
+    // 这里钉住两件事:换强调色不动它、调对比度不动它。
     const base = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
-    const overridden = deriveThemeTokens(CODEX_LIGHT_SEEDS, false, {
-      diffAdded: '#123456',
-      diffRemoved: '#abcdef',
-    });
+    const otherAccent = deriveThemeTokens(
+      { ...CODEX_LIGHT_SEEDS, accent: '#d92650' },
+      false,
+    );
+    const highContrast = deriveThemeTokens(
+      { ...CODEX_LIGHT_SEEDS, contrast: 100 },
+      false,
+    );
 
-    expect(overridden['--diff-added']).toBe(rgbToHslTriplet(hexToRgb('#123456')));
-    expect(overridden['--diff-removed']).toBe(rgbToHslTriplet(hexToRgb('#abcdef')));
-    // 状态色不受 diff 覆盖影响 —— 「MCP 连上了」不该跟着「diff 增删色」变。
-    expect(overridden['--success']).toBe(base['--success']);
-    expect(overridden['--destructive']).toBe(base['--destructive']);
-    // 其余派生层也不受影响（覆盖只落到对应变量，不参与任何公式）。
-    for (const token of Object.keys(base)) {
-      if (token === '--diff-added' || token === '--diff-removed') continue;
-      expect(overridden[token], token).toBe(base[token]);
+    for (const tokens of [otherAccent, highContrast]) {
+      expect(tokens['--diff-added']).toBe(base['--diff-added']);
+      expect(tokens['--diff-removed']).toBe(base['--diff-removed']);
     }
+    expect(base['--diff-added']).toBe(rgbToHslTriplet(hexToRgb(SEMANTIC_SEEDS.light.diffAdded)));
+    expect(base['--diff-removed']).toBe(rgbToHslTriplet(hexToRgb(SEMANTIC_SEEDS.light.diffRemoved)));
+    // 注意:Codex 自己的色板里 diff 增删色与 success/destructive 取的是同一个色值
+    // （浅色删除色 = 危险色,深色同理）。分开的是**变量与语义**而不是颜色 ——
+    // 组件要「删除行」时读 --diff-removed,要「失败」时读 --destructive,
+    // 两者可以各自演化而不必互相牵连。这里钉住现状,色板若变则此断言会提醒。
+    expect(base['--diff-added']).not.toBe(base['--success']);
   });
 
   it('converts rgb to hsl triplets without rounding drift', () => {

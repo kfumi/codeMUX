@@ -21,9 +21,7 @@ import {
   formatFontFamilyForCss,
   isHexColor,
   loadPrefs,
-  sanitizeDiffColors,
   seedsForPrefs,
-  semanticOverridesForPrefs,
 } from './appearance';
 import {
   CODEX_DARK_SEEDS,
@@ -131,37 +129,31 @@ describe('appearance preferences', () => {
     expect(ACCENTS.codex.dark).toBe(CODEX_DARK_SEEDS.accent);
   });
 
-  it('folds the diff color overrides into the derived tokens, light and dark separately', () => {
-    const prefs = {
-      ...DEFAULT_PREFS,
-      diff: { lightAdded: '#00aa00', darkAdded: '#00ff00' },
-    } as const;
-    const deriveFor = (p: typeof prefs, isDark: boolean) =>
-      deriveThemeTokens(seedsForPrefs(p, isDark), isDark, semanticOverridesForPrefs(p, isDark));
-
-    applyAppearance(prefs, false);
+  it('writes the fixed semantic diff colors, light and dark separately', () => {
     const root = document.documentElement;
-    expect(root.style.getPropertyValue('--diff-added')).toBe(deriveFor(prefs, false)['--diff-added']);
-    // 没有覆盖的键回落到语义种子（浅色删除色 = SEMANTIC_SEEDS.light.diffRemoved）。
+
+    applyAppearance(DEFAULT_PREFS, false);
+    const lightAdded = root.style.getPropertyValue('--diff-added');
+    expect(lightAdded).toBe(deriveThemeTokens(seedsForPrefs(DEFAULT_PREFS, false), false)['--diff-added']);
+    expect(lightAdded).toBe(rgbToHslTriplet(hexToRgb(SEMANTIC_SEEDS.light.diffAdded)));
     expect(root.style.getPropertyValue('--diff-removed')).toBe(
       rgbToHslTriplet(hexToRgb(SEMANTIC_SEEDS.light.diffRemoved)),
     );
 
-    applyAppearance(prefs, true);
-    // 深色下用的是 darkAdded，不是 lightAdded。
+    applyAppearance(DEFAULT_PREFS, true);
+    // 深色用 dark 种子,不是浅色那套 —— 否则深色下的 diff 会暗到看不见。
     const darkAdded = root.style.getPropertyValue('--diff-added');
-    expect(darkAdded).toBe(deriveFor(prefs, true)['--diff-added']);
-    expect(darkAdded).not.toBe(deriveFor(prefs, false)['--diff-added']);
+    expect(darkAdded).toBe(deriveThemeTokens(seedsForPrefs(DEFAULT_PREFS, true), true)['--diff-added']);
+    expect(darkAdded).not.toBe(lightAdded);
     expect(root.style.getPropertyValue('--diff-removed')).toBe(
       rgbToHslTriplet(hexToRgb(SEMANTIC_SEEDS.dark.diffRemoved)),
     );
   });
 
-  it('drops malformed diff colors instead of writing them into CSS', () => {
-    // 只接受 6 位 hex —— `<input type="color">` 永远给 6 位，3 位/颜色名一律丢弃。
-    expect(sanitizeDiffColors({ lightAdded: 'red', darkRemoved: '#fff', nope: '#000000' })).toEqual({});
-    expect(sanitizeDiffColors({ lightAdded: '#00AA00' })).toEqual({ lightAdded: '#00aa00' });
-    expect(sanitizeDiffColors(null)).toEqual({});
+  it('exposes no diff override seam: the pref has no diff field to carry one', () => {
+    // 外观页的 diff 取色器已经移除,这里钉住「偏好里不存在 diff 覆盖」——
+    // 免得以后又长出一个只能写不能改的幽灵字段。
+    expect('diff' in DEFAULT_PREFS).toBe(false);
     expect(isHexColor('#AABBCC')).toBe(true);
     expect(isHexColor('rgb(0,0,0)')).toBe(false);
   });

@@ -445,17 +445,35 @@ input[type='password']::-ms-reveal {
 }
 
 /* 外观设置里的对比度滑块。
-   `appearance: none` 之后浏览器不再画任何东西 —— 把手得自己给。轨道不是这个控件
-   的事:外面已经画好了「已填充段 + 空轨道」两层并用 pointer-events: none 让开，
-   这里保持透明,免得再叠一条灰杠。焦点环用不透明主色,满足 WCAG 2.2
-   SC 2.4.11 的 3:1。 */
+   轨道不归这个控件管:外面已经画好了「已填充段 + 空轨道」两层并用
+   pointer-events: none 让开,这里全程透明,免得再叠一条灰杠。
+
+   垂直居中要显式做:`appearance: none` 之后 WebKit 不再保证把手对齐轨道中心 ——
+   之前只给 input 一个 6px 的高度,14px 的把手就浮在下面半截,看着没跟线对齐。
+   这里把 input 撑到 16px 当命中区、把 runnable-track 定成同样 6px,再用
+   `margin-top: (6 - 14) / 2` 把把手拉回正中。
+   焦点环用不透明主色,满足 WCAG 2.2 SC 2.4.11 的 3:1。 */
 .contrast-slider {
   background: transparent;
+  height: 16px;
+}
+
+.contrast-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+  border: none;
+}
+
+.contrast-slider::-moz-range-track {
+  height: 6px;
+  background: transparent;
+  border: none;
 }
 
 .contrast-slider::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
+  margin-top: -4px;
   border-radius: var(--radius-full);
   border: 2px solid hsl(var(--background));
   background: var(--color-primary);

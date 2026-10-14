@@ -21,13 +21,15 @@
 
 **对比度滑块** 0–100，深色侧自动 +15（Codex 的 45 / 60 关系），上限截断。
 
-**diff 配色**与状态色**分开**：新增 `--diff-added` / `--diff-removed`（`--color-diff-added` / `--color-diff-removed`），用户可在外观设置里配，按明暗各存一套，每格可单独恢复默认。原有的 `--success` / `--destructive` 保持为固定的状态语义色 —— 否则「MCP 连上了」会跟着「diff 增删色」一起变。
+**diff 配色**与状态色**分开**：新增 `--diff-added` / `--diff-removed`（`--color-diff-added` / `--color-diff-removed`），作为固定语义种子落进派生表，不再跟着强调色或对比度漂移。原有的 `--success` / `--destructive` 保持为固定的状态语义色 —— 否则「MCP 连上了」会跟着「diff 增删色」一起变。
+
+> **后续变更（2026-10-14）**：本票原本还给 diff 配色做了四个取色器放在外观页，实际用下来这个入口没有价值，已整体移除 —— `AppearancePrefs.diff`、`setDiffColor`、`semanticOverridesForPrefs`、`sanitizeDiffColors` 与 `deriveThemeTokens` 的第三个参数一并删掉，`--diff-added` / `--diff-removed` 现在只由语义种子决定。**注意**：Codex 自己的色板里 diff 增删色与 `success` / `destructive` 取的就是同一个色值（浅色删除色 = 危险色 `#ba2623`，深色同理），所以「分开」指的是**变量与语义**分开而不是颜色分开 —— 要「删除行」读 `--diff-removed`，要「失败」读 `--destructive`，两者此后可以各自演化。
 
 迁移的是**确实在展示 diff** 的位置：DiffBlock、DiffView 统计、ReviewPanel 的文件条与 +N/-N、Git 三个 popover 的变更统计、CodeMuxMessageParts 的 diff 统计徽标、FileEditorPanel 的行号色。**没有**迁移的是状态指示器：Subagent 完成/失败图标、错误横幅、worktask 看板的状态 chip —— 那些不是 diff。
 
 **顺带发现并修掉两处误伤**：GitEnvironmentPopover 的 subagent 状态图标、CodeMuxMessageParts 的错误横幅最初被批量替换成了 diff 色，已改回状态色。这类「同一个 `text-success` 有时是状态、有时是 diff」的混淆正是把它们分开的理由。
 
-面板按 Codex 形态重画：强调色板改用预设 hex（不再维护第二份 swatch）、对比度与 diff 配色按分组插入、圆角预览改为直接读 `RADIUS_SCALES`。
+面板按 Codex 形态重画：强调色板改用预设 hex（不再维护第二份 swatch）、对比度按分组插入、圆角预览改为直接读 `RADIUS_SCALES`。外观页随后整体重排为 Codex 的「分组小标题 + 发丝描边卡片 + 左标题右控件」行版式（见 22cdec7）。
 
 ## 代码评审修复
 

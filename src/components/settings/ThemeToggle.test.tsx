@@ -8,7 +8,6 @@ import { ThemeToggle } from './ThemeToggle';
 
 const setUiFontFamily = vi.fn();
 const setContrast = vi.fn();
-const setDiffColor = vi.fn();
 const setUiFontSize = vi.fn();
 
 vi.mock('../../stores/settingsStore', () => ({
@@ -21,8 +20,7 @@ vi.mock('../../stores/appearanceStore', () => ({
     prefs: {
       accent: 'azure',
       contrast: 45,
-      diff: {},
-      uiFontFamily: '',
+        uiFontFamily: '',
       uiFontSize: 14,
       codeFontSize: 13,
       radius: 'soft',
@@ -30,7 +28,6 @@ vi.mock('../../stores/appearanceStore', () => ({
     },
     setAccent: vi.fn(),
     setContrast,
-    setDiffColor,
     setUiFontFamily,
     setUiFontSize,
     setCodeFontSize: vi.fn(),
@@ -41,7 +38,6 @@ vi.mock('../../stores/appearanceStore', () => ({
 }));
 
 import { ACCENTS, accentSwatch, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '../../lib/appearance';
-import { SEMANTIC_SEEDS } from '../../lib/colorDerivation';
 
 vi.mock('../../lib/systemFonts', () => ({
   loadSystemFonts: vi.fn().mockResolvedValue(['Segoe UI', 'Microsoft YaHei UI']),
@@ -52,7 +48,6 @@ describe('ThemeToggle', () => {
     setUiFontFamily.mockClear();
     setUiFontSize.mockClear();
     setContrast.mockClear();
-    setDiffColor.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
@@ -86,22 +81,11 @@ describe('ThemeToggle', () => {
     expect(setContrast).toHaveBeenCalledWith(82);
   });
 
-  it('shows four diff color pickers and writes the picked hex', () => {
+  it('不再提供 diff 取色器 —— 差异标记已从外观页移除', () => {
     render(<ThemeToggle />);
 
-    const added = screen.getByLabelText('浅色 · 新增');
-    const removed = screen.getByLabelText('深色 · 删除');
-    fireEvent.change(added, { target: { value: '#123456' } });
-    fireEvent.change(removed, { target: { value: '#654321' } });
-    expect(setDiffColor).toHaveBeenCalledWith('lightAdded', '#123456');
-    expect(setDiffColor).toHaveBeenCalledWith('darkRemoved', '#654321');
-  });
-
-  it('offers no reset button until a diff color is customized', () => {
-    render(<ThemeToggle />);
-
-    expect(screen.queryByLabelText('浅色 · 新增恢复默认')).toBeNull();
-    expect(screen.getByLabelText('浅色 · 新增')).toHaveProperty('value', SEMANTIC_SEEDS.light.diffAdded);
+    expect(screen.queryByText('差异标记')).toBeNull();
+    expect(document.querySelector('input[type=color]')).toBeNull();
   });
 
   it('按 Codex 的版式:分组小标题 + 左标题右控件的行', () => {

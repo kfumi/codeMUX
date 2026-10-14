@@ -4,7 +4,6 @@ import {
   type AccentKey,
   type AppearancePrefs,
   type ContentWidthKey,
-  type DiffColorKey,
   type RadiusKey,
   ACCENTS,
   CONTENT_WIDTHS,
@@ -14,7 +13,6 @@ import {
   applyAppearance,
   clampContrast,
   clampUiFontSize,
-  isHexColor,
   loadPrefs,
   resolveIsDark,
   savePrefs,
@@ -33,7 +31,6 @@ interface AppearanceState {
   prefs: AppearancePrefs;
   setAccent: (accent: AccentKey) => void;
   setContrast: (contrast: number) => void;
-  setDiffColor: (key: DiffColorKey, value: string | undefined) => void;
   setUiFontFamily: (uiFontFamily: string) => void;
   setUiFontSize: (uiFontSize: number) => void;
   setCodeFontSize: (codeFontSize: number) => void;
@@ -52,17 +49,6 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   },
   setContrast: (contrast) => {
     const prefs = { ...useAppearanceStore.getState().prefs, contrast: clampContrast(contrast) };
-    savePrefs(prefs);
-    apply(prefs);
-    set({ prefs });
-  },
-  setDiffColor: (key, value) => {
-    const current = useAppearanceStore.getState().prefs;
-    const diff = { ...current.diff };
-    // 传 undefined = 恢复默认（删掉覆盖，回落到语义种子）。
-    if (value === undefined || !isHexColor(value)) delete diff[key];
-    else diff[key] = value.trim().toLowerCase();
-    const prefs = { ...current, diff };
     savePrefs(prefs);
     apply(prefs);
     set({ prefs });

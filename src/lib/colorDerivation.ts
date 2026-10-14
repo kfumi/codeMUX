@@ -312,22 +312,16 @@ const DERIVED_CSS_VARIABLES: Partial<Record<keyof DerivedPalette, string>> = {
   textForegroundTertiary: '--foreground-tertiary',
 };
 
-/** 用户的 diff 配色覆盖 —— 明暗各一套。缺省的字段回落到语义种子。 */
-export type SemanticOverrides = Partial<SemanticSeeds>;
-
 /**
  * 把派生结果落成 CodeMUX 的 CSS 变量表：变量名不变，值全部是 HSL 三元组。
  *
  * 消费约定 `hsl(var(--token) / .6)` 因此原样继续工作 —— 全仓数百处引用零改动。
  *
- * `overrides` 是用户可配的语义色（目前只有 diff 增删）；它只影响对应的变量，
- * 不参与任何派生公式。
+ * 语义色(diff / 状态)不进派生公式，直接取固定种子：它们是「这套设计语言的常量」，
+ * 不是跟随强调色或对比度变化的旋钮。之前留过一个用户覆盖口子让外观页能改 diff
+ * 增删色，那个入口已经移除，这里也就不再有覆盖参数。
  */
-export function deriveThemeTokens(
-  seeds: ThemeSeeds,
-  isDark: boolean,
-  overrides: SemanticOverrides = {},
-): Record<string, string> {
+export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<string, string> {
   const palette = derivePalette(seeds, isDark);
   const tokens: Record<string, string> = {};
 
@@ -341,7 +335,7 @@ export function deriveThemeTokens(
   const surface = hexToRgb(seeds.surface);
   const ink = hexToRgb(seeds.ink);
   const accent = hexToRgb(seeds.accent);
-  const semantic = { ...(isDark ? SEMANTIC_SEEDS.dark : SEMANTIC_SEEDS.light), ...overrides };
+  const semantic = isDark ? SEMANTIC_SEEDS.dark : SEMANTIC_SEEDS.light;
   const set = (name: string, rgb: Rgb) => {
     tokens[name] = rgbToHslTriplet(rgb);
   };
