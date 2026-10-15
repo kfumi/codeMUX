@@ -18,6 +18,7 @@ import { cn } from '../../../lib/utils';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { subagentTabTitle, useSubagentStore } from '../../../stores/subagentStore';
+import { summaryPanelViewOf, useSummaryPanelStore } from '../../../stores/summaryPanelStore';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
@@ -222,8 +223,6 @@ function getTotals(files: GitStatusChange[]) {
   );
 }
 
-type GitLoadState = 'idle' | 'loading' | 'ready' | 'unavailable';
-
 function EnvironmentRowSkeleton() {
   return (
     <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5" aria-hidden>
@@ -379,50 +378,102 @@ function EnvironmentSection({
   );
 }
 
-export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath: string; todos?: TodoItem[] }) {
-  const activeSessionId = useSessionStore((state) => state.activeSessionId);
-  const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
-  const [open, setOpen] = useState(false);
-  const [branchOpen, setBranchOpen] = useState(false);
+/** 面板里的动作（打开变更、点子智能体）在浮层档下要把浮层收起；钉住的档位不收。 */
+function closeSummaryPopover() {
+  useSummaryPanelStore.getState().setPopoverOpen(false);
+}
+
+type GitLoadState = 'loading' | 'ready' | 'unavailable';
+
+type GitSnapshot = { state: GitRepositoryState; totals: { additions: number; deletions: number } };
+
+/**
+ * 摘要面板要的仓库信息：挂载即取（面板只在可见时才挂载），项目一换就重取。
+ * 结果带 `cancelled` 守卫 —— 面板现在会在「浮层 / 钉住」两种面之间切换挂载点，
+ * 快速切项目时旧响应不能盖住新的。
+ */
+function useSummaryPanelGitState(projectPath: string) {
   const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [totals, setTotals] = useState({ additions: 0, deletions: 0 });
-  const [branchQuery, setBranchQuery] = useState('');
-  const [gitLoadState, setGitLoadState] = useState<GitLoadState>('idle');
-  const [branchLoading, setBranchLoading] = useState(false);
+  const [gitLoadState, setGitLoadState] = useState<GitLoadState>('loading');
   const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null);
-  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
-  const [branchError, setBranchError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!projectPath) return;
-    setGitLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
-    setUnavailableMessage(null);
+  const fetchGitState = useCallback(async (): Promise<GitSnapshot | { error: string }> => {
+    if (!projectPath) return { error: '当前项目不是 Git 仓库' };
     try {
-      const [nextState, files] = await Promise.all([
+      const [state, files] = await Promise.all([
         daemonFacade.git.getRepositoryState(projectPath),
         daemonFacade.git.getStatusChanges(projectPath, 'unstaged').catch(() => []),
       ]);
-      setRepositoryState(nextState);
-      setTotals(getTotals(files));
-      setGitLoadState('ready');
+      return { state, totals: getTotals(files) };
     } catch (err) {
-      setUnavailableMessage(formatErrorMessage(err));
-      setRepositoryState(null);
-      setTotals({ additions: 0, deletions: 0 });
-      setGitLoadState('unavailable');
+      return { error: formatErrorMessage(err) };
     }
   }, [projectPath]);
 
+  const applySnapshot = useCallback((snapshot: GitSnapshot | { error: string }) => {
+    if ('error' in snapshot) {
+      setUnavailableMessage(snapshot.error);
+      setRepositoryState(null);
+      setTotals({ additions: 0, deletions: 0 });
+      setGitLoadState('unavailable');
+      return;
+    }
+    setUnavailableMessage(null);
+    setRepositoryState(snapshot.state);
+    setTotals(snapshot.totals);
+    setGitLoadState('ready');
+  }, []);
+
   useEffect(() => {
-    setGitLoadState('idle');
+    let cancelled = false;
     setRepositoryState(null);
     setTotals({ additions: 0, deletions: 0 });
     setUnavailableMessage(null);
-  }, [projectPath]);
+    setGitLoadState('loading');
+    void fetchGitState().then((snapshot) => {
+      if (!cancelled) applySnapshot(snapshot);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applySnapshot, fetchGitState]);
 
-  useEffect(() => {
-    if (open) void load();
-  }, [load, open]);
+  const reload = useCallback(async () => {
+    applySnapshot(await fetchGitState());
+  }, [applySnapshot, fetchGitState]);
+
+  return { repositoryState, totals, gitLoadState, unavailableMessage, reload };
+}
+
+/**
+ * 摘要面板的正文：环境信息 / 任务 / 子智能体。
+ *
+ * 它被两张面共用 —— 窄档的浮层（`GitEnvironmentPopover` 的 PopoverContent）与
+ * 宽档钉在对话右侧的内联面（`SummaryPanelSurface`）。数据取用跟着正文走，
+ * 「面板可见」是唯一的取数条件，两种面因此不会有各自的加载时序。
+ */
+export function SummaryPanelBody({
+  projectPath,
+  todos = [],
+  onOpenReview,
+  onOpenSubagent,
+}: {
+  projectPath: string;
+  todos?: TodoItem[];
+  /** 打开「变更」之后要做的动作；缺省什么都不做（钉住的面板留在原地）。 */
+  onOpenReview?: () => void;
+  /** 点开某个子智能体之后要做的动作；缺省什么都不做。 */
+  onOpenSubagent?: () => void;
+}) {
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchQuery, setBranchQuery] = useState('');
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const { repositoryState, totals, gitLoadState, unavailableMessage, reload } = useSummaryPanelGitState(projectPath);
 
   const currentBranch = repositoryState?.detached
     ? 'detached HEAD'
@@ -440,7 +491,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
     try {
       await daemonFacade.git.checkoutBranch(projectPath, branchName);
       setBranchOpen(false);
-      await load();
+      await reload();
     } catch (err) {
       setBranchError(formatErrorMessage(err));
     } finally {
@@ -456,7 +507,7 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
       await daemonFacade.git.createBranch(projectPath, branchName, checkout);
       setBranchDialogOpen(false);
       setBranchOpen(false);
-      await load();
+      await reload();
     } catch (err) {
       setBranchError(formatErrorMessage(err));
     } finally {
@@ -466,61 +517,33 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
 
   return (
     <>
-      <Popover
-        open={open}
-        onOpenChange={(nextOpen) => {
-          if (nextOpen && gitLoadState === 'idle') {
-            setGitLoadState('loading');
-          }
-          setOpen(nextOpen);
+      <EnvironmentSection
+        gitLoadState={gitLoadState}
+        unavailableMessage={unavailableMessage}
+        totals={totals}
+        currentBranch={currentBranch}
+        branchOpen={branchOpen}
+        onBranchOpenChange={setBranchOpen}
+        branchQuery={branchQuery}
+        onBranchQueryChange={setBranchQuery}
+        filteredBranches={filteredBranches}
+        branchLoading={branchLoading}
+        branchError={branchError}
+        onCheckoutBranch={(branchName) => void checkoutBranch(branchName)}
+        onOpenReview={() => {
+          openReviewTab(projectPath);
+          onOpenReview?.();
         }}
-      >
-        <TooltipHint content="切换摘要">
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              data-testid="git-environment-trigger"
-              aria-label="切换摘要"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </PopoverTrigger>
-        </TooltipHint>
-        <PopoverContent
-          align="end"
-          side="bottom"
-          sideOffset={8}
-          className="w-84 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
-        >
-          <EnvironmentSection
-            gitLoadState={gitLoadState}
-            unavailableMessage={unavailableMessage}
-            totals={totals}
-            currentBranch={currentBranch}
-            branchOpen={branchOpen}
-            onBranchOpenChange={setBranchOpen}
-            branchQuery={branchQuery}
-            onBranchQueryChange={setBranchQuery}
-            filteredBranches={filteredBranches}
-            branchLoading={branchLoading}
-            branchError={branchError}
-            onCheckoutBranch={(branchName) => void checkoutBranch(branchName)}
-            onOpenReview={() => {
-              openReviewTab(projectPath);
-              setOpen(false);
-            }}
-            onOpenBranchDialog={() => {
-              setBranchOpen(false);
-              setBranchDialogOpen(true);
-            }}
-          />
+        onOpenBranchDialog={() => {
+          setBranchOpen(false);
+          setBranchDialogOpen(true);
+        }}
+      />
 
-          <TodoSection todos={todos} />
+      <TodoSection todos={todos} />
 
-          <SubagentSection sessionId={activeSessionId} onOpenSubagent={() => setOpen(false)} />
-        </PopoverContent>
-      </Popover>
+      <SubagentSection sessionId={activeSessionId} onOpenSubagent={() => onOpenSubagent?.()} />
+
       <GitBranchDialog
         open={branchDialogOpen}
         loading={branchLoading}
@@ -528,6 +551,74 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
         onOpenChange={setBranchDialogOpen}
         onCreate={(branchName, checkout) => void createBranch(branchName, checkout)}
       />
+    </>
+  );
+}
+
+export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath: string; todos?: TodoItem[] }) {
+  // 档位决定这个按钮是「钉住」还是「开浮层」—— 与 Codex 的 HeaderButton 同构：
+  // overlay 档渲染带 Popover 的按钮，其余档渲染一个纯粹的切换按钮。
+  const availableWidth = useSummaryPanelStore((state) => state.availableWidth);
+  const contentWidth = useSummaryPanelStore((state) => state.contentWidth);
+  const panelWidth = useSummaryPanelStore((state) => state.panelWidth);
+  const isPinned = useSummaryPanelStore((state) => state.isPinned);
+  const isPopoverOpen = useSummaryPanelStore((state) => state.isPopoverOpen);
+  const toggle = useSummaryPanelStore((state) => state.toggle);
+  const setPopoverOpen = useSummaryPanelStore((state) => state.setPopoverOpen);
+
+  const { displayMode } = useMemo(
+    () => summaryPanelViewOf({ availableWidth, contentWidth, panelWidth, isPinned, isPopoverOpen }),
+    [availableWidth, contentWidth, panelWidth, isPinned, isPopoverOpen],
+  );
+
+  const isOverlay = displayMode === 'overlay';
+  const hint = isOverlay
+    ? (isPopoverOpen ? '收起摘要' : '展开摘要')
+    : (isPinned ? '取消钉住摘要' : '钉住摘要');
+
+  const triggerButton = (
+    <button
+      type="button"
+      data-testid="git-environment-trigger"
+      aria-label={hint}
+      aria-pressed={isOverlay ? isPopoverOpen : isPinned}
+      onClick={toggle}
+      className={cn(
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45',
+        !isOverlay && isPinned && 'bg-foreground/8',
+      )}
+    >
+      <SlidersHorizontal className="h-3.5 w-3.5" />
+    </button>
+  );
+
+  return (
+    <>
+      {isOverlay ? (
+        <Popover open={isPopoverOpen} onOpenChange={setPopoverOpen}>
+          <TooltipHint content={hint}>
+            <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+          </TooltipHint>
+          <PopoverContent
+            align="end"
+            side="bottom"
+            sideOffset={8}
+            // 宽度与内联面同源（store 里的 panelWidth = Codex 的 300）：
+            // 跨档切换时面板只挪位置、不变宽窄。
+            style={{ width: panelWidth }}
+            className="rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
+          >
+            <SummaryPanelBody
+              projectPath={projectPath}
+              todos={todos}
+              onOpenReview={closeSummaryPopover}
+              onOpenSubagent={closeSummaryPopover}
+            />
+          </PopoverContent>
+        </Popover>
+      ) : (
+        <TooltipHint content={hint}>{triggerButton}</TooltipHint>
+      )}
     </>
   );
 }

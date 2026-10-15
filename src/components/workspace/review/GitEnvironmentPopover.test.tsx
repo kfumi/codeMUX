@@ -32,12 +32,15 @@ vi.mock('./GitBranchDialog', () => ({
 
 import { GitEnvironmentPopover } from './GitEnvironmentPopover';
 import { useSubagentStore } from '../../../stores/subagentStore';
+import { useSummaryPanelStore } from '../../../stores/summaryPanelStore';
 
 describe('GitEnvironmentPopover', () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // 摘要面板的开合是全局 store 状态（宽档下还要看测量到的对话列宽度），用例之间必须复位。
+    useSummaryPanelStore.getState().reset();
     useSubagentStore.setState({
       sessions: {},
       continuationPending: {},
@@ -289,5 +292,39 @@ describe('GitEnvironmentPopover', () => {
     await screen.findByText('环境信息');
 
     expect(screen.queryByTestId('git-environment-subagents')).toBeNull();
+  });
+
+  it('宽档下按钮改管「钉住」，浮层不再出现（Codex 的同一套语义）', async () => {
+    // 对话列够宽（gutter 档）：正文两侧空槽放得下面板，按钮变成钉住开关。
+    useSummaryPanelStore.getState().setMetrics({ availableWidth: 1600, contentWidth: 768 });
+
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    const trigger = screen.getByTestId('git-environment-trigger');
+    expect(trigger.getAttribute('aria-label')).toBe('钉住摘要');
+    expect(trigger.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(trigger);
+    expect(useSummaryPanelStore.getState().isPinned).toBe(true);
+    expect(useSummaryPanelStore.getState().isPopoverOpen).toBe(false);
+    // 内联面由 MainLayout 挂，这里只保证没有再开一张浮层。
+    expect(screen.queryByText('环境信息')).toBeNull();
+
+    await waitFor(() => expect(trigger.getAttribute('aria-label')).toBe('取消钉住摘要'));
+
+    fireEvent.click(trigger);
+    expect(useSummaryPanelStore.getState().isPinned).toBe(false);
+  });
+
+  it('窄档下按钮管的是浮层，标签回到「展开/收起摘要」', () => {
+    // 默认（未测量/窄）就是 overlay 档 —— 与 Codex 里按钮文案随档位切换一致。
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    const trigger = screen.getByTestId('git-environment-trigger');
+    expect(trigger.getAttribute('aria-label')).toBe('展开摘要');
+
+    fireEvent.click(trigger);
+    expect(useSummaryPanelStore.getState().isPopoverOpen).toBe(true);
+    expect(useSummaryPanelStore.getState().isPinned).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import { type ReactNode } from 'react';
 import { MainLayout } from './MainLayout';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { useShellLayoutStore } from '../../stores/shellLayoutStore';
+import { useSummaryPanelStore } from '../../stores/summaryPanelStore';
 
 const titleBarProps: Record<string, unknown>[] = [];
 
@@ -51,6 +52,14 @@ vi.mock('../workspace/SidePanel', () => ({
   ),
 }));
 
+// 摘要面板的内联面浮在对话列里；这里只关心它挂没挂上、对话列让没让位，
+// 面板自身的渲染归 SummaryPanelSurface.test.tsx。
+vi.mock('../workspace/review/SummaryPanelSurface', () => ({
+  SummaryPanelSurface: ({ projectPath }: { projectPath?: string | null }) => (
+    <div data-testid="summary-panel-surface" data-project={String(projectPath)} />
+  ),
+}));
+
 /** 标题栏里那条控制条（收起侧栏 + 后退/前进 + 附件）的容器。 */
 function controlsHost(): HTMLElement | null {
   return document.querySelector('[data-testid="title-bar"]');
@@ -67,6 +76,9 @@ describe('MainLayout', () => {
     // 侧栏收起/抽屉开合现在是布局 store 里的全局状态（可绑定命令要用），
     // 用例之间必须复位，否则前一个用例点过「收起侧栏」会漏给后面的用例。
     useShellLayoutStore.setState({ sidebarCollapsed: false, narrowSidebarOpen: false });
+    // 摘要面板的档位来自测量值：测试里没有排版，得手动给一份，
+    // 否则永远停在 overlay（面板挂标题栏浮层）。
+    useSummaryPanelStore.getState().reset();
     windowState.maximized = false;
   });
 
@@ -90,8 +102,42 @@ describe('MainLayout', () => {
     expect(shell?.firstElementChild).toBe(document.querySelector('[data-testid="title-bar"]'));
   });
 
-  it('puts the controls in the full-width title bar and drops the floating overlay', () => {
+  it('宽档钉住摘要时给对话列让位，并把内联面挂进对话列', () => {
+    useSummaryPanelStore.getState().setMetrics({ availableWidth: 1400, contentWidth: 768 });
+    useSummaryPanelStore.getState().setPinned(true);
+
     render(
+      <MainLayout sidebar={<div>sidebar</div>} projectOpenPath="D:/project/app">
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const pane = document.querySelector('[data-conversation-pane]') as HTMLElement;
+    // shift 档：对话列右侧留出面板占位（300 + 8），正文列随之左移半个占位宽。
+    expect(pane.style.paddingRight).toBe('308px');
+
+    const surface = document.querySelector('[data-testid="summary-panel-surface"]');
+    // 面板浮在**对话列里面**：它跟正文是同一层的邻居，不能跑到内容面之外。
+    expect(surface).toBeTruthy();
+    expect(pane.contains(surface)).toBe(true);
+  });
+
+  it('空槽够宽（gutter 档）时面板落进空槽，对话列不让位', () => {
+    useSummaryPanelStore.getState().setMetrics({ availableWidth: 1920, contentWidth: 768 });
+    useSummaryPanelStore.getState().setPinned(true);
+
+    render(
+      <MainLayout sidebar={<div>sidebar</div>} projectOpenPath="D:/project/app">
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const pane = document.querySelector('[data-conversation-pane]') as HTMLElement;
+    expect(pane.style.paddingRight).toBe('');
+    expect(document.querySelector('[data-testid="summary-panel-surface"]')).toBeTruthy();
+  });
+
+  it('puts the controls in the full-width title bar and drops the floating overlay', () => {    render(
       <MainLayout sidebar={<div>sidebar</div>} sidebarAccessory={<button>更新</button>}>
         <div>content</div>
       </MainLayout>,
