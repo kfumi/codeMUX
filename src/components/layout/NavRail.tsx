@@ -5,15 +5,21 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { selectAttentionCount, useWorkTaskStore } from '../../stores/workTaskStore';
 import { cn } from '../../lib/utils';
 import { TooltipHint } from '../ui/tooltip';
+import { CompanionRailButton } from '../companion/CompanionRailButton';
+import { ProxyRailStatus } from './ProxyRailStatus';
 
 /**
- * 导航栏 —— 承载三个顶层视图 + 置底的设置。
+ * 导航栏 —— 承载三个顶层视图 + 置底的状态与设置。
  *
  * 对齐 Codex：顶层导航从「侧栏里的文字按钮」提到「窗口最左侧的窄图标栏」，
  * 侧栏随之降级为「随导航栏当前项切换的上下文侧栏」。
  *
+ * 底部三格从下往上：**设置**（顶层导航的最后一项）、**移动伴侣**、**Proxy 状态灯**。
+ * 后两者原先长在侧栏页脚（见 04 工单的「页脚上移」），与设置同属「全局 / 不随上下文变」的一类，
+ * 因此一起收进这条常驻的图标轨 —— 侧栏切到自动化 / 工单时它们也在，不再随侧栏内容消失。
+ *
  * 宽度按 Codex 实测约 56px 取整（`NAV_RAIL_WIDTH`），图标 18px、按钮 40×40、
- * 圆角走阶梯的 md 档。
+ * 圆角走阶梯的 md 档。tooltip 一律开在**右侧**：这条轨钉在窗口最左边，往上开会盖住相邻的图标。
  */
 
 export const NAV_RAIL_WIDTH = 56;
@@ -50,7 +56,7 @@ export function NavRail({ activeTarget, onSelect }: NavRailProps) {
     const hint = hintFor(item);
     const showBadge = item.target === 'todo' && attentionCount > 0;
     return (
-      <TooltipHint key={item.target} content={`${item.label}${hint ? ` · ${hint}` : ''}`}>
+      <TooltipHint key={item.target} side="right" content={`${item.label}${hint ? ` · ${hint}` : ''}`}>
         <button
           type="button"
           onClick={() => onSelect(item.target)}
@@ -61,10 +67,14 @@ export function NavRail({ activeTarget, onSelect }: NavRailProps) {
             'relative flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-fast',
             // 焦点环用不透明主色 + 外偏移：`ring-ring/45` 压在近白表面上只有
             // 约 2:1，达不到 WCAG 2.2 SC 2.4.11 对焦点指示的 3:1。
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--sidebar-bg))]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--chrome-bg))]',
+            // 选中/悬停档取 `--chrome-bg-hover`：这里压在**窗口面**上，那一档是
+            // 窗口面往 ink 方向走一档（浅色更深、深色更亮），与 Codex 的
+            // `buttonTertiaryBackgroundHover` 同一套公式。沿用侧栏的 `--sidebar-muted`
+            // 压在窗口面上只剩几级差，等于没按。
             active
-              ? 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--foreground))]'
-              : 'text-muted-foreground hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--foreground))]',
+              ? 'bg-[hsl(var(--chrome-bg-hover))] text-[hsl(var(--foreground))]'
+              : 'text-muted-foreground hover:bg-[hsl(var(--chrome-bg-hover))] hover:text-[hsl(var(--foreground))]',
           )}
         >
           <item.Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
@@ -83,10 +93,13 @@ export function NavRail({ activeTarget, onSelect }: NavRailProps) {
       aria-label="主导航"
       data-nav-rail
       style={{ width: NAV_RAIL_WIDTH }}
-      className="flex shrink-0 flex-col items-center gap-1 bg-[hsl(var(--sidebar-bg))] py-2.5"
+      // 图标轨不画自己的底色：它就是**窗口面**的左半边，与顶栏条连成一片 L 形。
+      className="flex shrink-0 flex-col items-center gap-1 py-2.5"
     >
       {MAIN_ITEMS.map(renderItem)}
       <div className="flex-1" />
+      <ProxyRailStatus />
+      <CompanionRailButton />
       {renderItem(SETTINGS_ITEM)}
     </nav>
   );

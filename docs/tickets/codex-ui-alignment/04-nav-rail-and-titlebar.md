@@ -21,3 +21,58 @@
 
 - 导航栏焦点环原本是 `ring-ring/45`，压在近白表面上约 2:1，达不到 WCAG 2.2 SC 2.4.11 对焦点指示的 3:1；改为不透明 `ring-2 ring-ring` + 外偏移。
 - 导航栏的文字色从 `text-[hsl(var(--sidebar-fg))]` 换成语义工具类（`text-foreground` / `text-muted-foreground`），与侧栏其余部分统一 —— 此前它是全仓最后一处还对 sidebar token 写任意值的文字。
+
+## 视觉复核修复：窗口面（顶栏 + 图标轨）没连起来
+
+对着 Codex 桌面端截图复核外壳，实测出三处不对（数值取自 Codex 窗口截图与它自己的 CSS：`--app-shell-panel-background: transparent`、顶栏 `bg-[var(--codex-titlebar-tint,transparent)]`、侧栏 `border-start-start-radius: var(--radius-xl-base)`）：
+
+| | Codex | 改之前 | 改之后 |
+|---|---|---|---|
+| 顶栏条 | 245 | 252 | 244 |
+| 图标轨 | 245（与顶栏同色连续） | 252 | 244（同色连续） |
+| 侧栏 | 252 | 252 | 252 |
+| 内容面 | 255 | 253 | 253 |
+
+1. **顶栏与图标轨没连成一片**：标题栏自己带 `border-b border-border`，那条线**横切过图标轨和侧栏**（实测顶栏下缘 y=47 在轨与侧栏上方都画了一道 239 的线）。Codex 的顶栏是 `transparent`，与图标轨共用窗口面，接缝根本不存在。现在标题栏与图标轨都不画底色，底由 `.app-shell` 提供；侧栏与内容面各自带发丝描边，边界一个不少。
+2. **没有「窗口面」这一档**：`.app-shell`、图标轨、侧栏、内容面之间的空气全部落在同一个近白值上，整扇窗是平的。Codex 的窗口面来自系统 Mica 背板（它有 `translucentSidebar` 开关与 `isSystemBackdropSupported` 探测），我们没有原生背板，于是新增派生键 `chromeBackground` / `chromeBackgroundHover`（`--chrome-bg` / `--chrome-bg-hover`，`mix(surface, ink, …)`，浅色比表面深一档、深色比表面亮一档）。三道平面因此成立：窗框 < 侧栏 < 内容面。
+3. **侧栏没读成面板**：Codex 的侧栏左侧两角是圆角（`border-start-start-radius` + `border-end-start-radius`），窗口面从缺口里露出来。现在侧栏跟着内容面一起在浮起态（`contentFloats`）套 `rounded-l-xl`。
+4. 顺带：导航栏的选中/悬停档从 `--sidebar-muted` 换成 `--chrome-bg-hover` —— 它压在窗口面上，沿用侧栏那档浅色下只剩 5 级差，等于没按（焦点环的 offset 底色同样是 `--chrome-bg`）。
+5. **内容面的切角条件反过来**（细节与理由见 05）：原先「侧栏停靠 → 内容面切左角」，现在侧栏展开时内容面直角贴边（Codex 实测就是直角），侧栏收起、左边变成图标轨时才切角。窗口面这一档上线后，缺口里露出的颜色从侧栏色变成更深的窗框色，原来那对圆角会变成两个「被咬掉一口」的灰台阶 —— 侧栏左角（左边是图标轨）继续切，内容面左角（左边是侧栏）不再切。
+
+测试：`colorDerivation.test.ts` 冻结表补两个键，并新增「三道平面互不相同」的不变量（浅色 chrome < 背景 < surface-1，深色 chrome > 背景、hover > chrome）；`MainLayout.test.tsx` 的两条分层契约 + 五条切角契约按新规则重写（展开 → 直角、收起 → 切角、浏览器/窄屏/最大化 → 直角）。
+
+## 深色复核修复：窗口面在深色下走反了方向（2026-10-14）
+
+上面第 2 条当时给窗口面定的规则是「浅色比表面深一档、**深色比表面亮一档**」—— 那是为了让纯黑表面上还能看出层次而临时定的。
+拿无损抓图（`PrintWindow`，绕开 CUA 的 JPEG 抖动）量真实 Codex 之后，发现方向反了：
+
+| | Codex 深色实测 | 改之前 | 改之后 |
+|---|---|---|---|
+| 顶栏条 / 图标轨 | **14** | 9 | **14** |
+| 侧栏 | 16 | 0 | 17 |
+| 内容面 | 17 | 31 | 17 |
+| composer 输入框 | 47 | 31 | 45 |
+| composer 上下文条 | 33 | 31 | 32 |
+
+两处根因：
+
+1. **窗口面就是 Codex 的 `surfaceUnder`**（`Fba`：浅色 `mix(surface, ink, .04 + (c-.45)*.0012)`、深色 `mix(surface, black, .16 + (c-.6)*.0015)`），**两套主题都是「比表面更深」**。原先的 `mix(surface, ink, .025 + c*.02)` 在深色下只能往亮走，方向必然反。换成 `surfaceUnder` 后浅色 244 → 242（Codex 用白种子时是 245，同一公式）、深色 9 → 14，与 Codex 逐位一致。
+2. **深色种子不能再是纯黑**：`surfaceUnder` 在深色下往**黑**混，表面压在 `#000000` 就无处可退，窗口面/侧栏/内容面会塌成同一个黑。Codex 包体里深色表面有 `#000000`（`cya` 预设）与 `#181818`（`KJ` 默认表）两个值，用户实机配的是 `#111111` —— 取后者，与用户看到的 Codex 一致。这一条同时带动 `themeBoot` 的启动底色与 Electron 窗口 `backgroundColor`。
+
+悬停档跟着窗口面重算：`--chrome-bg-hover` 现在是「窗口面往 ink 走一档」（Codex 的 `buttonTertiaryBackgroundHover`，浅色 `.08+c*.04` / 深色 `.05+c*.03`），浅色 238 → 220、深色 23 → 29。测试里的「三道平面」不变量同步改成：**两套主题下 chrome 都更深**，且侧栏与内容面的明度差 < 1。
+
+## 页脚上移：Proxy 状态与移动伴侣并入图标轨（2026-10-15）
+
+侧栏页脚那一条（`border-t` + 「• Proxy :4312」+ 手机图标）整条删掉，两项搬进图标轨底部，与设置排成一列，顺序从下往上：**设置 / 移动伴侣 / Proxy 状态灯**。
+
+理由不只是省地方：这两项与设置同属「全局、不随上下文变」的一类，而侧栏是**随导航栏当前项切换的上下文侧栏** —— 切到自动化 / 工单时侧栏内容整个换掉，页脚却还挂着，位置和语义都对不上。收进常驻的图标轨之后，无论侧栏显示什么它们都在。
+
+**Proxy 状态灯**（`ProxyRailStatus.tsx`）：56px 的轨里放不下「Proxy :4312」这行字，于是把状态交给**图标颜色** —— 运行中是成功色（与正下方的移动伴侣同一套语言：绿 = 通着），未运行是次级文字色；端口与来源进 tooltip，信息一点没丢。它是只读状态、不是按钮（点它没有去处），但保留 `tabIndex` + `role="status"`，键盘用户也能聚焦读到 tooltip。
+
+> 试过「中性图标 + 右上角一颗状态灯」：在 40×40 的格子里那颗灯离图标太远，看着像浮在按钮角上的一粒灰；压到图标肩上又会撞上 `Radio` 那两道弧。这个尺寸下颜色就是最干净的表达。
+
+**移动伴侣**（`CompanionRailButton.tsx`，由 `CompanionSidebarButton` 改名）：换的是那一套平面 token —— 图标轨压在**窗口面**上，悬停档因此取 `--chrome-bg-hover` 而不是侧栏的 `--sidebar-muted`，焦点环外偏移底色也是窗口面。图标颜色仍然承担状态（绿 = 已配对 / 琥珀 = 等待或重连 / 次级 = 未启用）。
+
+**tooltip 一律开到右侧**：这条轨钉在窗口最左边，往上开会盖住相邻的图标，所以连原有四项的 tooltip 也一起从 `top` 改成 `right`，整条轨一种行为。
+
+测试：`NavRail.test.tsx` 的排布契约改成「三视图 → 弹性空隙 → 状态灯 → 移动伴侣 → 设置」；`Sidebar.test.tsx` 新增一条「页脚整条消失」；`ProxyRailStatus.test.tsx` 与 `CompanionRailButton.test.tsx` 分别钉住状态色与平面 token（后者显式断言不再出现 `--sidebar-muted`）。

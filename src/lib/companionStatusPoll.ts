@@ -4,7 +4,7 @@ import type { CompanionRelayStatus, CompanionStatus, PairedDevice } from '../typ
 /**
  * 移动伴侣状态的**模块级单例**轮询器。
  *
- * 桌面端有两个消费方(SessionList 15s / CompanionSidebarButton 12s),以前各自
+ * 桌面端有两个消费方(SessionList 15s / CompanionRailButton 12s),以前各自
  * 起一个定时器、各自请求、各自 setState,每个 tick 还会把 loading 从 false 翻到
  * true 再翻回来,于是每 12s/15s 各带来两次重渲染。现在只有一个定时器、一个请求、
  * 一份共享状态:

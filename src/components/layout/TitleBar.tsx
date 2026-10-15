@@ -118,7 +118,10 @@ export function TitleBar({
       <ContextMenuTrigger asChild>
         <div
           data-app-drag-region
-          className="relative z-20 flex h-12 shrink-0 select-none items-stretch border-b border-border bg-[hsl(var(--background))]"
+          // 标题栏是**窗口面**本身，不自己画底色，也不画下边线：它与左侧图标轨共用
+          // `.app-shell` 的那块底，连着画才不会在轨道的正上方横切一道线。内容面与
+          // 侧栏各自带发丝描边（elevation / border-r），边界不缺。
+          className="relative z-20 flex h-12 shrink-0 select-none items-stretch"
         >
           {leftContent && (
             <div className="flex h-full items-center pl-2">

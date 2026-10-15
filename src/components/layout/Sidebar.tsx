@@ -6,11 +6,8 @@ import { createLogger, serializeError } from '../../lib/logger';
 import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
 import { useChatSearchStore } from '../../stores/chatSearchStore';
 import { useProjectStore } from '../../stores/projectStore';
-import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { Project } from '../../types/project';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
 import { ProjectExplorer } from '../workspace/ProjectExplorer';
@@ -32,9 +29,6 @@ interface SidebarProps {
  */
 export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
-  const proxyRunning = useSettingsStore((s) => s.proxyRunning);
-  const proxyUrl = useSettingsStore((s) => s.proxyUrl);
-  const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const chatSearchOpen = useChatSearchStore((state) => state.isOpen);
   const setChatSearchOpen = useChatSearchStore((state) => state.setOpen);
   // 搜索框挂在侧边栏里：切到设置页时侧边栏被替换、搜索框随之卸载，
@@ -126,24 +120,6 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
           onAddProject={handleAddProject}
           onSelectSession={onSelectSession}
         />
-      </div>
-
-      <div className="flex items-center gap-1 border-t border-[hsl(var(--sidebar-border))]/45 px-3 py-2.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
-              <span className={proxyRunning ? 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-fg))]/30'} />
-              <span>{proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy'}</span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>
-              {proxyRunning ? `由当前 Codex 会话自动运行 (${proxyUrl})` : '由 Codex 档案在会话启动时按需运行'}
-            </p>
-          </TooltipContent>
-        </Tooltip>
-        <div className="flex-1" />
-        <CompanionSidebarButton />
       </div>
 
       <ChatSearchDialog

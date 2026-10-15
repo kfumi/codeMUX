@@ -13,7 +13,6 @@ vi.mock('../../lib/shortcuts/shortcutPlatform', () => ({
 // 这个文件只关心上下文侧栏里剩下的两个入口上的键位提示，子面板各自有测试。
 vi.mock('../session/SessionList', () => ({ SessionList: () => <div /> }));
 vi.mock('../workspace/ProjectExplorer', () => ({ ProjectExplorer: () => <div /> }));
-vi.mock('../companion/CompanionSidebarButton', () => ({ CompanionSidebarButton: () => <div /> }));
 vi.mock('./ChatSearchDialog', () => ({ ChatSearchDialog: () => <div /> }));
 vi.mock('../../stores/projectStore', () => ({
   useProjectStore: (selector: (state: { fetchProjects: () => void }) => unknown) =>
@@ -23,7 +22,7 @@ vi.mock('../../stores/projectStore', () => ({
 const noop = () => {};
 
 function renderSidebar() {
-  render(
+  return render(
     <TooltipProvider>
       <Sidebar
         onNewSession={noop}
@@ -74,5 +73,17 @@ describe('Sidebar 的键位提示', () => {
     for (const label of ['自动化', '待办任务', '工单', '设置']) {
       expect(screen.queryByText(label), label).toBeNull();
     }
+  });
+
+  it('页脚整条消失：Proxy 状态与移动伴侣都搬进了导航栏', () => {
+    const { container } = renderSidebar();
+
+    // 它们原先钉在这个页脚里，现在与设置同属「全局 / 不随上下文变」的一类，
+    // 收进常驻的图标轨（见 NavRail.test.tsx 的排布契约）。这里同样只钉「不再重复出现」。
+    expect(screen.queryByText('Proxy')).toBeNull();
+    expect(screen.queryByText(/^Proxy :/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '移动伴侣' })).toBeNull();
+    // 页脚那条上边框也一并删掉 —— 底部不再需要一条分隔线。
+    expect(container.querySelectorAll('.border-t').length).toBe(0);
   });
 });

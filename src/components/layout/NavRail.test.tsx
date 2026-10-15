@@ -20,6 +20,22 @@ vi.mock('../../stores/workTaskStore', () => ({
   selectAttentionCount: workTaskState.selectAttentionCount,
 }));
 
+// 移动伴侣那一格会去轮询 daemon；图标轨的测试只关心排布，状态由 ProxyRailStatus /
+// CompanionRailButton 各自的测试覆盖（口径与 SessionList.test 一致）。
+vi.mock('../../hooks/useCompanionStatus', () => ({
+  useCompanionStatus: () => ({
+    status: null,
+    loading: false,
+    busy: false,
+    error: null,
+    loadStatus: vi.fn(),
+    setEnabled: vi.fn(),
+    refreshPairingCode: vi.fn(),
+    setRelayEnabled: vi.fn(),
+    setRelayConfig: vi.fn(),
+  }),
+}));
+
 const select = vi.fn();
 
 function renderRail(activeTarget: Parameters<typeof NavRail>[0]['activeTarget'] = 'app') {
@@ -38,7 +54,7 @@ describe('NavRail', () => {
 
   afterEach(() => cleanup());
 
-  it('carries the three top-level views and pins settings at the bottom', () => {
+  it('carries the three top-level views, then the status row, and pins settings at the bottom', () => {
     renderRail();
 
     const nav = screen.getByRole('navigation', { name: '主导航' });
@@ -46,19 +62,21 @@ describe('NavRail', () => {
     // 宽度对齐 Codex 实测的约 56px。
     expect((nav as HTMLElement).style.width).toBe(`${NAV_RAIL_WIDTH}px`);
 
-    for (const label of ['会话', '自动化', '工单', '设置']) {
+    for (const label of ['会话', '自动化', '工单', '移动伴侣', '设置']) {
       expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
     }
 
-    // 设置是最后一个，且前面有一段弹性空隙把它压到底部。
+    // 底部三格从下往上：设置（最后）、移动伴侣、Proxy 状态灯；前面一段弹性空隙把整组压到底部。
     const buttons = Array.from(nav.querySelectorAll('button'));
     expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([
       '会话',
       '自动化',
       '工单',
+      '移动伴侣',
       '设置',
     ]);
-    expect(buttons[3].previousElementSibling?.className).toContain('flex-1');
+    expect(buttons[3].previousElementSibling?.getAttribute('role')).toBe('status');
+    expect(buttons[3].previousElementSibling?.previousElementSibling?.className).toContain('flex-1');
   });
 
   it('reports the clicked target', () => {

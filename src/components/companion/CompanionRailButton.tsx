@@ -4,7 +4,7 @@ import { Smartphone } from 'lucide-react';
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
 import { getCompanionVisualState, companionVisualStateLabel } from '../../lib/companion';
 import { cn } from '../../lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { TooltipHint } from '../ui/tooltip';
 import { CompanionDialog } from './CompanionDialog';
 
 function iconClassForState(visualState: ReturnType<typeof getCompanionVisualState>): string {
@@ -14,7 +14,7 @@ function iconClassForState(visualState: ReturnType<typeof getCompanionVisualStat
   if (visualState === 'waiting' || visualState === 'reconnecting') {
     return 'text-[hsl(var(--warning))]';
   }
-  return 'text-[hsl(var(--sidebar-fg))]/66';
+  return 'text-muted-foreground';
 }
 
 function tooltipForState(visualState: ReturnType<typeof getCompanionVisualState>): string {
@@ -22,7 +22,14 @@ function tooltipForState(visualState: ReturnType<typeof getCompanionVisualState>
   return `移动伴侣：${companionVisualStateLabel(visualState)}`;
 }
 
-export function CompanionSidebarButton() {
+/**
+ * 移动伴侣入口 —— 图标轨上的一格，与 Proxy 状态灯、设置排在一起。
+ *
+ * 从侧栏页脚搬过来时换了那一套平面 token：图标轨压在**窗口面**上，悬停档因此取
+ * `--chrome-bg-hover`（不是侧栏的 `--sidebar-muted`），焦点环的外偏移底色也是窗口面。
+ * 图标颜色仍然承担状态（绿 = 已配对 / 琥珀 = 等待或重连 / 次级 = 未启用）。
+ */
+export function CompanionRailButton() {
   const [open, setOpen] = useState(false);
   const controller = useCompanionStatus({ pollIntervalMs: 12_000, polling: true });
   const visualState = getCompanionVisualState(controller.status);
@@ -36,24 +43,21 @@ export function CompanionSidebarButton() {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={handleOpen}
-            aria-label="移动伴侣"
-            className={cn(
-              'flex shrink-0 items-center rounded-md p-2 transition-colors duration-fast hover:bg-[hsl(var(--sidebar-muted))]/78',
-              iconClassForState(visualState),
-            )}
-          >
-            <Smartphone className="h-4 w-4" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          <p>{tooltipForState(visualState)}</p>
-        </TooltipContent>
-      </Tooltip>
+      <TooltipHint side="right" content={tooltipForState(visualState)}>
+        <button
+          type="button"
+          onClick={handleOpen}
+          aria-label="移动伴侣"
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors duration-fast',
+            'hover:bg-[hsl(var(--chrome-bg-hover))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--chrome-bg))]',
+            iconClassForState(visualState),
+          )}
+        >
+          <Smartphone className="h-[18px] w-[18px]" strokeWidth={1.75} />
+        </button>
+      </TooltipHint>
 
       <CompanionDialog open={open} onOpenChange={setOpen} controller={controller} />
     </>

@@ -13,6 +13,8 @@ import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
 import { NavRail, type NavRailTarget } from './NavRail';
+import { NarrowNavFooter } from './NarrowNavFooter';
+import { NarrowNavSwitcher } from './NarrowNavSwitcher';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
 import { TitleBar, type TitleBarNavigation } from './TitleBar';
 
@@ -140,10 +142,14 @@ export function MainLayout({
   const sidebarVisible = isNarrow ? narrowSidebarOpen : !sidebarCollapsed;
   const hostForm = useDaemonConnectionStore((state) => state.hostForm);
   const windowMaximized = useWindowMaximized();
-  // 内容面的圆角裁切与页面浮层:主聊天区从窗口边缘「浮起来」。窗口最大化、
-  // 浏览器与手机形态时,内容面贴满视口,圆角只会剩一条没来由的缺角,所以直线到底。
+  // 内容面切不切左角，只看它**左边挨着谁**（Codex 的同一套判断）：
+  //  - 侧栏展开：内容面贴着一块同样是面板的侧栏 → 直角贴边，靠侧栏那条发丝线分家。
+  //    这里切圆角会凭空咬出一个口子（缺口里露出来的是更深的窗口面），看着像磕坏的一角。
+  //  - 侧栏收起：内容面左边是图标轨/窗口面 → 可以切角，缺口里露出的窗口面与顶栏连成一片。
+  //  - 最大化 / 浏览器 / 手机形态：内容面贴满视口，圆角只会剩一条没来由的缺角，直线到底。
   const sidebarDocked = sidebar != null && sidebarVisible && !isNarrow;
-  const contentFloats = sidebarDocked && hostForm === 'desktop' && !windowMaximized;
+  const contentFloats = sidebar != null && !sidebarVisible && !isNarrow
+    && hostForm === 'desktop' && !windowMaximized;
 
   const sidebarToggleButton = sidebar != null ? (
     <TooltipHint content={sidebarVisible ? `收起侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}` : `展开侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}`}>
@@ -199,7 +205,10 @@ export function MainLayout({
   return (
     <div
       className={cn(
-        'app-shell flex flex-col bg-background text-foreground',
+        // 外壳底色 = **窗口面**：顶栏条与左侧图标轨连成的那块底（Codex 的窗口面
+        // 来自系统背板，我们是 `--chrome-bg` 这一档，见 colorDerivation）。
+        // 顶栏与图标轨都透明，于是这两块天然连成一片，中间不可能有缝。
+        'app-shell flex flex-col bg-[hsl(var(--chrome-bg))] text-foreground',
         isNarrow ? 'h-[100dvh]' : 'h-screen',
       )}
     >
@@ -227,7 +236,14 @@ export function MainLayout({
           />
         )}
 
-        {sidebar != null && navRailTarget && onNavRailSelect && (
+        {/*
+          图标轨只在桌面形态渲染。它是桌面解法:常驻在窗口最左边、靠 hover tooltip
+          说明图标含义;窄屏上继续占着这 56px,390px 的手机就只剩 334px 给内容。
+          窄屏下顶层导航改由抽屉承载 —— 视图切换在抽屉顶部分段行,Proxy 状态 /
+          移动伴侣 / 设置在抽屉页脚(见 NarrowNavSwitcher / NarrowNavFooter),
+          入口一个不少,内容区拿回全宽。
+        */}
+        {sidebar != null && navRailTarget && onNavRailSelect && !isNarrow && (
           <NavRail activeTarget={navRailTarget} onSelect={onNavRailSelect} />
         )}
 
@@ -238,13 +254,18 @@ export function MainLayout({
               // 纯色，blur 对纯色是恒等变换；而它面积大、桌面形态下常驻，整屏模糊
               // 只有开销没有观感收益。窄屏抽屉复用同一 className，靠 88% 不透明底色已足够可读。
               // 不变量见 MainLayout.test.tsx（含源码级契约）。
-              // 侧栏与导航栏共用**窗口表面**（Codex 的 rail 与 sidebar 同色，
-              // 只有内容面浮起来）；选中态由 `--sidebar-muted` 承担。
+              // 侧栏是**窗口面之上的第一层浮起面板**（Codex 的 sidebar 也如此：窗口面是
+              // 一条更深的「窗框」，侧栏与内容面依次更亮）。左侧两角切圆角，窗口面就在
+              // 缺口里露出来 —— 这是 Codex 里「面板浮在窗框上」的读数来源（Codex 用
+              // `border-start-start-radius` + `border-end-start-radius` 做同一件事）。
               'overflow-hidden bg-[hsl(var(--sidebar-bg))]',
+              sidebarDocked && 'rounded-l-xl',
               isNarrow
                 // 抽屉宽度跟随视口但稍宽于桌面侧栏默认值；顶部让出标题栏那条，
                 // 底部的收起按钮因此留在标题栏里，不用在抽屉里复制一份。
-                ? cn('fixed bottom-0 left-0 z-50 w-[92vw] max-w-96 shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]', TITLE_BAR_HEIGHT_CLASS)
+                // 窄屏抽屉内部是「分段切换器 / 上下文侧栏 / 页脚」三段，所以这一支
+                // 走 flex 列布局；桌面形态保持块布局不变（唯一子节点 h-full）。
+                ? cn('fixed bottom-0 left-0 z-50 flex w-[92vw] max-w-96 flex-col shadow-[18px_0_44px_-30px_hsl(var(--surface-shadow-strong)/0.6)]', TITLE_BAR_HEIGHT_CLASS)
                 : 'relative shrink-0 border-r border-[hsl(var(--layout-divider))]',
               sidebarResizing ? 'transition-none' : 'transition-[width,opacity,transform] duration-slow ease-motion-in-out',
             )}
@@ -261,12 +282,21 @@ export function MainLayout({
                 }}
             aria-hidden={isNarrow ? !narrowSidebarOpen : sidebarCollapsed}
           >
+            {/* 窄屏:顶层视图切换收进抽屉顶部分段行(图标轨的窄屏等价物),页脚再收
+                Proxy 状态 / 移动伴侣 / 设置三项。切完视图抽屉会自动收起(见上方
+                effect),所以"打开抽屉点一下"之后不需要再手动关。 */}
+            {isNarrow && navRailTarget && onNavRailSelect && (
+              <NarrowNavSwitcher activeTarget={navRailTarget} onSelect={onNavRailSelect} />
+            )}
             <div
-              className="relative z-10 flex h-full flex-col"
+              className={cn('relative z-10 flex min-h-0 flex-1 flex-col', !isNarrow && 'h-full')}
               style={isNarrow ? undefined : { width: sidebarWidth }}
             >
               {sidebar}
             </div>
+            {isNarrow && navRailTarget && onNavRailSelect && (
+              <NarrowNavFooter activeTarget={navRailTarget} onSelect={onNavRailSelect} />
+            )}
             {/* 窄屏不做拖拽改宽:抽屉宽度由视口决定。 */}
             {!isNarrow && (
               <div
@@ -280,21 +310,28 @@ export function MainLayout({
         )}
 
         {/*
-          外层容器的底色是 **窗口表面**（Codex 的 `--surface`：导航栏、侧栏、
-          内容面之间的「空气」都是它），内容面本身才是浮在上面那块更亮的面 ——
-          浅色下面板比窗口亮、深色下亮一点。把这两层摆反的话，浮起的观感会完全
-          消失（浅色下面板比窗口暗，等于一个洞）。
+          外层容器的底色是 **窗口面**：导航栏、侧栏、内容面之间的「空气」都是它，
+          内容面本身才是浮在上面那块更亮的面 —— 浅色下面板比窗口面亮、深色下亮一点。
+          把这两层摆反的话，浮起的观感会完全消失（浅色下面板比窗口暗，等于一个洞）。
+          这里必须与侧栏左边那条同色：内容面圆角缺口里露出来的就是这块窗框。
         */}
-        <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--background))]">
+        <div className="relative flex min-w-0 flex-1 bg-[hsl(var(--chrome-bg))]">
           <section
             data-content-surface
             data-floats={String(contentFloats)}
-            className="content-surface-root relative flex min-w-0 flex-1 flex-col bg-[hsl(var(--surface-1))] shadow-elevation-content"
+            /*
+              内容面 = **表面种子本身**（`--background`），不是抬高档。Codex 的
+              `_MainContentSurface_[data-app-shell-main-surface=default]` 取的就是
+              `--color-surface`（= 表面种子），抬高那档（`elevatedPrimary`）留给
+              composer 这类真正「浮起来的控件」。用反的后果在深色下最明显：侧栏与
+              内容面会差出 30 级（实测 Codex 只有 1 级），侧栏看着像个洞。
+            */
+            className="content-surface-root relative flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))] shadow-elevation-content"
           >
             <div className="content-surface flex min-h-0 flex-1 flex-col overflow-hidden">
-              <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--surface-1))]">
+              <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
                 {/* 窄屏下聊天列不再要求最小宽度,否则 420px 视口里会被挤出横向滚动。 */}
-                <div className={cn('flex flex-1 flex-col bg-[hsl(var(--surface-1))]', isNarrow ? 'min-w-0' : 'min-w-110')}>
+                <div className={cn('flex flex-1 flex-col bg-[hsl(var(--background))]', isNarrow ? 'min-w-0' : 'min-w-110')}>
                   {children}
                 </div>
                 <SidePanel
