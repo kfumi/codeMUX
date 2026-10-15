@@ -20,6 +20,10 @@ import {
   type AgentPermissionConfig,
   type AgentPlanMode,
 } from '../../lib/agentPermissions';
+import {
+  COMPOSER_BAR_CONTROL_CLASS,
+  COMPOSER_BAR_ICON_CONTROL_CLASS,
+} from '../../lib/composerTokens';
 import { cn } from '../../lib/utils';
 import type { AgentKind } from '../../types/session';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
@@ -195,9 +199,10 @@ export function AgentPermissionSelector({
                     aria-expanded={open}
                     aria-label={selected.label}
                     className={cn(
-                      'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-normal outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                      compact ? 'max-w-9' : 'max-w-none',
-                      selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+                      COMPOSER_BAR_CONTROL_CLASS,
+                      compact ? 'max-w-9 px-0' : 'max-w-none',
+                      selected.tone === 'warning' &&
+                        'text-orange-500 hover:bg-orange-500/10 hover:text-orange-500',
                     )}
                   >
                     <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
@@ -256,8 +261,9 @@ export function AgentPermissionSelector({
                     aria-pressed={autoApprove}
                     onClick={toggleAutoApprove}
                     className={cn(
-                      'inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 transition-all duration-normal outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                      autoApprove && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+                      COMPOSER_BAR_CONTROL_CLASS,
+                      COMPOSER_BAR_ICON_CONTROL_CLASS,
+                      autoApprove && 'text-orange-500 hover:bg-orange-500/10 hover:text-orange-500',
                     )}
                   >
                     <AutoApproveIcon className="h-3.5 w-3.5 shrink-0" />

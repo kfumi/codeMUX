@@ -12,6 +12,17 @@ import { CODEMUX_FORMATTER, CodeMuxComposer, createCodeMuxFormatter, findLatestP
 
 let composerText = '';
 
+/** 附件列表在 `useAuiState` 里是可控的：默认挂着那张图（与 Attachments 原语的桩一致），
+ * 需要验「没有附件时不留空行」的用例把它清空即可。 */
+const ATTACHMENT_FIXTURE = {
+  id: 'image-1',
+  type: 'image',
+  name: 'screenshot.png',
+  contentType: 'image/png',
+  status: { type: 'complete' },
+};
+let composerAttachments: unknown[] = [ATTACHMENT_FIXTURE];
+
 const lexicalProps: Array<{
   className?: string;
   formatter?: {
@@ -104,7 +115,7 @@ vi.mock('@assistant-ui/react', () => {
     },
     useAuiState: (selector: (state: any) => unknown) =>
       selector({
-        composer: { text: composerText, attachments: [] },
+        composer: { text: composerText, attachments: composerAttachments },
         attachment: {
           id: 'image-1',
           type: 'image',
@@ -248,6 +259,7 @@ describe('CodeMuxComposer', () => {
     lexicalProps.length = 0;
     capturedPopovers.length = 0;
     composerText = '';
+    composerAttachments = [ATTACHMENT_FIXTURE];
     setComposerTextMock.mockClear();
     addAttachmentMock.mockClear();
     sendToolResponseMock.mockReset();
@@ -482,6 +494,15 @@ describe('CodeMuxComposer', () => {
 
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(screen.getAllByAltText('screenshot.png')).toHaveLength(2);
+  });
+
+  it('没有附件时不渲染附件条 —— 否则输入框上方会空出一行', () => {
+    composerAttachments = [];
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    // 空着也渲染的话，父级 `gap-2` 照样给它一份间距，顶部就多出一条空带。
+    expect(screen.queryByTestId('composer-attachment-list')).toBeNull();
+    expect(screen.queryByTestId('composer-attachments')).toBeNull();
   });
 
   it('adds pasted image files as attachments from the Lexical input', () => {

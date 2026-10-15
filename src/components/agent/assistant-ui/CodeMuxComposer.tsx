@@ -40,6 +40,10 @@ import { toast } from 'sonner';
 import { registerComposerFocus } from '../../../lib/shortcuts/composerFocus';
 import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../../hooks/useShortcutHint';
 import { appendComposerReference, getPathLabel } from '../../../lib/composerReferences';
+import {
+  COMPOSER_BAR_CONTROL_CLASS,
+  COMPOSER_BAR_ICON_CONTROL_CLASS,
+} from '../../../lib/composerTokens';
 import { cn } from '../../../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../../ui/tooltip';
@@ -569,7 +573,10 @@ export function CodeMuxComposer({
         <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
             className={cn(
-              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-xl border border-border bg-[hsl(var(--surface-1))] p-2.5 shadow-elevation-prominent transition-all duration-normal',
+              // 描边交给 `shadow-elevation-prominent`（它自带 1px 描边）。这里再挂一条
+              // `border` 会变成两条线叠着 —— 实测就是这个「重影」：border 画在盒内、
+              // 描边画在盒外，边缘看着比 Codex 粗一倍。Codex 的输入框只有一条发丝线。
+              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-xl bg-[hsl(var(--surface-1))] p-2.5 shadow-elevation-prominent transition-all duration-normal',
             )}
           >
             <input
@@ -579,11 +586,15 @@ export function CodeMuxComposer({
               multiple
               onChange={(event) => void handleFileSelection(event)}
             />
-            <div className="mb-1.5 flex flex-wrap gap-2" data-testid="composer-attachment-list">
-              <ComposerPrimitive.Attachments>
-                {() => <ComposerAttachmentPreview />}
-              </ComposerPrimitive.Attachments>
-            </div>
+            {/* 附件条只在真的有附件时占位：空着也渲染会在输入框上方留下一整行空行
+                （父级 `gap-2` 照给间距），顶部的红色空带就是这么来的。 */}
+            {attachmentCount > 0 && (
+              <div className="flex flex-wrap gap-2" data-testid="composer-attachment-list">
+                <ComposerPrimitive.Attachments>
+                  {() => <ComposerAttachmentPreview />}
+                </ComposerPrimitive.Attachments>
+              </div>
+            )}
             <BrowserElementPills sessionId={sessionId} />
             {hasPendingPermissions ? (
               pendingPermissions.length === 1 ? (
@@ -674,7 +685,10 @@ export function CodeMuxComposer({
                             type="button"
                             disabled={disabled}
                             aria-label="添加附件或功能"
-                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-normal hover:bg-muted/58 hover:text-foreground"
+                            className={cn(
+                              COMPOSER_BAR_CONTROL_CLASS,
+                              COMPOSER_BAR_ICON_CONTROL_CLASS,
+                            )}
                           >
                             <Plus className="h-4 w-4" />
                           </button>
@@ -735,7 +749,10 @@ export function CodeMuxComposer({
                       onClick={onTogglePlanMode}
                       aria-pressed="true"
                       aria-label="关闭计划模式"
-                      className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-primary/45 bg-primary/10 px-2 text-xs font-medium text-primary transition-all duration-normal outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50"
+                      className={cn(
+                        COMPOSER_BAR_CONTROL_CLASS,
+                        'text-primary hover:bg-primary/10 hover:text-primary',
+                      )}
                     >
                       <ListTodo className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">计划</span>

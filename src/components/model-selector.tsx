@@ -249,9 +249,12 @@ export const modelSelectorTriggerVariants = cva(
   {
     variants: {
       variant: {
+        // 悬停一律往 ink 走一档（`bg-foreground/8`），不再写死中性灰：写死的那套
+        // 在深色下比 composer 的表面还暗，悬停看着像按下去；而且它绕过了主题 token，
+        // 用户换强调色/对比度时这一档不跟着动。
         outline:
-          "border-input hover:bg-neutral-100 hover:text-neutral-900 border bg-transparent focus-visible:ring-ring/50 focus-visible:ring-2 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
-        ghost: "hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-0 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
+          "border-input hover:bg-foreground/8 hover:text-foreground border bg-transparent focus-visible:ring-ring/50 focus-visible:ring-2",
+        ghost: "hover:bg-foreground/8 hover:text-foreground focus-visible:ring-0",
         muted: "bg-secondary text-secondary-foreground hover:bg-secondary/80 focus-visible:ring-ring/50 focus-visible:ring-2",
       },
       size: {

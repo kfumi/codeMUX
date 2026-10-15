@@ -35,3 +35,34 @@
 - 浮层表面的任意值阴影**没有清干净**：上一轮只手工改了 `ui/` 与几个点名的文件，ChatSearchDialog / ImportSessionsDialog / QueuedMessages / SessionHeader / AgentPermissionSelector / SlashCommandMenu / BrowserElementPills / ProjectExplorerContextMenu / GitActionPopover / SessionItem 等仍在用 `shadow-[…]`。已按「对话框尺度 → prominent / 菜单与卡片 → elevation / 小面积 → subtle」分档统一换掉。方向性面板投影（抽屉、右侧面板）与 `inset 0 1px 0 …` 内高光按 AGENTS.md 的例外条款保留。
 - `AgentSelector` 的卡片上原本同时挂着 `shadow-elevation hover:shadow-elevation hover:shadow-elevation-prominent`（两份写同一个 `--tw-shadow`，谁赢取决于 Tailwind 内部排序而非作者意图），删掉重复的那份。
 - `hover-card` 上残留的 `shadow-elevation dark:shadow-elevation` 同类重复，一并清掉。
+
+## 后续变更（2026-10-14）：两段式输入区的两个档位与 Codex 对上号
+
+结构早就拆成两层了，但**两层的底色一直没对上 Codex 的档位**：输入框和内容面同色（都是 `--surface-1`），上下文条和输入框又只差 1 级，深色下整块输入区糊成一片。按 Codex 的映射表校准后：
+
+| 面 | Codex 的 token | 深色实测 | CodeMUX 现在 |
+|---|---|---|---|
+| 上下文条 | `--color-background-composer-action-bar` = 深色 `elevatedSecondaryOpaque` | 33 | `--surface-2` = 32 |
+| 输入框 | `--color-surface-elevated` = `elevatedPrimary` | 47 | `--surface-1` = 45 |
+| 底（内容面） | `--color-surface` | 17 | `--background` = 17 |
+
+组件**一行没改** —— 上下文条本来就用 `--surface-2`、输入框本来就用 `--surface-1`；错的是内容面占了 `--surface-1`（见 05），以及深色种子压在纯黑上（见 04）。三处一起改完，输入框才第一次真正「浮」在内容面之上。
+
+顺带核对：Codex 输入框内部**没有**再分一条操作条 —— 底部的 `＋ / 权限 / 模型 / 发送` 与输入区同色（实测都是 47），分色的是上方那条上下文条。所以 CodeMUX 输入框内部的排布不需要加底色。
+
+## 后续变更（2026-10-15）：输入框的三处复核修复
+
+对着 Codex 截图复核输入框，实测出三处（数值取自 Codex 窗口的无损抓图与它的 CSS）：
+
+1. **边框有重影、比 Codex 粗一倍。** 输入框同时挂了 `border border-border`（画在盒内）和 `shadow-elevation-prominent`（它自带 1px 描边，画在盒外），两条线叠着。Codex 的输入框只有**一条发丝线**（浅色实测：内容面 253 → 线 241 → 输入框 255）。删掉 `border`，描边交给 elevation —— 与 AGENTS.md 的「stroke-first，浮起面不要自己再画边框」一致。改后实机量到的是单线（253 → 233 → 253）。
+
+2. **顶部多一行空行。** 附件条是无条件渲染的：没有附件时它高度为 0，但父级 `gap-2` 照样给它一份间距，加上它自己的 `mb-1.5`，输入框上方就空出约 14px。改成 `attachmentCount > 0` 才渲染（`mb-1.5` 一并删掉，间距由 `gap-2` 表达）。改后输入框整体矮了 16px，占位符紧贴顶边。
+
+3. **底排控件是一排「带边框的小方块」，Codex 是一排裸按钮。** `+`、权限选择器、自动接受开关三个各自挂着 `border border-border/40 bg-[hsl(var(--surface-2))]/70`，而 Codex 这一排平时只剩图标与文字，悬停或展开时才浮出一层 ink。抽了一个共用外形 `COMPOSER_BAR_CONTROL_CLASS`（`src/lib/composerTokens.ts`）给这三处用，并把计划模式 chip 一起收编（状态靠 `text-primary` 表达，不再靠边框）。
+
+   - 悬停用 **ink 的 alpha**（`bg-foreground/8`）而不是某个固定表面色：控件压在**抬高档**（`--surface-1`）上，而 `--muted` / `--surface-3` 是相对**表面种子**算的，深色下比输入框还暗，悬停会变成「按下去」。
+   - 顺带清掉同一排另外两处写死的中性灰（`model-selector` 的 ghost/outline 变体、`ReasoningEffortSelector` 的触发按钮用的是 `hover:bg-neutral-100 dark:hover:bg-neutral-800`）—— 那套绕过了主题 token，换强调色/对比度时不跟着动。
+
+   实测（浅色，无损抓图）：底排从左到右扫描，`+`、`构建模式`、盾牌三处**全部落在输入框底色 253 上**，没有任何边框或底块；盾牌仍是橙色图标（255,124,32）。
+
+测试：`CodeMuxComposer.test.tsx` 新增「没有附件时不渲染附件条」；附件相关的两条用例原先的桩自相矛盾（`Attachments` 原语永远渲染一张图，而 `useAuiState` 报 `attachments: []`），改成受控的 `composerAttachments` 夹具。

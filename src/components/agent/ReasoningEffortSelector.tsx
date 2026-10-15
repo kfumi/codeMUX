@@ -58,7 +58,9 @@ export function ReasoningEffortSelector({
           'w-auto shrink-0 cursor-pointer gap-1.5 border-0 bg-transparent px-2.5 shadow-none outline-none ring-0 ring-offset-0',
           'focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
           'data-[state=open]:border-0 data-[state=open]:ring-0',
-          'hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100',
+          // 悬停往 ink 走一档，与同一排的其余控件一致（原先写死的中性灰绕过了主题 token，
+          // 换强调色 / 对比度时不跟着动）。
+          'hover:bg-foreground/8 hover:text-foreground',
           compact ? 'h-8' : 'h-9',
         )}
       >
