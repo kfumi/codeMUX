@@ -51,6 +51,39 @@ describe('SettingsRow', () => {
     expect(controlCell.className).toContain('justify-self-end');
   });
 
+  it('没有说明的行,控件不跨两行 —— 否则标题会被顶到行的上四分之一', () => {
+    const { container } = render(
+      <SettingsRow label="模式" control={<span data-testid="ctl">控件</span>} />,
+    );
+
+    const controlCell = screen.getByTestId('ctl').parentElement as HTMLElement;
+    expect(controlCell.className).not.toContain('sm:row-span-2');
+    // 单行内 items-center 就能把标题与控件对齐到同一条中线上。
+    expect((container.firstElementChild as HTMLElement).className).toContain('items-center');
+  });
+
+  it('可以用 controlClassName 放宽控件列的宽度上限', () => {
+    render(
+      <>
+        <SettingsRow label="默认" control={<span data-testid="ctl-default">控件</span>} />
+        <SettingsRow
+          label="模式"
+          controlClassName="sm:max-w-none"
+          control={<span data-testid="ctl-wide">控件</span>}
+        />
+      </>,
+    );
+
+    const defaultCell = screen.getByTestId('ctl-default').parentElement as HTMLElement;
+    expect(defaultCell.className).toContain('sm:max-w-60');
+
+    // 宽控件(一排 272px 的缩略图)要放开这个上限;tailwind-merge 会把同族里
+    // 先出现的 `sm:max-w-60` 去掉,只留最后那一档。
+    const wideCell = screen.getByTestId('ctl-wide').parentElement as HTMLElement;
+    expect(wideCell.className).toContain('sm:max-w-none');
+    expect(wideCell.className).not.toContain('sm:max-w-60');
+  });
+
   it('surface 自带卡片描边,divided 画分隔线', () => {
     const { container } = render(
       <SettingsRow surface divided label="忽略证书校验" control={<span>控件</span>} />,

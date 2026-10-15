@@ -12,6 +12,9 @@ import { cn } from '../../lib/utils';
 export const SETTINGS_CARD_CLASS =
   'rounded-xl border border-border bg-[hsl(var(--surface-1))]';
 
+/** 卡内行的统一内边距 —— 与 `SettingsRow` 的 `surface` 单行保持一致。 */
+export const ROW_PADDING = 'px-4 py-3.5';
+
 /** 把若干 `SettingsRow` 装进一张 Codex 式设置卡,行间自动画发丝分隔线。 */
 export function SettingsCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -36,6 +39,8 @@ interface SettingsRowProps {
   surface?: boolean;
   /** 同一张卡片内的多行之间画分隔线。 */
   divided?: boolean;
+  /** 追加到控件格上的类:宽控件(如模式缩略图一排 272px)用它放宽 `sm:max-w-60`。 */
+  controlClassName?: string;
   className?: string;
 }
 
@@ -46,8 +51,12 @@ interface SettingsRowProps {
  * 640px 以下改为上下堆叠;宽屏(≥640px)恢复原来的左右布局。
  *
  * 用 grid 而不是两套 DOM:`inlineControl` 时开关留在标题右侧,说明换行到第二
- * 行;否则控件整行铺开。宽屏用 `sm:` 把控件放回右列并跨两行,和改动前的
- * 桌面布局一致。
+ * 行;否则控件整行铺开。宽屏用 `sm:` 把控件放回右列,和改动前的桌面布局一致。
+ *
+ * 控件只在**有说明**时才跨两行(`sm:row-span-2`),让右侧控件相对「标题 + 说明」
+ * 这个文字块居中。没有说明的行绝不能跨行:跨行后控件比文字高出来的那部分会被
+ * 平均分给两条轨道,标题因此被顶到行的上四分之一 —— 模式行(60px 缩略图 + 一行
+ * 标题)的「模式」两字就是这么做出来的。
  */
 export function SettingsRow({
   label,
@@ -56,13 +65,14 @@ export function SettingsRow({
   inlineControl = false,
   surface = false,
   divided = false,
+  controlClassName,
   className,
 }: SettingsRowProps) {
   return (
     <div
       className={cn(
         'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 sm:gap-x-4 sm:gap-y-1',
-        surface && cn(SETTINGS_CARD_CLASS, 'px-4 py-3.5'),
+        surface && cn(SETTINGS_CARD_CLASS, ROW_PADDING),
         divided && 'border-t border-border pt-3.5',
         className,
       )}
@@ -72,11 +82,13 @@ export function SettingsRow({
       </div>
       <div
         className={cn(
-          'min-w-0 self-center sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:row-span-2 sm:w-auto sm:max-w-60 sm:justify-self-end',
+          'min-w-0 self-center sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:w-auto sm:max-w-60 sm:justify-self-end',
+          description && 'sm:row-span-2',
           inlineControl
             ? 'col-start-2 row-start-1 justify-self-end'
             // 没有说明文字时不要多占一行,否则会白流出一条 0 高度的行间隙。
             : cn('col-span-2 w-full', description ? 'row-start-3' : 'row-start-2'),
+          controlClassName,
         )}
       >
         {control}

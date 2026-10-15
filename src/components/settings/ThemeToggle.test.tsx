@@ -9,10 +9,11 @@ import { ThemeToggle } from './ThemeToggle';
 const setUiFontFamily = vi.fn();
 const setContrast = vi.fn();
 const setUiFontSize = vi.fn();
+const setTheme = vi.fn();
 
 vi.mock('../../stores/settingsStore', () => ({
-  useSettingsStore: (selector: (state: { config: { theme: 'Light' }; setTheme: ReturnType<typeof vi.fn> }) => unknown) =>
-    selector({ config: { theme: 'Light' }, setTheme: vi.fn() }),
+  useSettingsStore: (selector: (state: { config: { theme: 'Light' }; setTheme: typeof setTheme }) => unknown) =>
+    selector({ config: { theme: 'Light' }, setTheme }),
 }));
 
 vi.mock('../../stores/appearanceStore', () => ({
@@ -48,8 +49,9 @@ describe('ThemeToggle', () => {
     setUiFontFamily.mockClear();
     setUiFontSize.mockClear();
     setContrast.mockClear();
+    setTheme.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
-    // jsdom 没实现 matchMedia —— 「跟随系统」那张缩略图要按系统偏好画。
+    // jsdom 没实现 matchMedia / ResizeObserver,Radix 的浮层要这两样。
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: false,
       media: query,
@@ -112,37 +114,24 @@ describe('ThemeToggle', () => {
     expect(accentTrigger.textContent).toContain(ACCENTS.azure.name);
   });
 
-  it('模式是一排三张缩略图,当前项 aria-pressed', () => {
+  it('模式行在面板里可选,选中项回写主题', () => {
     render(<ThemeToggle />);
 
-    for (const label of ['浅色', '深色', '跟随系统']) {
-      expect(screen.getByRole('button', { name: label })).toBeTruthy();
-    }
-    expect(screen.getByRole('button', { name: '浅色' })).toHaveProperty('ariaPressed', 'true');
-    expect(screen.getByRole('button', { name: '深色' })).toHaveProperty('ariaPressed', 'false');
-  });
-
-  it('每张缩略图画一扇完整的窗,不做左右对半切', () => {
-    render(<ThemeToggle />);
-
-    // 之前把「跟随系统」劈成两半 36px 的小窗,缩出来什么也看不清 —— 钉住每张
-    // 缩略图底下只有一扇窗。
-    for (const label of ['浅色', '深色', '跟随系统']) {
-      const thumb = screen.getByRole('button', { name: label });
-      expect(thumb.children).toHaveLength(1);
-    }
+    expect(screen.getByRole('radio', { name: '浅色' })).toHaveProperty('checked', true);
+    fireEvent.click(screen.getByRole('radio', { name: '深色' }));
+    expect(setTheme).toHaveBeenCalledWith('Dark');
   });
 
   it('模式行是「标题在左、缩略图在右」的设置行,不是标题下再摆一排', () => {
     render(<ThemeToggle />);
 
-    const thumb = screen.getByRole('button', { name: '浅色' });
-    const controlCell = thumb.closest('.grid');
-    expect(controlCell).not.toBeNull();
-    expect(controlCell!.textContent).toContain('模式');
-    // 三张缩略图都在同一行的控件格里（缩略图只有 aria-label，没有可见文字）
-    for (const label of ['浅色', '深色', '跟随系统']) {
-      expect(screen.getByRole('button', { name: label }).closest('.grid')).toBe(controlCell);
+    const group = screen.getByRole('radiogroup', { name: '模式' });
+    // 控件格 → 设置行:同一行里既有这一排缩略图,也有左边的可见标题。
+    const row = group.parentElement!.parentElement as HTMLElement;
+    expect(row.className).toContain('grid');
+    expect(row.textContent).toContain('模式');
+    for (const label of ['跟随系统', '浅色', '深色']) {
+      expect(screen.getByRole('radio', { name: label }).closest('[role=radiogroup]')).toBe(group);
     }
   });
 
@@ -162,18 +151,21 @@ describe('ThemeToggle', () => {
     expect(setUiFontSize).toHaveBeenCalledWith(16);
   });
 
-  it('对比度滑块的轨道与把手都是自绘的,input 只当命中区', () => {
+  it('对比度滑块的轨道是强调色渐变,把手交给原生 thumb', () => {
     render(<ThemeToggle />);
 
     const slider = screen.getByRole('slider', { name: '对比度' });
-    // 原生把手必须彻底不参与布局 —— 之前正是它和自绘轨道各自居中,
-    // 把手浮在轨道下面半截(见 92dd39c 的修复说明)。
-    expect(slider.className).toContain('opacity-0');
-
-    // 自绘把手:aria-hidden 的定位圆点,left 跟着当前值走。
-    const thumb = document.querySelector('span[aria-hidden="true"].rounded-full.border-2');
-    expect(thumb).not.toBeNull();
-    expect((thumb as HTMLElement).style.left).toBe('45%');
+    // 轨道就是 input 自己:2px 高,背景是一条**静态**的强调色渐变(强调色 35% 混表面
+    // → 纯强调色),不随当前值分段,和 Codex 一样。
+    expect(slider.className).toContain('h-0.5');
+    expect(slider.style.background).toContain('linear-gradient');
+    expect(slider.style.background).toContain('hsl(var(--primary) / 0.35)');
+    // 20px 的把手要落在 2px 的轨道正中:(2 - 20) / 2 = -9px,位置是算出来的。
+    expect(slider.className).toContain('[&::-webkit-slider-thumb]:mt-[-9px]');
+    expect(slider.className).toContain('[&::-webkit-slider-thumb]:h-5');
+    // 控件格必须有确定宽度:否则 flex-1 的轨道在自动宽度的列里被解成 0,整条滑块
+    // 塌成一个点贴在数字左边。
+    expect((slider.parentElement as HTMLElement).className).toContain('sm:w-56');
   });
 
   it('高级区默认摊开,可以收起', () => {    render(<ThemeToggle />);

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
@@ -11,7 +11,6 @@ import {
   CONTRAST_MIN,
   type ContentWidthKey,
   RADIUS_PREVIEW,
-  resolveIsDark,
   type RadiusKey,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
@@ -23,9 +22,9 @@ import type { Theme } from '../../types/provider';
 import { Button } from '../ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { TooltipHint } from '../ui/tooltip';
 import { FontPicker } from './FontPicker';
-import { SettingsCard, SettingsRow } from './SettingsRow';
+import { ModeRow } from './ModeRow';
+import { ROW_PADDING, SettingsCard, SettingsRow } from './SettingsRow';
 
 /**
  * 外观设置页。
@@ -40,124 +39,6 @@ function GroupLabel({ children }: { children: ReactNode }) {
   return <h3 className="px-0.5 text-ui-compact font-medium text-muted-foreground">{children}</h3>;
 }
 
-/** 卡内行的统一内边距 —— 与 `SettingsRow` 的 `surface` 单行保持一致。 */
-const ROW_PADDING = 'px-4 py-3.5';
-
-const THEME_LABELS: Record<Theme, string> = { Light: '浅色', Dark: '深色', System: '跟随系统' };
-
-/**
- * 缩略图配色 —— 画的是「一扇应用窗口的样子」，不是真实表面，所以用字面量而不是
- * 主题 token：一扇浅色窗口在深色主题下也必须是浅色的。强调色的部分走
- * `bg-primary`，跟着用户选的强调色走。
- */
-const SHOT = {
-  light: { window: '#ffffff', fill: 'rgb(13 13 13 / 0.05)', line: 'rgb(13 13 13 / 0.13)' },
-  dark: { window: '#191919', fill: 'rgb(255 255 255 / 0.07)', line: 'rgb(255 255 255 / 0.18)' },
-} as const;
-
-/**
- * 一扇应用窗口的示意画，画在 72×48 的框里：左上角一个图标圆点、中间三行内容、
- * 底部一条输入框带着发送圆点。
- *
- * 尺寸是按这个框算死的一组数：图标 6..14、行 18..33、输入条 34..42。上一版用
- * `top-6` + `gap-1` 排四行，行区一路撑到 48px，和 `bottom-1.5` 的输入条直接叠在
- * 一起 —— 缩出来是一团糊。
- *
- * 之前画的还是「浏览器窗口」（红黄绿圆点 + 侧栏），放到 72px 里圆点只剩 4px、
- * 侧栏挤成一条，根本看不出是自己的应用。
- */
-function WindowShot({ variant }: { variant: 'light' | 'dark' }) {
-  const c = SHOT[variant];
-  return (
-    <div className="relative h-full w-full" style={{ backgroundColor: c.window }}>
-      <span className="absolute left-1.5 top-1.5 h-2 w-2 rounded-full bg-foreground/15" />
-      <span className="absolute left-1.5 right-1.5 top-[18px] flex flex-col gap-[3px]">
-        <span className="h-[3px] w-full rounded-full bg-primary" />
-        <span className="h-[3px] w-3/4 rounded-full" style={{ backgroundColor: c.line }} />
-        <span className="h-[3px] w-1/2 rounded-full bg-primary" />
-      </span>
-      <span
-        className="absolute inset-x-1.5 bottom-1.5 flex h-2 items-center justify-end rounded-sm px-1"
-        style={{ backgroundColor: c.fill }}
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-      </span>
-    </div>
-  );
-}
-
-/** 模式选择：一排应用窗口缩略图，选中项套主色描边。 */
-function ModeThumb({
-  theme,
-  variant,
-  active,
-  onClick,
-}: {
-  theme: Theme;
-  variant: 'light' | 'dark';
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <TooltipHint content={THEME_LABELS[theme]}>
-      <button
-        type="button"
-        onClick={onClick}
-        aria-pressed={active}
-        aria-label={THEME_LABELS[theme]}
-        className={cn(
-          'block h-12 w-[72px] shrink-0 overflow-hidden rounded-lg transition-shadow duration-normal',
-          active ? 'ring-2 ring-primary' : 'ring-1 ring-border hover:ring-foreground/25',
-        )}
-      >
-        <WindowShot variant={variant} />
-      </button>
-    </TooltipHint>
-  );
-}
-
-/** 系统偏好 —— 「跟随系统」那张缩略图要按当前实际解析成什么主题来画。 */
-function useSystemPrefersDark(): boolean {
-  const [dark, setDark] = useState(() => resolveIsDark('System'));
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => setDark(query.matches);
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-  return dark;
-}
-
-function ModeRow({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
-  const systemDark = useSystemPrefersDark();
-  const variants: Record<Theme, 'light' | 'dark'> = {
-    Light: 'light',
-    Dark: 'dark',
-    // 跟随系统 = 按当前解析结果画一扇窗，而不是左右劈成两半（36px 宽的半扇窗
-    // 缩出来什么也看不清）。它和「浅色」长得像本身就是信息：告诉用户跟随系统
-    // 现在解析出来就是浅色。
-    System: systemDark ? 'dark' : 'light',
-  };
-  return (
-    <SettingsRow
-      className={ROW_PADDING}
-      label="模式"
-      control={
-        <div className="flex items-center gap-2.5">
-          {(['Light', 'System', 'Dark'] as Theme[]).map((option) => (
-            <ModeThumb
-              key={option}
-              theme={option}
-              variant={variants[option]}
-              active={theme === option}
-              onClick={() => onChange(option)}
-            />
-          ))}
-        </div>
-      }
-    />
-  );
-}
 
 /** 紧凑数值框:Codex 的字号是「小方框 + 右侧 px 后缀」,不是加减号步进器。 */
 function NumberField({
@@ -209,47 +90,54 @@ function NumberField({
 }
 
 /**
- * 对比度滑块。
+ * 对比度滑块 —— 照搬 Codex 的画法:轨道是一条**静态**的强调色渐变(左端「强调色
+ * 35% 混表面」、32% 起纯强调色),表达「往右越浓」这条语义,不随当前值变化;当前
+ * 值靠把手位置 + 右侧数字表达,不再画「已填充 / 未填充」两段。
  *
- * 轨道和把手全部自己画，`<input type="range">` 只作为透明的一层盖在上面负责
- * 拖拽、键盘与无障碍。之前让 input 自己画轨道、`appearance: none` 之后再用
- * `::-webkit-slider-thumb` + `margin-top` 去把把手拉回正中 —— WebKit 对这个
- * 组合的居中并不保证，结果就是把手浮在轨道下面半截，看着没跟线对齐。
- * 现在两条都用 `top-1/2 -translate-y-1/2`，位置是算出来的而不是调出来的。
+ * 把手交回原生 `::-webkit-slider-thumb`:20px 圆点、颜色取文字色(浅色下黑、深色
+ * 下白),`mt-[-9px]` 就是 (2px 轨道 - 20px 把手) / 2,位置是算出来的。上一版担心
+ * WebKit 居中不可靠而改成「自绘把手 + 透明 input」,代价是丢掉键盘焦点环与原生拖拽,
+ * 而且没有解决真正的问题 ——
  *
- * 配色照参考图：已填充段与把手都是 ink，未填充段是浅灰轨道，把手带一圈表面色
- * 的环 —— 所以在深色下环是深色的，浅色下是白圈。
- *
- * 空轨道不能用 `--muted`：浅色下它是 `0 0% 98.82%`，在白色卡片上等于没有，
- * 整条滑块只剩一个孤零零的圆点。这里直接给 ink 的 12% —— 表面层次用透明度是
- * AGENTS.md 明确允许的用法，明暗两套下都看得见。
+ * **容器必须有确定宽度。** 设置行的控件格是 `auto` 宽,它的最大宽度反过来又由内容
+ * 决定,`flex-1` 的轨道于是被解成 0 宽:整条滑块塌成一个点贴在数字左边(Codex 给这
+ * 一行 `min-w-[12rem]`,我们给整行固定宽度)。
  */
 function ContrastControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  const percent = ((value - CONTRAST_MIN) / (CONTRAST_MAX - CONTRAST_MIN)) * 100;
   return (
-    <div className="flex w-full max-w-64 items-center gap-3">
-      <div className="relative h-4 flex-1">
-        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-[hsl(var(--foreground)/0.12)]">
-          <div className="h-full rounded-full bg-foreground" style={{ width: `${percent}%` }} />
-        </div>
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[hsl(var(--background))] bg-foreground shadow-elevation-subtle"
-          style={{ left: `${percent}%` }}
-        />
-        <input
-          type="range"
-          min={CONTRAST_MIN}
-          max={CONTRAST_MAX}
-          step={1}
-          value={value}
-          aria-label="对比度"
-          onChange={(event) => onChange(Number(event.target.value))}
-          className="contrast-slider peer absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-full opacity-0"
-        />
-        <span className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2" />
-      </div>
-      <output className="w-8 text-ui-body tabular-nums text-foreground" aria-live="polite">
+    <div className="flex h-9 w-full items-center gap-2.5 sm:w-56">
+      <input
+        type="range"
+        min={CONTRAST_MIN}
+        max={CONTRAST_MAX}
+        step={1}
+        value={value}
+        aria-label="对比度"
+        onChange={(event) => onChange(Number(event.target.value))}
+        style={{
+          background:
+            'linear-gradient(90deg, hsl(var(--primary) / 0.35) 0%, hsl(var(--primary)) 32%, hsl(var(--primary)) 100%)',
+        }}
+        className={cn(
+          'h-0.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full',
+          // 轨道:Chromium 下由 input 自身的 2px 背景充当,这里只管两条引擎的轨道高度。
+          '[&::-webkit-slider-runnable-track]:h-0.5 [&::-webkit-slider-runnable-track]:rounded-full',
+          '[&::-moz-range-track]:h-0.5 [&::-moz-range-track]:rounded-full',
+          // 把手
+          '[&::-webkit-slider-thumb]:mt-[-9px] [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5',
+          '[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full',
+          '[&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-transparent',
+          '[&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:shadow-elevation-subtle',
+          '[&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full',
+          '[&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-transparent',
+          '[&::-moz-range-thumb]:bg-foreground [&::-moz-range-thumb]:shadow-elevation-subtle',
+          // 焦点环画在把手上:轨道只有 2px,套在它身上的环等于看不见。
+          'focus-visible:outline-none',
+          'focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-ring/60',
+          'focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-ring/60',
+        )}
+      />
+      <output className="w-9 text-end text-sm tabular-nums text-foreground" aria-live="polite">
         {value}
       </output>
     </div>
