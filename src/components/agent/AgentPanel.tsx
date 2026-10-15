@@ -10,6 +10,7 @@ import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommand
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
+import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
@@ -127,9 +128,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const isFreeModelSession = agentKind === 'opencode'
     && isOpenCodeFreeProviderId(session?.provider_id);
   const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
+  // 免费会话没有 ModelProvider 记录可读，上下文只能从目录取；取不到就是取不到，
+  // 不退回 200k —— 那会让 1M 的模型看起来随时溢出（ADR 0015、ADR 0017）。
+  const freeCatalogContextWindow = useCatalogContextWindow(
+    isFreeModelSession ? model : null,
+    'opencode',
+  );
   const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode' || agentKind === 'pi'
     ? (isFreeModelSession
-      ? null
+      ? freeCatalogContextWindow
       : getProfileModelContextWindow(runtimeProvider, model))
     : null;
   const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
@@ -545,6 +552,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   projectSkills={projectSkills}
                   modelName={modelNameWithSuffix}
                   configuredContextWindow={configuredContextWindow}
+                  assumeDefaultContextWindow={!isFreeModelSession}
                   disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(
                     <AgentModelSelector

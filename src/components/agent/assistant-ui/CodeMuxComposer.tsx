@@ -91,6 +91,8 @@ interface CodeMuxComposerProps {
   projectSkills?: ProjectSkill[];
   modelName?: string;
   configuredContextWindow?: number | null;
+  /** 上下文窗口查不到时是否退回 200k 猜测值；见 buildContextUsageViewModel。 */
+  assumeDefaultContextWindow?: boolean;
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
@@ -205,6 +207,7 @@ export function CodeMuxComposer({
   projectSkills = [],
   modelName,
   configuredContextWindow,
+  assumeDefaultContextWindow,
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
@@ -247,12 +250,13 @@ export function CodeMuxComposer({
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [dismissedPlanKeys, setDismissedPlanKeys] = useState<Set<string>>(() => new Set());
   const contextUsage = useMemo(() => buildContextUsageViewModel({
-    tokenUsage,
+tokenUsage,
     model: modelName,
     configuredContextWindow,
+    assumeDefaultContextWindow,
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
-  }), [configuredContextWindow, modelName, tokenUsage]);
+  }), [configuredContextWindow, assumeDefaultContextWindow, modelName, tokenUsage]);
   const commands = useMemo(() => getAllCommands(agentKind, projectSkills), [agentKind, projectSkills]);
   const showComposerPlanControls = agentKind === 'codex';
   const formatter = useMemo(

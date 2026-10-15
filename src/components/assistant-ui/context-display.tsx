@@ -7,7 +7,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 type ContextDisplayProps = {
   usedTokens: number;
-  totalTokens: number;
+  /** `null` = 上下文窗口未知，整个环隐藏（不用猜出来的分母画一个假的百分比）。 */
+  totalTokens: number | null;
   modelName?: string;
   inputTokens?: number;
   cachedTokens?: number;
@@ -26,7 +27,7 @@ export function ContextDisplay({
 }: ContextDisplayProps) {
   const [detailOpen, setDetailOpen] = useState(false);
 
-  if (totalTokens <= 0) {
+  if (!totalTokens || totalTokens <= 0) {
     return null;
   }
 

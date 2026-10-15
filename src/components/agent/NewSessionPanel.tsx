@@ -11,6 +11,8 @@ import { useProjectStore } from '../../stores/projectStore';
 import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useAgentModels } from '../../hooks/useAgentModels';
+import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
+import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
@@ -94,11 +96,20 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [models, preferredModelId, preferredProviderId]);
   const effectiveModel = preferredModel?.modelId || '';
   const effectiveProviderId = preferredModel?.providerId || preferredProviderId;
+  const isFreeSelection = selectedAgentKind === 'opencode'
+    && isOpenCodeFreeProviderId(effectiveProviderId);
+  // 免费模型没有 ModelProvider 记录，窗口只能从目录取；查不到就不显示分母。
+  const freeCatalogContextWindow = useCatalogContextWindow(
+    isFreeSelection ? effectiveModel : null,
+    'opencode',
+  );
   const configuredContextWindow = selectedAgentKind === 'codex' || selectedAgentKind === 'opencode' || selectedAgentKind === 'pi'
-    ? getProfileModelContextWindow(
-      modelProviders.find((provider) => provider.id === effectiveProviderId) ?? null,
-      effectiveModel,
-    )
+    ? (isFreeSelection
+      ? freeCatalogContextWindow
+      : getProfileModelContextWindow(
+        modelProviders.find((provider) => provider.id === effectiveProviderId) ?? null,
+        effectiveModel,
+      ))
     : null;
   // 配置了默认值但免费目录还在途：先挂起发送，选择器显示加载中；目录回来后首屏即默认值，
   // 避免先闪列表第一个、用户在窗口期内发出跑错模型。无配置时不等待，行为与之前一致。
@@ -349,6 +360,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               projectPath={draftProjectPath}
               projectSkills={projectSkills}
               configuredContextWindow={configuredContextWindow}
+              assumeDefaultContextWindow={!isFreeSelection}
               placeholder={placeholder}
               disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}

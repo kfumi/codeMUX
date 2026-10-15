@@ -4,7 +4,8 @@ const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
 
 export type ContextUsage = {
   usedTokens: number;
-  totalTokens: number;
+  /** `null` 表示上下文窗口未知 —— UI 应当隐藏整个环，而不是显示一个假的分母。 */
+  totalTokens: number | null;
   inputTokens: number;
   cachedTokens: number;
   outputTokens: number;
@@ -32,6 +33,16 @@ type ContextUsageOptions = {
   configuredContextWindow?: number | null;
   sessionProviderUsesLargeContext: boolean;
   activeProviderUsesLargeContext: boolean;
+  /**
+   * 前四级阶梯都没命中时，是否允许退回 200k 这个猜测值。
+   *
+   * 默认 `true`，保持既有行为。传 `false` 的只有一类会话：绑定虚拟供应商
+   * `opencode-free` 的 OpenCode 免费模型 —— 它没有 ModelProvider 记录，
+   * 用户连配置窗口的地方都没有，所以「查不到」是终态而非待补状态。
+   * 这种会话返回 `null`，让 UI 隐藏整个环；显示一个假的 200k 只会让
+   * 1M 的模型看起来随时要溢出（ADR 0015：查不到就留空，绝不猜）。
+   */
+  assumeDefaultContextWindow?: boolean;
 };
 
 export function normalizeThreadTokenUsage(raw: unknown): ThreadTokenUsage | null {
@@ -65,6 +76,7 @@ export function buildContextUsageViewModel({
   configuredContextWindow,
   sessionProviderUsesLargeContext,
   activeProviderUsesLargeContext,
+  assumeDefaultContextWindow = true,
 }: ContextUsageOptions): ContextUsage | null {
   if (!tokenUsage) {
     return null;
@@ -86,6 +98,7 @@ export function buildContextUsageViewModel({
       sessionProviderUsesLargeContext,
       activeProviderUsesLargeContext,
       modelContextWindow: tokenUsage.modelContextWindow ?? undefined,
+      assumeDefaultContextWindow,
     }),
     inputTokens,
     cachedTokens,
@@ -164,13 +177,15 @@ function getSessionContextLimit({
   sessionProviderUsesLargeContext,
   activeProviderUsesLargeContext,
   modelContextWindow,
+  assumeDefaultContextWindow,
 }: {
   model?: string | null;
   configuredContextWindow?: number | null;
   sessionProviderUsesLargeContext: boolean;
   activeProviderUsesLargeContext: boolean;
   modelContextWindow?: number;
-}) {
+  assumeDefaultContextWindow?: boolean;
+}): number | null {
   if (configuredContextWindow && configuredContextWindow > 0) {
     return configuredContextWindow;
   }
@@ -189,5 +204,9 @@ function getSessionContextLimit({
     return LARGE_CONTEXT_TOKENS;
   }
 
-  return activeProviderUsesLargeContext ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
+  if (activeProviderUsesLargeContext) {
+    return LARGE_CONTEXT_TOKENS;
+  }
+
+  return assumeDefaultContextWindow === false ? null : DEFAULT_CONTEXT_TOKENS;
 }

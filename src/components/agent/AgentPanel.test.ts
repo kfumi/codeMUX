@@ -118,6 +118,43 @@ describe('history-file context usage view model', () => {
     });
   });
 
+  it('reports an unknown context window instead of guessing 200k when the session may not declare one', () => {
+    const tokenUsage = normalizeThreadTokenUsage({
+      input_tokens: 320_000,
+      output_tokens: 1_200,
+    });
+
+    // 免费模型会话：没有 ModelProvider 记录，窗口只能来自目录。目录没命中时
+    // 分母是未知的，返回 200k 会让 1M 的模型看起来随时要溢出。
+    expect(buildContextUsageViewModel({
+      tokenUsage,
+      model: 'space-bunny-free',
+      configuredContextWindow: null,
+      assumeDefaultContextWindow: false,
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })?.totalTokens).toBeNull();
+
+    // 同一个会话，目录命中 1M —— 分母必须是真值，不是 200k。
+    expect(buildContextUsageViewModel({
+      tokenUsage,
+      model: 'space-bunny-free',
+      configuredContextWindow: 1_048_576,
+      assumeDefaultContextWindow: false,
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })?.totalTokens).toBe(1_048_576);
+
+    // 普通供应商会话保持既有行为：用户没填也退回 200k。
+    expect(buildContextUsageViewModel({
+      tokenUsage,
+      model: 'gpt-5-codex',
+      configuredContextWindow: null,
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })?.totalTokens).toBe(200_000);
+  });
+
   it('returns null when no history usage snapshot exists', () => {
     expect(buildContextUsageViewModel({
       tokenUsage: null,

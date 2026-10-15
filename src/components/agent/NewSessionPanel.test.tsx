@@ -53,6 +53,8 @@ vi.mock('../../hooks/useAgentModels', () => ({
       freePending: pendingCtl.value && _agentKind === 'opencode',
     };
   },
+  OPENCODE_FREE_PROVIDER_ID: 'opencode-free',
+  isOpenCodeFreeProviderId: (providerId: string | null | undefined) => providerId === 'opencode-free',
 }));
 
 const composerProps: Array<{
@@ -208,8 +210,8 @@ describe('NewSessionPanel', () => {
           sound_enabled: false,
           sound: 'ding',
         },
-      },
-    }));
+},
+}));
   });
 
   afterEach(() => {
