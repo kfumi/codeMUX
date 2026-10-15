@@ -119,6 +119,10 @@
      `chromeBackground` —— 这是 Codex 没有、我们自补的一档。 */
   --color-chrome-bg: hsl(var(--chrome-bg));
   --color-chrome-bg-hover: hsl(var(--chrome-bg-hover));
+  /* 输入区顶部上下文条（项目 / 工作树 / 分支）那块凹面的底 —— Codex 的
+     `--color-background-composer-action-bar`，见 colorDerivation 的
+     `composerActionBarBackground`。 */
+  --color-composer-action-bar-bg: hsl(var(--composer-action-bar-bg));
   /* 凹面（画布）：给浮起的卡片当底，右侧面板主体就是它。见 colorDerivation 的
      `surfaceCanvas` —— Codex 的 `--color-surface-canvas`。 */
   --color-surface-canvas: hsl(var(--surface-canvas));
@@ -272,6 +276,8 @@
     --content-width: 48rem;
     --chrome-bg: 0 0% 94.9%;
     --chrome-bg-hover: 0 0% 86.27%;
+    /* 输入区顶部上下文条的底（Codex 的 --color-background-composer-action-bar）。 */
+    --composer-action-bar-bg: 0 0% 94.9%;
     --surface-canvas: 0 0% 96.86%;
     --sidebar-bg: 0 0% 98.82%;
     --sidebar-fg: 0 0% 5.1%;
@@ -338,6 +344,9 @@
     --shell-bg: 0 0% 6.67%;
     --chrome-bg: 0 0% 5.49%;
     --chrome-bg-hover: 0 0% 11.37%;
+    /* 深色下与窗口面不同档：取 `elevatedSecondaryOpaque`，夹在内容面（17）与
+       输入框（17.65%）之间偏下，实测 Codex 是 33。 */
+    --composer-action-bar-bg: 0 0% 12.55%;
     --surface-canvas: 0 0% 6.67%;
     --surface-1: 0 0% 17.65%;
     --surface-2: 0 0% 12.55%;

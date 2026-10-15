@@ -172,8 +172,10 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
   };
 
   // 上下文条里的 chip：**无边框、无底色**，靠悬停才浮出底 —— 这是 Codex 的做法。
-  // 三个 chip（项目 / 工作树 / 分支）共用下面那一块面，不再各带一个边框。
-  const chipClass = 'inline-flex h-7 max-w-44 items-center gap-1.5 rounded-md px-2 text-ui-caption text-foreground transition-colors duration-fast hover:bg-[hsl(var(--surface-3))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45';
+  // 三个 chip（项目 / 工作树 / 分支）共用这一整条，不再各带一个边框。
+  // 悬停用 ink 的 alpha（`bg-foreground/8`）而不是 `--surface-3`：这条自带凹面底，
+  // 而 `--surface-3` 与凹面同档（浅色 240 vs 242），悬停会看不出来。
+  const chipClass = 'inline-flex h-7 max-w-44 items-center gap-1.5 rounded-md px-2 text-sm text-foreground transition-colors duration-fast hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45';
 
   const isLocalSelected = draftWorkspace.kind === 'local';
   const isWorktreeSelected = draftWorkspace.kind === 'worktree';
@@ -181,24 +183,36 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
   return (
     <div
       className={cn(
-        // 上下文条是输入区**上方那块独立的面**（Codex 的两段式输入区）：
-        // 底色、圆角与下面的输入框分开，靠 2px 的缝表达「这是两件事」。
-        'flex flex-wrap items-center gap-1 rounded-lg bg-[hsl(var(--surface-2))] px-1.5 py-1',
+        // 上下文条是**发送框顶部贴着的那一条**（Codex 的 composer rail）：
+        //
+        //   · 与输入框同宽同列，但**左右各内缩一个输入框圆角**（`mx-[var(--radius-xl)]`），
+        //     因为输入框自己的顶角是圆的 —— 内缩量正好等于圆角半径时，rail 的两条竖边
+        //     与输入框顶角弧线的终点接上，外轮廓连成一条（Codex 的
+        //     `--home-composer-inline-inset` 与它的 composer 圆角同为 12px）。
+        //   · 只圆上面两角、下面两角是直角，直接压在输入框顶边上，中间没有缝也没有线。
+        //   · 底色 `--composer-action-bar-bg`（Codex 的 `background-composer-action-bar`）：
+        //     比输入框退档、也比页面底色低一档，读作「凹进页面里的一条」。
+        //   · `relative z-10` 是为了压住输入框那条 `shadow-elevation-prominent` 描边 ——
+        //     描边画在输入框盒子**外**（顶边上就是 1px 的线），rail 不抬层的话
+        //     接缝处会多出一条横线。
+        //   · 宽度靠父级 flex 列的 `align-items: stretch` 撑开（不写 `w-full` ——
+        //     那会连同左右外边距一起算 100%，比输入框宽出两个圆角）。
+        'relative z-10 mx-[var(--radius-xl)] flex flex-wrap items-center gap-1 rounded-t-xl bg-[hsl(var(--composer-action-bar-bg))] px-1.5 py-1.5',
         className,
       )}
       data-testid="draft-workspace-toolbar"
-      data-context-bar
+      data-composer-rail
     >
       <Popover open={projectOpen} onOpenChange={setProjectOpen}>
         <PopoverTrigger asChild>
           <button type="button" className={chipClass} data-testid="draft-project-picker">
             {draftProject ? (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
             ) : (
-              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
             <span className="truncate">{getProjectLabel(draftProject)}</span>
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-72 rounded-xl border-border/70 bg-popover/98 p-1.5">
@@ -264,12 +278,12 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
             <PopoverTrigger asChild>
               <button type="button" className={chipClass} data-testid="draft-worktree-picker">
                 {isWorktreeSelected ? (
-                  <GitBranchPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <GitBranchPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
                 ) : (
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <span className="truncate">{worktreeTriggerLabel}</span>
-                <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
               </button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5">
@@ -322,9 +336,9 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
             <Popover open={branchOpen} onOpenChange={setBranchOpen}>
               <PopoverTrigger asChild>
                 <button type="button" className={chipClass} data-testid="draft-branch-picker">
-                  <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="truncate">{branchPickerLabel}</span>
-                  <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
                 </button>
               </PopoverTrigger>
               <PopoverContent align="start" className="w-72 rounded-xl border-border/70 bg-popover/98 p-1.5">

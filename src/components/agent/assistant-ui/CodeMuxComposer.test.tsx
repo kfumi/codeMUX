@@ -328,7 +328,9 @@ describe('CodeMuxComposer', () => {
 
     const className = lexicalProps[0]?.className ?? '';
 
-    expect((container.firstElementChild as HTMLElement | null)?.style.maxWidth).toBe('var(--content-width, 52rem)');
+    expect((container.firstElementChild as HTMLElement | null)?.style.maxWidth).toBe(
+      'calc(var(--content-width, 52rem) + 48px)',
+    );
     expect(className).toContain('relative');
     expect(className).toContain('[&_.aui-lexical-input]:px-2');
     expect(className).toContain('[&_.aui-lexical-input]:py-1');
@@ -337,6 +339,18 @@ describe('CodeMuxComposer', () => {
     expect(className).toContain('[&_.aui-lexical-input]:border-0');
     expect(className).toContain('[&_.aui-lexical-input]:shadow-none');
     expect(className).toContain('[&_.aui-lexical-input]:ring-0');
+  });
+
+  it('draws its own elevated surface with the composer radius', () => {
+    const { container } = render(<CodeMuxComposer sessionId="session-1" />);
+
+    const root = container.querySelector('.aui-composer-root') as HTMLElement;
+    // composer 永远自己画那块面：圆角 + 抬高档底色 + 描边式投影。
+    // （上下文条是发送框**上方**独立的一排、间距 40px，不与它共用外壳，
+    //  所以这里不需要「外壳已画好」的 embedded 变体。）
+    expect(root.className).toContain('rounded-xl');
+    expect(root.className).toContain('bg-[hsl(var(--surface-1))]');
+    expect(root.className).toContain('shadow-elevation-prominent');
   });
 
   it('renders file mention chips with a file icon', () => {

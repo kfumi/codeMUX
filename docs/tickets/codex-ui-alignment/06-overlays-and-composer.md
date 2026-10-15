@@ -66,3 +66,90 @@
    实测（浅色，无损抓图）：底排从左到右扫描，`+`、`构建模式`、盾牌三处**全部落在输入框底色 253 上**，没有任何边框或底块；盾牌仍是橙色图标（255,124,32）。
 
 测试：`CodeMuxComposer.test.tsx` 新增「没有附件时不渲染附件条」；附件相关的两条用例原先的桩自相矛盾（`Attachments` 原语永远渲染一张图，而 `useAuiState` 报 `attachments: []`），改成受控的 `composerAttachments` 夹具。
+
+## 后续变更（2026-10-15）：首页改建会话页，去掉准备清单与建议提示词
+
+用户对着 Codex 首页截图提了两处（图注）：
+
+1. **一进软件应落在新建会话页。** 之前冷启动（没有活动会话）渲染的是一个「开始新对话」空白占位页，要先点侧栏按钮才能开始。`App.tsx` 的 app 视图分支改成 `activeSessionId ? 会话 : 新建会话页`，且**与草稿开合状态解耦** —— 冷启动、侧栏「新对话」、从自动化/工单经导航栏点回会话，任何路径落到 app 视图且没有会话时，看到的都是同一页。
+2. **首页构图与干净度对齐 Codex。** 问候区（agent 选择 + 标题）占满上半屏居中，两段式输入区贴底。旧版是「准备清单 + 建议提示词 + 输入区」作为一个整体居中，输入区被顶在页面中段；Codex 的输入区落在底部、与标题之间留大片空白。「开始前检查」chip 行与三条建议提示词按用户反馈整块移除，`AgentSetupChecklist` 组件随之删除（无其他引用）。
+
+未动：agent 选择入口位置、模型/权限选择行为。（「两段式输入区结构不变」这条在同日的下两节被进一步修正，最终形态以最后一节为准。）
+
+## 后续变更（2026-10-15，续）：composer 几何对齐会话页
+
+对着 Codex 本机截图复核首页，改了三处：
+
+1. **composer 的宽度与离底高度和真实对话页不一致。** 新建会话页的列是 `max-w-2xl`(42rem) / `py-10`，而会话页的 composer 走 `--content-width`(48rem)、底部 `pb-3`（`CodeMuxThread` 的 thread-content-shell 与 ViewportFooter）。发第一条消息时输入框会跳宽跳位。首页列改为逐值复用会话页那一组：`--content-width` / `px-5` / `pb-3` / `pt-4`。
+2. **上下文条与输入区收进同一块外壳**（`rounded-xl` + `--surface-1` + elevation），输入区新增 `embedded` 模式只画内容、不重复描边。（这一版的排布在下一节被编译产物复核后修正。）
+3. **供应商提示启动时闪一下。** 冷启动模型目录在途时 `hasUsableProvider` 短暂为 false，无条件渲染让「请先在设置 → 模型配置……」闪一帧。改为目录落定（`!areModelsLoading && !waitingForConfiguredModel`）仍无可用供应商时才提示。
+
+## 后续变更（2026-10-15，再续）：从 Codex 编译产物复核发送框，修正两处
+
+`app.asar`（Store 版 26.1007.9446.0，`app/webview/assets/` 下 `app-shared-*.css` 与 `app-initial-*.js`）逐字复核，发现前两节有两处是按截图猜的，都不对：
+
+| | 按截图猜的 | 编译产物里的真实值 |
+|---|---|---|
+| 上下文条底色 | 与输入区同色 | **独立 token** `--color-background-composer-action-bar`（`.bg-background-composer-action-bar`）：浅色 `--color-surface-secondary` / 深色 `elevatedSecondaryOpaque`，比输入区（`surface-elevated`）**更退一档**（实机深色 33 vs 输入框 47） |
+| 发送框宽度 | 与正文栏等宽 | **宽出一截**：`--composer-inline-overhang` = 24px/边，`--composer-adjacent-max-width = thread-content-max-width + overhang×2 − inset×2` |
+
+按取证结果落成（**以此节为准**）：
+
+1. `DraftWorkspaceToolbar` 改为 composer **外壳里的通栏顶行**：`w-full` + `rounded-t-xl` + `bg-[hsl(var(--surface-2))]`（退档表面色），底端不切，读作一块面的上半段。
+2. `CodeMuxComposer` 的 `maxWidth` 由 `var(--content-width, 52rem)` 改为 `calc(var(--content-width, 52rem) + 48px)`（24px/边）。改在共享组件上，首页与会话页两边同时生效，宽度因此天生一致。
+3. `embedded` 模式保留：外壳（`rounded-xl` + `--surface-1` + elevation）同时罩住上下文条与输入区，输入区只画内容不重复描边。
+
+> 教训记在这里：**Codex 的观感细节一律回查编译产物**，不拿截图推。asar 读取方式：头 4 字节后是 12 字节尺寸前缀，JSON 头从第 16 字节起（括号匹配找结尾），条目 `offset` 是字符串需 `Number()`，数据起点 = 头结尾。
+
+### 第三轮：只搜 token 不够，要定位到渲染它的组件
+
+上表只查了 CSS token，「上下文条长什么样」仍是推的，于是又错了一轮（做成了发送框外壳里的通栏顶行）。正确做法是顺着 class 名反查使用它的 JSX——`grep -abo` 直接在 asar 原文里定位 `.bg-background-composer-action-bar`，命中 `OV` 组件：
+
+```js
+l = !(s && o) && 'bg-background-composer-action-bar'   // 常态自带底色
+u = Sg('px-1', l)                                       // 外框 px-1
+f = jsxs(gPe, { className: 'flex min-w-0 items-center justify-between gap-2 py-1.5 ...' })
+p = jsx(uR.Item, { className: u, concealed: a, 'data-composer-placement': 'home', variant: 'controls', children: f })
+```
+
+再由其宿主 `z4e`（composer 包装组件）定方位：
+
+```js
+d = u || quickChatComposerPresentation != null ? 'above' : s   // actionBarPosition 默认 'above'
+x = !u && d === 'above' && f && 'mt-10'                         // 间距 40px
+T = d === 'above' ? [g, v] : [v, g]                            // 上下文条在前、输入框在后
+```
+
+结论（**以此为准**）：上下文条是**发送框上方独立的一排**，间距 40px（`mt-10`），四角全圆、自有底色 `--color-background-composer-action-bar`（比输入区退一档），**不与发送框同面、不共用外壳**。落地为 `NewSessionPanel` 里 `<div className="mb-10"><DraftWorkspaceToolbar /></div>` + composer 自身不变；`embedded` 变体随之删除（它是误判期间的产物）。
+
+最终形态复盘：为上下文条试过四个版本——独立面板 + 2px 缝（原始）、外壳通栏顶行、外壳内嵌行、上方独立一排。只有最后一个有编译产物依据。**先取证再动手，一个版本能省掉三次返工。**
+
+### 第四轮：上一轮的 `mt-10` 是「动作条不在 rail 里」的分支，形态仍然错
+
+用户对着两边截图指出「效果明显不好」。把两张图逐像素量了一遍，问题不在间距，在**形态**：
+
+| | 我们的（改前） | Codex（同一张截图实测） |
+|---|---|---|
+| 位置 | 发送框上方 40px，悬空 | **压着发送框顶边**，中间 0 缝 |
+| 宽度 | 与发送框同宽 | 比发送框**左右各窄 12px** |
+| 圆角 | 四角全圆 | **只圆上面两角**，下边是直角 |
+| 底色实测 | 251（= 页面底色，浅色下**整条隐形**） | 242 / 页面 246–249 / 输入框 255 |
+
+前两轮漏掉的东西：
+
+1. **`mt-10` 那条分支不是这个场景。** 它出自 `V4e`/`z4e`：`p = aboveActionBarInRail && position === 'above'` —— 为真时动作条渲染进 `uR`（rail）里，为假时才作为独立一排挂 `mt-10`。本机 Codex 首页走的是**进 rail** 那条：`Q4e` 里 `<div data-codex-composer-root data-composer-placement="home"><uR><$4e/></uR>{composer}</div>`。只看 token、只看截图都会漏，得把宿主组件的两个分支一起读完。
+2. **rail 的真实几何在 CSS module `1hrlq` 里**（`_rail_/ _attached_ / _item_ / _embedded_`）：`._attached[placement=above]` = `padding-bottom: var(--radius-2xl)` + `margin-bottom: -(...)` + 上两角 `var(--radius-2xl)` + `:after` 只画上边与左右（`border-width: 1px 1px 0`，再 `clip-path: inset(0 0 var(--radius-2xl))` 裁掉下半）。`--home-composer-inline-inset` 与 composer 圆角同为 12px —— **左右内缩量 = 输入框圆角半径**，rail 的两条竖边正好接在输入框顶角弧线的终点上，外轮廓连成一条。这是「贴合」的成因，不是随手写的内边距。
+3. **底色一个值套两套主题会隐形。** Codex 的公式是 `--color-background-composer-action-bar: light ? surfaceUnder : elevatedSecondaryOpaque`；我们之前两套都用 `--surface-2`(= `elevatedSecondaryOpaque`)，浅色下它落在 98.82% —— 与 `--background` 同值，整条在页面上看不见（截图里只剩孤零零一个标签）。
+
+落地（**以此为准**）：
+
+- 新增派生 token `--composer-action-bar-bg`（`colorDerivation` 的 `composerActionBarBackground`），浅色取 `surfaceUnder`（= 已有的 `chromeBackground`，实测 242），深色取 `elevatedSecondaryOpaque`（32）。两个 `@theme` 映射与 `:root`/`.dark` 静态镜像同步补齐。
+- `DraftWorkspaceToolbar` 改为 rail：`mx-[var(--radius-xl)]`（内缩量锁在输入框圆角同一个变量上，用户换圆角档位也跟着走）+ `rounded-t-xl` + `bg-[hsl(var(--composer-action-bar-bg))]` + `relative z-10`（压住输入框那条画在盒外的 `shadow-elevation-prominent` 描边，接缝才不会有横线）。
+- `NewSessionPanel` 去掉 `mb-10` 包裹：rail 与 composer 同列相邻，0 缝。
+- chip 顺带对齐：字号 `text-ui-caption` → `text-sm`、图标 14 → 16px、悬停从 `--surface-3` 换成 ink alpha（`--surface-3` 与 rail 底色同档，浮不出来）；`text-muted-foreground/70` 的箭头改成第三档 `text-foreground-tertiary`（AGENTS.md 禁用文字透明度后缀）。
+
+实机复核（1200×800，`data-host=desktop`）：rail 宽 696 / 输入框 728 → **每边内缩 16px = `--radius-xl`**；rail 上圆角 16px、下圆角 0；两盒接缝 `bottom - composer.y = 0`；rail 底色 `rgb(242,242,242)`（Codex 实测 241）。接缝像素逐行扫描 242 → 249 → 253，**没有多出来的线**。深色下 rail 32 / 输入框 45 / 页面 17，与 Codex 同序。
+
+测试：`colorDerivation.test.ts` 冻结表补两个值 + 新增一条「上下文条必须同时离开页面底色与输入框」的契约（浅色下同值隐形的回归防线）；`DraftWorkspaceToolbar.test.tsx` 与 `NewSessionPanel.test.tsx` 的形态契约改成 rail 口径。
+
+> 这一轮的教训：前两轮把「哪一行 JSX 渲染它」当成终点，其实还要问一句「**这个组件在什么条件下走哪条分支**」。判断依据取错了分支，取证再细也是白取。

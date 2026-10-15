@@ -554,7 +554,16 @@ export function CodeMuxComposer({
   };
 
   return (
-    <div ref={composerRootRef} className="relative mx-auto flex w-full flex-col" style={{ maxWidth: 'var(--content-width, 52rem)' }} onKeyDownCapture={handleComposerKeyDown}>
+    // 发送框比正文栏**宽出一截**：Codex 的 `--composer-inline-overhang` = 24px/边，
+    // 完整口径 `thread-content-max-width + overhang×2 − inset×2`。取 24px 的直观量，
+    // 于是 `mx-auto` 时它比左右的消息列各宽 24px —— 这是 Codex 发送框的辨识特征。
+    // 首页与会话页共用这一个组件，两处的宽度因此天生一致。
+    <div
+      ref={composerRootRef}
+      className="relative mx-auto flex w-full flex-col"
+      style={{ maxWidth: 'calc(var(--content-width, 52rem) + 48px)' }}
+      onKeyDownCapture={handleComposerKeyDown}
+    >
       {menuVisible && (
         <TriggerMenu
           char={activeChar ?? '/'}

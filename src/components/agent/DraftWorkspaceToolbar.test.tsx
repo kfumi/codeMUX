@@ -128,20 +128,29 @@ describe('DraftWorkspaceToolbar', () => {
     expect(screen.queryByTestId('draft-branch-picker')).toBeNull();
   });
 
-  it('renders as a context bar of borderless chips rather than three bordered buttons', () => {
+  it('renders as an attached rail of borderless chips rather than three bordered buttons', () => {
     render(<DraftWorkspaceToolbar />);
 
     const bar = screen.getByTestId('draft-workspace-toolbar');
-    // 「独立的一块面」：底色 + 圆角，与下面那块输入框分开。
-    expect(bar.getAttribute('data-context-bar')).toBe('true');
-    expect(bar.className).toContain('bg-[hsl(var(--surface-2))]');
-    expect(bar.className).toContain('rounded-lg');
+    // 上下文条是**发送框顶部贴着的那一条**（Codex 的 composer rail）：
+    // 左右各内缩一个输入框圆角、只圆上面两角、直接压在输入框顶边上；底色取
+    // `--composer-action-bar-bg`（Codex 的 `background-composer-action-bar`）。
+    expect(bar.getAttribute('data-composer-rail')).toBe('true');
+    expect(bar.className).toContain('rounded-t-xl');
+    expect(bar.className).toContain('mx-[var(--radius-xl)]');
+    expect(bar.className).toContain('bg-[hsl(var(--composer-action-bar-bg))]');
+    // 底边不圆：下面那条边要和输入框的顶边接上，圆了就会漏出两个缺口。
+    expect(bar.className).not.toContain('rounded-xl');
+    expect(bar.className).not.toContain('bg-[hsl(var(--surface-1))]');
+    // 压住输入框的外描边，接缝处不能多出一条线。
+    expect(bar.className).toContain('z-10');
 
     // chip 无边框、无常驻底色，只有悬停时才浮出来。
     const chip = screen.getByTestId('draft-project-picker');
     const base = chip.className.split('hover:')[0];
     expect(chip.className).not.toContain('border');
     expect(base).not.toContain('bg-');
-    expect(chip.className).toContain('hover:bg-[hsl(var(--surface-3))]');
+    // 悬停用 ink 的 alpha：压在凹面上时 `--surface-3` 与底色同档，浮不出来。
+    expect(chip.className).toContain('hover:bg-foreground/8');
   });
 });

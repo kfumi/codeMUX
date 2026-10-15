@@ -16,7 +16,6 @@ import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
-import { AgentSetupChecklist } from './AgentSetupChecklist';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
@@ -27,12 +26,6 @@ import { resolveDraftProjectPath } from '../../lib/sessionCwd';
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
 }
-
-const STARTER_PROMPTS: Record<string, string[]> = {
-  claude_code: ['先检查项目结构', '帮我定位一个问题', '制定实现计划'],
-  codex: ['审查当前改动', '运行测试并修复失败', '分析这个项目的入口'],
-  opencode: ['先了解项目结构', '实现一个小功能', '检查最近的代码改动'],
-};
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
@@ -310,46 +303,44 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         onCommand={handleCommand}
         sendDisabled={!hasUsableProvider || isCheckingRuntime}
       >
-        <div className="mx-auto flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
-          <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both duration-slow ease-motion-out">
-            <div className="mb-10 flex flex-col items-center gap-4">
-              <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="hero" />
-              <h1 className="text-center text-ui-heading-md font-semibold leading-tight text-foreground sm:text-ui-heading-lg">
-                {title}
-              </h1>
-              {!hasUsableProvider && usesProviderModel && (
-                <p className="text-center text-sm text-muted-foreground">
-                  请先在设置 → 模型配置中配置并启用可用的模型供应商（需 API Key 与匹配协议端点）。
-                </p>
-              )}
-              <AgentSetupChecklist
-                agentLabel={selectedAgent?.label ?? '智能体'}
-                hasUsableProvider={hasUsableProvider}
-                isLoadingModel={areModelsLoading || waitingForConfiguredModel}
-                hasModel={Boolean(effectiveModel)}
-                hasWorkspace={Boolean(draftProjectPath)}
-              />
-              <div className="flex flex-wrap justify-center gap-2">
-                {(STARTER_PROMPTS[selectedAgentKind] ?? STARTER_PROMPTS.claude_code).map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    disabled={!hasUsableProvider || isCheckingRuntime}
-                    onClick={() => void handleSend({ text: prompt })}
-                    className="rounded-full border border-border/55 bg-[hsl(var(--surface-1))]/70 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/6 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/*
+          首页构图对齐 Codex：问候区占满上半屏居中，composer 贴底。
 
-            {/*
-              两段式输入区：上下文条（发到哪个项目/工作树/分支）在上、输入框在下，
-              各自是**独立的一块面**，中间留 2px 的缝。间距由这里的 gap-0.5
-              统一表达 —— 两个组件都不再自带外边距，避免两层各减一次。
-            */}
-            <div className="flex flex-col gap-0.5">
+          整页的列宽、水平内边距与底部间距**与真实对话页逐值一致** —— `--content-width` /
+          px-5 / pb-3 就是 CodeMuxThread 里 thread-content-shell 与 ViewportFooter 用的
+          同一组值。这样点发送后会话页接手时，composer 的宽度与离底高度不动，用户看到的
+          只是消息从它上方长出来。上一版列宽是 max-w-2xl(42rem)、底部 py-10，发送瞬间
+          输入框会跳宽跳位。
+        */}
+        <div
+          className="mx-auto flex min-h-full w-full flex-col px-5 pb-3 pt-4"
+          style={{ maxWidth: 'var(--content-width, 52rem)' }}
+        >
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 animate-in fade-in fill-mode-both duration-slow ease-motion-out">
+            <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="hero" />
+            <h1 className="text-center text-ui-heading-md font-semibold leading-tight text-foreground sm:text-ui-heading-lg">
+              {title}
+            </h1>
+            {/* 冷启动模型目录在途时 hasUsableProvider 会短暂为 false，无条件渲染这行
+                会让它「闪一下」；等目录落定、确认没有可用供应商时再给提示。 */}
+            {!hasUsableProvider && usesProviderModel && !areModelsLoading && !waitingForConfiguredModel && (
+              <p className="text-center text-sm text-muted-foreground">
+                请先在设置 → 模型配置中配置并启用可用的模型供应商（需 API Key 与匹配协议端点）。
+              </p>
+            )}
+          </div>
+
+          {/*
+            composer 整块贴页面底部，入场从下方滑入。
+
+            上下文条（草稿工作区三件：项目 / 工作树 / 分支）是**发送框顶部贴着的那
+            一条**（Codex 的 composer rail）：与输入框同一个 flex 列、中间不留间距，
+            左右各内缩一个输入框圆角、只圆上面两角 —— 于是它读作输入框伸出来的一条
+            「上沿」，而不是浮在旁边的一个独立小框。间距全部由 rail 自己的内边距表达，
+            这里不再加任何 margin。见 `DraftWorkspaceToolbar` 顶部注释与工单 06。
+          */}
+          <div className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both duration-slow ease-motion-out">
+            <div className="flex flex-col">
               <DraftWorkspaceToolbar />
               <CodeMuxComposer
               key={draftRevision}

@@ -223,6 +223,55 @@ describe('NewSessionPanel', () => {
     expect(composerProps.some((entry) => entry.sessionId === 'new-session-draft')).toBe(true);
   });
 
+  it('opens clean: no setup checklist and no starter prompts (Codex 首页)', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+    // 准备清单 chip 行与建议提示词按用户反馈整块移除,首页只留标题与输入区。
+    expect(screen.queryByTestId('agent-setup-checklist')).toBeNull();
+    expect(screen.queryByText('先了解项目结构')).toBeNull();
+    expect(screen.queryByText('检查最近的代码改动')).toBeNull();
+  });
+
+  it('keeps the greeting centered above and pins the composer to the bottom', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    const hero = screen.getByText('我们应该做什么？').parentElement!;
+    // 问候区吃掉剩余空间把标题顶到上半屏居中;composer 是它之后的下一个兄弟,落在页面底部。
+    expect(hero.className).toContain('flex-1');
+    expect(hero.className).toContain('justify-center');
+
+    const column = hero.parentElement!;
+    expect(hero.nextElementSibling).toBe(column.lastElementChild);
+    expect(column.lastElementChild!.contains(screen.getByText('Mock Composer'))).toBe(true);
+
+    // 列宽 / 水平内边距 / 底部间距与 CodeMuxThread 的 thread-content-shell 逐值一致 ——
+    // 发送后会话页接手,composer 的宽度与离底高度不动(用户要的就是「点发送输入框不动」)。
+    expect(column.style.maxWidth).toBe('var(--content-width, 52rem)');
+    expect(column.className).toContain('px-5');
+    expect(column.className).toContain('pb-3');
+  });
+
+  it('attaches the context rail to the top of the composer', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    const toolbar = screen.getByTestId('draft-workspace-toolbar');
+    const composer = screen.getByText('Mock Composer').closest('div')!;
+
+    // 「发送框顶部贴着的那一条」：与发送框在**同一个 flex 列**里、中间不留间距
+    // （间距全部由 rail 自己的内边距表达），左右各内缩一个输入框圆角、只圆上两角。
+    const column = toolbar.parentElement!;
+    expect(column.className).not.toContain('mb-10');
+    expect(column.className).toContain('flex-col');
+    // 紧挨着、同一个 flex 列：rail 的下边缘就是输入框的上边缘，中间不留间距。
+    expect(toolbar.nextElementSibling).toBe(composer);
+    expect(composer.parentElement).toBe(column);
+
+    expect(toolbar.className).toContain('rounded-t-xl');
+    expect(toolbar.className).toContain('mx-[var(--radius-xl)]');
+    expect(toolbar.className).toContain('bg-[hsl(var(--composer-action-bar-bg))]');
+    // composer 自己画那块面，不存在共用外壳。
+    expect(composerProps.some((entry) => entry.embedded === true)).toBe(false);
+  });
+
   it('clears the shared new-session composer draft after a successful submit', async () => {
     useAgentStore.getState().saveComposerDraft('new-session-draft', '旧输入还在');
 

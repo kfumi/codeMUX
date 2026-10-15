@@ -1,4 +1,3 @@
-import { Sparkles } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { toast, Toaster } from 'sonner';
 
@@ -558,26 +557,17 @@ function App() {
               <Suspense fallback={panelFallback}>
                 <AgentPanel sessionId={activeSessionId} />
               </Suspense>
-            ) : isDraftOpen ? (
+            ) : (
+              /*
+                没有活动会话时，app 视图就是**新建会话页**（参考 Codex 首页：一进软件
+                就是「我们要构建什么？」+ 输入区，不是空白占位）。这里不再区分草稿开合
+                状态 —— 之前冷启动会落在一个「开始新对话」空状态上，用户得先点侧栏按钮
+                才能开始；任何导航路径（冷启动 / 侧栏新对话 / 从自动化或工单点回会话）
+                回到 app 视图且没有会话时，看到的都是同一页。
+              */
               <Suspense fallback={panelFallback}>
                 <NewSessionPanel onSubmit={handleStartNewSession} />
               </Suspense>
-            ) : (
-              <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
-                <div className="max-w-md space-y-5 text-center">
-                  <div className="relative inline-flex">
-                    <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-border/70 bg-muted/35 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.025)]">
-                      <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.58)]" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h2 className="text-ui-title font-semibold text-foreground/84">开始新对话</h2>
-                    <p className="text-sm leading-relaxed text-foreground/70">
-                      在左侧创建对话，或选择一个项目开始编码任务
-                    </p>
-                  </div>
-                </div>
-              </div>
             )}
           </ErrorBoundary>
         </MainLayout>

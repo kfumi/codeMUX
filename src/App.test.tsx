@@ -47,6 +47,12 @@ vi.mock('./components/layout/Sidebar', () => ({
   Sidebar: () => <div>sidebar</div>,
 }));
 
+// App 用例关心的是路由接线:没有活动会话时 app 视图落到哪一页。新建会话页自身
+// 的模型/草稿行为由 NewSessionPanel.test.tsx 覆盖,这里只占位。
+vi.mock('./components/agent/NewSessionPanel', () => ({
+  NewSessionPanel: () => <div>new session panel</div>,
+}));
+
 vi.mock('./components/settings/SettingsDialog', () => ({
   SettingsSidebar: () => <div>settings sidebar</div>,
   SettingsContent: () => <div>settings content</div>,
@@ -209,6 +215,14 @@ describe('App', () => {
 
     expect(updateEntry).toBeTruthy();
     expect(updaterProvider.contains(updateEntry)).toBe(true);
+  });
+
+  it('没有活动会话时 app 视图落在新建会话页（参考 Codex 首页）', () => {
+    render(<App />);
+
+    // 冷启动 / 任何回到 app 视图且没有会话的路径,看到的都是同一页 ——
+    // 不再是「开始新对话」空白占位。
+    expect(screen.getByText('new session panel')).toBeTruthy();
   });
 
   it('浏览器返回手势会回退应用内页面并留在当前页面', async () => {

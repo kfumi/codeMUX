@@ -296,6 +296,27 @@ describe('colorDerivation', () => {
     expect(lightnessOf(dark['--surface-1'])).toBeGreaterThan(lightnessOf(dark['--background']));
   });
 
+  it('keeps the composer context bar off both the page and the input surface', () => {
+    // 输入区顶部那条上下文条的底 —— Codex 的 `background-composer-action-bar`
+    // （浅色 surfaceUnder / 深色 elevatedSecondaryOpaque）。它必须同时离开页面底色
+    // **和**输入框：
+    //   浅色 Codex 实测 页面 246–249 / 上下文条 241 / 输入框 255；
+    //   深色 Codex 实测 页面 17  / 上下文条 33  / 输入框 47。
+    // 曾经按 `elevatedSecondaryOpaque` 一个值套两套主题，浅色下发到 98.82% —— 与
+    // 页面底色同值，整条在页面上隐形（实机截图里只剩一个孤零零的标签）。
+    const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
+    expect(lightnessOf(light['--composer-action-bar-bg']))
+      .toBeLessThan(lightnessOf(light['--background']));
+    expect(lightnessOf(light['--composer-action-bar-bg']))
+      .toBeLessThan(lightnessOf(light['--surface-1']));
+
+    const dark = deriveThemeTokens(CODEX_DARK_SEEDS, true);
+    expect(lightnessOf(dark['--composer-action-bar-bg']))
+      .toBeGreaterThan(lightnessOf(dark['--background']));
+    expect(lightnessOf(dark['--composer-action-bar-bg']))
+      .toBeLessThan(lightnessOf(dark['--surface-1']));
+  });
+
   it('keeps borders neutral translucent-ink rather than grey', () => {
     const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
     // 边框必须完全无彩色相（墨色低 alpha 合成到近白表面上），靠明度差体现。
@@ -333,6 +354,7 @@ describe('colorDerivation', () => {
       '--codemux-directive-bg': '215 75% 93.73%',
       '--codemux-directive-border': '0 0% 91.37%',
       '--codemux-link': '216.83 92.2% 59.8%',
+      '--composer-action-bar-bg': '0 0% 94.9%',
       '--destructive': '1.19 68.33% 43.33%',
       '--destructive-foreground': '0 0% 98.82%',
       '--diff-added': '143.7 100% 31.76%',
@@ -394,6 +416,7 @@ describe('colorDerivation', () => {
       '--codemux-directive-bg': '217.02 62.67% 14.71%',
       '--codemux-directive-border': '0 0% 13.73%',
       '--codemux-link': '217.04 92% 75.49%',
+      '--composer-action-bar-bg': '0 0% 12.55%',
       '--destructive': '1.28 94.95% 61.18%',
       '--destructive-foreground': '0 0% 6.67%',
       '--diff-added': '144.09 55.92% 51.96%',

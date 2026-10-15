@@ -208,6 +208,13 @@ export interface DerivedPalette {
   chromeBackground: string;
   /** 窗口面上的悬停/选中档(导航栏的图标按钮)。 */
   chromeBackgroundHover: string;
+  /**
+   * 输入区顶部那条上下文条的底（发送框上方的一排：项目 / 工作树 / 分支）——
+   * Codex 的 `--color-background-composer-action-bar`，公式是
+   * `light ? surfaceUnder : elevatedSecondaryOpaque`：浅色取**窗口面**那一档
+   * （往 ink 混 4%，Codex 实测 241），深色取抬高二档（实测 33）。
+   */
+  composerActionBarBackground: string;
   controlBackground: string;
   controlBackgroundOpaque: string;
   elevatedPrimary: string;
@@ -292,6 +299,9 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
       buttonPrimaryBackground: rgbToHex(primaryFill),
       chromeBackground: rgbToHex(chrome),
       chromeBackgroundHover: rgbToHex(overlayRgb(chrome, ink, 0.05 + c * 0.03)),
+      // Codex 深色下这条上下文条用的是 `elevatedSecondaryOpaque`，不是窗口面：
+      // 深色的层次是「底 17 / 上下文条 32 / 输入框 45」，它夹在中间才读得出两级。
+      composerActionBarBackground: rgbToHex(mixRgb(surface, ink, 0.04 + c * 0.05)),
       controlBackground: rgbToHex(overlayRgb(surface, mixRgb(surface, ink, 0.06 + c * 0.05), 0.96)),
       controlBackgroundOpaque: rgbToHex(mixRgb(surface, ink, 0.06 + c * 0.05)),
       elevatedPrimary: rgbToHex(overlayRgb(surface, mixRgb(surface, ink, 0.08 + c * 0.08), 0.96)),
@@ -325,6 +335,11 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
     buttonPrimaryBackground: rgbToHex(ink),
     chromeBackground: rgbToHex(chrome),
     chromeBackgroundHover: rgbToHex(overlayRgb(chrome, ink, 0.08 + c * 0.04)),
+    // 浅色下 Codex 这条上下文条取的是**窗口面**（`surfaceUnder`，往 ink 混 4%）：
+    // 实测 241，比输入框（255）退两档、比输入框周围的页面（246–249）还低一档 ——
+    // 读作「凹进页面里的一条」。之前按 `elevatedSecondaryOpaque`（98.82% = 252）
+    // 取色，正好与页面底色撞在一起，整条因此在浅色下隐形。
+    composerActionBarBackground: rgbToHex(chrome),
     controlBackground: rgbToHex(overlayRgb(surface, mixRgb(surface, WHITE, 0.09 + c * 0.04), 0.96)),
     controlBackgroundOpaque: rgbToHex(mixRgb(surface, WHITE, 0.09 + c * 0.04)),
     elevatedPrimary: rgbToHex(overlayRgb(surface, mixRgb(surface, WHITE, 0.16 + c * 0.12), 0.96)),
@@ -359,6 +374,7 @@ const DERIVED_CSS_VARIABLES: Partial<Record<keyof DerivedPalette, string>> = {
   borderHeavy: '--surface-edge',
   chromeBackground: '--chrome-bg',
   chromeBackgroundHover: '--chrome-bg-hover',
+  composerActionBarBackground: '--composer-action-bar-bg',
   surfaceCanvas: '--surface-canvas',
   controlBackground: '--muted',
   elevatedPrimary: '--card',
