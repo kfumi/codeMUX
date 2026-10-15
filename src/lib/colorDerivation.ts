@@ -33,7 +33,7 @@ export interface Rgb {
 
 /** 派生层的输入：4 个种子。 */
 export interface ThemeSeeds {
-  /** 基础表面色，hex。浅色 `#fcfcfc` / 深色 `#000000`。 */
+  /** 基础表面色，hex。浅色 `#fcfcfc` / 深色 `#111111`。 */
   surface: string;
   /** 主文字色，hex。浅色 `#0d0d0d` / 深色 `#ededed`。 */
   ink: string;
@@ -64,8 +64,15 @@ export const CODEX_LIGHT_SEEDS: ThemeSeeds = {
   contrast: 45,
 };
 
+/**
+ * 深色种子。`surface` 是 `#111111` 而不是纯黑 —— 这是 Codex 的结构性要求，不是审美：
+ * 窗口面（顶栏 + 图标轨）在 Codex 里**比表面再深一档**（`surfaceUnder` = 表面往黑混 16%），
+ * 表面若压在 `#000000`，那一档就无处可退，窗口面、侧栏、内容面会全部塌成同一个黑，
+ * 整扇窗失去「面板浮在窗框上」的层次。Codex 自己的深色默认是 `#181818`，
+ * 用户在 Codex 里用的也是 `#111111` —— 取后者，与参考实现逐位对齐。
+ */
 export const CODEX_DARK_SEEDS: ThemeSeeds = {
-  surface: '#000000',
+  surface: '#111111',
   ink: '#ededed',
   accent: '#3a83f7',
   contrast: 60,
@@ -197,6 +204,10 @@ export interface DerivedPalette {
   borderHeavy: string;
   borderLight: string;
   buttonPrimaryBackground: string;
+  /** 窗口面 —— 顶栏与图标轨共用的那块底，Codex 的 `surfaceUnder`。 */
+  chromeBackground: string;
+  /** 窗口面上的悬停/选中档(导航栏的图标按钮)。 */
+  chromeBackgroundHover: string;
   controlBackground: string;
   controlBackgroundOpaque: string;
   elevatedPrimary: string;
@@ -209,10 +220,41 @@ export interface DerivedPalette {
   iconSecondary: string;
   iconTertiary: string;
   simpleScrim: string;
+  /** 凹面 —— 比表面低一档的「画布」，Codex 的 `--color-surface-canvas`。 */
+  surfaceCanvas: string;
   textAccent: string;
   textForeground: string;
   textForegroundSecondary: string;
   textForegroundTertiary: string;
+}
+
+/**
+ * 窗口面（顶栏 + 左侧图标轨连成的那块底）—— Codex 的 `surfaceUnder`
+ * （`Fba` = `Yba[variant] + (contrast - Kba[variant]) * Xba[variant]`）：
+ * 浅色往 ink 混 4%，深色往黑混 16%，两套都是「比表面**再深**一档」。
+ *
+ * 这一档的意义是让侧栏与内容面「浮」在窗框之上：实测 Codex 深色（surface `#111111`）
+ * 是 窗框 14 / 侧栏 16 / 内容 17，浅色是 窗框 245 / 侧栏 252 / 内容 253 —— 都是
+ * 「窗框最深、面板更亮」。Codex 的窗口面本来还有 Mica 半透明背板这一层，
+ * 我们把它归并进同一个公式：两套主题下它都是一个实心色，与面板的相对关系一致。
+ */
+function surfaceUnder(surface: Rgb, ink: Rgb, c: number, isDark: boolean): Rgb {
+  return isDark
+    ? mixRgb(surface, BLACK, 0.16 + (c - 0.6) * 0.0015)
+    : mixRgb(surface, ink, 0.04 + (c - 0.45) * 0.0012);
+}
+
+/**
+ * 凹面（画布）—— Codex 的 `--color-surface-canvas`：
+ * `color-mix(in srgb, var(--color-surface) 98%, var(--black))`，即表面往黑走 2%。
+ *
+ * 用途是**给浮起的卡片当底**：Codex 的右侧面板主体就是它（浅色实测 250），
+ * 面板里的卡片与标签页回到表面档（255），于是「卡片浮在面板上」读得出来。
+ * 深色下 98% 只差不到 1 级（17 → 16.66，8bit 取整后仍是 17），与 Codex 深色一致 ——
+ * 那一侧的分层靠描边与抬高档，不靠凹面。
+ */
+function surfaceCanvas(surface: Rgb): Rgb {
+  return mixRgb(surface, BLACK, 0.02);
 }
 
 /**
@@ -223,6 +265,11 @@ export interface DerivedPalette {
  *     特有的「深色下强制亮色会话」功能，CodeMUX 没有对应概念。
  *  2. 输出统一成 hex 而不是 `rgba()` / `rgb()` 字符串：透明度在 `deriveThemeTokens`
  *     里按各自的底色合成掉，好让消费层继续用 `hsl(var(--x) / a)`。
+ *
+ * 另有一处**新增**（Codex 把它放在另一套变量里）：`chromeBackground` /
+ * `chromeBackgroundHover` —— 窗口面，取上面那个 `surfaceUnder` 及其悬停档。
+ * 少这一档的后果是实测出来的——顶栏、图标轨、侧栏、内容面会全部落在同一个值上，
+ * 整扇窗看着是平的。
  */
 export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalette {
   const surface = hexToRgb(seeds.surface);
@@ -233,6 +280,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
   if (isDark) {
     const accentLift = mixRgb(accent, WHITE, 0.3 + c * 0.15);
     const primaryFill = mixRgb(surface, WHITE, 0.38 + c * 0.12);
+    const chrome = surfaceUnder(surface, ink, c, true);
     return {
       accentBackground: rgbToHex(mixRgb(BLACK, accent, 0.2 + c * 0.08)),
       accentBackgroundActive: rgbToHex(mixRgb(BLACK, accent, 0.22 + c * 0.12)),
@@ -242,6 +290,8 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
       borderHeavy: rgbToHex(overlayRgb(surface, ink, 0.12 + c * 0.06)),
       borderLight: rgbToHex(overlayRgb(surface, ink, 0.03 + c * 0.02)),
       buttonPrimaryBackground: rgbToHex(primaryFill),
+      chromeBackground: rgbToHex(chrome),
+      chromeBackgroundHover: rgbToHex(overlayRgb(chrome, ink, 0.05 + c * 0.03)),
       controlBackground: rgbToHex(overlayRgb(surface, mixRgb(surface, ink, 0.06 + c * 0.05), 0.96)),
       controlBackgroundOpaque: rgbToHex(mixRgb(surface, ink, 0.06 + c * 0.05)),
       elevatedPrimary: rgbToHex(overlayRgb(surface, mixRgb(surface, ink, 0.08 + c * 0.08), 0.96)),
@@ -254,12 +304,15 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
       iconSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
       iconTertiary: rgbToHex(overlayRgb(surface, ink, 0.45 + c * 0.1)),
       simpleScrim: rgbToHex(overlayRgb(surface, ink, 0.08 + c * 0.04)),
+      surfaceCanvas: rgbToHex(surfaceCanvas(surface)),
       textAccent: rgbToHex(accentLift),
       textForeground: rgbToHex(ink),
       textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
       textForegroundTertiary: rgbToHex(overlayRgb(surface, ink, 0.42 + c * 0.13)),
     };
   }
+
+  const chrome = surfaceUnder(surface, ink, c, false);
 
   return {
     accentBackground: rgbToHex(mixRgb(surface, accent, 0.11 + c * 0.04)),
@@ -270,6 +323,8 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
     borderHeavy: rgbToHex(overlayRgb(surface, ink, 0.09 + c * 0.06)),
     borderLight: rgbToHex(overlayRgb(surface, ink, 0.04 + c * 0.02)),
     buttonPrimaryBackground: rgbToHex(ink),
+    chromeBackground: rgbToHex(chrome),
+    chromeBackgroundHover: rgbToHex(overlayRgb(chrome, ink, 0.08 + c * 0.04)),
     controlBackground: rgbToHex(overlayRgb(surface, mixRgb(surface, WHITE, 0.09 + c * 0.04), 0.96)),
     controlBackgroundOpaque: rgbToHex(mixRgb(surface, WHITE, 0.09 + c * 0.04)),
     elevatedPrimary: rgbToHex(overlayRgb(surface, mixRgb(surface, WHITE, 0.16 + c * 0.12), 0.96)),
@@ -282,6 +337,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
     iconSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
     iconTertiary: rgbToHex(overlayRgb(surface, ink, 0.45 + c * 0.1)),
     simpleScrim: rgbToHex(overlayRgb(surface, BLACK, 0.08 + c * 0.04)),
+    surfaceCanvas: rgbToHex(surfaceCanvas(surface)),
     textAccent: rgbToHex(accent),
     textForeground: rgbToHex(ink),
     textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
@@ -301,6 +357,9 @@ const DERIVED_CSS_VARIABLES: Partial<Record<keyof DerivedPalette, string>> = {
   border: '--border',
   borderFocus: '--ring',
   borderHeavy: '--surface-edge',
+  chromeBackground: '--chrome-bg',
+  chromeBackgroundHover: '--chrome-bg-hover',
+  surfaceCanvas: '--surface-canvas',
   controlBackground: '--muted',
   elevatedPrimary: '--card',
   elevatedSecondary: '--secondary',

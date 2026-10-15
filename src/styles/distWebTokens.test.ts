@@ -110,11 +110,13 @@ it('阶梯 / elevation / 文字与 diff 色的工具类都真的产出了', () =
     }
   });
 
-  it('深色 surface 是纯黑（Codex 的 #000000），不是近黑', () => {
+  it('深色 surface 是 #111111，不是纯黑 —— 窗口面要留得出「更深一档」', () => {
+    // Codex 深色的窗框（surfaceUnder）比表面再深 16%，表面压在 #000000 就无处可退，
+    // 窗口面/侧栏/内容面会塌成同一个黑。用户在 Codex 里用的深色表面也是 #111111。
     expect(deriveThemeTokens(CODEX_DARK_SEEDS, true)['--background']).toBe(
       rgbToHslTriplet(hexToRgb(CODEX_DARK_SEEDS.surface)),
     );
-    expect(BUILT_CSS).toContain('--background:0 0% 0%');
+    expect(BUILT_CSS).toContain('--background:0 0% 6.67%');
   });
 
   it('内容面的三个圆角 token 与 clip-path 都在产物里', () => {

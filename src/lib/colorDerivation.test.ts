@@ -274,6 +274,28 @@ describe('colorDerivation', () => {
     }
   });
 
+  it('keeps the three shell planes apart: chrome, sidebar surface, content surface', () => {
+    // 顶栏+图标轨（窗口面）、侧栏、内容面是外壳的三道平面。Codex 实测：
+    //   浅色 窗框 245 / 侧栏 252 / 内容 253；深色 窗框 14 / 侧栏 16 / 内容 17。
+    // 两套都是「窗框比面板更深，面板之间只差 1 级」—— 任两者塌到同一个值上，
+    // 整扇窗就成了一块平的；反过来把面板之间拉开几十级（比如深色下侧栏纯黑、
+    // 内容面用抬高档），侧栏就会读成面板上的一个洞。这两种毛病都实测出现过。
+    const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
+    expect(lightnessOf(light['--chrome-bg'])).toBeLessThan(lightnessOf(light['--background']));
+    // 侧栏与内容面同属面板档：同为表面种子，差值不该超过一两级。
+    expect(Math.abs(lightnessOf(light['--sidebar-bg']) - lightnessOf(light['--background']))).toBeLessThan(1);
+    // 窗口面上的悬停档还要再深一点，否则导航栏的选中态压在窗口面上看不出来。
+    expect(lightnessOf(light['--chrome-bg-hover'])).toBeLessThan(lightnessOf(light['--chrome-bg']));
+    // 抬高档（composer 那类浮起控件）必须比内容面亮，否则控件浮不起来。
+    expect(lightnessOf(light['--surface-1'])).toBeGreaterThan(lightnessOf(light['--background']));
+
+    const dark = deriveThemeTokens(CODEX_DARK_SEEDS, true);
+    expect(lightnessOf(dark['--chrome-bg'])).toBeLessThan(lightnessOf(dark['--background']));
+    expect(lightnessOf(dark['--chrome-bg-hover'])).toBeGreaterThan(lightnessOf(dark['--chrome-bg']));
+    expect(Math.abs(lightnessOf(dark['--sidebar-bg']) - lightnessOf(dark['--background']))).toBeLessThan(1);
+    expect(lightnessOf(dark['--surface-1'])).toBeGreaterThan(lightnessOf(dark['--background']));
+  });
+
   it('keeps borders neutral translucent-ink rather than grey', () => {
     const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
     // 边框必须完全无彩色相（墨色低 alpha 合成到近白表面上），靠明度差体现。
@@ -305,6 +327,8 @@ describe('colorDerivation', () => {
       '--card': '0 0% 99.22%',
       '--card-foreground': '0 0% 5.1%',
       '--card-opaque': '0 0% 99.22%',
+      '--chrome-bg': '0 0% 94.9%',
+      '--chrome-bg-hover': '0 0% 86.27%',
       '--codemux-directive-accent': '216.83 92.2% 59.8%',
       '--codemux-directive-bg': '215 75% 93.73%',
       '--codemux-directive-border': '0 0% 91.37%',
@@ -344,6 +368,7 @@ describe('colorDerivation', () => {
       '--surface-1': '0 0% 99.22%',
       '--surface-2': '0 0% 98.82%',
       '--surface-3': '0 0% 94.12%',
+      '--surface-canvas': '0 0% 96.86%',
       '--surface-edge': '0 0% 87.84%',
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',
@@ -357,56 +382,59 @@ describe('colorDerivation', () => {
       '--accent-bg-active': '217.09 61.8% 17.45%',
       '--accent-bg-hover': '217.65 61.45% 16.27%',
       '--accent-foreground': '0 0% 92.94%',
-      '--background': '0 0% 0%',
-      '--border': '0 0% 7.84%',
-      '--border-light': '0 0% 3.92%',
-      '--card': '0 0% 11.37%',
+      '--background': '0 0% 6.67%',
+      '--border': '0 0% 13.73%',
+      '--border-light': '0 0% 10.2%',
+      '--card': '0 0% 17.25%',
       '--card-foreground': '0 0% 92.94%',
-      '--card-opaque': '0 0% 11.76%',
+      '--card-opaque': '0 0% 17.65%',
+      '--chrome-bg': '0 0% 5.49%',
+      '--chrome-bg-hover': '0 0% 11.37%',
       '--codemux-directive-accent': '217.04 92% 75.49%',
       '--codemux-directive-bg': '217.02 62.67% 14.71%',
-      '--codemux-directive-border': '0 0% 7.84%',
+      '--codemux-directive-border': '0 0% 13.73%',
       '--codemux-link': '217.04 92% 75.49%',
       '--destructive': '1.28 94.95% 61.18%',
-      '--destructive-foreground': '0 0% 0%',
+      '--destructive-foreground': '0 0% 6.67%',
       '--diff-added': '144.09 55.92% 51.96%',
       '--diff-removed': '1.28 94.95% 61.18%',
       '--foreground': '0 0% 92.94%',
-      '--foreground-tertiary': '0 0% 46.27%',
+      '--foreground-tertiary': '0 0% 49.8%',
       '--glow': '216.83 92.2% 59.8%',
-      '--icon-secondary': '0 0% 65.88%',
-      '--icon-tertiary': '0 0% 47.45%',
-      '--input': '0 0% 7.84%',
-      '--layout-divider': '0 0% 7.84%',
-      '--muted': '0 0% 7.84%',
-      '--muted-foreground': '0 0% 65.88%',
-      '--muted-opaque': '0 0% 8.24%',
-      '--popover': '0 0% 11.37%',
+      '--icon-secondary': '0 0% 67.84%',
+      '--icon-tertiary': '0 0% 50.59%',
+      '--input': '0 0% 13.73%',
+      '--layout-divider': '0 0% 13.73%',
+      '--muted': '0 0% 14.12%',
+      '--muted-foreground': '0 0% 67.84%',
+      '--muted-opaque': '0 0% 14.51%',
+      '--popover': '0 0% 17.25%',
       '--popover-foreground': '0 0% 92.94%',
       '--primary': '216.83 92.2% 59.8%',
       '--primary-foreground': '0 0% 100%',
-      '--ring': '217.24 40.09% 57.45%',
+      '--ring': '217.24 41.63% 59.02%',
       '--scrim': 'rgba(237, 237, 237, 0.104)',
-      '--secondary': '0 0% 3.14%',
+      '--secondary': '0 0% 9.41%',
       '--secondary-foreground': '0 0% 92.94%',
-      '--secondary-opaque': '0 0% 6.67%',
-      '--settings-sidebar-bg': '0 0% 0%',
-      '--shell-bg': '0 0% 0%',
+      '--secondary-opaque': '0 0% 12.55%',
+      '--settings-sidebar-bg': '0 0% 6.67%',
+      '--shell-bg': '0 0% 6.67%',
       '--sidebar-accent': '217.04 92% 75.49%',
-      '--sidebar-bg': '0 0% 0%',
-      '--sidebar-border': '0 0% 7.84%',
+      '--sidebar-bg': '0 0% 6.67%',
+      '--sidebar-border': '0 0% 13.73%',
       '--sidebar-fg': '0 0% 92.94%',
       '--sidebar-glow': '216.83 92.2% 59.8%',
-      '--sidebar-muted': '0 0% 7.84%',
+      '--sidebar-muted': '0 0% 13.73%',
       '--success': '144.09 55.92% 51.96%',
-      '--surface-1': '0 0% 11.76%',
-      '--surface-2': '0 0% 6.67%',
-      '--surface-3': '0 0% 7.84%',
-      '--surface-edge': '0 0% 14.51%',
+      '--surface-1': '0 0% 17.65%',
+      '--surface-2': '0 0% 12.55%',
+      '--surface-3': '0 0% 13.73%',
+      '--surface-canvas': '0 0% 6.67%',
+      '--surface-edge': '0 0% 20%',
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',
       '--surface-shadow-strong': '0 0% 0%',
-'--warning': '39.44 74.17% 52.94%',
+      '--warning': '39.44 74.17% 52.94%',
     });
   });
 

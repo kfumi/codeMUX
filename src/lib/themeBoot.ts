@@ -30,17 +30,17 @@ import type { Theme } from '../types/provider';
 /** 渲染层写、内联脚本读的 localStorage key(存原始枚举,不是布尔)。 */
 export const THEME_BOOT_STORAGE_KEY = 'codemux:theme';
 
-/** 启动画面底色:与种子 `--surface` 逐位一致(深色纯黑 / 浅色 #fcfcfc)。 */
-export const BOOT_BACKGROUND_DARK = '#000000';
+/** 启动画面底色:与种子 `--surface` 逐位一致(深色 #111111 / 浅色 #fcfcfc)。 */
+export const BOOT_BACKGROUND_DARK = '#111111';
 export const BOOT_BACKGROUND_LIGHT = '#fcfcfc';
 
 /**
  * 首帧前的 `<html>` 底色。刻意与 colorDerivation 的 `--surface` 种子同步
- * (深色 `#000000`、浅色 `#fcfcfc`),这样开发态 CSS 尚未注入的那一两帧、
+ * (深色 `#111111`、浅色 `#fcfcfc`),这样开发态 CSS 尚未注入的那一两帧、
  * 以及滚动回弹露出的 html 区域,底色都与应用一致 —— 用「近似值」会让浅色主题
  * 的滚动回弹露出灰色。
  */
-export const APP_BACKGROUND_DARK = '#000000';
+export const APP_BACKGROUND_DARK = '#111111';
 export const APP_BACKGROUND_LIGHT = '#fcfcfc';
 
 export function isTheme(value: unknown): value is Theme {
