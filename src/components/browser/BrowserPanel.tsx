@@ -363,7 +363,7 @@ function BrowserToolbar({
           type="button"
           aria-label="后退"
           disabled={!page?.canGoBack}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
           onClick={onBack}
         >
           <ArrowLeft className="h-3.5 w-3.5" />
@@ -374,7 +374,7 @@ function BrowserToolbar({
           type="button"
           aria-label="前进"
           disabled={!page?.canGoForward}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
           onClick={onForward}
         >
           <ArrowRight className="h-3.5 w-3.5" />
@@ -385,7 +385,7 @@ function BrowserToolbar({
           type="button"
           aria-label="刷新"
           disabled={!page?.hostAttached}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
           onClick={onReload}
         >
           <RotateCw className={cn('h-3.5 w-3.5', page?.isLoading && 'animate-spin')} />
@@ -419,7 +419,7 @@ function BrowserToolbar({
             'flex h-7 w-7 items-center justify-center rounded-lg transition-colors',
             previewActive
               ? 'bg-primary/15 text-primary'
-              : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground',
+              : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
           )}
           onClick={onTogglePreview}
         >
@@ -436,7 +436,7 @@ function BrowserToolbar({
             'flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-35',
             inspecting
               ? 'bg-primary/15 text-primary'
-              : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground',
+              : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
           )}
           onClick={onInspect}
         >
@@ -450,7 +450,7 @@ function BrowserToolbar({
               type="button"
               aria-label="更多浏览器操作"
               title="更多浏览器操作"
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>

@@ -83,7 +83,7 @@ export function BrowserElementPills({ sessionId }: BrowserElementPillsProps) {
         <button
           type="button"
           aria-label="清除全部网页元素"
-          className="rounded p-0.5 text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
+          className="rounded p-0.5 text-muted-foreground/55 transition-colors hover:bg-foreground/8 hover:text-foreground"
           onClick={() => clear(sessionId)}
         >
           <X className="h-3 w-3" />

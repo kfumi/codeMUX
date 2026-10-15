@@ -337,7 +337,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                 <div
                   className={cn(
                     'flex w-full items-center gap-2 px-2 py-2 text-left transition-colors',
-                    expanded ? 'bg-muted/52' : 'hover:bg-muted/28',
+                    expanded ? 'bg-muted/52' : 'hover:bg-foreground/8',
                   )}
                 >
                   <button

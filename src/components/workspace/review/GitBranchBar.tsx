@@ -125,7 +125,7 @@ export function GitBranchBar({
       data-testid="git-action-trigger"
       aria-label={effectiveMode === 'push' ? '打开推送窗口' : effectiveMode === 'pr' ? '打开拉取请求窗口' : '打开提交窗口'}
       disabled={loading || mutating || (effectiveMode === 'pr' && !canPullRequest)}
-      className="flex h-8 items-center gap-1.5 rounded-l-lg border border-r-0 border-border/45 bg-background/92 px-2.5 text-xs font-medium text-foreground/86 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex h-8 items-center gap-1.5 rounded-l-lg border border-r-0 border-border/45 bg-background/92 px-2.5 text-xs font-medium text-foreground/86 transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {effectiveMode === 'push' ? <UploadCloud className="h-3.5 w-3.5" /> : effectiveMode === 'pr' ? <GitPullRequest className="h-3.5 w-3.5" /> : <GitCommitHorizontal className="h-3.5 w-3.5" />}
       {effectiveMode === 'push' ? '推送' : effectiveMode === 'pr' ? '拉取请求' : '提交'}
@@ -140,7 +140,7 @@ export function GitBranchBar({
             type="button"
             aria-label={`审查范围：${area === 'unstaged' ? '未提交' : '已暂存'}`}
             data-testid="git-review-scope-trigger"
-            className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/88 transition-colors hover:bg-muted/45 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/88 transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={loading || mutating || !state}
           >
             <span>{area === 'unstaged' ? '未提交' : '已暂存'}</span>
@@ -174,7 +174,7 @@ export function GitBranchBar({
             aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
             onClick={onStageAll}
             disabled={loading || mutating || fileCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
           >
             {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
           </button>
@@ -186,7 +186,7 @@ export function GitBranchBar({
             data-testid="git-revert-all"
             onClick={onRevertAll}
             disabled={loading || mutating || fileCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -197,7 +197,7 @@ export function GitBranchBar({
             aria-label="刷新"
             onClick={onRefresh}
             disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground disabled:opacity-50"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           </button>
@@ -248,7 +248,7 @@ export function GitBranchBar({
                 data-testid="git-actions-trigger"
                 aria-label="切换 Git 操作"
                 disabled={loading || mutating}
-                className="flex h-8 items-center rounded-r-lg border border-l-0 border-border/45 bg-background/92 px-1.5 text-foreground/70 transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-8 items-center rounded-r-lg border border-l-0 border-border/45 bg-background/92 px-1.5 text-foreground/70 transition-colors hover:bg-foreground/8 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>

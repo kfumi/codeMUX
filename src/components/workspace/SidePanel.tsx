@@ -189,7 +189,12 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
     <aside
       ref={panelRef}
       className={cn(
-        `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
+        // 面板主体是**凹面**（`--surface-canvas` = 表面往黑 2%，Codex 的
+        // `--color-surface-canvas`），面板里的标签页与卡片回到抬高档浮在它上面 ——
+        // Codex 右侧面板就是这个关系（浅色实测：主体 250、卡片 255）。
+        // 之前主体与内容面同色，卡片又只有 `bg-muted/45`（浅色下与底几乎同值），
+        // 于是整块面板看着「没有卡片」。
+        `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-[hsl(var(--surface-canvas))]`,
         coversContent ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
         !isVisible && 'pointer-events-none invisible',
         isResizing ? 'transition-none' : 'transition-[width] duration-slow ease-motion-in-out',
@@ -216,11 +221,11 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
       <ResizeOverlay active={isResizing} />
 
       <div className="flex h-full w-full min-w-0 flex-col">
-        <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-1">
+        <div className="relative z-20 flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-background px-1">
           <TooltipHint content="收起面板">
             <button
               aria-label="收起面板"
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
               onClick={closePanel}
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -248,7 +253,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                   <button
                     type="button"
                     aria-label="打开标签"
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -291,7 +296,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                   data-testid="side-panel-expand-toggle"
                   aria-label={isExpanded ? '恢复面宽' : '展开预览'}
                   onClick={toggleExpanded}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
                 </button>
@@ -423,8 +428,8 @@ function TabButton({
           className={cn(
             'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
             active
-              ? 'border-border bg-muted/45 text-foreground'
-              : 'border-transparent text-muted-foreground hover:bg-muted/35 hover:text-foreground',
+              ? 'border-border bg-[hsl(var(--surface-1))] text-foreground'
+              : 'border-transparent text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
           )}
           onClick={onClick}
         >
@@ -442,7 +447,7 @@ function TabButton({
             tabIndex={-1}
             aria-label={`关闭标签页 ${tab.title}`}
             className={cn(
-              'ml-1 rounded p-0.5 text-muted-foreground/70 transition-opacity hover:bg-muted',
+              'ml-1 rounded p-0.5 text-muted-foreground transition-opacity hover:bg-foreground/8 hover:text-foreground',
               isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
             )}
             onClick={(event) => {
@@ -493,13 +498,13 @@ function SidePanelEmpty({
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-      <h2 className="text-2xl font-semibold tracking-normal text-foreground/88">打开标签页</h2>
+      <h2 className="text-2xl font-semibold tracking-normal text-foreground">打开标签页</h2>
       <p className="mt-3 text-sm text-muted-foreground">
         选择要在侧边面板中打开的标签。
       </p>
       <div className="mt-7 grid w-full max-w-105 grid-cols-2 gap-3">
         <button
-          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-[hsl(var(--surface-1))] text-foreground transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-45"
           disabled={!projectPath}
           onClick={onOpenReview}
         >
@@ -507,7 +512,7 @@ function SidePanelEmpty({
           <span className="text-sm">审查</span>
         </button>
         <button
-          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-[hsl(var(--surface-1))] text-foreground transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-45"
           disabled={!projectPath}
           onClick={onOpenTerminal}
         >
@@ -516,7 +521,7 @@ function SidePanelEmpty({
         </button>
         {browserHostAvailable ? (
           <button
-            className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70"
+            className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-[hsl(var(--surface-1))] text-foreground transition-colors hover:bg-foreground/8"
             onClick={onOpenBrowser}
           >
             <Globe className="h-5 w-5" />

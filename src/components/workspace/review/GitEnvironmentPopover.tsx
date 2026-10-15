@@ -51,7 +51,7 @@ function TodoSection({ todos }: { todos: TodoItem[] }) {
           type="button"
           data-testid="git-environment-todos-expand"
           onClick={() => setCollapsed(false)}
-          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-foreground/8 hover:text-foreground"
         >
           <ChevronDown className="h-3 w-3 rotate-[-90deg] transition-transform" />
           展示前面 {hiddenCount} 条已完成/更早的任务
@@ -79,7 +79,7 @@ function TodoSection({ todos }: { todos: TodoItem[] }) {
             type="button"
             data-testid="git-environment-todos-collapse"
             onClick={() => setCollapsed(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-foreground/8 hover:text-foreground"
           >
             <ChevronDown className="h-3 w-3 rotate-[-90deg] transition-transform" />
             收起前面 {hiddenCount} 条
@@ -155,7 +155,7 @@ function SubagentSection({ sessionId, onOpenSubagent }: { sessionId: string | nu
           type="button"
           data-testid="git-environment-subagents-expand"
           onClick={() => setCollapsed(false)}
-          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-foreground/8 hover:text-foreground"
         >
           <ChevronDown className="h-3 w-3 -rotate-90 transition-transform" />
           展示前面 {hiddenCount} 个更早的子智能体
@@ -172,7 +172,7 @@ function SubagentSection({ sessionId, onOpenSubagent }: { sessionId: string | nu
               openInSidePanel(sessionId, subagent.subagentId);
               onOpenSubagent();
             }}
-            className="flex w-full items-start gap-2.5 rounded-md px-1 py-1 text-left text-xs leading-relaxed transition-colors hover:bg-muted/45"
+            className="flex w-full items-start gap-2.5 rounded-md px-1 py-1 text-left text-xs leading-relaxed transition-colors hover:bg-foreground/8"
           >
             <span className="mt-0.5 shrink-0">{getSubagentStatusIcon(subagent.status)}</span>
             <span className="min-w-0 flex-1">
@@ -197,7 +197,7 @@ function SubagentSection({ sessionId, onOpenSubagent }: { sessionId: string | nu
             type="button"
             data-testid="git-environment-subagents-collapse"
             onClick={() => setCollapsed(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-foreground/8 hover:text-foreground"
           >
             <ChevronDown className="h-3 w-3 -rotate-90 transition-transform" />
             收起前面 {hiddenCount} 个
@@ -284,7 +284,7 @@ function EnvironmentSection({
             type="button"
             data-testid="git-environment-changes"
             onClick={onOpenReview}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/8"
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
               <GitCommitHorizontal className="h-3 w-3" />
@@ -302,7 +302,7 @@ function EnvironmentSection({
               <button
                 type="button"
                 data-testid="git-environment-branch"
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/8"
               >
                 <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
                   <GitBranch className="h-3 w-3" />
@@ -339,7 +339,7 @@ function EnvironmentSection({
                     type="button"
                     disabled={branchLoading || branch.current}
                     onClick={() => onCheckoutBranch(branch.name)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <GitBranch className={cn('h-3.5 w-3.5', branch.current ? 'text-primary' : 'text-muted-foreground')} />
                     <TooltipHint content={branch.name}>
