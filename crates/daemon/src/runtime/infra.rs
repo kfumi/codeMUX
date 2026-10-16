@@ -28,14 +28,18 @@ impl Default for SystemNodeResolver {
     }
 }
 
-/// 使用 CodeMUX 统一的系统 Node.js 解析逻辑。
+/// 使用 CodeMUX 统一的 Node.js 解析逻辑。
 ///
-/// 设置页、Runtime 安装器和 sidecar 启动路径都应基于同一套 PATH 解析结果，
-/// 避免检测到的 Node.js 与实际执行的 Node.js 不一致。
+/// 设置页、Runtime 安装器和 sidecar 启动路径都应基于同一套解析结果，避免检测到
+/// 的 Node.js 与实际执行的 Node.js 不一致。随包 Node 运行时（资源根 `node/`，
+/// 见 [`crate::toolchain`]）优先，未随包时回落 PATH。
 pub fn detect_system_node() -> NodeDetection {
-    let node_path = match find_node_in_path() {
-        Some(path) => path,
-        None => return NodeDetection::unavailable("PATH 中未找到 node 可执行文件"),
+    let node_path = match crate::toolchain::bundled_node_dir_resolved() {
+        Some(dir) => crate::toolchain::node_binary_in(&dir),
+        None => match find_node_in_path() {
+            Some(path) => path,
+            None => return NodeDetection::unavailable("PATH 中未找到 node 可执行文件"),
+        },
     };
 
     match query_node_version(&node_path) {
@@ -50,11 +54,12 @@ pub fn detect_system_node() -> NodeDetection {
     }
 }
 
-/// 检测与指定 Node.js 解析结果对应的系统 npm。
+/// 检测与指定 Node.js 解析结果对应的 npm（随包运行时内的 npm 优先）。
 pub fn detect_system_npm(node: &NodeDetection) -> NpmDetection {
-    let command = npm_command_name();
-    let executable_path = find_command_in_path(command);
-    let mut npm = Command::new(command);
+    let command = crate::toolchain::npm_command();
+    let command_str = command.to_string_lossy().to_string();
+    let executable_path = find_command_in_path(&command_str);
+    let mut npm = Command::new(&command);
     configure_hidden_command(npm.arg("--version"));
     let output = match npm.output() {
         Ok(output) => output,
@@ -110,8 +115,7 @@ impl NodeResolver for SystemNodeResolver {
 
 /// 在 PATH 中查找 `node` 可执行文件路径。
 fn find_node_in_path() -> Option<PathBuf> {
-    let executable = if cfg!(windows) { "node.exe" } else { "node" };
-    find_command_in_path(executable).map(PathBuf::from)
+    find_command_in_path(crate::toolchain::node_binary_name()).map(PathBuf::from)
 }
 
 fn find_command_in_path(command: &str) -> Option<String> {
@@ -128,14 +132,6 @@ fn find_command_in_path(command: &str) -> Option<String> {
         .trim()
         .to_string();
     (!first_line.is_empty()).then_some(first_line)
-}
-
-fn npm_command_name() -> &'static str {
-    if cfg!(windows) {
-        "npm.cmd"
-    } else {
-        "npm"
-    }
 }
 
 fn configure_hidden_command(command: &mut Command) -> &mut Command {

@@ -89,14 +89,6 @@ fn sidecar_relative_path() -> PathBuf {
     PathBuf::from(SIDECAR_RELATIVE_DIR).join(SIDECAR_ENTRYPOINT)
 }
 
-fn node_binary_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "node.exe"
-    } else {
-        "node"
-    }
-}
-
 fn resolve_sidecar_script_path(
     resource_dir: Option<&Path>,
     manifest_dir: &Path,
@@ -126,10 +118,12 @@ fn resolve_sidecar_script_path(
 }
 
 fn resolve_node_runtime_path(
-    _resource_dir: Option<&Path>,
+    resource_dir: Option<&Path>,
     _environment: BuildEnvironment,
 ) -> Result<PathBuf, String> {
-    Ok(PathBuf::from(node_binary_name()))
+    // 随包 Node 运行时优先(资源根 `node/`),未随包时回落 PATH 中的 `node`。
+    // 详见 `crate::toolchain`:这是「不依赖用户机器 Node 环境」的落点。
+    Ok(crate::toolchain::resolve_node_binary(resource_dir))
 }
 
 fn missing_node_prerequisite_error(node_command: &str, script_path: &str) -> String {
@@ -144,6 +138,16 @@ fn configure_sidecar_command(command: &mut Command) -> &mut Command {
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     command
+}
+
+/// 把 `dir` 放到子进程 PATH 最前,让 sidecar 内部的 `node`/`npx`(如 MCP server、
+/// pi 运行时)命中随包运行时,而不是用户 PATH 里的旧 Node。
+fn prepend_to_child_path(dir: &Path) -> Option<std::ffi::OsString> {
+    let mut paths = vec![dir.to_path_buf()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(paths).ok()
 }
 
 /// Strip Windows extended-length prefixes before passing paths to Node.js.
@@ -193,6 +197,13 @@ pub async fn spawn_sidecar(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
     );
+    // 随包运行时:把 node/npm/npx 所在目录放到子进程 PATH 最前,让 sidecar 内部
+    // 的 node 调用与 sidecar 自身用同一份运行时。PATH 回落(裸 node 名)时不动。
+    if let Some(bin_dir) = node_path.parent().filter(|_| node_path.is_absolute()) {
+        if let Some(path) = prepend_to_child_path(bin_dir) {
+            command.env("PATH", path);
+        }
+    }
 
     let mut child = command.spawn().map_err(|e| {
         if e.kind() == io::ErrorKind::NotFound {
@@ -426,11 +437,30 @@ mod tests {
     }
 
     #[test]
-    fn release_build_uses_system_node_command() {
+    fn falls_back_to_path_node_command_when_not_bundled() {
+        // 测试构建关闭 dev 回落,也没有随包运行时 → 裸 `node`,由 PATH 解析。
         let path = resolve_node_runtime_path(None, BuildEnvironment::Release)
-            .expect("release builds should use the system Node.js command");
+            .expect("no bundled runtime should fall back to PATH node");
 
-        assert_eq!(path, std::path::PathBuf::from(super::node_binary_name()));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from(crate::toolchain::node_binary_name())
+        );
+    }
+
+    #[test]
+    fn prefers_bundled_node_runtime_from_resource_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let node_dir = temp.path().join("node");
+        std::fs::create_dir_all(&node_dir).expect("mkdir");
+        let binary = crate::toolchain::node_binary_in(&node_dir);
+        std::fs::write(&binary, b"stub").expect("write stub");
+
+        let path = resolve_node_runtime_path(Some(temp.path()), BuildEnvironment::Release)
+            .expect("bundled runtime should resolve");
+
+        assert_eq!(path, binary);
+        assert!(path.is_absolute());
     }
 
     #[test]

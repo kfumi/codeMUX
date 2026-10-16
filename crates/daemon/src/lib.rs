@@ -31,6 +31,7 @@ mod scheduled_tasks;
 mod services;
 mod skills;
 mod terminal;
+mod toolchain;
 
 pub mod work_tasks;
 

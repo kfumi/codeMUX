@@ -90,6 +90,9 @@ pub struct DaemonState {
 impl DaemonState {
     /// 无窗口可用的核心组装:初始化数据库、加载配置、装配全部状态。
     pub fn assemble(roots: PathRoots, ui_events: Arc<dyn UiEventSink>) -> Result<Self, String> {
+        // 先解析随包 Node 运行时(资源根 `node/`),让后续的 sidecar 启动、npm 安装
+        // 与设置页检测共用同一份运行时;未随包时回落 PATH。见 `crate::toolchain`。
+        crate::toolchain::init(roots.resource_dir.as_deref());
         let conn = crate::db::initialize(&roots)?;
         let config = crate::config::load_config(&roots);
         Ok(Self {

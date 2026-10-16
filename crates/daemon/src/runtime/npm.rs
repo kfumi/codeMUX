@@ -582,12 +582,9 @@ fn install_sync(
     Ok(())
 }
 
-fn npm_command() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "npm.cmd"
-    } else {
-        "npm"
-    }
+/// npm 命令:随包 Node 运行时内的 npm 优先,否则 PATH 裸名。见 [`crate::toolchain`]。
+fn npm_command() -> PathBuf {
+    crate::toolchain::npm_command()
 }
 
 fn configure_hidden_command(command: &mut Command) {
