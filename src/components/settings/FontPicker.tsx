@@ -76,15 +76,20 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
           role="combobox"
           aria-expanded={open}
           aria-label="界面字体"
-          className="h-10 w-full max-w-md justify-between border-input bg-muted/80 font-normal hover:bg-muted focus-visible:bg-card"
+          // 与同页的下拉的 `SelectTrigger size="sm"` 同档:32px 高、透明底 + 发丝描边、
+          // 固定 160px。此前是 `w-full max-w-md` —— 行右侧是收缩到内容宽度的列,
+          // `w-full` 于是塌成 ~90px,把面板宽度也一起拖窄了(面板曾绑 trigger 宽)。
+          className="h-8 w-40 shrink-0 justify-between gap-1.5 border-input bg-transparent px-2.5 py-0 text-ui-compact font-normal hover:border-[hsl(var(--surface-edge))] hover:bg-transparent focus-visible:bg-transparent"
         >
           <span className="truncate" style={{ fontFamily: previewFamily }}>
             {displayLabel}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+      {/* 宽度用 PopoverContent 的默认档(288px),不再绑 trigger 宽 —— 绑了就出上面那种
+          窄面板:列表项换行成「系 / 统 / 默 / 认」、字体名竖排。 */}
+      <PopoverContent className="p-0" align="end">
         <Command>
           <CommandInput placeholder="搜索字体..." />
           <CommandList>

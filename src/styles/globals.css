@@ -136,6 +136,10 @@
   --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
+  /* 用户消息气泡的底 —— Codex 浅色实测 #f3f3f3，见 colorDerivation 的
+     `userMessageBackground`。它与 `--muted` 分开：浅色的 muted 混向 white，
+     在 #fcfcfc 表面上会被 8bit 取整吃掉，气泡会与页面同值。 */
+  --color-user-message-bg: hsl(var(--user-message-bg));
   --color-accent: hsl(var(--accent));
   --color-accent-foreground: hsl(var(--accent-foreground));
   /* 强调色的三个浓度档 —— 全部由 accent + surface 派生，换强调色时一起变。 */
@@ -257,6 +261,8 @@
     --secondary-foreground: 0 0% 5.1%;
     --muted: 0 0% 98.82%;
     --muted-foreground: 0 0% 33.73%;
+    /* 用户消息气泡底（Codex 浅色实测 #f3f3f3 = 95.29%）。 */
+    --user-message-bg: 0 0% 95.29%;
     --accent: 215 75% 93.73%;
     --accent-foreground: 0 0% 5.1%;
     --accent-bg: 215 75% 93.73%;
@@ -318,6 +324,8 @@
     --secondary-foreground: 0 0% 92.94%;
     --muted: 0 0% 14.12%;
     --muted-foreground: 0 0% 67.84%;
+    /* 用户消息气泡底：深色与 --muted 同档（往 ink 提一档）。 */
+    --user-message-bg: 0 0% 14.12%;
     --accent: 217.02 62.67% 14.71%;
     --accent-foreground: 0 0% 92.94%;
     --accent-bg: 217.02 62.67% 14.71%;

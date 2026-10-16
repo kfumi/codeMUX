@@ -233,7 +233,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
           className="shrink-0 text-ui-micro text-muted-foreground tabular-nums"
         >
           {isRunning && timelineBounds.first !== undefined ? (
-            <RunningElapsedTimer label="" startTime={timelineBounds.first} active={false} />
+            <RunningElapsedTimer label="" startTime={timelineBounds.first} />
           ) : (
             finishedDuration
           )}

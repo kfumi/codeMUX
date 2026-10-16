@@ -30,14 +30,11 @@ type RunningElapsedTimerProps = {
   label?: string;
   /** If provided, computes elapsed from this epoch ms instead of mount time. */
   startTime?: number;
-  /** Show a small breathing status marker next to the label. Defaults to true. */
-  active?: boolean;
 };
 
 export function RunningElapsedTimer({
   label = '正在执行',
   startTime,
-  active = true,
 }: RunningElapsedTimerProps) {
   const mountTime = useRef(Date.now());
   const base = startTime ?? mountTime.current;
@@ -64,17 +61,9 @@ export function RunningElapsedTimer({
   const text = label ? `${label} · ${formatElapsed(elapsed)}` : formatElapsed(elapsed);
 
   return (
-    // 文字保持静态可读（对比度不随动画变化）；"还在跑"由小呼吸点表达
-    // （animate-pulse-soft 只动 opacity，可上合成线程；reduce 下由全局规则降速保留）。
-    <span className="relative inline-flex items-center gap-1.5 leading-none">
-      {active ? (
-        <span
-          aria-hidden
-          data-slot="running-elapsed-marker"
-          className="size-1.5 shrink-0 rounded-full bg-[hsl(var(--warning))] animate-pulse-soft"
-        />
-      ) : null}
-      <span>{text}</span>
-    </span>
+    // 文字保持静态可读（对比度不随动画变化）。此前 label 左侧还挂着一枚 warning 色的
+    // 呼吸点（`animate-pulse-soft`）表示「还在跑」，但同一行里秒数每秒都在跳 —— 时间
+    // 本身就是活着的证据，点只是噪音，已去掉。
+    <span className="leading-none">{text}</span>
   );
 }

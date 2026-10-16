@@ -317,6 +317,28 @@ describe('colorDerivation', () => {
       .toBeLessThan(lightnessOf(dark['--surface-1']));
   });
 
+  it('keeps the user-message bubble off the page background in both themes', () => {
+    // 用户消息气泡的底 —— Codex 浅色实测 243（`#f3f3f3`）。
+    // 曾经它取 `--muted`：浅色的 muted 混向 white，在 `#fcfcfc` 的表面上被 8bit 取整
+    // 整个吃掉，与页面底色同值 —— 气泡在浅色下整片消失，而深色下同一 token 却是可见的
+    // 一档（46 vs 17），问题只在一侧显形。两套主题因此都要钉住。
+    const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
+    expect(lightnessOf(light['--user-message-bg']))
+      .toBeLessThan(lightnessOf(light['--background']));
+    // 右侧面板主体（凹面）上也可能出现用户消息的只读副本，同样要压得住。
+    expect(lightnessOf(light['--user-message-bg']))
+      .toBeLessThan(lightnessOf(light['--surface-canvas']));
+    // 但它不能比「抬高档」还亮：那是浮起控件的档，气泡读成浮起面板就不对了。
+    expect(lightnessOf(light['--user-message-bg']))
+      .toBeLessThan(lightnessOf(light['--surface-1']));
+
+    const dark = deriveThemeTokens(CODEX_DARK_SEEDS, true);
+    expect(lightnessOf(dark['--user-message-bg']))
+      .toBeGreaterThan(lightnessOf(dark['--background']));
+    expect(lightnessOf(dark['--user-message-bg']))
+      .toBeLessThan(lightnessOf(dark['--surface-1']));
+  });
+
   it('keeps borders neutral translucent-ink rather than grey', () => {
     const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
     // 边框必须完全无彩色相（墨色低 alpha 合成到近白表面上），靠明度差体现。
@@ -395,6 +417,7 @@ describe('colorDerivation', () => {
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',
       '--surface-shadow-strong': '0 0% 0%',
+      '--user-message-bg': '0 0% 95.29%',
       '--warning': '35.45 91.67% 32.94%',
     });
 
@@ -457,6 +480,7 @@ describe('colorDerivation', () => {
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',
       '--surface-shadow-strong': '0 0% 0%',
+      '--user-message-bg': '0 0% 14.12%',
       '--warning': '39.44 74.17% 52.94%',
     });
   });

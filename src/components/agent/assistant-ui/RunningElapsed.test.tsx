@@ -64,28 +64,20 @@ describe('RunningElapsedTimer', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
 
-    render(<RunningElapsedTimer label="" startTime={Date.now() - 90_000} active={false} />);
+    render(<RunningElapsedTimer label="" startTime={Date.now() - 90_000} />);
 
     expect(screen.getByText('1m 30s')).toBeTruthy();
     expect(screen.queryByText(/·/)).toBeNull();
   });
 
-  it('active 时文字只渲染一份（无 shimmer 叠层），并带呼吸点标记', () => {
+  it('文字只渲染一份（无 shimmer 叠层），也不留呼吸点', () => {
     const { container } = render(<RunningElapsedTimer />);
 
     // 旧实现会把同一段文字叠一层 shimmer 副本；现在文字必须只有一份、对比度恒定。
     expect(screen.getAllByText('正在执行 · 0s')).toHaveLength(1);
     expect(container.querySelector('.shimmer')).toBeNull();
-
-    const marker = container.querySelector('[data-slot="running-elapsed-marker"]');
-    expect(marker).not.toBeNull();
-    expect(marker?.className).toContain('animate-pulse-soft');
-  });
-
-  it('active=false 时不渲染呼吸点', () => {
-    const { container } = render(<RunningElapsedTimer active={false} />);
-
-    expect(screen.getByText('正在执行 · 0s')).toBeTruthy();
+    // 「还在跑」由每秒跳动的秒数表达，那枚 warning 色呼吸点已去掉。
     expect(container.querySelector('[data-slot="running-elapsed-marker"]')).toBeNull();
+    expect(container.querySelector('.animate-pulse-soft')).toBeNull();
   });
 });

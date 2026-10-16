@@ -277,7 +277,7 @@ export function TranscriptUserMessageBubble({
     <div
       data-user-message-bubble="true"
       className={cn(
-        'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-muted px-3.5 py-2 text-sm leading-relaxed text-foreground',
+        'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-user-message-bg px-3.5 py-2 text-sm leading-relaxed text-foreground',
         canCollapse && !expanded && TRANSCRIPT_COLLAPSED_USER_MESSAGE_CLASS,
       )}
     >

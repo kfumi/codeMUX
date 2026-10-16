@@ -86,6 +86,22 @@ describe('ThemeToggle', () => {
     expect(setUiFontFamily).toHaveBeenCalledWith('Microsoft YaHei UI');
   });
 
+  it('界面字体下拉:trigger 固定宽、面板不绑 trigger 宽(回归:面板曾窄到列表项竖排)', async () => {
+    render(<ThemeToggle />);
+
+    const trigger = screen.getByRole('combobox', { name: '界面字体' });
+    // 行右侧是收缩到内容宽度的列,`w-full` 会塌成 ~90px。
+    expect(trigger.className).toContain('w-40');
+    expect(trigger.className).not.toContain('w-full');
+
+    fireEvent.click(trigger);
+
+    const command = await screen.findByPlaceholderText('搜索字体...');
+    const panel = command.closest('[data-radix-popper-content-wrapper]')?.firstElementChild as HTMLElement | null;
+    expect(panel?.className).toContain('w-72');
+    expect(panel?.className).not.toContain('radix-popover-trigger-width');
+  });
+
   it('drives the contrast knob from 0 to 100', () => {
     render(<ThemeToggle />);
 

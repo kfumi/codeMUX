@@ -250,6 +250,8 @@ export interface DerivedPalette {
   textForeground: string;
   textForegroundSecondary: string;
   textForegroundTertiary: string;
+  /** 用户消息气泡的底 —— Codex 浅色实测 `#f3f3f3`。见 `userMessageBackground`。 */
+  userMessageBackground: string;
 }
 
 /**
@@ -279,6 +281,21 @@ function surfaceUnder(surface: Rgb, ink: Rgb, c: number, isDark: boolean): Rgb {
  */
 function surfaceCanvas(surface: Rgb): Rgb {
   return mixRgb(surface, BLACK, 0.02);
+}
+
+/**
+ * 用户消息气泡的底 —— 两套主题都是「比页面底再偏 ink 一档」，Codex 浅色实测 243
+ * （`#f3f3f3`）。
+ *
+ * 浅色**不能**沿用 `controlBackground`（往 white 混 `.09 + c*.04`）：`#fcfcfc` 的
+ * 表面上这一混在 8bit 取整里整个消失，气泡与页面底色同值 —— 这正是它此前在浅色下
+ * 「没有背景」的原因。浅色因此往 **ink** 混 3.8%（c=45 时 243），深色与
+ * `controlBackground` 同档（往 ink 提 11%，实测 36，与旧值逐位一致）。
+ */
+function userMessageBackground(surface: Rgb, ink: Rgb, c: number, isDark: boolean): Rgb {
+  return isDark
+    ? overlayRgb(surface, mixRgb(surface, ink, 0.06 + c * 0.05), 0.96)
+    : overlayRgb(surface, mixRgb(surface, ink, 0.02 + c * 0.04), 0.96);
 }
 
 /**
@@ -356,6 +373,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
       textForeground: rgbToHex(ink),
       textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
       textForegroundTertiary: rgbToHex(overlayRgb(surface, ink, 0.42 + c * 0.13)),
+      userMessageBackground: rgbToHex(userMessageBackground(surface, ink, c, true)),
     };
   }
 
@@ -394,6 +412,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
     textForeground: rgbToHex(ink),
     textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
     textForegroundTertiary: rgbToHex(overlayRgb(surface, ink, 0.45 + c * 0.1)),
+    userMessageBackground: rgbToHex(userMessageBackground(surface, ink, c, false)),
   };
 }
 
@@ -422,6 +441,7 @@ const DERIVED_CSS_VARIABLES: Partial<Record<keyof DerivedPalette, string>> = {
   textForeground: '--foreground',
   textForegroundSecondary: '--muted-foreground',
   textForegroundTertiary: '--foreground-tertiary',
+  userMessageBackground: '--user-message-bg',
 };
 
 /**
