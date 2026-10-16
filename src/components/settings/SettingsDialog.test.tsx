@@ -114,6 +114,32 @@ describe('SettingsView', () => {
     expect(sidebar?.className).toContain('w-[275px]');
     expect(content?.className).toContain('bg-[hsl(var(--background))]');
   });
+
+  it('左导航按 Codex 形态分成四组,并给出分组标题', async () => {
+    render(<SettingsView onBack={vi.fn()} />);
+
+    for (const heading of ['通用', '智能体', '能力', '数据与系统']) {
+      expect(screen.getByText(heading)).toBeTruthy();
+    }
+  });
+
+  it('搜索框按标签与副标题过滤分页,空结果给出提示', async () => {
+    render(<SettingsView onBack={vi.fn()} />);
+
+    const search = screen.getByRole('searchbox', { name: '搜索设置' });
+
+    fireEvent.change(search, { target: { value: '浏览' } });
+    expect(screen.getByRole('button', { name: '浏览器控制' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '快捷键' })).toBeNull();
+    // 被过滤空的分组连标题一起收起,不留光标题。
+    expect(screen.queryByText('数据与系统')).toBeNull();
+
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(screen.getByText('未找到结果')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    expect(screen.getByRole('button', { name: '快捷键' })).toBeTruthy();
+  });
 });
 
 describe('SettingsView 浏览器形态', () => {

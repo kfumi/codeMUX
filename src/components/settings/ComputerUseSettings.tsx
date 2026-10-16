@@ -16,7 +16,7 @@ import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
 import { TooltipHint } from '../ui/tooltip';
-import { SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 interface DiagnosticCheck {
   id: string;
@@ -168,169 +168,174 @@ export function ComputerUseSettings() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
-        <SettingsRow
-          surface
-          inlineControl
-          label="开启电脑控制"
-          description="允许会话读取桌面窗口清单与截图（只读观测）。默认关闭；与「浏览器控制」是两个开关，互不代管。关闭时桌面工具不会出现在会话的工具清单里。"
-          control={
-            <Switch
-              aria-label="开启电脑控制"
-              checked={computerUse.enabled}
-              onCheckedChange={(checked) => update({ enabled: checked })}
-            />
-          }
-        />
-        <SettingsRow
-          surface
-          inlineControl
-          label="系统级执行"
-          description="开启后驱动才能启动，智能体可经驱动操作原生应用界面。每一步输入动作仍要你放行。关闭时经驱动的工具（界面观测与输入）不会出现在会话的工具清单里。任务运行期间会临时接管全局 Esc（按 Esc = 急停驱动并打断当前回合，屏幕上会显示提示条），任务结束即解除。"
-          control={
-            <Switch
-              aria-label="系统级执行"
-              checked={computerUse.system_execution_enabled}
-              onCheckedChange={(checked) => update({ system_execution_enabled: checked })}
-            />
-          }
-        />
-        <SettingsRow
-          surface
-          label="步数上限"
-          description="一轮对话里输入动作的上限（1-200，只读观看不计数）；到顶智能体会停下等你接手。"
-          control={
-            <Input
-              type="number"
-              aria-label="步数上限"
-              min={COMPUTER_USE_MIN_STEPS}
-              max={COMPUTER_USE_MAX_STEPS}
-              value={computerUse.max_steps}
-              onChange={(event) => update({ max_steps: Number(event.target.value) })}
-              className="h-8 w-24 text-ui-body"
-            />
-          }
-        />
-      </section>
+      <SettingsSection label="电脑控制">
+        <SettingsCard>
+          <SettingsRow
+            inlineControl
+            label="开启电脑控制"
+            description="让会话读取桌面窗口清单与截图（只读）；与「浏览器控制」互不代管"
+            control={
+              <Switch
+                aria-label="开启电脑控制"
+                checked={computerUse.enabled}
+                onCheckedChange={(checked) => update({ enabled: checked })}
+              />
+            }
+          />
+          <SettingsRow
+            inlineControl
+            label="系统级执行"
+            description={
+              <>
+                开启后驱动才能启动，智能体可操作原生界面；每一步输入动作仍要你放行
+                <span className="mt-0.5 block">任务期间临时接管全局 Esc 用于急停，结束即解除</span>
+              </>
+            }
+            control={
+              <Switch
+                aria-label="系统级执行"
+                checked={computerUse.system_execution_enabled}
+                onCheckedChange={(checked) => update({ system_execution_enabled: checked })}
+              />
+            }
+          />
+          <SettingsRow
+            label="步数上限"
+            description="输入动作的上限（1-200，观看不计数）；到顶会停下等你接手"
+            control={
+              <Input
+                type="number"
+                aria-label="步数上限"
+                min={COMPUTER_USE_MIN_STEPS}
+                max={COMPUTER_USE_MAX_STEPS}
+                value={computerUse.max_steps}
+                onChange={(event) => update({ max_steps: Number(event.target.value) })}
+                className="h-8 w-24 text-ui-body"
+              />
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
-      <section className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">驱动</label>
-        <div className="space-y-3 rounded-xl settings-tile p-4">
-          <div className="flex flex-wrap items-center gap-2 text-ui-body">
-            <span
-              className={
-                snapshot.status.running
-                  ? 'flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-ui-caption text-success'
-                  : 'flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground'
-              }
-            >
-              {snapshot.status.running ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}
-              {snapshot.status.running ? '运行中' : '未运行'}
-            </span>
-            <span className="text-muted-foreground">
-              {resolution?.command
-                ? `${resolution.command}${snapshot.status.version ? ` · ${snapshot.status.version}` : ''}`
-                : driverMissing
-                  ? '未检测到 cua-driver(官方安装位置与 PATH)'
-                  : '未配置驱动命令'}
-            </span>
-            {resolution?.mode === 'auto' ? (
-              <span className="rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground">
-                自动检测
+      <SettingsSection label="驱动">
+        <SettingsCard>
+          <SettingsRow
+            stacked
+            label="驱动状态"
+            description={
+              <span className="flex flex-wrap items-center gap-2">
+                <span
+                  className={
+                    snapshot.status.running
+                      ? 'flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-ui-caption text-success'
+                      : 'flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground'
+                  }
+                >
+                  {snapshot.status.running ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}
+                  {snapshot.status.running ? '运行中' : '未运行'}
+                </span>
+                <span>
+                  {resolution?.command
+                    ? `${resolution.command}${snapshot.status.version ? ` · ${snapshot.status.version}` : ''}`
+                    : driverMissing
+                      ? '未检测到 cua-driver(官方安装位置与 PATH)'
+                      : '未配置驱动命令'}
+                </span>
+                {resolution?.mode === 'auto' ? <span>自动检测</span> : null}
+                {snapshot.status.tools.length > 0 ? (
+                  <span>{snapshot.status.tools.length} 个工具</span>
+                ) : null}
               </span>
-            ) : null}
-            {snapshot.status.tools.length > 0 ? (
-              <span className="text-ui-caption text-muted-foreground">
-                {snapshot.status.tools.length} 个工具
-              </span>
-            ) : null}
-          </div>
+            }
+            control={
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  disabled={busy !== null}
+                  onClick={() => void runAction('refresh', refresh, '已重新检测')}
+                >
+                  {busy === 'refresh' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  重新检测
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  disabled={busy !== null || !computerUse.system_execution_enabled}
+                  onClick={() =>
+                    void runAction('start', () => daemonFacade.computerUse.startDriver(), '驱动已启动')
+                  }
+                >
+                  启动驱动
+                </Button>
+                {driverMissing ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    disabled={busy !== null}
+                    onClick={() => setInstallConfirmOpen(true)}
+                  >
+                    一键安装
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  disabled={busy !== null}
+                  onClick={() => void runDiagnostics()}
+                >
+                  {busy === 'diagnose' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  一键诊断
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="xs"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void runAction('estop', () => daemonFacade.computerUse.estopDriver(), '已急停：驱动子进程被杀')
+                  }
+                >
+                  急停
+                </Button>
+                {updateChannel ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    disabled={busy !== null}
+                    onClick={() => setUpdateConfirmOpen(true)}
+                  >
+                    更新驱动
+                  </Button>
+                ) : (
+                  // 没有可用升级通道时不留一个必然失败的控件:按钮禁用 + 说明为什么。
+                  <TooltipHint content="没有可用升级通道:先「一键安装」装官方驱动,或在下方「更新命令」里填升级方式">
+                    <Button type="button" variant="secondary" size="xs" disabled>
+                      更新驱动
+                    </Button>
+                  </TooltipHint>
+                )}
+              </div>
+            }
+          />
+
           {snapshot.status.lastError ? (
-            <p className="text-ui-caption text-warning">{snapshot.status.lastError}</p>
+            <p className="px-4 py-3 text-ui-caption text-warning">{snapshot.status.lastError}</p>
           ) : null}
 
           {driverMissing ? (
-            <p className="text-ui-caption text-warning">
+            <p className="px-4 py-3 text-ui-caption text-warning">
               未检测到 cua-driver。可一键安装官方驱动,或手动填写驱动命令。
             </p>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => void runAction('refresh', refresh, '已重新检测')}
-            >
-              {busy === 'refresh' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              重新检测
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy !== null || !computerUse.system_execution_enabled}
-              onClick={() =>
-                void runAction('start', () => daemonFacade.computerUse.startDriver(), '驱动已启动')
-              }
-            >
-              启动驱动
-            </Button>
-            {driverMissing ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => setInstallConfirmOpen(true)}
-              >
-                一键安装
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => void runDiagnostics()}
-            >
-              {busy === 'diagnose' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              一键诊断
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={busy !== null}
-              onClick={() =>
-                void runAction('estop', () => daemonFacade.computerUse.estopDriver(), '已急停：驱动子进程被杀')
-              }
-            >
-              急停
-            </Button>
-            {updateChannel ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => setUpdateConfirmOpen(true)}
-              >
-                更新驱动
-              </Button>
-            ) : (
-              // 没有可用升级通道时不留一个必然失败的控件:按钮禁用 + 说明为什么。
-              <TooltipHint content="没有可用升级通道:先「一键安装」装官方驱动,或在下方「更新命令」里填升级方式">
-                <Button type="button" variant="outline" size="sm" disabled>
-                  更新驱动
-                </Button>
-              </TooltipHint>
-            )}
-          </div>
-
           {checks ? (
-            <ul className="space-y-1.5 border-t border-border pt-3">
+            <ul className="space-y-1.5 px-4 py-3">
               {checks.map((check) => (
                 <li key={check.id} className="text-ui-caption">
                   <span className={check.ok ? 'text-success' : 'text-warning'}>
@@ -345,8 +350,8 @@ export function ComputerUseSettings() {
               ))}
             </ul>
           ) : null}
-        </div>
-      </section>
+        </SettingsCard>
+      </SettingsSection>
 
       <ConfirmDialog
         open={updateConfirmOpen}
@@ -374,122 +379,126 @@ export function ComputerUseSettings() {
         loading={busy === 'install'}
       />
 
-      <section className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">驱动配置</label>
-        <div className="space-y-3 rounded-xl settings-tile p-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-ui-body text-foreground" htmlFor="computer-use-driver-command">
-              驱动命令
-            </label>
-            <input
-              id="computer-use-driver-command"
-              value={computerUse.driver_command ?? ''}
-              placeholder={
-                resolution?.mode === 'auto' && resolution.command
-                  ? `留空 = 自动:${resolution.command}`
-                  : driverMissing
-                    ? '未检测到,可一键安装或手动填路径'
-                    : '如 cua-driver 或 C:\\path\\to\\driver.exe'
-              }
-              onChange={(event) =>
-                update({ driver_command: event.target.value.trim() ? event.target.value : null })
-              }
-              className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-code text-foreground"
-            />
-            <p className="text-ui-caption text-muted-foreground">
-              留空 = 自动检测 cua-driver(官方安装位置与 PATH);驱动需支持 stdio MCP。
-            </p>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-ui-body text-foreground" htmlFor="computer-use-driver-args">
-              启动参数
-            </label>
-            <Input
-              id="computer-use-driver-args"
-              value={computerUse.driver_args.join(' ')}
-              placeholder="留空 = mcp(cua-driver 官方 MCP 子命令);自定义驱动才需要填,如 --stdio"
-              onChange={(event) => update({ driver_args: parseArgsInput(event.target.value) })}
-              className="h-8 font-mono text-code"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-ui-body text-foreground" htmlFor="computer-use-driver-update">
-              更新命令
-            </label>
-            <Input
-              id="computer-use-driver-update"
-              value={computerUse.driver_update_command ?? ''}
-              placeholder="留空 = 驱动自带升级（cua-driver update --apply）"
-              onChange={(event) =>
-                update({
-                  driver_update_command: event.target.value.trim() ? event.target.value : null,
-                })
-              }
-              className="h-8 font-mono text-code"
-            />
-            <p className="text-ui-caption text-muted-foreground">
-              留空时用驱动自带升级（cua-driver update --apply，查最新版并走官方安装器原地升级）；npm、Homebrew 等包管理器装的才需要在这里覆盖。每次升级都会先问过你。
-            </p>
-          </div>
-        </div>
-      </section>
+      <SettingsSection label="驱动配置">
+        <SettingsCard>
+          <SettingsRow
+            stacked
+            htmlFor="computer-use-driver-command"
+            label="驱动命令"
+            description="留空 = 自动检测；自填的驱动需支持 stdio MCP"
+            control={
+              <Input
+                id="computer-use-driver-command"
+                value={computerUse.driver_command ?? ''}
+                placeholder={
+                  resolution?.mode === 'auto' && resolution.command
+                    ? `留空 = 自动:${resolution.command}`
+                    : driverMissing
+                      ? '未检测到,可一键安装或手动填路径'
+                      : '如 cua-driver 或 C:\\path\\to\\driver.exe'
+                }
+                onChange={(event) =>
+                  update({ driver_command: event.target.value.trim() ? event.target.value : null })
+                }
+                className="h-8 font-mono text-code"
+              />
+            }
+          />
+          <SettingsRow
+            stacked
+            htmlFor="computer-use-driver-args"
+            label="启动参数"
+            description="留空 = mcp（官方 MCP 子命令），自定义驱动才需要填"
+            control={
+              <Input
+                id="computer-use-driver-args"
+                value={computerUse.driver_args.join(' ')}
+                placeholder="如 --stdio"
+                onChange={(event) => update({ driver_args: parseArgsInput(event.target.value) })}
+                className="h-8 font-mono text-code"
+              />
+            }
+          />
+          <SettingsRow
+            stacked
+            htmlFor="computer-use-driver-update"
+            label="更新命令"
+            description="留空用驱动自带升级；包管理器装的才需要覆盖"
+            control={
+              <Input
+                id="computer-use-driver-update"
+                value={computerUse.driver_update_command ?? ''}
+                placeholder="留空 = 驱动自带升级（cua-driver update --apply）"
+                onChange={(event) =>
+                  update({
+                    driver_update_command: event.target.value.trim() ? event.target.value : null,
+                  })
+                }
+                className="h-8 font-mono text-code"
+              />
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
-      <section className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">可操作范围</label>
-        <div className="space-y-3 rounded-xl settings-tile p-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-ui-body text-foreground" htmlFor="computer-use-allowlist">
-              允许列表（每行一个应用名）
-            </label>
-            <textarea
-              id="computer-use-allowlist"
-              value={allowlistText}
-              rows={4}
-              placeholder="留空 = 除内置拒绝外全部可操作"
-              onChange={(event) => setAllowlistDraft(event.target.value)}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-code text-foreground"
-            />
-            <p className="text-ui-caption text-muted-foreground">
-              留空表示除内置拒绝列表外都可以操作；填了就只允许列出的应用。
-            </p>
-            {allowlistDirty ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    update({ allowlist: parseAllowlistInput(allowlistText) });
-                    setAllowlistDraft(null);
-                  }}
-                >
-                  保存允许列表
-                </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => setAllowlistDraft(null)}>
-                  取消
-                </Button>
+      <SettingsSection label="可操作范围">
+        <SettingsCard>
+          <SettingsRow
+            stacked
+            htmlFor="computer-use-allowlist"
+            label="允许列表（每行一个应用名）"
+            description="留空 = 除内置拒绝外都可操作；填了就只允许列出的应用"
+            control={
+              <div className="flex flex-col gap-2">
+                <textarea
+                  id="computer-use-allowlist"
+                  value={allowlistText}
+                  rows={4}
+                  placeholder="每行一个应用名"
+                  onChange={(event) => setAllowlistDraft(event.target.value)}
+                  className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 font-mono text-code text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+                />
+                {allowlistDirty ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      onClick={() => {
+                        update({ allowlist: parseAllowlistInput(allowlistText) });
+                        setAllowlistDraft(null);
+                      }}
+                    >
+                      保存允许列表
+                    </Button>
+                    <Button type="button" size="xs" variant="ghost" onClick={() => setAllowlistDraft(null)}>
+                      取消
+                    </Button>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
+            }
+          />
 
-          <div className="flex flex-col gap-1 border-t border-border pt-3">
-            <span className="text-ui-body text-foreground">内置拒绝列表（不可删除）</span>
-            <p className="text-ui-caption text-muted-foreground">
-              这些永远不可操作：密码管理器、终端、锁屏、Windows 安全中心，以及 CodeMUX 自己、安装器和更新器。
-              允许列表写了也没用。
-            </p>
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {denyScopes().map((scope) => (
-                <span
-                  key={scope}
-                  className="rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground"
-                >
-                  {scope}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+          <SettingsRow
+            stacked
+            label="内置拒绝列表（不可删除）"
+            description="这些永远不可操作，允许列表写了也没用"
+            control={
+              <div className="flex flex-wrap gap-1.5">
+                {denyScopes().map((scope) => (
+                  <span
+                    key={scope}
+                    className="rounded-md border border-border px-2 py-0.5 text-ui-caption text-muted-foreground"
+                  >
+                    {scope}
+                  </span>
+                ))}
+              </div>
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
     </div>
   );
 }

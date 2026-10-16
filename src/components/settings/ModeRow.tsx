@@ -3,7 +3,7 @@ import { useId, type ReactNode } from 'react';
 import type { Theme } from '../../types/provider';
 import { cn } from '../../lib/utils';
 import { TooltipHint } from '../ui/tooltip';
-import { ROW_PADDING, SettingsRow } from './SettingsRow';
+import { SettingsRow } from './SettingsRow';
 
 /**
  * 模式行 —— 一排三张应用窗口缩略图,画法与 Codex 的 80×60 插图逐笔对齐。
@@ -199,7 +199,6 @@ const MODE_OPTIONS: { theme: Theme; label: string }[] = [
 export function ModeRow({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
   return (
     <SettingsRow
-      className={ROW_PADDING}
       label="模式"
       // 一排缩略图 3×80 + 2×16 = 272px,比设置行默认的 240px 上限宽。
       controlClassName="sm:max-w-none"

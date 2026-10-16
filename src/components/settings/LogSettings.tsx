@@ -124,7 +124,7 @@ export function LogSettings() {
       <div className="flex items-center justify-end gap-2">
         {files.length > 1 && (
           <Select value={selectedFile} onValueChange={handleFileChange}>
-            <SelectTrigger aria-label="日志文件" className="h-8 w-52 text-ui-compact">
+            <SelectTrigger aria-label="日志文件" size="sm" className="w-52">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -140,9 +140,8 @@ export function LogSettings() {
           <span className="text-xs text-muted-foreground">更新于 {lastRefresh}</span>
         )}
         <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
+          variant="secondary"
+          size="xs"
           onClick={handleRefresh}
           disabled={loading}
         >
@@ -150,9 +149,8 @@ export function LogSettings() {
           刷新
         </Button>
         <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
+          variant="secondary"
+          size="xs"
           onClick={handleOpenLogDir}
           disabled={!logDir}
         >
@@ -167,7 +165,7 @@ export function LogSettings() {
         </div>
       )}
 
-      <div className="rounded-xl settings-tile">
+      <div className="overflow-hidden rounded-xl border border-border bg-[hsl(var(--surface-1))]">
         <div
           ref={contentRef}
           className="h-[60vh] overflow-auto p-4 font-mono text-code leading-relaxed"

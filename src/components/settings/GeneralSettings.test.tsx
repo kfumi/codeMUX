@@ -85,7 +85,7 @@ describe('GeneralSettings', () => {
     render(<GeneralSettings />);
 
     expect(await screen.findByText('D:\\CodeMUX\\config.json')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /打开配置目录/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /打开目录/ })).toBeTruthy();
     expect(shellFacadeMock.getAppDataDirectory).toHaveBeenCalled();
   });
 
@@ -96,7 +96,7 @@ describe('GeneralSettings', () => {
     render(<GeneralSettings />);
 
     expect(screen.queryByText('配置文件')).toBeNull();
-    expect(screen.queryByRole('button', { name: /打开配置目录/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /打开目录/ })).toBeNull();
     expect(shellFacadeMock.getAppDataDirectory).not.toHaveBeenCalled();
   });
 });

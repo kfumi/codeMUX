@@ -403,6 +403,15 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-ui);
+    /*
+     * 正文基准字重 430 —— Codex 的 `--font-ui-weight`（Electron 端实测值），
+     * 取 400 与 500 之间的中间值：正文因此比常规 400 略重一点，是「字不浅」的来源。
+     * 只有可变字体（Win11 的 Segoe UI Variable、Geist/Inter 等）会真的渲染 430，
+     * 静态字体（Segoe UI、Noto Sans SC、LXGW WenKai）自动回落到最接近的 400，
+     * 所以这是一个安全的渐进增强，不需要按字体分支。
+     * 显式档位不受影响：`font-medium` 仍是 500、`font-semibold` 仍是 600。
+     */
+    font-weight: 430;
     font-size: var(--ui-font-size);
     letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
@@ -556,9 +565,12 @@ html.cmx-panel-resizing webview {
   }
 }
 
-/* 设置页软瓦片(参考 PI-Desktop / Codex 的"无分割线"分层):
-   用墨色低 alpha 混合的色调层代替描边卡片 —— 与 Codex 的 hover 公式同源
-   (ink 的 .04 → .065),亮暗主题自动适配。 */
+/* 墨色低 alpha 的软瓦片 —— 与 Codex 的 hover 公式同源(ink 的 .04 → .065),
+   亮暗主题自动适配。
+
+   设置页已改用 `SettingsCard`(发丝描边 + 卡片自带的内缩分隔线,见工单
+   codex-ui-alignment/11):实测 Codex 的设置卡是白底 + 1px 描边,不靠色调底分层。
+   这个类现在只剩智能体侧的 `ComputerUseApprovalCard` 在用,新代码不要再往上加。 */
 .settings-tile {
   background: hsl(var(--foreground) / 0.04);
 }

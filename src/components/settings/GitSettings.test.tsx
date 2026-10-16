@@ -95,8 +95,8 @@ describe('GitSettings', () => {
     const prTextarea = screen.getByTestId('git-pr-instructions') as HTMLTextAreaElement;
     expect(prTextarea.getAttribute('placeholder')).toBe('添加拉取请求指引...');
 
-    expect(screen.getByText('已添加到提交信息生成提示中')).toBeTruthy();
-    expect(screen.getByText('已添加到 PR 标题/描述生成提示中')).toBeTruthy();
+    expect(screen.getByText('追加到提交信息的生成提示里')).toBeTruthy();
+    expect(screen.getByText('追加到 PR 标题与描述的生成提示里')).toBeTruthy();
   });
 
   it('stores the Gitee token without displaying an existing token', async () => {

@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog';
+import { SETTINGS_CARD_CLASS, SettingsCard, SettingsSection } from './SettingsRow';
 
 interface AppInfo {
   name: string;
@@ -25,7 +26,7 @@ interface AppInfo {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-2">
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="min-w-0 truncate text-right text-sm font-medium text-foreground">{value}</span>
     </div>
@@ -66,9 +67,9 @@ export function AboutSettings() {
   const totalBytes = progress?.totalBytes ?? null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* App identity */}
-      <div className="flex flex-col items-center gap-4 rounded-xl settings-tile p-6">
+      <div className={cn('flex flex-col items-center gap-4 p-6', SETTINGS_CARD_CLASS)}>
         <img src="/logo.png" alt="CodeMUX" className="h-16 w-16 rounded-2xl" />
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground">
@@ -84,9 +85,8 @@ export function AboutSettings() {
       </div>
 
       {/* Environment info */}
-      <div className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">运行环境</label>
-        <div className="rounded-xl settings-tile px-4 divide-y divide-border/40">
+      <SettingsSection label="运行环境">
+        <SettingsCard>
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
           <InfoRow
             label="宿主形态"
@@ -98,73 +98,76 @@ export function AboutSettings() {
           />
           <InfoRow label="操作系统" value={getOSInfo()} />
           <InfoRow label="系统架构" value={getArchInfo()} />
-        </div>
-      </div>
+        </SettingsCard>
+      </SettingsSection>
 
       {/* 更新状态:下载/安装/重启进度 + 失败原因(此前本页完全没有反馈) */}
       {showUpdateStatus && updateView && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <label
+        <SettingsSection
+          label={
+            <span
               className={cn(
-                'text-ui-compact font-medium',
-                updateView.tone === 'error' ? 'text-destructive' : 'text-muted-foreground',
+                updateView.tone === 'error' ? 'text-destructive' : 'text-foreground',
               )}
             >
               {updateView.label}
-            </label>
-            {updatePercent !== null && (
-              <span className="font-mono text-code text-foreground">{updatePercent}%</span>
-            )}
-          </div>
-          {stage === 'downloading' && (
-            <>
-              <div
-                role="progressbar"
-                aria-label="更新下载进度"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={updatePercent ?? undefined}
-                className="h-1.5 w-full overflow-hidden rounded-full bg-secondary"
-              >
-                {updatePercent === null ? (
-                  // 总量未知(未收到 content-length):不确定态,不做假百分比。
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-                ) : (
+            </span>
+          }
+        >
+          <SettingsCard>
+            <div className="flex flex-col gap-2 px-4 py-3">
+              {updatePercent !== null && (
+                <span className="font-mono text-code text-foreground">{updatePercent}%</span>
+              )}
+              {stage === 'downloading' && (
+                <>
                   <div
-                    className="h-full rounded-full bg-primary transition-[width] duration-normal ease-motion-out"
-                    style={{ width: `${updatePercent}%` }}
-                  />
-                )}
-              </div>
-              <span className="text-ui-meta text-muted-foreground">
-                {totalBytes !== null
-                  ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
-                  : `已下载 ${formatBytes(downloadedBytes)}`}
-              </span>
-            </>
-          )}
-          {updateView.tone === 'error' && updateView.detail && (
-            <span className="text-ui-meta text-destructive [overflow-wrap:anywhere]">
-              {updateView.detail}
-            </span>
-          )}
-          {updateView.tone === 'error' && (
-            <span className="text-ui-meta text-muted-foreground">
-              完整原因见应用数据目录下的 logs/updater.log
-            </span>
-          )}
-        </div>
+                    role="progressbar"
+                    aria-label="更新下载进度"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={updatePercent ?? undefined}
+                    className="h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--foreground)/0.1)]"
+                  >
+                    {updatePercent === null ? (
+                      // 总量未知(未收到 content-length):不确定态,不做假百分比。
+                      <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+                    ) : (
+                      <div
+                        className="h-full rounded-full bg-primary transition-[width] duration-normal ease-motion-out"
+                        style={{ width: `${updatePercent}%` }}
+                      />
+                    )}
+                  </div>
+                  <span className="text-ui-meta text-muted-foreground">
+                    {totalBytes !== null
+                      ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
+                      : `已下载 ${formatBytes(downloadedBytes)}`}
+                  </span>
+                </>
+              )}
+              {updateView.tone === 'error' && updateView.detail && (
+                <span className="text-ui-meta text-destructive [overflow-wrap:anywhere]">
+                  {updateView.detail}
+                </span>
+              )}
+              {updateView.tone === 'error' && (
+                <span className="text-ui-meta text-muted-foreground">
+                  完整原因见应用数据目录下的 logs/updater.log
+                </span>
+              )}
+            </div>
+          </SettingsCard>
+        </SettingsSection>
       )}
 
       {/* Links */}
-      <div className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">链接</label>
+      <SettingsSection label="链接">
         <div className="flex gap-2">
           {canUpdate && (
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="xs"
               disabled={isUpdateActive}
               onClick={async () => {
                 try {
@@ -189,9 +192,8 @@ export function AboutSettings() {
             </Button>
           )}
           <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
+            variant="secondary"
+            size="xs"
             onClick={() => {
               // 外链走壳桥 openExternal(main 侧 shell.openExternal,仅 http/https)。
               void shellFacade.openExternal('https://github.com/kfumi/codeMUX').catch(() => {});
@@ -202,13 +204,13 @@ export function AboutSettings() {
             <ExternalLink className="h-3 w-3 opacity-50" />
           </Button>
         </div>
-      </div>
+      </SettingsSection>
 
       <ConfirmDialog
         open={updateConfirmOpen}
         onOpenChange={setUpdateConfirmOpen}
         title={`安装更新 ${version ?? ''}？`}
-        description="应用将下载新版本并在安装完成后重启。请先保存正在编辑的重要内容。"
+        description="下载完成后会重启应用，请先保存正在编辑的内容"
         confirmLabel="下载并安装"
         cancelLabel="稍后"
         onConfirm={() => {
@@ -221,7 +223,7 @@ export function AboutSettings() {
           <DialogHeader>
             <DialogTitle>已经是最新版本</DialogTitle>
             <DialogDescription>
-              当前安装的 CodeMUX 已经是最新版本。
+              当前已是最新版本
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -237,7 +239,7 @@ export function AboutSettings() {
           <DialogHeader>
             <DialogTitle>检查更新失败</DialogTitle>
             <DialogDescription>
-              暂时无法检查更新，请确认网络可访问 GitHub，并在桌面正式环境中重试。
+              暂时无法检查更新，请确认网络可访问 GitHub
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

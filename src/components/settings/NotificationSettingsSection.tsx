@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 const SOUND_OPTIONS: Array<{ value: NotificationSound; label: string }> = [
   { value: 'ding', label: '默认（叮咚）' },
@@ -50,9 +50,8 @@ export function NotificationSettingsSection() {
   const settings = normalizeNotificationSettings(config.notifications);
 
   return (
-    <div className="flex flex-col gap-3">
-      <label className="text-ui-compact font-medium text-muted-foreground">通知</label>
-      <div className="space-y-3 rounded-xl settings-tile p-4">
+    <SettingsSection label="通知">
+      <SettingsCard>
         {presentation.systemNotifications ? (
           <SettingsRow
             inlineControl
@@ -62,7 +61,7 @@ export function NotificationSettingsSection() {
                 系统通知
               </span>
             }
-            description="CodeMUX 不活跃时，任务完成或等待你回复会显示系统通知。"
+            description="不活跃时，任务完成或等待你回复会弹出系统通知"
             control={
               <Switch
               aria-label="系统通知"
@@ -84,12 +83,12 @@ export function NotificationSettingsSection() {
                 浏览器通知
               </span>
             }
-            description="需要浏览器的通知权限。未授权时不会弹出任何提示，功能不受影响。"
+            description="需要浏览器授权，未授权时静默，不影响功能"
             control={
               <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="xs"
               disabled={webSupport === 'granted' || webSupport === 'denied' || webSupport === 'unsupported'}
               onClick={() => {
                 void requestWebNotificationPermission().then(setWebSupport);
@@ -102,7 +101,6 @@ export function NotificationSettingsSection() {
         ) : null}
 
         <SettingsRow
-          divided
           inlineControl
           label={
             <span className="flex items-center gap-2">
@@ -110,7 +108,7 @@ export function NotificationSettingsSection() {
               提示音
             </span>
           }
-          description="任务完成后可选播放短提示音，默认关闭。"
+          description="任务完成时播放短提示音"
           control={
             <Switch
             aria-label="提示音"
@@ -122,39 +120,43 @@ export function NotificationSettingsSection() {
           }
         />
 
-        <div className="flex flex-col gap-2 border-t border-border/55 pt-3 sm:flex-row sm:items-center">
-          <Select
-            value={settings.sound}
-            disabled={!settings.sound_enabled}
-            onValueChange={(value) => {
-              void setNotificationSettings({ ...settings, sound: value as NotificationSound });
-            }}
-          >
-            <SelectTrigger aria-label="提示音类型" className="w-full sm:w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SOUND_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={!settings.sound_enabled}
-            onClick={() => playPreview(settings.sound)}
-          >
-            <Volume2 className="h-3.5 w-3.5" />
-            试听
-          </Button>
-        </div>
-      </div>
-    </div>
+        <SettingsRow
+          label="提示音类型"
+          control={
+            <div className="flex items-center gap-2">
+              <Select
+                value={settings.sound}
+                disabled={!settings.sound_enabled}
+                onValueChange={(value) => {
+                  void setNotificationSettings({ ...settings, sound: value as NotificationSound });
+                }}
+              >
+                <SelectTrigger aria-label="提示音类型" size="sm" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SOUND_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                disabled={!settings.sound_enabled}
+                onClick={() => playPreview(settings.sound)}
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+                试听
+              </Button>
+            </div>
+          }
+        />
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 

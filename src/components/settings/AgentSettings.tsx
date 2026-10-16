@@ -444,7 +444,7 @@ function AgentConfigurationSection({
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-foreground">智能体配置</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          为每个智能体配置新建会话的默认模型；支持特殊配置的智能体也会显示在对应卡片中。
+          每个智能体新建会话时的默认模型
         </p>
       </div>
       <div className="grid gap-3">
@@ -605,7 +605,7 @@ function PiPermissionSection({
         <h3 className="text-sm font-semibold text-foreground">pi 默认权限</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">新建对话时默认使用的审批级别。</p>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          不会加载项目内 .pi 的设置与扩展：pi 以无界面模式运行，无法询问项目信任，按默认拒绝处理。
+          不加载项目内 .pi 的设置与扩展：pi 以无界面模式运行，无法询问项目信任，按默认拒绝
         </p>
       </div>
       <div className="w-full lg:w-72 lg:flex-none">
@@ -796,7 +796,7 @@ function RuntimeDetectionSection({
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-foreground">运行时环境检测</h3>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            一键检测本机已安装的 Claude Code、Codex、OpenCode CLI，显示命令路径、配置文件、当前版本与最新版本。点击卡片可设为默认智能体引擎。
+            检测本机的 Claude Code、Codex、OpenCode CLI；点卡片设为默认智能体
           </p>
         </div>
         <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={onRefresh} disabled={checking}>
@@ -1113,7 +1113,7 @@ function ProxyRouteSection({ proxyRunning, proxyUrl }: ProxyRouteSectionProps) {
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-foreground">本地代理路由</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          为 Codex 等智能体提供本地兼容代理，由档案配置在启动会话时自动管理。
+          为 Codex 等智能体提供本地兼容代理，随会话启动自动管理
         </p>
       </div>
       <div className="rounded-2xl border border-border/45 bg-muted/15 p-4">
@@ -1257,7 +1257,7 @@ function OpenCodeAutoApproveSection({ enabled, onChange }: OpenCodeAutoApproveSe
       <div className="min-w-0 space-y-1 lg:flex-1">
         <h3 className="text-sm font-semibold text-foreground">自动接受权限</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          开启后，原本需要确认的权限请求将自动通过；显式拒绝的规则仍由 OpenCode 服务端强制执行。
+          原本要确认的权限请求自动通过；显式拒绝的规则仍由 OpenCode 强制执行
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2 lg:w-72 lg:justify-end">
@@ -1320,7 +1320,7 @@ function ClaudePermissionSection({
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-foreground">Claude Code 默认权限</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          控制新建 Claude Code 对话时默认选中的工具权限行为，与发送框下拉保持一致。仍可在新建对话时手动切换。
+          新建对话默认选中的工具权限，与发送框下拉一致
         </p>
       </div>
       <div className={cn('grid gap-2 sm:grid-cols-2', compact && 'sm:grid-cols-1')}>

@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { SettingsCard, SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 afterEach(() => {
   cleanup();
@@ -84,24 +84,25 @@ describe('SettingsRow', () => {
     expect(wideCell.className).not.toContain('sm:max-w-60');
   });
 
-  it('surface 自带卡片描边,divided 画分隔线', () => {
+  it('行自带内边距;surface 再加一圈卡片描边', () => {
     const { container } = render(
-      <SettingsRow surface divided label="忽略证书校验" control={<span>控件</span>} />,
+      <SettingsRow surface label="忽略证书校验" control={<span>控件</span>} />,
     );
 
     const row = container.firstElementChild as HTMLElement;
+    expect(row.className).toContain('px-4');
+    expect(row.className).toContain('py-3');
     expect(row.className).toContain('rounded-xl');
     // Codex 式卡片:平面 + 发丝描边,不再靠 `settings-tile` 的深底色分层。
     expect(row.className).toContain('border-border');
     expect(row.className).toContain('bg-[hsl(var(--surface-1))]');
-    expect(row.className).toContain('border-t');
   });
 
-  it('SettingsCard 把多行收进同一张卡并裁掉圆角外的分隔线', () => {
+  it('SettingsCard 把多行收进同一张卡,并自己画内缩的发丝分隔线', () => {
     const { container } = render(
       <SettingsCard>
         <SettingsRow label="第一行" control={<span>a</span>} />
-        <SettingsRow divided label="第二行" control={<span>b</span>} />
+        <SettingsRow label="第二行" control={<span>b</span>} />
       </SettingsCard>,
     );
 
@@ -109,5 +110,59 @@ describe('SettingsRow', () => {
     expect(card.className).toContain('overflow-hidden');
     expect(card.className).toContain('rounded-xl');
     expect(card.children).toHaveLength(2);
+    // 分隔线由卡片统一画:只在非最后一个子元素上,且两侧内缩 16px。
+    expect(card.className).toContain('[&>*:not(:last-child)]:after:inset-x-4');
+    expect(card.className).toContain('[&>*:not(:last-child)]:after:h-px');
+    // 行自己不再带边框,避免与卡片的分隔线叠成双线。
+    const rows = Array.from(card.children) as HTMLElement[];
+    expect(rows.every((row) => !row.className.includes('border-t'))).toBe(true);
+  });
+
+  it('stacked 让控件在宽屏也铺满整行(路径与多行输入塞不进右列)', () => {
+    render(
+      <SettingsRow
+        stacked
+        label="驱动命令"
+        description="留空 = 自动检测"
+        control={<span data-testid="ctl">控件</span>}
+      />,
+    );
+
+    const controlCell = screen.getByTestId('ctl').parentElement as HTMLElement;
+    expect(controlCell.className).toContain('col-span-2');
+    expect(controlCell.className).toContain('justify-self-stretch');
+    // 不再回到右列,也就不会继承 240px 上限。
+    expect(controlCell.className).not.toContain('sm:col-start-2');
+    expect(controlCell.className).not.toContain('sm:max-w-60');
+  });
+
+  it('htmlFor 把行标题渲染成 label,点标题能聚焦控件', () => {
+    render(
+      <SettingsRow
+        stacked
+        htmlFor="driver-command"
+        label="驱动命令"
+        control={<input id="driver-command" defaultValue="" />}
+      />,
+    );
+
+    const label = screen.getByText('驱动命令');
+    expect(label.tagName).toBe('LABEL');
+    expect(label.getAttribute('for')).toBe('driver-command');
+    expect(screen.getByLabelText('驱动命令').id).toBe('driver-command');
+  });
+});
+
+describe('SettingsSection', () => {
+  it('分组标题是墨色正文色,不是弱化的灰色', () => {
+    render(
+      <SettingsSection label="显示偏好">
+        <SettingsRow label="精简 AI 输出" control={<span>控件</span>} />
+      </SettingsSection>,
+    );
+
+    const heading = screen.getByRole('heading', { level: 3, name: '显示偏好' });
+    expect(heading.className).toContain('text-foreground');
+    expect(heading.className).not.toContain('text-muted-foreground');
   });
 });

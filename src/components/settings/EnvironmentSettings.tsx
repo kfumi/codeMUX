@@ -9,6 +9,7 @@ import type {
 } from '../../lib/desktop-bridge';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { SettingsCard, SettingsSection } from './SettingsRow';
 
 const statusMeta: Record<EnvironmentCheckStatus, { label: string; className: string; icon: typeof CheckCircle2 }> = {
   ok: {
@@ -56,9 +57,9 @@ export function EnvironmentSettings() {
   }, [runCheck]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-end">
-        <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={runCheck} disabled={loading}>
+        <Button variant="secondary" size="xs" className="shrink-0" onClick={runCheck} disabled={loading}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           重新检测
         </Button>
@@ -70,13 +71,17 @@ export function EnvironmentSettings() {
         </div>
       )}
 
-      <div className="space-y-3">
+      <SettingsSection label="工具检测">
         {loading && !check ? (
-          <div className="rounded-xl settings-tile p-5 text-sm text-muted-foreground">正在检测环境...</div>
+          <div className="rounded-xl border border-border bg-[hsl(var(--surface-1))] px-4 py-5 text-sm text-muted-foreground">
+            正在检测环境...
+          </div>
         ) : (
-          check?.tools.map((tool) => <ToolCheckRow key={tool.command} tool={tool} />)
+          <SettingsCard>
+            {check?.tools.map((tool) => <ToolCheckRow key={tool.command} tool={tool} />)}
+          </SettingsCard>
         )}
-      </div>
+      </SettingsSection>
 
       {check?.checkedAt && (
         <p className="text-xs text-muted-foreground">检测时间：{formatCheckedAt(check.checkedAt)}</p>
@@ -90,13 +95,13 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
   const Icon = meta.icon;
 
   return (
-    <div className="rounded-xl settings-tile p-4">
+    <div className="px-4 py-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-muted-foreground" />
-            <h4 className="text-sm font-semibold text-foreground">{tool.name}</h4>
-            <code className="rounded-md bg-muted/50 px-1.5 py-0.5 text-ui-caption text-muted-foreground">{tool.command}</code>
+            <h4 className="text-sm font-medium text-foreground">{tool.name}</h4>
+            <code className="rounded-md bg-[hsl(var(--foreground)/0.05)] px-1.5 py-0.5 text-ui-caption text-muted-foreground">{tool.command}</code>
           </div>
           <p className="mt-2 text-sm text-foreground">{tool.message}</p>
         </div>
@@ -106,7 +111,7 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
         </span>
       </div>
 
-      <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
         <InfoPill label="版本" value={tool.version ?? '-'} />
         <InfoPill label="路径" value={tool.path ?? '-'} />
       </div>
@@ -116,7 +121,7 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
 
 function InfoPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
+    <div className="min-w-0 rounded-lg bg-[hsl(var(--foreground)/0.04)] px-3 py-2">
       <div className="text-ui-caption text-muted-foreground">{label}</div>
       <div className="mt-1 truncate font-mono text-ui-meta text-foreground">{value}</div>
     </div>

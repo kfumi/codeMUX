@@ -95,7 +95,7 @@ describe('AboutSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
     expect(await screen.findByText('已经是最新版本')).toBeTruthy();
-    expect(screen.getByText('当前安装的 CodeMUX 已经是最新版本。')).toBeTruthy();
+    expect(screen.getByText('当前已是最新版本')).toBeTruthy();
   });
 
   it('手动检查失败时弹出失败提示且不展示底层错误原因', async () => {
@@ -112,7 +112,7 @@ describe('AboutSettings', () => {
     });
 
     expect(await screen.findByText('检查更新失败')).toBeTruthy();
-    expect(screen.getByText('暂时无法检查更新，请确认网络可访问 GitHub，并在桌面正式环境中重试。')).toBeTruthy();
+    expect(screen.getByText('暂时无法检查更新，请确认网络可访问 GitHub')).toBeTruthy();
     expect(screen.queryByText('network down')).toBeNull();
     expect(screen.queryByText('已经是最新版本')).toBeNull();
     expect(screen.queryByText('安装更新')).toBeNull();

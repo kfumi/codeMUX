@@ -107,11 +107,27 @@ The palette is **derived**, not listed. `src/lib/colorDerivation.ts` holds the o
 
 - New UI must inherit the global font family from `var(--font-ui)` (Tailwind `font-sans` is mapped to it); do not hard-code a font family unless the content is intentionally code.
 
+**Base weight 430:**
+
+- `body` sets `font-weight: 430` (Codex's `--font-ui-weight`): variable fonts (Win11 Segoe UI Variable, Geist, Inter) really render 430, static fonts fall back to 400 — a safe progressive enhancement, do not branch on it in components.
+- The explicit tiers stay standard: `font-medium` = 500, `font-semibold` = 600. Do not introduce 510 / 590.
+
 **Font sizes — always the dynamic scale, never absolute values:**
 
 - Use the dynamic typography utilities (`text-ui-micro`, `text-ui-caption`, `text-ui-meta`, `text-ui-compact`, `text-ui-body`, `text-ui-title`, `text-ui-heading-sm/md/lg`) so text follows the user's global interface font-size setting.
 - Avoid hard-coded text sizes such as `text-[11px]` or inline `font-size` in UI components. The Tailwind `text-xs` through `text-3xl` utilities are also mapped to the global UI scale and may be used where their semantic size fits.
 - For code, paths, and numeric diff statistics that intentionally use the code style, use `font-mono text-code` so they follow the global code-font-size setting.
+
+**Settings surface — 设置页公约:**
+
+设置页是「左导航 + 表单」的密集场景，配方单独定（工单 `codex-ui-alignment/11`），不要在各处手写行/卡样式：
+
+- **构件**：`SettingsSection`（墨色小标题 + 卡）→ `SettingsCard`（两侧内缩 16px 的发丝分隔线由卡片统一画，行不得自带 `border-t`）→ `SettingsRow`（`stacked` 给路径、多行输入这类塞不进 240px 右列的控件；`htmlFor` 让标题真正关联控件）。单行成块用 `SettingsRow surface`。
+- **字号层级**：页标题 `text-ui-heading-lg`，导航标题 `text-ui-heading-sm`，分区小标题与行标题 `text-sm`（行标题加 `font-medium`），行描述 `text-xs leading-snug text-muted-foreground`。
+- **颜色**：导航项、分区标题、行标题一律 `text-foreground`（**不许**用 `muted-foreground` —— 那会让整页发浅）；只有行描述用次级、导航分组标题用弱色。
+- **描述文案**：一句话讲「它做什么」，目标 ≤ 24 字、上限 40 字或两个短句；不写「在哪儿点」的教学句；危险项保留最短的完整警示句；结尾不用句号。
+- **控件**：下拉用 `SelectTrigger size="sm"`（32px / 透明底 + 发丝描边 / 13px），行内动作按钮用 `Button size="xs"` + `variant="secondary"`（ink 5% 软按钮），开关用 `Switch` 默认档（32×20，关态 ink 10%）。档位已经定好，别再就地写 `className="h-9 …"`。
+- **导航**：分组定义在 `src/components/settings/SettingsDialog.tsx` 的 `NAV_GROUPS`；新增分页要同时给出 `label` 与一句话 `description`（搜索会匹配两者），并归入某个分组。
 
 **Corner radius — an eight-step ladder, two scale factors:**
 

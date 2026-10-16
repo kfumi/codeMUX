@@ -14,14 +14,18 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
           "border border-input bg-background text-foreground hover:bg-muted hover:text-foreground",
+        // 软按钮 —— Codex 的 `color: secondary`：墨色 5% 填充、无描边，hover 加重到 10%。
+        // 设置页里的行内动作（复制路径 / 打开目录 / 更改）就是这一档。
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/78 dark:hover:bg-[hsl(var(--surface-3))/0.78]",
+          "bg-[hsl(var(--foreground)/0.05)] text-foreground hover:bg-[hsl(var(--foreground)/0.1)]",
         ghost: "hover:bg-muted/62 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.78]",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4 py-2",
         sm: "h-9 px-3",
+        // 设置页行内动作档 —— 28px 高（Codex 的 `settingsAction`）。
+        xs: "h-7 gap-1.5 px-2.5 text-ui-compact",
         lg: "h-11 px-8",
         icon: "h-10 w-10",
       },

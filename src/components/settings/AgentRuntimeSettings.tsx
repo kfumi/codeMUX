@@ -26,7 +26,7 @@ export function AgentRuntimeSettingsPanel({
           <div>
             <h3 className="text-ui-heading-sm font-semibold text-foreground">引擎偏好</h3>
             <p className="mt-1 text-ui-compact leading-relaxed text-muted-foreground">
-              选择默认智能体并配置会话权限。下面的托管 Runtime 决定智能体是否具备实际运行能力。
+              默认智能体与新建会话的权限；托管 Runtime 决定它能不能真的跑起来
             </p>
           </div>
         </div>
@@ -41,7 +41,7 @@ export function AgentRuntimeSettingsPanel({
           <div>
             <h3 className="text-ui-heading-sm font-semibold text-foreground">托管 SDK Runtime</h3>
             <p className="mt-1 text-ui-compact leading-relaxed text-muted-foreground">
-              CodeMUX 使用的 SDK 和 CLI 均来自这里，不会因系统全局 CLI 的安装状态而改变。
+              CodeMUX 使用的 SDK 与 CLI 都来自这里，与系统全局 CLI 的安装状态无关
             </p>
           </div>
         </div>

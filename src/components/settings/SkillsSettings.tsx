@@ -175,7 +175,7 @@ export function SkillsSettingsPanel() {
     <div className="@container space-y-4">
       {/* 工具行:计数 + 搜索在左,操作按钮在右(参考 PI-Desktop 的 MCP/Skills 工具栏) */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md settings-tile px-3 text-ui-compact text-muted-foreground">
+        <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-input px-2.5 text-ui-compact text-muted-foreground">
           全部
           <span className="font-medium text-foreground">{installedSkills.length}</span>
         </span>
@@ -222,7 +222,7 @@ export function SkillsSettingsPanel() {
         {filteredSkills.map((skill) => (
           <article
             key={skill.id}
-            className="flex flex-col gap-2 rounded-xl settings-tile settings-tile-hover px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-3"
+            className="flex flex-col gap-2 rounded-xl border border-border bg-[hsl(var(--surface-1))] px-4 py-3 transition-colors hover:border-[hsl(var(--surface-edge))] sm:flex-row sm:items-center sm:gap-3"
           >
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--foreground)/0.06)] text-muted-foreground">
@@ -352,7 +352,7 @@ export function SkillsSettingsPanel() {
                             'flex items-center gap-3 p-2.5 rounded-lg border border-transparent cursor-pointer transition-colors',
                             checked
                               ? 'bg-primary/5 border-primary/30'
-                              : 'settings-tile settings-tile-hover',
+                              : 'border-border bg-[hsl(var(--surface-1))] hover:border-[hsl(var(--surface-edge))]',
                           )}
                         >
                           <button

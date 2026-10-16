@@ -201,16 +201,16 @@ export function ArchivedSessionsPanel() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="relative md:col-span-2 xl:col-span-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             placeholder="搜索已归档对话"
-            className="pl-9"
+            className="h-8 pl-8"
           />
         </div>
         <Select value={agentKind} onValueChange={(value) => setAgentKind(value as 'all' | AgentKind)}>
-          <SelectTrigger>
+          <SelectTrigger size="sm" className="w-full">
             <SelectValue placeholder="智能体" />
           </SelectTrigger>
           <SelectContent>
@@ -223,7 +223,7 @@ export function ArchivedSessionsPanel() {
           </SelectContent>
         </Select>
         <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-          <SelectTrigger>
+          <SelectTrigger size="sm" className="w-full">
             <SelectValue placeholder="排序方式" />
           </SelectTrigger>
           <SelectContent>
@@ -233,7 +233,7 @@ export function ArchivedSessionsPanel() {
           </SelectContent>
         </Select>
         <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger>
+          <SelectTrigger size="sm" className="w-full">
             <SelectValue placeholder="项目" />
           </SelectTrigger>
           <SelectContent>
@@ -247,7 +247,7 @@ export function ArchivedSessionsPanel() {
         </Select>
       </div>
 
-      <div className="rounded-xl settings-tile">
+      <div className="overflow-hidden rounded-xl border border-border bg-[hsl(var(--surface-1))]">
         <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 text-sm text-foreground">
           <span>{filteredSessions.length} 个对话</span>
           <span className="flex items-center gap-1.5">

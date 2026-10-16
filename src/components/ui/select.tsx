@@ -9,21 +9,34 @@ const SelectGroup = SelectPrimitive.Group
 
 const SelectValue = SelectPrimitive.Value
 
+export interface SelectTriggerProps
+  extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> {
+  /**
+   * `sm` —— 设置页行内控件的紧凑档（Codex 的 `--select-control-size-md`：32px 高、
+   * 13px 字、窄扁箭头），底色改走 Codex 的 outline 变体（透明底 + 一圈发丝描边，
+   * hover 只加重描边而不是填底）。
+   */
+  size?: 'default' | 'sm';
+}
+
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
+  SelectTriggerProps
+>(({ className, children, size = 'default', ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full cursor-pointer items-center justify-between rounded-md border border-input bg-muted/80 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/74 transition-[background-color,border-color,color,box-shadow] duration-fast outline-none hover:bg-muted focus:outline-none focus:ring-0 focus-visible:bg-card focus-visible:ring-1 focus-visible:ring-ring/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "flex w-full cursor-pointer items-center justify-between rounded-md border border-input transition-[background-color,border-color,color,box-shadow] duration-fast outline-none focus:outline-none focus:ring-0 focus-visible:ring-1 focus-visible:ring-ring/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      size === 'sm'
+        ? "h-8 shrink-0 gap-1.5 bg-transparent px-2.5 py-0 text-ui-compact hover:border-[hsl(var(--surface-edge))] focus-visible:bg-transparent"
+        : "h-10 bg-muted/80 px-3 py-2 text-sm hover:bg-muted focus-visible:bg-card",
       className
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className={cn('shrink-0 opacity-50', size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ))

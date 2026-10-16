@@ -6,7 +6,7 @@ import { normalizeBrowserControl } from '../../lib/browserControl';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
-import { SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 export function BrowserControlSettings() {
   const config = useSettingsStore((state) => state.config);
@@ -40,52 +40,52 @@ export function BrowserControlSettings() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
-        <SettingsRow
-          surface
-          inlineControl
-          label="开启内置浏览器控制"
-          description="允许后续会话通过内置浏览器操作网页。此开关不影响侧边栏打开浏览器；关闭时浏览器操作工具不会出现在会话的工具清单里。"
-          control={
-            <Switch
-            aria-label="开启内置浏览器控制"
-            checked={browser.enabled}
-            onCheckedChange={(checked) => update({ enabled: checked })}
-            />
-          }
-        />
-      </section>
+      <SettingsSection label="浏览器控制">
+        <SettingsCard>
+          <SettingsRow
+            inlineControl
+            label="开启内置浏览器控制"
+            description="让后续会话能操作网页；关掉后相关工具不出现在会话里"
+            control={
+              <Switch
+              aria-label="开启内置浏览器控制"
+              checked={browser.enabled}
+              onCheckedChange={(checked) => update({ enabled: checked })}
+              />
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
-      <section className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">安全</label>
-        <SettingsRow
-          surface
-          inlineControl
-          label="忽略证书校验"
-          description="开启后内置浏览器不再校验 HTTPS 证书，仅影响内置浏览器。修改后需重启生效。"
-          control={
-            <Switch
-            aria-label="忽略证书校验"
-            checked={browser.ignore_certificate_errors}
-            onCheckedChange={(checked) => update({ ignore_certificate_errors: checked })}
-            />
-          }
-        />
-      </section>
+      <SettingsSection label="安全">
+        <SettingsCard>
+          <SettingsRow
+            inlineControl
+            label="忽略证书校验"
+            description="内置浏览器不再校验 HTTPS 证书，重启后生效"
+            control={
+              <Switch
+              aria-label="忽略证书校验"
+              checked={browser.ignore_certificate_errors}
+              onCheckedChange={(checked) => update({ ignore_certificate_errors: checked })}
+              />
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
       {canClearHostData && (
-        <section className="flex flex-col gap-3">
-          <label className="text-ui-compact font-medium text-muted-foreground">浏览器数据</label>
-          <div className="space-y-3 rounded-xl settings-tile p-4">
+        <SettingsSection label="浏览器数据">
+          <SettingsCard>
             <SettingsRow
               inlineControl
               label="清除内置浏览器缓存"
-              description="清除 HTTP 缓存、Cache Storage 和 Service Worker，保留 Cookie 和本地站点数据。"
+              description="保留 Cookie 与站点数据，只清缓存与 Service Worker"
               control={
                 <Button
                 type="button"
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="xs"
                 disabled={clearing !== null}
                 onClick={() => void clearData('cache')}
               >
@@ -94,15 +94,14 @@ export function BrowserControlSettings() {
               }
             />
             <SettingsRow
-              divided
               inlineControl
               label="清除全部浏览器数据"
-              description="删除内置浏览器中的 Cookie、站点数据和缓存。此操作不可撤销。"
+              description="删除 Cookie、站点数据与缓存，不可撤销"
               control={
                 <Button
                 type="button"
                 variant="destructive"
-                size="sm"
+                size="xs"
                 disabled={clearing !== null}
                 onClick={() => void clearData('all')}
               >
@@ -110,8 +109,8 @@ export function BrowserControlSettings() {
               </Button>
               }
             />
-          </div>
-        </section>
+          </SettingsCard>
+        </SettingsSection>
       )}
     </div>
   );

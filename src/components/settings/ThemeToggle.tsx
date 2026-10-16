@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
@@ -24,7 +24,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/colla
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { FontPicker } from './FontPicker';
 import { ModeRow } from './ModeRow';
-import { ROW_PADDING, SettingsCard, SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 /**
  * 外观设置页。
@@ -33,12 +33,6 @@ import { ROW_PADDING, SettingsCard, SettingsRow } from './SettingsRow';
  * 行与行之间用发丝线分隔,控件一律收到右列(下拉、数值框、滑块、开关),不再用
  * 大标题 + 右侧说明 + 整块底色把每一项都撑成一个大色块。
  */
-
-/** 分组小标题:Codex 用弱化的小标题分层,不是大标题。 */
-function GroupLabel({ children }: { children: ReactNode }) {
-  return <h3 className="px-0.5 text-ui-compact font-medium text-muted-foreground">{children}</h3>;
-}
-
 
 /** 紧凑数值框:Codex 的字号是「小方框 + 右侧 px 后缀」,不是加减号步进器。 */
 function NumberField({
@@ -178,9 +172,8 @@ export function ThemeToggle() {
   const accentHex = accentSwatch(prefs.accent, isDark).toUpperCase();
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-2.5">
-        <GroupLabel>视觉风格</GroupLabel>
+    <div className="space-y-8">
+      <SettingsSection label="视觉风格">
 
         <SettingsCard>
           <ModeRow theme={currentTheme} onChange={setTheme} />
@@ -188,16 +181,12 @@ export function ThemeToggle() {
 
         <SettingsCard>
           <SettingsRow
-            className={ROW_PADDING}
             label="强调色"
-            description="按钮、链接与高亮元素使用的颜色。"
+            description="按钮、链接与高亮元素的颜色"
             control={
               <div className="flex items-center gap-2.5">
                 <Select value={prefs.accent} onValueChange={(value) => setAccent(value as AccentKey)}>
-                  <SelectTrigger
-                    aria-label="强调色"
-                    className="h-8 w-40 justify-between gap-2 rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
-                  >
+                  <SelectTrigger aria-label="强调色" size="sm" className="w-40 justify-between">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -220,24 +209,17 @@ export function ThemeToggle() {
           />
 
           <SettingsRow
-            divided
-            className={ROW_PADDING}
             label="界面字体"
-            description="仅影响界面文字，代码与差异视图另用代码字体。"
+            description="仅影响界面文字，代码另用代码字体"
             control={<FontPicker value={prefs.uiFontFamily} onChange={setUiFontFamily} />}
           />
 
           <SettingsRow
-            divided
-            className={ROW_PADDING}
             label="圆角风格"
-            description="控制按钮、卡片与输入框的边角弧度。"
+            description="按钮、卡片与输入框的圆角弧度"
             control={
               <Select value={prefs.radius} onValueChange={(value) => setRadius(value as RadiusKey)}>
-                <SelectTrigger
-                  aria-label="圆角风格"
-                  className="h-8 w-40 justify-between rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
-                >
+                <SelectTrigger aria-label="圆角风格" size="sm" className="w-40 justify-between">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -258,23 +240,18 @@ export function ThemeToggle() {
           />
 
           <SettingsRow
-            divided
-            className={ROW_PADDING}
             label="幕布宽度"
             description={
               prefs.contentWidth === 'fixed'
-                ? '定宽：对话消息与发送框宽度固定居中。'
-                : '流式：内容宽度尽量居中撑满中间区域。'
+                ? '对话消息与发送框定宽居中'
+                : '内容宽度尽量撑满中间区域'
             }
             control={
               <Select
                 value={prefs.contentWidth}
                 onValueChange={(value) => setContentWidth(value as ContentWidthKey)}
               >
-                <SelectTrigger
-                  aria-label="幕布宽度"
-                  className="h-8 w-40 justify-between rounded-md border-border bg-[hsl(var(--surface-2))] px-2.5 text-ui-body hover:bg-[hsl(var(--surface-3))]"
-                >
+                <SelectTrigger aria-label="幕布宽度" size="sm" className="w-40 justify-between">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -288,13 +265,13 @@ export function ThemeToggle() {
             }
           />
         </SettingsCard>
-      </section>
+      </SettingsSection>
 
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <CollapsibleTrigger
           className={cn(
-            'flex items-center gap-1 px-0.5 text-ui-compact font-medium text-muted-foreground',
-            'transition-colors duration-fast ease-motion-out hover:text-foreground',
+            'flex items-center gap-1 px-0.5 text-ui-compact font-medium text-foreground',
+            'transition-colors duration-fast ease-motion-out hover:text-muted-foreground',
           )}
         >
           高级
@@ -303,12 +280,11 @@ export function ThemeToggle() {
           />
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="space-y-2.5 pt-2.5">
+        <CollapsibleContent className="pt-2.5">
           <SettingsCard>
             <SettingsRow
-              className={ROW_PADDING}
               label="界面字号"
-              description="调整界面文字的基础字号。"
+              description="界面文字的基础字号"
               control={
                 <NumberField
                   label="界面字号"
@@ -322,10 +298,8 @@ export function ThemeToggle() {
             />
 
             <SettingsRow
-              divided
-              className={ROW_PADDING}
               label="代码字体大小"
-              description="调整代码与差异视图中代码使用的基础字号。"
+              description="代码与差异视图使用的字号"
               control={
                 <NumberField
                   label="代码字体大小"
@@ -339,10 +313,8 @@ export function ThemeToggle() {
             />
 
             <SettingsRow
-              divided
-              className={ROW_PADDING}
               label="对比度"
-              description="调低更安静，调高让边界与次级文字更清楚。"
+              description="调低更安静，调高让边界与次级文字更清楚"
               control={<ContrastControl value={prefs.contrast} onChange={setContrast} />}
             />
           </SettingsCard>

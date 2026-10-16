@@ -10,7 +10,7 @@ import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
-import { SettingsRow } from './SettingsRow';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 import type { ImmediateRunMode } from '../../types/provider';
 
 export function GeneralSettings() {
@@ -52,138 +52,142 @@ export function GeneralSettings() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">显示偏好</label>
-        <SettingsRow
-          surface
-          inlineControl
-          label="精简 AI 输出"
-          description="开启后，每轮完成时折叠总结前的过程消息，仅保留最终总结。"
-          control={
-            <Switch
-            aria-label="精简 AI 输出"
-            checked={compactAiOutput}
-            onCheckedChange={(checked) => {
-              void setCompactAiOutput(checked);
-            }}
-            />
-          }
-        />
-      </div>
+    <div className="space-y-8">
+      <SettingsSection label="显示偏好">
+        <SettingsCard>
+          <SettingsRow
+            inlineControl
+            label="精简 AI 输出"
+            description="每轮只保留最终总结，过程消息收起来"
+            control={
+              <Switch
+              aria-label="精简 AI 输出"
+              checked={compactAiOutput}
+              onCheckedChange={(checked) => {
+                void setCompactAiOutput(checked);
+              }}
+              />
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
-      <div className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">对话</label>
-        <SettingsRow
-          surface
-          label="交互行为"
-          description="在 CodeMUX 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。"
-          control={
-            <Select
-            value={immediateRunMode}
-            onValueChange={(value) => {
-              void setImmediateRunMode(value as ImmediateRunMode);
-            }}
-          >
-            <SelectTrigger aria-label="交互行为" className="h-9 w-full shrink-0 rounded-lg sm:w-28">
-              <SelectValue>
-                {immediateRunMode === 'interrupt' ? '中断' : '引导'}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="steer">引导</SelectItem>
-              <SelectItem value="interrupt">中断</SelectItem>
-            </SelectContent>
-            </Select>
-          }
-        />
-      </div>
+      <SettingsSection label="对话">
+        <SettingsCard>
+          <SettingsRow
+            label="交互行为"
+            description="运行中发消息：引导它改变方向，或直接打断"
+            control={
+              <Select
+              value={immediateRunMode}
+              onValueChange={(value) => {
+                void setImmediateRunMode(value as ImmediateRunMode);
+              }}
+            >
+              <SelectTrigger aria-label="交互行为" size="sm" className="w-full shrink-0 sm:w-32">
+                <SelectValue>
+                  {immediateRunMode === 'interrupt' ? '中断' : '引导'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="steer">引导</SelectItem>
+                <SelectItem value="interrupt">中断</SelectItem>
+              </SelectContent>
+              </Select>
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
-      <div className="flex flex-col gap-3">
-        <label className="text-ui-compact font-medium text-muted-foreground">项目打开</label>
-        <SettingsRow
-          surface
-          label="默认文件打开目标"
-          description="设置默认打开文件和文件夹的位置，对话页项目打开按钮会默认使用此项。"
-          control={
-            <Select
-            value={defaultOpenTarget}
-            onValueChange={(value) => {
-              void setDefaultOpenTarget(value as OpenTarget);
-            }}
-          >
-            <SelectTrigger aria-label="默认文件打开目标" className="h-9 w-full shrink-0 rounded-lg sm:w-44">
-              <SelectValue>
-                {(() => {
-                  const option = getOpenTargetOption(defaultOpenTarget);
+      <SettingsSection label="项目打开">
+        <SettingsCard>
+          <SettingsRow
+            label="默认文件打开目标"
+            description="对话页的项目打开按钮默认用它"
+            control={
+              <Select
+              value={defaultOpenTarget}
+              onValueChange={(value) => {
+                void setDefaultOpenTarget(value as OpenTarget);
+              }}
+            >
+              <SelectTrigger aria-label="默认文件打开目标" size="sm" className="w-full shrink-0 sm:w-44">
+                <SelectValue>
+                  {(() => {
+                    const option = getOpenTargetOption(defaultOpenTarget);
+                    const Icon = option.Icon;
+                    return (
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        <span>{option.label}</span>
+                      </span>
+                    );
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {OPEN_TARGET_OPTIONS.map((option) => {
                   const Icon = option.Icon;
                   return (
-                    <span className="flex items-center gap-2">
-                      <Icon className="h-4 w-4" />
-                      <span>{option.label}</span>
-                    </span>
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        <span>{option.label}</span>
+                      </span>
+                    </SelectItem>
                   );
-                })()}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end">
-              {OPEN_TARGET_OPTIONS.map((option) => {
-                const Icon = option.Icon;
-                return (
-                  <SelectItem key={option.value} value={option.value}>
-                    <span className="flex items-center gap-2">
-                      <Icon className="h-4 w-4" />
-                      <span>{option.label}</span>
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-            </Select>
-          }
-        />
-      </div>
+                })}
+              </SelectContent>
+              </Select>
+            }
+          />
+        </SettingsCard>
+      </SettingsSection>
 
       <NotificationSettingsSection />
 
       {/* Config file section:仅桌面壳(本机路径 + 资源管理器) */}
       {showConfigFile && (
-        <div className="flex flex-col gap-3">
-          <label className="text-ui-compact font-medium text-muted-foreground">配置文件</label>
-          <div className="rounded-xl settings-tile p-4 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              配置文件包含提供商、智能体、主题等所有应用设置。高级用户可直接编辑此文件。
-            </p>
-            {configPath ? (
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-lg bg-muted/50 px-3 py-2 text-code text-foreground font-mono">
-                  {configPath}
-                </code>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5"
-                  onClick={handleCopy}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? '已复制' : '复制路径'}
-                </Button>
-              </div>
-            ) : (
-              <div className="h-8 animate-pulse rounded-lg bg-muted/40" />
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleOpenDir}
-              disabled={!configDir}
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              打开配置目录
-            </Button>
-          </div>
-        </div>
+        <SettingsSection label="配置文件">
+          <SettingsCard>
+            <SettingsRow
+              stacked
+              label="应用配置文件"
+              description="包含提供商、智能体、主题等全部设置"
+              control={
+                <div className="flex items-center gap-2">
+                  {configPath ? (
+                    <code className="min-w-0 flex-1 truncate rounded-md bg-[hsl(var(--foreground)/0.05)] px-2.5 py-1 font-mono text-code text-foreground">
+                      {configPath}
+                    </code>
+                  ) : (
+                    <div className="h-7 min-w-0 flex-1 animate-pulse rounded-md bg-[hsl(var(--foreground)/0.05)]" />
+                  )}
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    className="shrink-0"
+                    onClick={handleCopy}
+                    disabled={!configPath}
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? '已复制' : '复制路径'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    className="shrink-0"
+                    onClick={handleOpenDir}
+                    disabled={!configDir}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    打开目录
+                  </Button>
+                </div>
+              }
+            />
+          </SettingsCard>
+        </SettingsSection>
       )}
     </div>
   );

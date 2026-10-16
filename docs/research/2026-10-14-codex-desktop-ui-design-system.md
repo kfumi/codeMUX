@@ -414,3 +414,67 @@ Diff 专用：`--diffs-line-height: calc(var(--diffs-font-size) * 1.8)`（**1.8 
 ## 10. 一句话总结
 
 Codex 桌面端的"高级感"来自四件事：**① 用墨色低 alpha 做边框而不是用灰；② 用 4 个种子 + 算法派生出全部语义色，主题只有一个旋钮；③ 阴影靠"0.5px 描边 + 超大 spread 极低透明度"而不是常规投影；④ 圆角极小（2/4/6/8/24/32）再靠 superellipse 放大 25%**。这四条加起来，实现成本极低，但视觉差距是数量级的。
+---
+
+## 附录 A. 设置页实测（2026-10-16 补充）
+
+来源两处：用户提供的 Codex 设置页截图（1482×946，用 `zlib` 解 PNG 逐像素取样）与应用包内
+明文前端（`app.asar` 的 `chunks/settings-page-*.js`、`chunks/general-settings-*.js`、
+`select-*.css`、`app-shared.css`）。工单 `codex-ui-alignment/11` 按这些值改的 CodeMUX 设置页。
+
+### A.1 颜色（截图取样，抗锯齿使测得值偏亮，可视为上限）
+
+| 元素 | 实测最暗像素 | 含义 |
+|---|---|---|
+| 页标题「常规」 | `#0d0d0d` | 正文墨色 |
+| **分区标题「权限」** | `#0d0d0d` | **墨色**，不是灰 —— 只有字号(13px)与字重(medium)区分层级 |
+| 行标签「默认权限」 | `#0d0d0d` | 墨色 |
+| 行描述 | `#616161` | 次级（`--color-text-secondary`） |
+| **导航项「外观」** | `#0d0d0d` | **墨色** —— 导航整列发灰是「设置页看起来浅」的最大成因 |
+| 导航分组「个人」 | `#858585` | 弱色（tertiary）；**与项同字号**，只靠颜色退后 |
+| 导航标题「设置」 | `#0d0d0d` | 墨色 |
+| 卡片填充 | `#ffffff` | 与页面同色 |
+| 卡片描边 | `#ececec` 1px | 卡片 x 555→1282 |
+| 分隔线 | 从 x 572 画到 1265 | **两侧各内缩 16~17px**，不是通栏 |
+
+结论：卡片**不靠色调分层**，就是白底 + 一圈 1px 描边；分层感来自「墨色文字 + 内缩发丝线」。
+（此前有把设置卡写成 `settings-tile` 色调底的版本，那是错的。）
+
+### A.2 排版与尺寸（asar 原文）
+
+- 设置页标题 `heading-xl` = **32px / 38px / 590 / -0.025em**；标题块 `min-height: 60px`。
+- 导航标题 18px / 24px / 590。
+- 行标签 13px / 510 / 墨色（`text-sm` + `font-medium`），描述 12px / **16px 行高** / 次级，
+  两者间距 **2px**（`flex-col gap-0.5`）。
+- 行：`px-4 py-3`，文字↔控件 **24px**（`gap-6`）；密集档 `gap-4 py-2`。
+- 导航行高 **30px**（浏览器 36）、`px-2`、图标 **14px**、`gap-6px`、圆角 12.5px（`--radius-lg`）；
+  选中 = `--color-background-primary-ghost-hover`（浅色 `#0000000d` / 深色 `#ffffff1a`）。
+- 导航分组标题：min-height 30px、13px / 510 / tertiary。
+- 搜索框：**36px 高、圆角 full、无描边**、底 `--color-background-secondary-soft-alpha`（ink 8~12%）、
+  `padding-inline: 12px`、14px 字、占位符 tertiary、图标 secondary。
+- 页面栅格：`max-w-3xl`（768px，截图实测内容 ≈730px）+ `px-panel`（20px），
+  分组之间 **40px**（`--settings-section-gap: calc(spacing*10)`），紧凑档 22px。
+- 页面根节点带 `data-density`（`default|compact|form`），行的类名大量依赖
+  `group-data-[density=…]/settings:` 变体。
+
+### A.3 控件
+
+| 控件 | Codex |
+|---|---|
+| 下拉 | md 档：**32px 高**、gutter 12px、圆角 10px、13px 字；`outline` 变体 = 透明底 + 1px inset 描边；`soft` 变体 = ink alpha 底；箭头是 **11×6 的窄扁 SVG**，不是常规 chevron；hover 只加重描边 |
+| 开关 | 轨道 **32×20**，关 = `bg-text/10`，开 = `--color-chart-blue`；滑块 16px 白（`--color-control-thumb-on-accent`），位移 2px → 14px |
+| 行内动作按钮 | `settingsAction` = **28px 高**、`px-2`、圆角 12.5px；`color: secondary` = `bg-text/5`、无描边、hover `bg-text/10`、13px |
+
+### A.4 i18n 文案长度（`zh-CN-*.js` 与内联 `defaultMessage`）
+
+Codex 的描述是**一句话**，通常 3~9 词 / 约 30~60 字符，最多两个短句，且**不写「在哪儿点」**：
+
+| 标签 | 描述 |
+|---|---|
+| 显示预测内容 | 根据对话内容预测你的下一条消息 |
+| 减少动态效果 | 减少动画效果或匹配系统设置 |
+| 差异标记 | 使用颜色或 +/− 标记显示更改 |
+| 默认采用完整视图 | 开始新任务时，在同一标签页栏中显示聊天和内容 |
+| 关闭窗口前确认 | 选择何时在关闭窗口前显示警告。仅当设置为"始终"时，按 Alt+F4 或点击关闭按钮才会显示警告。 |
+
+注意最后一条：**危险项允许第二个短句**，但仍是行为描述，不是操作指引。

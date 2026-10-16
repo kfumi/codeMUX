@@ -1258,7 +1258,7 @@ export function ProviderConfigPanel() {
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  勾选「视觉」表示模型原生支持图片识别；未勾选时，若已启用「设置 → 图片识别」，发送图片将自动走解析模型。
+                  勾选表示模型原生支持图片；未勾选时发送图片会走「图片识别」里的解析模型
                 </p>
               </div>
 

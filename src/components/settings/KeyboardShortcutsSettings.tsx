@@ -26,6 +26,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { ShortcutKeys } from '../shortcuts/ShortcutKeys';
 import { Button } from '../ui/button';
 import { TooltipHint } from '../ui/tooltip';
+import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
 
 /** 被拒时的文案集中在此，避免与测试期望漂移。 */
 const REJECT_NO_MODIFIER = '至少需要一个修饰键，或使用 F1–F12';
@@ -147,105 +148,109 @@ export function KeyboardShortcutsSettings() {
     const isSaving = savingTarget === command.id;
 
     return (
-      <div
+      <SettingsRow
         key={command.id}
-        data-testid={`shortcut-row-${command.id}`}
-        className="flex items-center justify-between gap-4 rounded-lg settings-tile py-2 pl-4 pr-2"
-      >
-        <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-          {command.label}
-        </div>
-        <div
-          data-recording={isRecording ? 'true' : undefined}
-          className="flex shrink-0 items-center gap-1.5"
-        >
-          {/* 键位本身就是录制入口：点它，然后按下组合键。 */}
-          <TooltipHint content={isRecording ? '按 Esc 取消录制' : '点这里后按下要绑定的组合键'}>
-            <button
-              type="button"
-              data-testid={`shortcut-record-${command.id}`}
-              aria-pressed={isRecording}
-              aria-label={`修改「${command.label}」的键位`}
-              disabled={isSaving}
-              onClick={() => {
-                setErrorMessage(null);
-                setRecordingCommandId(isRecording ? null : command.id);
-              }}
-              className={cn(
-                'inline-flex h-7 w-28 items-center justify-end rounded-md border px-2 transition-colors disabled:cursor-default sm:w-40',
-                isRecording
-                  ? 'border-primary/50 bg-primary/[0.06] ring-2 ring-primary/25'
-                  : 'border-border/70 bg-background hover:border-border hover:bg-foreground/5',
-                isSaving && 'opacity-50',
-              )}
-            >
-              {isRecording ? (
-                <span className="text-ui-caption font-medium text-primary">按下组合键…</span>
-              ) : (
-                <span data-testid={`shortcut-binding-${command.id}`}>
-                  <ShortcutKeys
-                    binding={binding}
-                    platform={platform}
-                    variant="plain"
-                    emptyLabel={disabled ? '已禁用' : '未绑定'}
-                  />
-                </span>
-              )}
-            </button>
-          </TooltipHint>
-          <TooltipHint content="禁用：这条命令不再占用任何键位">
-            <button
-              type="button"
-              data-testid={`shortcut-disable-${command.id}`}
-              aria-label={`禁用「${command.label}」`}
-              disabled={disabled || busy}
-              onClick={() => {
-                setRecordingCommandId(null);
-                void saveKeybindings(
-                  command.id,
-                  withKeybindingOverride(overrides, command, null, platform),
-                );
-              }}
-              className={ICON_BUTTON_CLASS}
-            >
-              <Power className="h-3.5 w-3.5" />
-            </button>
-          </TooltipHint>
-          <TooltipHint content="恢复这条命令的默认键位">
-            <button
-              type="button"
-              data-testid={`shortcut-reset-${command.id}`}
-              aria-label={`恢复「${command.label}」的默认键位`}
-              disabled={!customized || busy}
-              onClick={() => {
-                setRecordingCommandId(null);
-                void saveKeybindings(command.id, resetKeybindingOverride(overrides, command.id));
-              }}
-              className={ICON_BUTTON_CLASS}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-            </button>
-          </TooltipHint>
-        </div>
-      </div>
+        className="py-2.5"
+        label={
+          <span data-testid={`shortcut-row-${command.id}`} className="block truncate">
+            {command.label}
+          </span>
+        }
+        control={
+          <div
+            data-recording={isRecording ? 'true' : undefined}
+            className="flex shrink-0 items-center gap-1.5"
+          >
+            {/* 键位本身就是录制入口：点它，然后按下组合键。 */}
+            <TooltipHint content={isRecording ? '按 Esc 取消录制' : '点这里后按下要绑定的组合键'}>
+              <button
+                type="button"
+                data-testid={`shortcut-record-${command.id}`}
+                aria-pressed={isRecording}
+                aria-label={`修改「${command.label}」的键位`}
+                disabled={isSaving}
+                onClick={() => {
+                  setErrorMessage(null);
+                  setRecordingCommandId(isRecording ? null : command.id);
+                }}
+                className={cn(
+                  'inline-flex h-7 w-28 items-center justify-end rounded-md border px-2 transition-colors disabled:cursor-default sm:w-40',
+                  isRecording
+                    ? 'border-primary/50 bg-primary/[0.06] ring-2 ring-primary/25'
+                    : 'border-input bg-transparent hover:border-[hsl(var(--surface-edge))]',
+                  isSaving && 'opacity-50',
+                )}
+              >
+                {isRecording ? (
+                  <span className="text-ui-caption font-medium text-primary">按下组合键…</span>
+                ) : (
+                  <span data-testid={`shortcut-binding-${command.id}`}>
+                    <ShortcutKeys
+                      binding={binding}
+                      platform={platform}
+                      variant="plain"
+                      emptyLabel={disabled ? '已禁用' : '未绑定'}
+                    />
+                  </span>
+                )}
+              </button>
+            </TooltipHint>
+            <TooltipHint content="禁用：这条命令不再占用任何键位">
+              <button
+                type="button"
+                data-testid={`shortcut-disable-${command.id}`}
+                aria-label={`禁用「${command.label}」`}
+                disabled={disabled || busy}
+                onClick={() => {
+                  setRecordingCommandId(null);
+                  void saveKeybindings(
+                    command.id,
+                    withKeybindingOverride(overrides, command, null, platform),
+                  );
+                }}
+                className={ICON_BUTTON_CLASS}
+              >
+                <Power className="h-3.5 w-3.5" />
+              </button>
+            </TooltipHint>
+            <TooltipHint content="恢复这条命令的默认键位">
+              <button
+                type="button"
+                data-testid={`shortcut-reset-${command.id}`}
+                aria-label={`恢复「${command.label}」的默认键位`}
+                disabled={!customized || busy}
+                onClick={() => {
+                  setRecordingCommandId(null);
+                  void saveKeybindings(command.id, resetKeybindingOverride(overrides, command.id));
+                }}
+                className={ICON_BUTTON_CLASS}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            </TooltipHint>
+          </div>
+        }
+      />
     );
   };
 
   return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-ui-title font-medium text-foreground">快捷键</h3>
+    <div className="space-y-8">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-ui-compact text-muted-foreground">
+          点键位即可录新组合，Esc 取消；浏览器宿主里部分组合可能不生效
+        </p>
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
+          variant="secondary"
+          size="xs"
           data-testid="shortcut-reset-all"
           disabled={overrideCount === 0 || busy}
           onClick={() => {
             setRecordingCommandId(null);
             void saveKeybindings('all', {});
           }}
-          className="gap-1.5 text-muted-foreground"
+          className="shrink-0"
         >
           <RotateCcw className="h-3.5 w-3.5" />
           恢复默认
@@ -256,23 +261,15 @@ export function KeyboardShortcutsSettings() {
         const commands = SHORTCUT_COMMANDS.filter((command) => command.group === group);
         if (commands.length === 0) return null;
         return (
-          <div key={group} className="space-y-1.5 pt-1">
-            <div className="px-1 text-ui-caption font-medium text-muted-foreground">
-              {SHORTCUT_GROUP_LABELS[group]}
-            </div>
-            <div className="space-y-1.5">{commands.map(renderCommandRow)}</div>
-          </div>
+          <SettingsSection key={group} label={SHORTCUT_GROUP_LABELS[group]}>
+            <SettingsCard>{commands.map(renderCommandRow)}</SettingsCard>
+          </SettingsSection>
         );
       })}
 
-      <div className="space-y-1 px-1 pt-1">
-        <p className="text-ui-caption leading-relaxed text-muted-foreground">
-          点键位即可录新组合，Esc 取消；浏览器宿主里部分组合属于浏览器自身，可能不生效。
-        </p>
-        {errorMessage && (
-          <p className="text-ui-caption leading-relaxed text-destructive">保存失败：{errorMessage}</p>
-        )}
-      </div>
-    </section>
+      {errorMessage && (
+        <p className="text-ui-caption leading-relaxed text-destructive">保存失败：{errorMessage}</p>
+      )}
+    </div>
   );
 }
