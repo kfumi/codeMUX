@@ -815,7 +815,11 @@ tokenUsage,
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal active:scale-95',
                         hasInput && !disabled && !loading
                           ? 'bg-primary text-primary-foreground shadow-elevation-subtle hover:bg-primary/94'
-                          : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
+                          // 空输入:照 Codex 用「反色实心 + 半透明」—— 底取 ink 极(深色是
+                          // 亮灰、浅色是墨)、图标取 surface 极,整枚压到半透明。
+                          // 深色下渲染约 #8e8e8e(Codex 实测 ~#939393);此前用
+                          // `--surface-3`(#232323) 比输入框(#2f2f2f)还深,读成一个洞。
+                          : 'cursor-not-allowed bg-foreground text-background opacity-50',
                       )}
                       aria-label="发送"
                     >

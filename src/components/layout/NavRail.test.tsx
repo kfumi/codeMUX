@@ -79,6 +79,24 @@ describe('NavRail', () => {
     expect(buttons[3].previousElementSibling?.previousElementSibling?.className).toContain('flex-1');
   });
 
+  it('pins the accessory at the top of the bottom cluster, above the status and settings', () => {
+    render(
+      <TooltipProvider>
+        <NavRail activeTarget="app" onSelect={select} accessory={<button>更新</button>} />
+      </TooltipProvider>,
+    );
+
+    const update = screen.getByRole('button', { name: '更新' });
+    // 紧接在弹性空隙之后 = 底部整组的最上面；下面几格不会因它出现/消失而移位。
+    expect(update.previousElementSibling?.className).toContain('flex-1');
+    expect(update.compareDocumentPosition(screen.getByRole('status'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(update.compareDocumentPosition(screen.getByRole('button', { name: '设置' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it('reports the clicked target', () => {
     renderRail();
 

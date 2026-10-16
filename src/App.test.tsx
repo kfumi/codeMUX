@@ -217,6 +217,15 @@ describe('App', () => {
     expect(updaterProvider.contains(updateEntry)).toBe(true);
   });
 
+  it('设置视图也照常把更新入口交给主布局(与 app 视图行为一致)', async () => {
+    useNavigationStore.getState().navigate({ view: 'settings' });
+
+    render(<App />);
+
+    expect(useNavigationStore.getState().current.view).toBe('settings');
+    expect(screen.getByText('更新入口')).toBeTruthy();
+  });
+
   it('没有活动会话时 app 视图落在新建会话页（参考 Codex 首页）', () => {
     render(<App />);
 

@@ -410,6 +410,18 @@ describe('CodeMuxComposer', () => {
     expect(sendButton.disabled).toBe(false);
   });
 
+  it('fills the empty-input send button with the inverted ink pole, not a surface hole', () => {
+    // 夹具默认挂着一张附件(hasInput 为真),这里清空才是「真的空输入」。
+    composerAttachments = [];
+    render(<CodeMuxComposer sessionId="session-empty-send" />);
+
+    const sendButton = screen.getByRole('button', { name: '发送' });
+    expect((sendButton as HTMLButtonElement).disabled).toBe(true);
+    // 深色下 `--surface-3`(#232323) 比输入框(#2f2f2f)还深,读成一个洞。
+    expect(sendButton.className).toContain('bg-foreground');
+    expect(sendButton.className).not.toContain('surface-3');
+  });
+
   it('does not overwrite non-empty composer text with restored rewind text', async () => {
     render(<CodeMuxComposer sessionId="session-keep" />);
     composerText = '已有草稿';

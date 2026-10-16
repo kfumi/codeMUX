@@ -227,7 +227,6 @@ export function MainLayout({
           </TooltipHint>
         </div>
       ) : null}
-      {sidebarAccessory}
     </div>
   ) : null;
 
@@ -273,7 +272,7 @@ export function MainLayout({
           入口一个不少,内容区拿回全宽。
         */}
         {sidebar != null && navRailTarget && onNavRailSelect && !isNarrow && (
-          <NavRail activeTarget={navRailTarget} onSelect={onNavRailSelect} />
+          <NavRail activeTarget={navRailTarget} onSelect={onNavRailSelect} accessory={sidebarAccessory} />
         )}
 
         {sidebar != null && (
@@ -324,7 +323,7 @@ export function MainLayout({
               {sidebar}
             </div>
             {isNarrow && navRailTarget && onNavRailSelect && (
-              <NarrowNavFooter activeTarget={navRailTarget} onSelect={onNavRailSelect} />
+              <NarrowNavFooter activeTarget={navRailTarget} onSelect={onNavRailSelect} accessory={sidebarAccessory} />
             )}
             {/* 窄屏不做拖拽改宽:抽屉宽度由视口决定。 */}
             {!isNarrow && (

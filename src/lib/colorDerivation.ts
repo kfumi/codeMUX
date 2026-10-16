@@ -194,6 +194,23 @@ export function cssRgba(rgb: Rgb, alpha: number): string {
   return `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${roundAlpha(alpha)})`;
 }
 
+/** WCAG 相对亮度（sRGB 线性化后按 0.2126 / 0.7152 / 0.0722 加权）。 */
+export function relativeLuminance({ red, green, blue }: Rgb): number {
+  const channel = (value: number) => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+}
+
+/** WCAG 对比度，1..21。用于「这句话/这个图形压在另一个色上读不读得出来」。 */
+export function contrastRatio(a: Rgb, b: Rgb): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /** 派生结果 —— 内部沿用 Codex 的命名，只在映射成 CSS 变量名时才落到 CodeMUX 词汇。 */
 export interface DerivedPalette {
   accentBackground: string;
@@ -262,6 +279,26 @@ function surfaceUnder(surface: Rgb, ink: Rgb, c: number, isDark: boolean): Rgb {
  */
 function surfaceCanvas(surface: Rgb): Rgb {
   return mixRgb(surface, BLACK, 0.02);
+}
+
+/**
+ * 主按钮 / 强调色面上的前景 —— 白字压在强调色上读不出来时，翻到「暗极」。
+ *
+ * Codex 的 `jba` / `Nba` 没有这条公式：它的深色主按钮是「浅灰描边」样式，
+ * 压根没有「压在实心强调色上的字」这件事。CodeMUX 的 `bg-primary` 是实心强调色
+ * （`--primary` = accent 种子），前景就必须自己算 —— 照抄「深色用白」会在强调色
+ * 选到「白色」档时白成一片（实测 1:1），所有 `bg-primary text-primary-foreground`
+ * 的控件一起瞎。
+ *
+ * 规则：先取「亮极」（深色白 / 浅色 surface，与旧行为逐位一致），只有它相对强调色
+ * 达不到 3:1 时才翻到「暗极」（深色 surface / 浅色 ink）。3:1 是仓里既有的可读门槛
+ * （图标与焦点指示，见 `NavRail.tsx`），比正文的 4.5:1 宽 —— 宽出来的那部分正是
+ * Codex 故意留给「白字压彩色」的观感，所以彩色强调色不会被无谓地翻面。
+ */
+function primaryForeground(surface: Rgb, ink: Rgb, accent: Rgb, isDark: boolean): Rgb {
+  const lightPole = isDark ? WHITE : surface;
+  const darkPole = isDark ? surface : ink;
+  return contrastRatio(lightPole, accent) >= 3 ? lightPole : darkPole;
 }
 
 /**
@@ -481,9 +518,9 @@ export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<st
 
   // 主按钮：浅色是墨底反白字（Codex 的 buttonPrimaryBackground = ink）；
   // 深色下 Codex 的主按钮是「浅灰描边」样式，而 CodeMUX 的 `bg-primary` 是实心强调色
-  // 按钮，所以前景取 surface 的反相（白），而不是照抄 Codex 的 `tY(r)` 浅灰 ——
-  // 后者压在强调色上只有约 2.5:1，远低于正文所需的 4.5:1。
-  set('--primary-foreground', isDark ? WHITE : surface);
+  // 按钮，前景得跟着强调色走（公式见 `primaryForeground`）—— 默认仍是「深色白 /
+  // 浅色 surface」，与 Codex 的观感一致，只有强调色本身亮到白字读不出来时才翻成暗极。
+  set('--primary-foreground', primaryForeground(surface, ink, accent, isDark));
 
   return tokens;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Radio, Settings, Smartphone } from 'lucide-react';
 
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
@@ -9,7 +9,8 @@ import type { NavRailTarget } from './NavRail';
 import { CompanionDialog } from '../companion/CompanionDialog';
 
 /**
- * 窄屏抽屉页脚 —— 桌面端图标轨底部三格（Proxy 状态灯 / 移动伴侣 / 设置）在窄屏下的等价物。
+ * 窄屏抽屉页脚 —— 桌面端图标轨底部几格（Proxy 状态灯 / 移动伴侣 / 更新入口 / 设置）
+ * 在窄屏下的等价物。
  *
  * 图标轨在窄屏整条隐藏，底部这三格跟着搬进抽屉页脚，顺序与图标轨一致
  * （设置钉在最下面）。它们与分段切换器（`NarrowNavSwitcher`）同属「全局、不随
@@ -25,6 +26,8 @@ import { CompanionDialog } from '../companion/CompanionDialog';
 interface NarrowNavFooterProps {
   activeTarget: NavRailTarget;
   onSelect: (target: NavRailTarget) => void;
+  /** 图标轨置底扩展位（更新入口）在窄屏页脚里的等价行。 */
+  accessory?: ReactNode;
 }
 
 function companionIconColor(visualState: CompanionVisualState): string {
@@ -91,11 +94,13 @@ function ProxyRow() {
   );
 }
 
-export function NarrowNavFooter({ activeTarget, onSelect }: NarrowNavFooterProps) {
+export function NarrowNavFooter({ activeTarget, onSelect, accessory }: NarrowNavFooterProps) {
   const settingsActive = activeTarget === 'settings';
 
   return (
     <div className="flex shrink-0 flex-col gap-0.5 border-t border-[hsl(var(--layout-divider))] px-3 py-2">
+      {/* 更新入口压在这组之上，出现/消失不让邻居移位（与图标轨同一顺序）。 */}
+      {accessory}
       <ProxyRow />
       <CompanionRow />
       <button

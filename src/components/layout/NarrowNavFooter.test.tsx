@@ -67,6 +67,24 @@ describe('NarrowNavFooter', () => {
     );
   });
 
+  it('renders the accessory row at the top of the footer cluster', () => {
+    render(
+      <NarrowNavFooter
+        activeTarget="app"
+        onSelect={select}
+        accessory={<button aria-label="更新">更新</button>}
+      />,
+    );
+
+    const update = screen.getByRole('button', { name: '更新' });
+    expect(update.compareDocumentPosition(screen.getByRole('status'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(update.compareDocumentPosition(screen.getByRole('button', { name: '设置' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it('opens the companion dialog from the footer row', () => {
     renderFooter();
 

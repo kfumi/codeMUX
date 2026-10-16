@@ -23,15 +23,35 @@ import {
   isHexColor,
   loadPrefs,
   seedsForPrefs,
+  type AccentKey,
 } from './appearance';
 import {
   CODEX_DARK_SEEDS,
   CODEX_LIGHT_SEEDS,
   SEMANTIC_SEEDS,
+  contrastRatio,
   deriveThemeTokens,
   hexToRgb,
   rgbToHslTriplet,
 } from './colorDerivation';
+
+/** 把派生出来的 HSL 三元组还原成 RGB，好在测试里量对比度。 */
+function hslTripletToRgb(triplet: string) {
+  const [h, s, l] = triplet.split(/\s+/).map((part) => Number.parseFloat(part));
+  const c = (1 - Math.abs((l / 100) * 2 - 1)) * (s / 100);
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r1, g1, b1] =
+    hp < 1 ? [c, x, 0]
+    : hp < 2 ? [x, c, 0]
+    : hp < 3 ? [0, c, x]
+    : hp < 4 ? [0, x, c]
+    : hp < 5 ? [x, 0, c]
+    : [c, 0, x];
+  const m = l / 100 - c / 2;
+  const to255 = (v: number) => Math.round((v + m) * 255);
+  return { red: to255(r1), green: to255(g1), blue: to255(b1) };
+}
 
 describe('appearance preferences', () => {
   beforeEach(() => {
@@ -136,8 +156,30 @@ describe('appearance preferences', () => {
     expect(loadPrefs().accent).toBe('azure');
   });
 
+  it('keeps the label on the accent legible for every preset, in both themes', () => {
+    // 回归:强调色选到「白色」档(深色下 accent 纯白)时,前景曾是写死的白 —— 1:1,
+    // 所有 bg-primary 的按钮/图标一起瞎。前景现在跟着强调色翻面,这里钉住这条不变量。
+    for (const isDark of [false, true]) {
+      for (const accent of Object.keys(ACCENTS) as AccentKey[]) {
+        const seeds = seedsForPrefs({ ...DEFAULT_PREFS, accent }, isDark);
+        const tokens = deriveThemeTokens(seeds, isDark);
+        const label = hslTripletToRgb(tokens['--primary-foreground']);
+        const ratio = contrastRatio(label, hexToRgb(seeds.accent));
+        expect(ratio, `${accent}/${isDark ? 'dark' : 'light'}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('flips the on-accent foreground to the dark pole when the accent itself is light', () => {
+    const tokens = deriveThemeTokens(
+      seedsForPrefs({ ...DEFAULT_PREFS, accent: 'graphite' }, true),
+      true,
+    );
+    // 深色 + 「白色」档:前景翻到暗极 = surface(= --background),不再是白。
+    expect(tokens['--primary-foreground']).toBe(tokens['--background']);
+  });
+
   it('names the black/white preset per resolved theme, and keeps others theme-agnostic', () => {
-    // 浅色近黑、深色纯白 —— 显示名跟着解析后的主题换面。
     expect(accentName('graphite', false)).toBe('黑色');
     expect(accentName('graphite', true)).toBe('白色');
     // 其余预设没有 darkName,深浅同名(不会因主题切换而改名)。

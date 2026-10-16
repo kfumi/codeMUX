@@ -27,8 +27,8 @@ vi.mock('./TitleBar', () => ({
 }));
 
 vi.mock('./NavRail', () => ({
-  NavRail: ({ activeTarget }: { activeTarget: string }) => (
-    <nav data-testid="nav-rail" data-active={activeTarget} />
+  NavRail: ({ activeTarget, accessory }: { activeTarget: string; accessory?: ReactNode }) => (
+    <nav data-testid="nav-rail" data-active={activeTarget}>{accessory}</nav>
   ),
   NAV_RAIL_WIDTH: 56,
 }));
@@ -41,8 +41,8 @@ vi.mock('./NarrowNavSwitcher', () => ({
 }));
 
 vi.mock('./NarrowNavFooter', () => ({
-  NarrowNavFooter: ({ activeTarget }: { activeTarget: string }) => (
-    <div data-testid="narrow-nav-footer" data-active={activeTarget} />
+  NarrowNavFooter: ({ activeTarget, accessory }: { activeTarget: string; accessory?: ReactNode }) => (
+    <div data-testid="narrow-nav-footer" data-active={activeTarget}>{accessory}</div>
   ),
 }));
 
@@ -137,20 +137,26 @@ describe('MainLayout', () => {
     expect(document.querySelector('[data-testid="summary-panel-surface"]')).toBeTruthy();
   });
 
-  it('puts the controls in the full-width title bar and drops the floating overlay', () => {    render(
-      <MainLayout sidebar={<div>sidebar</div>} sidebarAccessory={<button>更新</button>}>
+  it('routes the sidebar accessory into the bottom of the nav rail, not the title bar', () => {
+    render(
+      <MainLayout
+        sidebar={<div>sidebar</div>}
+        navRailTarget="app"
+        onNavRailSelect={vi.fn()}
+        sidebarAccessory={<button>更新</button>}
+      >
         <div>content</div>
       </MainLayout>,
     );
 
     const toggle = document.querySelector('button[aria-label="收起侧栏"]');
-    const update = document.querySelector('button:not([aria-label])');
+    const rail = document.querySelector('[data-testid="nav-rail"]');
+    const update = rail?.querySelector('button');
 
+    // 更新入口落在图标轨里（Codex 的左下角），标题栏里不再有那份副本。
     expect(toggle).toBeTruthy();
     expect(update?.textContent).toBe('更新');
-    expect(toggle?.parentElement).toBe(update?.parentElement);
-    // 控件在标题栏里，不再有浮在侧栏左上角的那份副本。
-    expect(controlsHost()?.contains(toggle!)).toBe(true);
+    expect(controlsHost()?.contains(update!)).toBe(false);
   });
 
   it('renders navigation controls beside the sidebar toggle', () => {

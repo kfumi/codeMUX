@@ -518,7 +518,7 @@ function App() {
           )}
           navRailTarget={navTargetForView(activeView)}
           onNavRailSelect={handleNavRailSelect}
-          sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
+          sidebarAccessory={<UpdateEntry />}
           sidePanelAvailable={activeView === 'app'}
           sidePanelProjectPath={sidePanelProjectPath}
           sidePanelScopeId={sidePanelScopeId}

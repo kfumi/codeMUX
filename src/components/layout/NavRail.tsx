@@ -1,4 +1,5 @@
 import { ListTodo, MessageSquare, Settings, Timer, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { useShortcutHint } from '../../hooks/useShortcutHint';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -14,8 +15,10 @@ import { ProxyRailStatus } from './ProxyRailStatus';
  * 对齐 Codex：顶层导航从「侧栏里的文字按钮」提到「窗口最左侧的窄图标栏」，
  * 侧栏随之降级为「随导航栏当前项切换的上下文侧栏」。
  *
- * 底部三格从下往上：**设置**（顶层导航的最后一项）、**移动伴侣**、**Proxy 状态灯**。
- * 后两者原先长在侧栏页脚（见 04 工单的「页脚上移」），与设置同属「全局 / 不随上下文变」的一类，
+ * 底部格子从下往上：**设置**（顶层导航的最后一项）、**移动伴侣**、**Proxy 状态灯**、
+ * **更新入口**（`accessory`，压在这组图标最上面）。更新入口排在整组之上而不是中间：
+ * 它是按更新状态出现/消失的，插在中间会让下面几格移位闪一下。后几者原先长在侧栏页脚
+ * （见 04 工单的「页脚上移」）或标题栏左上角，与设置同属「全局 / 不随上下文变」的一类，
  * 因此一起收进这条常驻的图标轨 —— 侧栏切到自动化 / 工单时它们也在，不再随侧栏内容消失。
  *
  * 宽度按 Codex 实测约 56px 取整（`NAV_RAIL_WIDTH`），图标 18px、按钮 40×40、
@@ -29,6 +32,8 @@ export type NavRailTarget = 'app' | 'automation' | 'todo' | 'settings';
 interface NavRailProps {
   activeTarget: NavRailTarget;
   onSelect: (target: NavRailTarget) => void;
+  /** 置底一格的扩展位（更新入口）—— 排在设置之上，照 Codex 的「更新压着齿轮」。 */
+  accessory?: ReactNode;
 }
 
 interface RailItem {
@@ -45,7 +50,7 @@ const MAIN_ITEMS: RailItem[] = [
 
 const SETTINGS_ITEM: RailItem = { target: 'settings', label: '设置', Icon: Settings };
 
-export function NavRail({ activeTarget, onSelect }: NavRailProps) {
+export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
   const attentionCount = useWorkTaskStore((state) => selectAttentionCount(state.tasks));
   const settingsHint = useShortcutHint('openSettings');
 
@@ -98,6 +103,9 @@ export function NavRail({ activeTarget, onSelect }: NavRailProps) {
     >
       {MAIN_ITEMS.map(renderItem)}
       <div className="flex-1" />
+      {/* 更新入口压在整组底部图标**之上**：它出现/消失时下面三格原地不动，
+          不会在中间挤出一个空位再让邻居跳一下。 */}
+      {accessory}
       <ProxyRailStatus />
       <CompanionRailButton />
       {renderItem(SETTINGS_ITEM)}

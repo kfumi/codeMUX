@@ -61,7 +61,7 @@ describe('UpdateEntry', () => {
     expect(screen.queryByRole('button', { name: /更新/ })).toBeNull();
   });
 
-  it('发现新版本时展示左上角更新按钮，确认后才开始下载安装', async () => {
+  it('发现新版本时展示置底更新图标，确认后才开始下载安装', async () => {
     mockUpdaterState.stage = 'available';
     mockUpdaterState.version = '1.2.3';
 
@@ -75,6 +75,24 @@ describe('UpdateEntry', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载并安装' }));
 
     expect(mockUpdaterState.startUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('桌面形态是强调色圆 + 反色图标,名称走 aria-label', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    mockUpdaterState.stage = 'available';
+
+    render(<UpdateEntry />);
+
+    const button = screen.getByRole('button', { name: '更新' });
+    // 图标格不露文字，可访问名由 aria-label 承担。
+    expect(button.textContent).toBe('');
+    expect(button.className).toContain('h-10');
+    expect(button.className).toContain('w-10');
+    // 圆形底走强调色 token（Codex 的蓝圆），图标取反色前景。
+    const circle = button.querySelector('span');
+    expect(circle?.className).toContain('rounded-full');
+    expect(circle?.className).toContain('bg-primary');
+    expect(circle?.className).toContain('text-primary-foreground');
   });
 
   it('下载、安装和重启阶段展示不可重复点击的进度入口', async () => {
