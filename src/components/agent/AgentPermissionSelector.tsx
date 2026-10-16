@@ -266,7 +266,7 @@ export function AgentPermissionSelector({
                       autoApprove && 'text-orange-500 hover:bg-orange-500/10 hover:text-orange-500',
                     )}
                   >
-                    <AutoApproveIcon className="h-3.5 w-3.5 shrink-0" />
+                    <AutoApproveIcon className="h-4 w-4 shrink-0" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>{autoApprove ? '关闭自动接受权限（恢复逐项确认）' : '自动接受权限请求（显式拒绝的规则仍生效）'}</TooltipContent>
