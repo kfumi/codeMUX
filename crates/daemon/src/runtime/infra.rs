@@ -57,8 +57,7 @@ pub fn detect_system_node() -> NodeDetection {
 /// 检测与指定 Node.js 解析结果对应的 npm（随包运行时内的 npm 优先）。
 pub fn detect_system_npm(node: &NodeDetection) -> NpmDetection {
     let command = crate::toolchain::npm_command();
-    let command_str = command.to_string_lossy().to_string();
-    let executable_path = find_command_in_path(&command_str);
+    let executable_path = resolve_command_path(&command);
     let mut npm = Command::new(&command);
     configure_hidden_command(npm.arg("--version"));
     let output = match npm.output() {
@@ -134,6 +133,20 @@ fn find_command_in_path(command: &str) -> Option<String> {
     (!first_line.is_empty()).then_some(first_line)
 }
 
+/// 解析命令对应的可执行文件路径。
+///
+/// 随包 npm 本身就是绝对文件路径,直接采用,不能交给 `where` —— Windows 的
+/// `where` 把绝对路径里的盘符冒号当成 `path:pattern` 语法,会报「参数无效模式」
+/// 而返回失败;因此随包 npm 会解析不到路径,`matches_node` 被误判为 false。
+fn resolve_command_path(command: &Path) -> Option<String> {
+    if command.is_absolute() {
+        return command
+            .is_file()
+            .then(|| command.to_string_lossy().into_owned());
+    }
+    find_command_in_path(&command.to_string_lossy())
+}
+
 fn configure_hidden_command(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -162,4 +175,29 @@ fn query_node_version(node_path: &Path) -> Result<Option<String>, String> {
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok((!version.is_empty()).then_some(version))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_command_path;
+
+    #[test]
+    fn absolute_command_path_is_used_directly_without_where() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let file = temp.path().join("npm.cmd");
+        std::fs::write(&file, b"stub").expect("write stub");
+
+        assert_eq!(
+            resolve_command_path(&file),
+            Some(file.to_string_lossy().into_owned()),
+            "随包 npm 的绝对路径应直接采用(Windows `where` 不认绝对路径)"
+        );
+    }
+
+    #[test]
+    fn missing_absolute_command_resolves_to_none() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        assert_eq!(resolve_command_path(&temp.path().join("npm.cmd")), None);
+    }
 }
