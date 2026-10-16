@@ -87,6 +87,8 @@ export class OpenCodeRuntime {
   private readonly compactionSummaryMessageIds = new Set<string>();
   private compactionSummaryInFlight = false;
   private readonly assistantMessageIdsBeforeCompaction = new Set<string>();
+  /** Compaction part ids already used to arm {@link compactionSummaryInFlight} this turn. */
+  private readonly compactionPartIds = new Set<string>();
   /** Tool call ids currently in the `running` state. Drives the idle guard: while any tool is running, the guard is suspended so long-running tool execution (e.g. builds, installs) is not mistaken for a hang. The tool layer is authoritative for its own timeouts. */
   private readonly runningToolIds = new Set<string>();
   private readonly pendingQuestionIds = new Set<string>();
@@ -966,7 +968,15 @@ export class OpenCodeRuntime {
     if (type === 'message.part.updated') {
       const properties = asRecord(asRecord(event)?.properties);
       const part = asRecord(properties?.part);
-      if (readString(part?.type) === 'compaction') {
+      const partId = readString(part?.id);
+      // OpenCode emits `message.part.updated` for the compaction marker both when
+      // the part is created (compaction start) and again when it is finalized
+      // (compaction end). The final emit can land *after* the summary's
+      // `message.updated` has already cleared the gate, which would re-arm it with
+      // no later clear and suppress the entire post-compaction answer. Arm once per
+      // part id so the trailing update cannot resurrect the gate.
+      if (readString(part?.type) === 'compaction' && partId && !this.compactionPartIds.has(partId)) {
+        this.compactionPartIds.add(partId);
         this.assistantMessageIdsBeforeCompaction.clear();
         for (const id of this.assistantMessageIds) {
           this.assistantMessageIdsBeforeCompaction.add(id);
@@ -1249,6 +1259,7 @@ export class OpenCodeRuntime {
     this.compactionSummaryMessageIds.clear();
     this.compactionSummaryInFlight = false;
     this.assistantMessageIdsBeforeCompaction.clear();
+    this.compactionPartIds.clear();
     this.runningToolIds.clear();
     this.pendingTaskToolCallIds.clear();
     this.childTaskToolIds.clear();
@@ -1299,6 +1310,7 @@ export class OpenCodeRuntime {
     this.compactionSummaryMessageIds.clear();
     this.compactionSummaryInFlight = false;
     this.assistantMessageIdsBeforeCompaction.clear();
+    this.compactionPartIds.clear();
     this.runningToolIds.clear();
     this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();

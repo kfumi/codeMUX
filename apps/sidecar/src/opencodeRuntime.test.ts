@@ -1454,6 +1454,40 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('does not re-arm the compaction summary gate when the compaction part is re-emitted after the summary completes', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => { onEvent = input.onEvent; return { close: vi.fn() }; });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    // OpenCode emits `message.part.updated` for the compaction marker twice: once
+    // when it is created (compaction start) and once when it is finalized
+    // (compaction end). Distinct event ids mirror the real SSE stream.
+    const compactionPart = (eventId: string) => ({
+      id: eventId,
+      type: 'message.part.updated',
+      properties: { sessionID: 'opencode-new', part: { id: 'compact-part-1', sessionID: 'opencode-new', messageID: 'user-compact', type: 'compaction', auto: true } },
+    });
+
+    onEvent({ type: 'message.updated', properties: { sessionID: 'opencode-new', info: { id: 'assistant-before', role: 'assistant', mode: 'build' } } });
+    // Compaction part created: arms the in-flight gate.
+    onEvent(compactionPart('evt-compaction-created'));
+    // Summary streams while the gate is up.
+    onEvent({ type: 'message.part.delta', properties: { sessionID: 'opencode-new', partID: 'summary-part', messageID: 'assistant-summary', field: 'text', delta: 'SUMMARY' } });
+    // Summary message completes: clears the gate.
+    onEvent({ type: 'message.updated', properties: { sessionID: 'opencode-new', info: { id: 'assistant-summary', role: 'assistant', mode: 'compaction', summary: true, time: { completed: 1 }, finish: 'stop' } } });
+    // The compaction part is re-emitted when finalized *after* the clear; it must not re-arm.
+    onEvent(compactionPart('evt-compaction-finalized'));
+    // Post-compaction answer must reach the timeline.
+    onEvent({ type: 'message.part.updated', properties: { sessionID: 'opencode-new', part: { id: 'answer-part', sessionID: 'opencode-new', messageID: 'assistant-answer', type: 'text', text: 'ANSWER' }, delta: 'ANSWER' } });
+
+    await vi.waitFor(() => expect(emitted.some((event) => JSON.stringify(event).includes('ANSWER'))).toBe(true));
+    expect(emitted.some((event) => JSON.stringify(event).includes('SUMMARY'))).toBe(false);
+    await runtime.shutdown();
+  });
+
   it('emits one terminal result and ignores late tool starts and duplicate interruption', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];
