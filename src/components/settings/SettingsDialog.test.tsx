@@ -10,35 +10,6 @@ import { SettingsView } from './SettingsDialog';
 vi.mock('../../lib/facades/shell-facade', () => ({
   shellFacade: {
     getAppDataDirectory: vi.fn(async () => 'D:/codeMUX'),
-    checkDevelopmentEnvironment: vi.fn(async () => ({
-      checkedAt: '2026-06-27T00:00:00Z',
-      tools: [
-        {
-          name: 'Node.js',
-          command: 'node',
-          status: 'missing',
-          version: null,
-          path: null,
-          message: '未找到 Node.js，请安装 Node.js 18+ 并确认 PATH 已生效。',
-        },
-        {
-          name: 'npm',
-          command: 'npm',
-          status: 'missing',
-          version: null,
-          path: null,
-          message: '未找到 npm，请确认 Node.js 安装包含 npm 且 PATH 已生效。',
-        },
-        {
-          name: 'Git',
-          command: 'git',
-          status: 'ok',
-          version: '2.34.1.windows.1',
-          path: null,
-          message: 'Git 可用。',
-        },
-      ],
-    })),
   },
 }));
 
@@ -83,16 +54,6 @@ describe('SettingsView', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByRole('main', { name: '设置' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '返回应用' })).toBeTruthy();
-  });
-
-  it('renders the system tools tab and reports missing Node.js/npm', async () => {
-    render(<SettingsView onBack={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /系统工具/ }));
-
-    expect(await screen.findByText('Node.js')).toBeTruthy();
-    expect(screen.getAllByText('npm').length).toBeGreaterThan(0);
-    expect(screen.getByText(/请安装 Node.js 18\+/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /重新检测/ })).toBeTruthy();
   });
 
   it('uses one combined entry for agent preferences and managed Runtime', async () => {
@@ -150,7 +111,6 @@ describe('SettingsView 浏览器形态', () => {
   it('隐藏壳独占的设置入口,而不是让用户点进去看到「桥不可用」', async () => {
     render(<SettingsView onBack={vi.fn()} />);
 
-    expect(screen.queryByRole('button', { name: /系统工具/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /日志/ })).toBeNull();
     expect(screen.getByRole('button', { name: /模型配置/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /使用统计/ })).toBeTruthy();

@@ -144,11 +144,7 @@ interface ProviderOperationState {
   startedAt: number;
 }
 
-export function RuntimeSettingsPanel({
-  onOpenSystemTools,
-}: {
-  onOpenSystemTools?: () => void;
-}) {
+export function RuntimeSettingsPanel() {
   // 外部 CLI 诊断探测的是壳进程所在机器的 PATH(host.agent-cli):浏览器/移动
   // 形态隐藏该区块,托管 Runtime 走 daemon 协议,三形态一致保留。
   const capabilities = useHostCapabilities();
@@ -383,7 +379,15 @@ export function RuntimeSettingsPanel({
         </Button>
       </div>
 
-      {checkResult && <NodeStatusCard node={checkResult.node} onOpenSystemTools={onOpenSystemTools} />}
+      {checkResult && !canInstallManagedRuntime(checkResult.node) && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-ui-compact text-destructive">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            {checkResult.node.error
+              ?? 'Node.js 运行时不可用，托管 Runtime 暂时无法安装；随包运行时缺失时请重新安装 CodeMUX。'}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {loading && !checkResult ? (
@@ -431,79 +435,6 @@ function describeOperation(kind: OperationKind): string {
 
 function canInstallManagedRuntime(node: ManagedNodeInfo): boolean {
   return node.satisfiesMinimum && node.npm.available && node.npm.matchesNode;
-}
-
-/* ------------------------------- Node 状态区 ------------------------------- */
-
-function NodeStatusCard({
-  node,
-  onOpenSystemTools,
-}: {
-  node: ManagedNodeInfo;
-  onOpenSystemTools?: () => void;
-}) {
-  const ok = node.available && node.satisfiesMinimum;
-  const Icon = ok ? CheckCircle2 : TriangleAlert;
-
-  return (
-    <div
-      className={cn(
-        'rounded-lg border p-4',
-        ok ? 'border-border/50' : 'border-red-500/30 bg-red-500/5',
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <Terminal className={cn('h-4 w-4 shrink-0', ok ? 'text-muted-foreground' : 'text-red-500')} />
-        <h4 className="text-ui-body font-semibold text-foreground">Node.js</h4>
-        <Icon className={cn('ml-auto h-4 w-4 shrink-0', ok ? 'text-emerald-500' : 'text-red-500')} />
-        {!ok && (
-          <span className="text-ui-caption font-medium text-red-600 dark:text-red-400">
-            需安装 Node 18+
-          </span>
-        )}
-      </div>
-      <div className="mt-3 grid gap-2 text-ui-compact sm:grid-cols-2">
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-muted-foreground">版本</span>
-          <span className="truncate font-mono text-foreground">
-            {node.version ?? (node.available ? '未知' : '未检测到')}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-muted-foreground">路径</span>
-          <span className="truncate font-mono text-foreground">{node.executablePath ?? '-'}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 text-muted-foreground">npm</span>
-          <span className={cn('truncate font-mono', node.npm.available && node.npm.matchesNode ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
-            {node.npm.version ?? (node.npm.available ? '未知' : '未检测到')}
-          </span>
-        </div>
-      </div>
-      {onOpenSystemTools && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="mt-2 h-7 gap-1.5 px-0 text-ui-caption text-muted-foreground hover:text-foreground"
-          onClick={onOpenSystemTools}
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          在系统工具中查看 Node.js 与 npm
-        </Button>
-      )}
-      {!ok && (
-        <p className="mt-2 text-ui-caption text-red-600 dark:text-red-400">
-          {node.error ?? 'Node.js 不可用或版本低于 18，请安装 Node 18+ 后重试。'}
-        </p>
-      )}
-      {ok && (!node.npm.available || !node.npm.matchesNode) && (
-        <p className="mt-2 text-ui-caption text-amber-600 dark:text-amber-300">
-          {node.npm.error ?? 'npm 不可用，Runtime 安装可能失败。'}
-        </p>
-      )}
-    </div>
-  );
 }
 
 /* --------------------------- Provider Runtime 卡片 --------------------------- */

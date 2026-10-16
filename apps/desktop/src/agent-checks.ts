@@ -1,7 +1,7 @@
 //! 壳能力的纯 Node 实现件(不 import electron,可被 vitest 直接测试)。
 //!
 //! 当前实现「最小面」:
-//! - checkDevelopmentEnvironment:node/npm/git 版本探测;
+//! - checkGitEnvironment:本机 Git 版本探测(host.git-check);
 //! - checkAgentRuntimes / probeAgentInstallations:PATH 锚定 + `--version`
 //!   探测 + npm registry 最新版比对(移植自 Tauri 壳时代的
 //!   agent_runtime_check.rs;多处安装枚举/冲突仲裁暂缺,后续按需增强);
@@ -20,18 +20,19 @@ import path from 'node:path';
 
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
 
-export interface EnvironmentToolCheck {
-  name: 'Node.js' | 'npm' | 'Git';
-  command: 'node' | 'npm' | 'git';
+/** 本机 Git 探测结果(壳独占能力 host.git-check)。 */
+export interface GitToolCheck {
+  name: 'Git';
+  command: 'git';
   status: EnvironmentCheckStatus;
   version: string | null;
   path: string | null;
   message: string;
 }
 
-export interface DevelopmentEnvironmentCheck {
+export interface GitEnvironmentCheck {
   checkedAt: string;
-  tools: EnvironmentToolCheck[];
+  git: GitToolCheck;
 }
 
 export type AgentRuntimeStatus = 'ok' | 'outdated' | 'missing' | 'error';
@@ -259,48 +260,43 @@ function configPathFor(spec: AgentSpec): string | null {
 // 壳门面入口。
 // ---------------------------------------------------------------------------
 
-/** node/npm/git 开发环境探测(对齐 commands/app.rs 的最小面)。 */
-export async function checkDevelopmentEnvironment(): Promise<DevelopmentEnvironmentCheck> {
-  const check = async (
-    name: EnvironmentToolCheck['name'],
-    command: EnvironmentToolCheck['command'],
-    okMessage: string,
-    missingMessage: string,
-  ): Promise<EnvironmentToolCheck> => {
-    const exePath = await findCommandPath(command);
-    if (!exePath) {
-      return { name, command, status: 'missing', version: null, path: null, message: missingMessage };
-    }
-    try {
-      const output = await runVersionCommand(exePath);
-      const version = parseVersion(output);
-      return {
-        name,
-        command,
-        status: 'ok',
+/** 本机 Git 探测(对齐 commands/app.rs 的最小面)。 */
+export async function checkGitEnvironment(): Promise<GitEnvironmentCheck> {
+  const checkedAt = new Date().toISOString();
+  const exePath = await findCommandPath('git');
+  if (!exePath) {
+    return {
+      checkedAt,
+      git: {
+        name: 'Git',
+        command: 'git',
+        status: 'missing',
+        version: null,
+        path: null,
+        message: '未找到 Git，请安装 Git 并确认 PATH 已生效。',
+      },
+    };
+  }
+  try {
+    const output = await runVersionCommand(exePath);
+    const version = parseVersion(output);
+    return {
+      checkedAt,
+      git: {
+        name: 'Git',
+        command: 'git',
+        status: version ? 'ok' : 'error',
         version,
         path: exePath,
-        message: version ? okMessage : `无法解析 ${name} 版本输出：${output}`,
-      };
-    } catch (error) {
-      return { name, command, status: 'error', version: null, path: exePath, message: String(error) };
-    }
-  };
-
-  const [node, npm, git] = await Promise.all([
-    check('Node.js', 'node', 'Node.js 可用。', '未找到 Node.js，请安装 Node.js 18+ 并确认 PATH 已生效。'),
-    check('npm', 'npm', 'npm 可用。', '未找到 npm，请安装 Node.js（含 npm）并确认 PATH 已生效。'),
-    check('Git', 'git', 'Git 可用。', '未找到 Git，请安装 Git 并确认 PATH 已生效。'),
-  ]);
-  // Node 版本低于 18 → warning(对齐 Rust classify_node_version 的语义)。
-  if (node.status === 'ok' && node.version) {
-    const major = Number(node.version.split('.')[0]);
-    if (Number.isFinite(major) && major < 18) {
-      node.status = 'warning';
-      node.message = 'Node.js 版本低于 18，请升级到 Node.js 18+。';
-    }
+        message: version ? 'Git 可用。' : `无法解析 Git 版本输出：${output}`,
+      },
+    };
+  } catch (error) {
+    return {
+      checkedAt,
+      git: { name: 'Git', command: 'git', status: 'error', version: null, path: exePath, message: String(error) },
+    };
   }
-  return { checkedAt: new Date().toISOString(), tools: [node, npm, git] };
 }
 
 /** 三个智能体 CLI 的检测(最小面:PATH 锚定单安装 + npm 最新版比对)。 */

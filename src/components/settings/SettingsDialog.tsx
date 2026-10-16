@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, Info, Keyboard, MonitorSmartphone, Palette, Plug, Puzzle, Search, Server, Settings, Terminal, X } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Globe, Image, Info, Keyboard, MonitorSmartphone, Palette, Plug, Puzzle, Search, Server, Settings, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
@@ -10,7 +10,6 @@ import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
 import { BrowserControlSettings } from './BrowserControlSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
-import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { GitSettings } from './GitSettings';
 import { ImageRecognitionSettings } from './ImageRecognitionSettings';
@@ -26,7 +25,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'shortcuts' | 'provider' | 'image-recognition' | 'browser-control' | 'computer-use' | 'agent-runtime' | 'mcp' | 'skills' | 'git' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'shortcuts' | 'provider' | 'image-recognition' | 'browser-control' | 'computer-use' | 'agent-runtime' | 'mcp' | 'skills' | 'git' | 'usage' | 'archive' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -36,7 +35,6 @@ interface SettingsSidebarProps {
 
 interface SettingsContentProps {
   activeTab: SettingsTab;
-  onTabChange: (tab: SettingsTab) => void;
 }
 
 interface SettingsTabDef {
@@ -90,7 +88,6 @@ const NAV_GROUPS: { key: string; label: string; tabs: SettingsTabDef[] }[] = [
     tabs: [
       { id: 'usage', label: '使用统计', description: '活跃度、Token 用量与模型分布', icon: BarChart3 },
       { id: 'archive', label: '已归档对话', description: '查询、恢复与删除会话', icon: Archive },
-      { id: 'system-tools', label: '系统工具', description: '检查本机的 Node.js、npm 与 Git', icon: Terminal },
       { id: 'logs', label: '日志', description: '实时查看应用运行日志', icon: FileText },
       { id: 'about', label: '关于', description: '应用信息与系统环境', icon: Info },
     ],
@@ -102,13 +99,12 @@ const allTabs: SettingsTabDef[] = NAV_GROUPS.flatMap((group) => group.tabs);
 /**
  * 壳独占设置页 → 所需能力(工单 02 回归)。
  *
- * 日志读的是 Electron 侧日志文件、系统工具探测的是壳进程所在机器的 PATH:
- * 浏览器/移动形态没有对应后端,导航里直接隐藏入口,而不是让用户点进去看到
- * 「桥不可用」的报错(用户故事 10:shell-only 能力隐藏而非报错)。
+ * 日志读的是 Electron 侧日志文件:浏览器/移动形态没有对应后端,导航里直接
+ * 隐藏入口,而不是让用户点进去看到「桥不可用」的报错(用户故事 10:
+ * shell-only 能力隐藏而非报错)。
  */
 const SHELL_ONLY_TAB_CAPABILITY: Partial<Record<SettingsTab, string>> = {
   logs: 'host.logs',
-  'system-tools': 'host.env-check',
 };
 
 function isTabAvailable(tab: SettingsTab, capabilities: HostCapabilitySet): boolean {
@@ -242,8 +238,7 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
  * 标题用大档(Codex 的设置页标题是 32px 的 heading-xl,我们取刻度里最接近的一档),
  * 并且**不吸顶**:Codex 的标题随内容滚走,滚动位置由内容本身表达。
  */
-export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps) {
-  const capabilities = useHostCapabilities();
+export function SettingsContent({ activeTab }: SettingsContentProps) {
   const activeTabDef = allTabs.find((tab) => tab.id === activeTab);
   const activeLabel = activeTabDef?.label ?? '设置';
   const activeDescription = activeTabDef?.description;
@@ -267,19 +262,12 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
         {activeTab === 'image-recognition' && <ImageRecognitionSettings />}
         {activeTab === 'browser-control' && <BrowserControlSettings />}
         {activeTab === 'computer-use' && <ComputerUseSettings />}
-        {activeTab === 'agent-runtime' && (
-          <AgentRuntimeSettingsPanel
-            onOpenSystemTools={
-              capabilities.has('host.env-check') ? () => onTabChange('system-tools') : undefined
-            }
-          />
-        )}
+        {activeTab === 'agent-runtime' && <AgentRuntimeSettingsPanel />}
         {activeTab === 'mcp' && <McpSettingsPanel />}
         {activeTab === 'skills' && <SkillsSettingsPanel />}
         {activeTab === 'git' && <GitSettings />}
         {activeTab === 'usage' && <UsageStatistics />}
         {activeTab === 'archive' && <ArchivedSessionsPanel />}
-        {activeTab === 'system-tools' && <EnvironmentSettings />}
         {activeTab === 'logs' && <LogSettings />}
         {activeTab === 'about' && <AboutSettings />}
       </div>
@@ -295,7 +283,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       <aside className="flex w-[275px] shrink-0 flex-col bg-[hsl(var(--sidebar-bg))]">
         <SettingsSidebar activeTab={activeTab} onTabChange={setActiveTab} onBack={onBack} />
       </aside>
-      <SettingsContent activeTab={activeTab} onTabChange={setActiveTab} />
+      <SettingsContent activeTab={activeTab} />
     </div>
   );
 }

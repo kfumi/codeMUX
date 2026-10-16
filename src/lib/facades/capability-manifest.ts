@@ -82,7 +82,7 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   // shell.explorer:资源管理器是桌面壳的概念,浏览器/移动形态没有对应后端,
   // 会话/项目菜单据此隐藏「在资源管理器中打开」而不是留一个必然报错的入口。
   { id: 'shell.explorer', owner: 'shell', shellMethod: 'openInExplorer' },
-  { id: 'host.env-check', owner: 'shell', shellMethod: 'checkDevelopmentEnvironment' },
+  { id: 'host.git-check', owner: 'shell', shellMethod: 'checkGitEnvironment' },
   { id: 'host.agent-cli', owner: 'shell', shellMethod: 'checkAgentRuntimes' },
   // fs.ensure-directory:会话默认工作目录(~/CodemuxProject)的落盘创建。
   // 浏览器/移动形态没有壳桥,由 sidecar 侧 cwd 预检兜底报出明确错误。

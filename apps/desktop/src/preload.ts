@@ -107,8 +107,8 @@ const bridge = {
   quitAndInstall: () => invoke<void>('quitAndInstall'),
   currentVersion: () => invoke<string>('currentVersion'),
 
-  // 环境与运行时检测
-  checkDevelopmentEnvironment: () => invoke('checkDevelopmentEnvironment'),
+  // Git 与运行时检测
+  checkGitEnvironment: () => invoke('checkGitEnvironment'),
   checkAgentRuntimes: () => invoke('checkAgentRuntimes'),
   probeAgentInstallations: (agentKind: string) => invoke('probeAgentInstallations', agentKind),
   upgradeAgentRuntime: (agentKind: string) => invoke('upgradeAgentRuntime', agentKind),

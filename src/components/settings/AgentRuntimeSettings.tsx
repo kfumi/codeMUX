@@ -3,19 +3,13 @@ import { Bot, Layers3 } from 'lucide-react';
 import { AgentPreferencesPanel } from './AgentSettings';
 import { RuntimeSettingsPanel } from './RuntimeSettings';
 
-interface AgentRuntimeSettingsPanelProps {
-  onOpenSystemTools?: () => void;
-}
-
 /**
  * 智能体设置的统一入口。
  *
  * 偏好设置和托管 Runtime 在同一页呈现，但仍保持各自独立的内部模块：
  * 偏好模块负责会话配置，Runtime 模块负责 SDK 生命周期。
  */
-export function AgentRuntimeSettingsPanel({
-  onOpenSystemTools,
-}: AgentRuntimeSettingsPanelProps) {
+export function AgentRuntimeSettingsPanel() {
   return (
     <div className="space-y-10">
       <section className="rounded-2xl border border-[hsl(var(--primary)/0.16)] bg-[hsl(var(--primary)/0.035)] p-5">
@@ -45,7 +39,7 @@ export function AgentRuntimeSettingsPanel({
             </p>
           </div>
         </div>
-        <RuntimeSettingsPanel onOpenSystemTools={onOpenSystemTools} />
+        <RuntimeSettingsPanel />
       </section>
     </div>
   );

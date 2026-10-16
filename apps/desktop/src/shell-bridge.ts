@@ -28,7 +28,7 @@ import path from 'node:path';
 
 import {
   checkAgentRuntimes,
-  checkDevelopmentEnvironment,
+  checkGitEnvironment,
   probeAgentInstallations,
   upgradeAgentRuntime,
 } from './agent-checks';
@@ -381,8 +381,8 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     'Verdana',
   ]);
 
-  // --- 环境与运行时检测(agent-checks.ts 最小面;工单 06 完善) ---------------
-  handle('checkDevelopmentEnvironment', () => checkDevelopmentEnvironment());
+  // --- Git 与运行时检测(agent-checks.ts 最小面;工单 06 完善) -----------------
+  handle('checkGitEnvironment', () => checkGitEnvironment());
   handle('checkAgentRuntimes', () => checkAgentRuntimes());
   handle('probeAgentInstallations', (agentKind: unknown) => {
     if (typeof agentKind !== 'string') throw new Error('agentKind must be a string');

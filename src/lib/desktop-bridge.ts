@@ -26,20 +26,19 @@ export interface LogFileInfo {
 
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
 
-export type EnvironmentToolName = 'node' | 'npm' | 'git';
-
-export interface EnvironmentToolCheck {
-  name: 'Node.js' | 'npm' | 'Git';
-  command: EnvironmentToolName;
+/** 本机 Git 探测结果(壳独占能力 host.git-check)。 */
+export interface GitToolCheck {
+  name: 'Git';
+  command: 'git';
   status: EnvironmentCheckStatus;
   version: string | null;
   path: string | null;
   message: string;
 }
 
-export interface DevelopmentEnvironmentCheck {
+export interface GitEnvironmentCheck {
   checkedAt: string;
-  tools: EnvironmentToolCheck[];
+  git: GitToolCheck;
 }
 
 export type AgentRuntimeStatus = 'ok' | 'outdated' | 'missing' | 'error';
@@ -222,8 +221,8 @@ export interface CodemuxDesktopBridge {
   quitAndInstall(): Promise<void>;
   currentVersion(): Promise<string>;
 
-  // 环境与运行时检测
-  checkDevelopmentEnvironment(): Promise<DevelopmentEnvironmentCheck>;
+  // Git 与运行时检测
+  checkGitEnvironment(): Promise<GitEnvironmentCheck>;
   checkAgentRuntimes(): Promise<AgentRuntimeCheckResult>;
   probeAgentInstallations(agentKind: string): Promise<AgentInstallationReport>;
   upgradeAgentRuntime(agentKind: string): Promise<AgentRuntimeUpgradeResult>;

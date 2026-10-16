@@ -44,7 +44,7 @@ export const shellFacade = {
   getLogDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getLogDirectory()),
   getAppDataDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getAppDataDirectory()),
   getUserHomeDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getUserHomeDirectory()),
-  checkDevelopmentEnvironment: () => bridgeCall((bridge) => bridge.checkDevelopmentEnvironment()),
+  checkGitEnvironment: () => bridgeCall((bridge) => bridge.checkGitEnvironment()),
   getLogFiles: () => bridgeCall((bridge) => bridge.getLogFiles()),
   readLogFile: (fileName: string): Promise<string> => bridgeCall((bridge) => bridge.readLogFile(fileName)),
   checkAgentRuntimes: () => bridgeCall((bridge) => bridge.checkAgentRuntimes()),

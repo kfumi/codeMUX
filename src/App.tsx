@@ -539,7 +539,7 @@ function App() {
           <ErrorBoundary>
             {activeView === 'settings' ? (
               <Suspense fallback={panelFallback}>
-              <SettingsContent activeTab={settingsTab} onTabChange={handleSettingsTabChange} />
+              <SettingsContent activeTab={settingsTab} />
               </Suspense>
             ) : activeView === 'automation' ? (
               <Suspense fallback={panelFallback}>

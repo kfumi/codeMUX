@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
 import { resolveModelDisplayName } from '../../lib/providerModels';
 import { useModelDisplayNames } from '../../hooks/useModelDisplayNames';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
+import { shellFacade } from '../../lib/facades/shell-facade';
+import type { EnvironmentCheckStatus, GitEnvironmentCheck } from '../../lib/desktop-bridge';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { cn } from '../../lib/utils';
+import { TooltipHint } from '../ui/tooltip';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { Button } from '../ui/button';
 import {
@@ -23,6 +29,7 @@ const textareaClass =
 /** 生成模型 + 提交说明 + 拉取请求指令。 */
 export function GitSettings() {
   useModelDisplayNames();
+  const canCheckGit = useHostCapabilities().has('host.git-check');
   const config = useSettingsStore((state) => state.config);
   const setGitSettings = useSettingsStore((state) => state.setGitSettings);
   const [commitDraft, setCommitDraft] = useState<string | null>(null);
@@ -70,6 +77,8 @@ export function GitSettings() {
 
   return (
     <div className="space-y-8">
+      {canCheckGit && <GitExecutableSection />}
+
       <SettingsSection label="生成模型">
         <SettingsCard>
           <SettingsRow
@@ -198,6 +207,104 @@ export function GitSettings() {
         </SettingsCard>
       </SettingsSection>
     </div>
+  );
+}
+
+const GIT_STATUS_META: Record<
+  EnvironmentCheckStatus,
+  { label: string; className: string; icon: typeof CheckCircle2 }
+> = {
+  ok: { label: '正常', className: 'border-success/30 bg-success/10 text-success', icon: CheckCircle2 },
+  warning: { label: '需升级', className: 'border-warning/35 bg-warning/10 text-warning', icon: TriangleAlert },
+  missing: { label: '未找到', className: 'border-destructive/35 bg-destructive/10 text-destructive', icon: AlertCircle },
+  error: { label: '异常', className: 'border-destructive/35 bg-destructive/10 text-destructive', icon: AlertCircle },
+};
+
+/** 本机 Git 探测(壳独占:host.git-check;浏览器/移动形态不渲染)。 */
+function GitExecutableSection() {
+  const [check, setCheck] = useState<GitEnvironmentCheck | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runCheck = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setCheck(await shellFacade.checkGitEnvironment());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void runCheck();
+  }, [runCheck]);
+
+  const git = check?.git;
+  const pending = loading && !git;
+  const meta = GIT_STATUS_META[error ? 'error' : git?.status ?? 'missing'];
+  const StatusIcon = meta.icon;
+
+  let detail: ReactNode;
+  if (error) {
+    detail = error;
+  } else if (pending) {
+    detail = '正在检测本机 Git…';
+  } else if (git?.status === 'ok' && git.path) {
+    detail = (
+      <span className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-0.5">
+        <span className="text-muted-foreground">版本</span>
+        <span className="font-mono text-foreground">{git.version ?? '—'}</span>
+        <span className="text-muted-foreground">位置</span>
+        <TooltipHint content={git.path}>
+          <span className="truncate font-mono text-foreground">{git.path}</span>
+        </TooltipHint>
+      </span>
+    );
+  } else {
+    detail = git?.message ?? '未检测';
+  }
+
+  return (
+    <SettingsSection label="本机 Git">
+      <SettingsCard>
+        <SettingsRow
+          inlineControl
+          label="Git 可执行文件"
+          description={detail}
+          control={
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-ui-caption font-medium',
+                  pending ? 'border-border text-muted-foreground' : meta.className,
+                )}
+              >
+                {pending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <StatusIcon className="h-3.5 w-3.5" />
+                )}
+                {pending ? '检测中' : meta.label}
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                className="shrink-0"
+                onClick={runCheck}
+                disabled={loading}
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                重新检测
+              </Button>
+            </div>
+          }
+        />
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 
