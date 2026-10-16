@@ -13,6 +13,7 @@ import {
   DARK_CONTRAST_OFFSET,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
+  accentName,
   applyAppearance,
   buildUiFontFamily,
   clampCodeFontSize,
@@ -105,28 +106,43 @@ describe('appearance preferences', () => {
   });
 
   it('folds prefs into the four Codex seeds', () => {
+    // 默认强调色是 azure,深浅各取自己的 hex。
     expect(seedsForPrefs(DEFAULT_PREFS, false)).toEqual({
       ...CODEX_LIGHT_SEEDS,
-      accent: '#3a83f7',
+      accent: ACCENTS.azure.light,
       contrast: CONTRAST_DEFAULT,
     });
-    // 深色比浅色高 15 档（Codex 的 45 / 60 关系）；Codex 的强调色明暗同值。
+    // 深色比浅色高 15 档（Codex 的 45 / 60 关系）。
     expect(seedsForPrefs(DEFAULT_PREFS, true)).toEqual({
       ...CODEX_DARK_SEEDS,
-      accent: '#3a83f7',
+      accent: ACCENTS.azure.dark,
       contrast: CONTRAST_DEFAULT + DARK_CONTRAST_OFFSET,
     });
     // 深色侧的加成不会越过上限。
     expect(seedsForPrefs({ ...DEFAULT_PREFS, contrast: 95 }, true).contrast).toBe(CONTRAST_MAX);
     // 换个强调色时，深浅取各自的种子值。
-    expect(seedsForPrefs({ ...DEFAULT_PREFS, accent: 'azure' }, false).accent).toBe('#0169cb');
-    expect(seedsForPrefs({ ...DEFAULT_PREFS, accent: 'azure' }, true).accent).toBe('#3197f6');
+    expect(seedsForPrefs({ ...DEFAULT_PREFS, accent: 'rose' }, false).accent).toBe('#d92650');
+    expect(seedsForPrefs({ ...DEFAULT_PREFS, accent: 'rose' }, true).accent).toBe('#e46784');
   });
 
-  it('defaults the accent to the Codex seed so the app looks like Codex out of the box', () => {
-    expect(DEFAULT_PREFS.accent).toBe('codex');
-    expect(ACCENTS.codex.light).toBe(CODEX_LIGHT_SEEDS.accent);
-    expect(ACCENTS.codex.dark).toBe(CODEX_DARK_SEEDS.accent);
+  it('defaults the accent to azure and has no duplicate codex preset', () => {
+    expect(DEFAULT_PREFS.accent).toBe('azure');
+    expect(ACCENTS.azure).toBeDefined();
+    expect(Object.keys(ACCENTS)).not.toContain('codex');
+  });
+
+  it('falls a stored codex accent back to azure after the preset was removed', () => {
+    window.localStorage.setItem('codemux:appearance', JSON.stringify({ accent: 'codex' }));
+    expect(loadPrefs().accent).toBe('azure');
+  });
+
+  it('names the black/white preset per resolved theme, and keeps others theme-agnostic', () => {
+    // 浅色近黑、深色纯白 —— 显示名跟着解析后的主题换面。
+    expect(accentName('graphite', false)).toBe('黑色');
+    expect(accentName('graphite', true)).toBe('白色');
+    // 其余预设没有 darkName,深浅同名(不会因主题切换而改名)。
+    expect(accentName('azure', false)).toBe(ACCENTS.azure.name);
+    expect(accentName('azure', true)).toBe(ACCENTS.azure.name);
   });
 
   it('writes the fixed semantic diff colors, light and dark separately', () => {

@@ -7,7 +7,6 @@ import {
 import type { Theme } from '../types/provider';
 
 export type AccentKey =
-  | 'codex'
   | 'azure'
   | 'cyan'
   | 'emerald'
@@ -31,6 +30,11 @@ export interface AppearancePrefs {
 
 export interface AccentPreset {
   name: string;
+  /**
+   * 深色主题下的显示名；只有像「黑/白」这种两面各占一半的档位才需要，
+   * 缺省时深浅共用 `name`（绝大多数预设如此）。
+   */
+  darkName?: string;
   /** hex；由 `colorDerivation` 继续派生出悬停底 / 焦点环 / 强调背景。 */
   light: string;
   dark: string;
@@ -54,21 +58,25 @@ export const BUILT_IN_FONT_FAMILIES: Record<string, string> = {
 };
 
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
-  // Codex / ChatGPT 的默认强调色。放在第一位且作为默认值 —— 整套换色的意义
-  // 就是「开箱即与 Codex 一致」，默认给别的色会让第一次打开的人看到半成品。
-  codex: { name: 'Codex', light: '#3a83f7', dark: '#3a83f7' },
+  // 天蓝是 Codex 的那抹蓝的近似，排在第一位并作为默认值。原先另有一档与它重复的
+  // `codex`(#3a83f7 明暗同值)，已合并掉 —— 一档蓝色够了。
   azure: { name: '天蓝', light: '#0169cb', dark: '#3197f6' },
   cyan: { name: '青碧', light: '#1b9bbb', dark: '#3ccadd' },
   emerald: { name: '翠绿', light: '#2d9f6a', dark: '#38c784' },
   amber: { name: '琥珀', light: '#c17c15', dark: '#f4ae34' },
   rose: { name: '玫红', light: '#d92650', dark: '#e46784' },
   violet: { name: '紫罗兰', light: '#7b4dcb', dark: '#a07cde' },
-  graphite: { name: '石墨', light: '#1a1b1e', dark: '#ffffff' },
+  // 浅色近黑、深色纯白 —— 两面各占一半，所以名称也随解析后的主题换面。
+  graphite: { name: '黑色', darkName: '白色', light: '#1a1b1e', dark: '#ffffff' },
 };
 
 /** 色板圆点直接用 hex，不再维护第二份 swatch。 */
 export const accentSwatch = (accent: AccentKey, isDark: boolean): string =>
   isDark ? ACCENTS[accent].dark : ACCENTS[accent].light;
+
+/** 预设显示名，「黑/白」这类双面档位随解析后的主题换面，其余档位深浅同名。 */
+export const accentName = (accent: AccentKey, isDark: boolean): string =>
+  isDark ? ACCENTS[accent].darkName ?? ACCENTS[accent].name : ACCENTS[accent].name;
 
 export const UI_FONT_SIZE_MIN = 12;
 export const UI_FONT_SIZE_MAX = 18;
@@ -114,7 +122,7 @@ export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {
-  accent: 'codex',
+  accent: 'azure',
   contrast: CONTRAST_DEFAULT,
   // 空对象 = 完全跟随语义种子；用户改过的键才会被写进来。
   uiFontFamily: '',

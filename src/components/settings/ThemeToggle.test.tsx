@@ -11,15 +11,21 @@ const setContrast = vi.fn();
 const setUiFontSize = vi.fn();
 const setTheme = vi.fn();
 
+// 可变状态:默认浅色 + azure,个别用例切到「跟随系统」与「黑白」档来验证解析逻辑。
+const uiState = vi.hoisted(() => ({
+  theme: 'Light' as 'Light' | 'Dark' | 'System',
+  accent: 'azure',
+}));
+
 vi.mock('../../stores/settingsStore', () => ({
-  useSettingsStore: (selector: (state: { config: { theme: 'Light' }; setTheme: typeof setTheme }) => unknown) =>
-    selector({ config: { theme: 'Light' }, setTheme }),
+  useSettingsStore: (selector: (state: { config: { theme: string }; setTheme: typeof setTheme }) => unknown) =>
+    selector({ config: { theme: uiState.theme }, setTheme }),
 }));
 
 vi.mock('../../stores/appearanceStore', () => ({
   useAppearanceStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
     prefs: {
-      accent: 'azure',
+      accent: uiState.accent,
       contrast: 45,
         uiFontFamily: '',
       uiFontSize: 14,
@@ -50,6 +56,8 @@ describe('ThemeToggle', () => {
     setUiFontSize.mockClear();
     setContrast.mockClear();
     setTheme.mockClear();
+    uiState.theme = 'Light';
+    uiState.accent = 'azure';
     Element.prototype.scrollIntoView = vi.fn();
     // jsdom 没实现 matchMedia / ResizeObserver,Radix 的浮层要这两样。
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -112,6 +120,23 @@ describe('ThemeToggle', () => {
     // 下拉触发器回显当前预设名 + 色点（Radix 的 SelectValue 渲染选中项 children）
     const accentTrigger = screen.getByRole('combobox', { name: '强调色' });
     expect(accentTrigger.textContent).toContain(ACCENTS.azure.name);
+  });
+
+  it('跟随系统时色点、十六进制与显示名按系统深浅解析,而不是恒按浅色', () => {
+    uiState.theme = 'System';
+    uiState.accent = 'graphite';
+    // 系统为深色:面板必须显示白色那一面(hex + 色点 + 名称「白」)。
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('prefers-color-scheme: dark'),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+
+    render(<ThemeToggle />);
+
+    expect(screen.getByText(accentSwatch('graphite', true).toUpperCase())).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: '强调色' }).textContent).toContain('白色');
   });
 
   it('模式行在面板里可选,选中项回写主题', () => {

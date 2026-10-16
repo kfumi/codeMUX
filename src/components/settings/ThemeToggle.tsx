@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
   ACCENTS,
   type AccentKey,
+  accentName,
   accentSwatch,
   CODE_FONT_SIZE_MAX,
   CODE_FONT_SIZE_MIN,
@@ -12,6 +13,7 @@ import {
   type ContentWidthKey,
   RADIUS_PREVIEW,
   type RadiusKey,
+  resolveIsDark,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
 } from '../../lib/appearance';
@@ -151,11 +153,31 @@ const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
 
 const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
 
+/**
+ * 解析当前生效的明暗：显式主题直接取，「跟随系统」按系统偏好解析 —— 色点、十六进制
+ * 与「黑/白」显示名都要用这一份结果，不能拿 `theme === 'Dark'` 硬判(那会把「跟随
+ * 系统」当成浅色，系统为深色时面板仍显示黑色)。系统偏好变化时同步重渲染。
+ */
+function useResolvedIsDark(theme: Theme): boolean {
+  const [isDark, setIsDark] = useState(() => resolveIsDark(theme));
+
+  useEffect(() => {
+    setIsDark(resolveIsDark(theme));
+    if (theme !== 'System' || typeof window === 'undefined') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => setIsDark(resolveIsDark(theme));
+    media.addEventListener('change', handler);
+    return () => media.removeEventListener('change', handler);
+  }, [theme]);
+
+  return isDark;
+}
+
 export function ThemeToggle() {
   const config = useSettingsStore((state) => state.config);
   const setTheme = useSettingsStore((state) => state.setTheme);
   const currentTheme: Theme = config?.theme ?? 'System';
-  const isDark = currentTheme === 'Dark';
+  const isDark = useResolvedIsDark(currentTheme);
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
@@ -187,7 +209,15 @@ export function ThemeToggle() {
               <div className="flex items-center gap-2.5">
                 <Select value={prefs.accent} onValueChange={(value) => setAccent(value as AccentKey)}>
                   <SelectTrigger aria-label="强调色" size="sm" className="w-40 justify-between">
-                    <SelectValue />
+                    <SelectValue>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-3.5 w-3.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: accentSwatch(prefs.accent, isDark) }}
+                        />
+                        {accentName(prefs.accent, isDark)}
+                      </span>
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {ACCENT_KEYS.map((key) => (
@@ -197,7 +227,7 @@ export function ThemeToggle() {
                             className="h-3.5 w-3.5 shrink-0 rounded-full"
                             style={{ backgroundColor: accentSwatch(key, isDark) }}
                           />
-                          {ACCENTS[key].name}
+                          {accentName(key, isDark)}
                         </span>
                       </SelectItem>
                     ))}
