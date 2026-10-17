@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import type { AppConfig } from '../../types/provider';
 import { TooltipProvider } from '../ui/tooltip';
 import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
@@ -40,6 +41,7 @@ const baseConfig: AppConfig = {
 describe('ProjectOpenTargetButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     useSettingsStore.setState({
       config: structuredClone(baseConfig),
       isLoading: false,
@@ -87,5 +89,18 @@ describe('ProjectOpenTargetButton', () => {
 
     expect(screen.getByText('Cursor')).toBeTruthy();
     expect(screen.queryByText('Visual Studio')).toBeNull();
+  });
+
+  it('renders nothing outside the desktop shell', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+
+    const { container } = render(
+      <TooltipProvider>
+        <ProjectOpenTargetButton projectPath={'D:\\project\\ai-code\\codeMUX'} />
+      </TooltipProvider>,
+    );
+
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });

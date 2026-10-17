@@ -8,6 +8,7 @@ import type { Session } from '../../types/session';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { SessionHeader } from './SessionHeader';
 
 const mocks = vi.hoisted(() => ({
@@ -81,6 +82,7 @@ function makeProject(overrides: Partial<Project>): Project {
 describe('SessionHeader', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     mocks.resyncSessionFromNative.mockResolvedValue(3);
     Object.assign(navigator, {
       clipboard: {
@@ -132,6 +134,15 @@ describe('SessionHeader', () => {
     expect(screen.getByText('复制路径')).toBeTruthy();
     expect(screen.getByText('复制任务路径')).toBeTruthy();
     expect(screen.getByText('复制原生会话ID')).toBeTruthy();
+  });
+
+  it('hides the explorer action outside the desktop shell, keeping path copy', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+
+    openMenu();
+
+    expect(screen.queryByText('在资源管理器中打开')).toBeNull();
+    expect(screen.getByText('复制路径')).toBeTruthy();
   });
 
   it('syncs history from CLI through the session menu', async () => {

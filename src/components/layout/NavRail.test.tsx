@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NAV_RAIL_WIDTH, NavRail, navTargetForView } from './NavRail';
 import { TooltipProvider } from '../ui/tooltip';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
 vi.mock('../../lib/shortcuts/shortcutPlatform', () => ({
   getShortcutPlatform: () => 'win32',
@@ -50,6 +51,7 @@ describe('NavRail', () => {
   beforeEach(() => {
     select.mockClear();
     workTaskState.tasks = [];
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
   });
 
   afterEach(() => cleanup());
@@ -95,6 +97,15 @@ describe('NavRail', () => {
     expect(update.compareDocumentPosition(screen.getByRole('button', { name: '设置' }))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('drops the companion rail outside the desktop shell', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    renderRail();
+
+    expect(screen.queryByRole('button', { name: '移动伴侣' })).toBeNull();
+    expect(screen.getByRole('button', { name: '会话' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '设置' })).toBeTruthy();
   });
 
   it('reports the clicked target', () => {

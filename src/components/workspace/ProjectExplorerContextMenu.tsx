@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 
 import { getProjectRelativePath } from '../../lib/composerReferences';
 import { getOpenTargetOption } from '../../lib/openTargets';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useAgentStore } from '../../stores/agentStore';
 import {
   ContextMenuContent,
@@ -57,6 +58,10 @@ export function ProjectExplorerContextMenu({
   onOpen,
 }: ProjectExplorerContextMenuProps) {
   const requestComposerReferenceInsert = useAgentStore((state) => state.requestComposerReferenceInsert);
+  // 打开方式 / 资源管理器都是桌面壳概念,浏览器/移动形态隐藏入口。
+  const capabilities = useHostCapabilities();
+  const canOpenWithTarget = capabilities.has('open.project-path');
+  const canOpenExplorer = capabilities.has('shell.explorer');
   const relativePath = getProjectRelativePath(path, projectPath);
 
   const handleAddToChat = () => {
@@ -71,25 +76,29 @@ export function ProjectExplorerContextMenu({
   return (
     <ContextMenuContent className="surface-panel z-180 min-w-40 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md animate-in fade-in fill-mode-both duration-normal ease-motion-out">
       <ContextMenuItem onClick={onOpen}>打开</ContextMenuItem>
-      <ContextMenuSub>
-        <ContextMenuSubTrigger>打开方式</ContextMenuSubTrigger>
-        <ContextMenuSubContent className="surface-panel min-w-36 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md">
-          <ContextMenuItem
-            icon={<FILE_EXPLORER_OPTION.Icon className="h-3.5 w-3.5" />}
-            onClick={() => void openWithTarget(path, 'file_explorer')}
-          >
-            资源管理器
-          </ContextMenuItem>
-          <ContextMenuItem
-            icon={<VSCODE_OPTION.Icon className="h-3.5 w-3.5" />}
-            onClick={() => void openWithTarget(path, 'vscode')}
-          >
-            VS Code
-          </ContextMenuItem>
-        </ContextMenuSubContent>
-      </ContextMenuSub>
-      <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => void openInExplorer(path)}>在资源管理器中打开</ContextMenuItem>
+      {canOpenWithTarget ? (
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>打开方式</ContextMenuSubTrigger>
+          <ContextMenuSubContent className="surface-panel min-w-36 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-elevation backdrop-blur-md">
+            <ContextMenuItem
+              icon={<FILE_EXPLORER_OPTION.Icon className="h-3.5 w-3.5" />}
+              onClick={() => void openWithTarget(path, 'file_explorer')}
+            >
+              资源管理器
+            </ContextMenuItem>
+            <ContextMenuItem
+              icon={<VSCODE_OPTION.Icon className="h-3.5 w-3.5" />}
+              onClick={() => void openWithTarget(path, 'vscode')}
+            >
+              VS Code
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      ) : null}
+      {(canOpenWithTarget || canOpenExplorer) ? <ContextMenuSeparator /> : null}
+      {canOpenExplorer ? (
+        <ContextMenuItem onClick={() => void openInExplorer(path)}>在资源管理器中打开</ContextMenuItem>
+      ) : null}
       <ContextMenuItem onClick={() => void copyText(path)}>复制绝对路径</ContextMenuItem>
       <ContextMenuItem onClick={() => void copyText(relativePath)}>复制相对路径</ContextMenuItem>
       <ContextMenuSeparator />

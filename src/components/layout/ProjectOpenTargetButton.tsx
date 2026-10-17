@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 
 import { shellFacade } from '../../lib/facades/shell-facade';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
@@ -14,9 +15,15 @@ interface ProjectOpenTargetButtonProps {
 
 export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButtonProps) {
   const configuredTarget = useSettingsStore((state) => state.config?.default_open_target);
+  // 「用本机程序打开项目」是桌面壳能力,浏览器/移动形态直接不渲染。
+  const canOpenProject = useHostCapabilities().has('open.project-path');
   const defaultTarget = normalizeOpenTarget(configuredTarget);
   const defaultOption = getOpenTargetOption(defaultTarget);
   const DefaultIcon = defaultOption.Icon;
+
+  if (!canOpenProject) {
+    return null;
+  }
 
   const openProject = (target: OpenTarget) => {
     void shellFacade.openProjectPath(projectPath, target).catch(() => {

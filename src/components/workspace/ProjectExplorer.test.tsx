@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 
 import { useAgentStore } from '../../stores/agentStore';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/newSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
@@ -34,6 +35,7 @@ const project: Project = {
 describe('ProjectExplorer', () => {
   beforeEach(() => {
     listDirectoryMock.mockReset();
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     useSessionStore.setState({ activeSessionId: 'session-1' });
     useNewSessionStore.setState({ isDraftOpen: false });
     useAgentStore.setState({ pendingComposerReferenceInsert: {} });
@@ -141,6 +143,23 @@ describe('ProjectExplorer', () => {
     expect(screen.getByText('在资源管理器中打开')).toBeTruthy();
     expect(screen.getByText('复制绝对路径')).toBeTruthy();
     expect(screen.getByText('复制相对路径')).toBeTruthy();
+    expect(screen.getByText('添加到聊天')).toBeTruthy();
+  });
+
+  it('hides shell-only open actions outside the desktop shell', async () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    render(<ProjectExplorer project={project} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeTruthy();
+    });
+
+    fireEvent.contextMenu(screen.getByText('docs'));
+
+    expect(screen.getByText('打开')).toBeTruthy();
+    expect(screen.queryByText('打开方式')).toBeNull();
+    expect(screen.queryByText('在资源管理器中打开')).toBeNull();
+    expect(screen.getByText('复制绝对路径')).toBeTruthy();
     expect(screen.getByText('添加到聊天')).toBeTruthy();
   });
 

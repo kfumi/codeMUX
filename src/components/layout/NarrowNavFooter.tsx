@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Radio, Settings, Smartphone } from 'lucide-react';
 
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { getCompanionVisualState, companionVisualStateLabel, type CompanionVisualState } from '../../lib/companion';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { cn } from '../../lib/utils';
@@ -41,9 +42,15 @@ function companionIconColor(visualState: CompanionVisualState): string {
 }
 
 function CompanionRow() {
+  // 非桌面宿主没有移动伴侣管理面(daemon 只接受回环来源),整行不渲染。
+  const canManageCompanion = useHostCapabilities().has('companion.manage');
   const [open, setOpen] = useState(false);
-  const controller = useCompanionStatus({ pollIntervalMs: 12_000, polling: true });
+  const controller = useCompanionStatus({ pollIntervalMs: 12_000, polling: canManageCompanion });
   const visualState = getCompanionVisualState(controller.status);
+
+  if (!canManageCompanion) {
+    return null;
+  }
 
   const handleOpen = () => {
     setOpen(true);

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getProjectRelativePath } from '@/lib/composerReferences';
 import { getOpenTargetOption } from '@/lib/openTargets';
+import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useSidePanelStore } from '@/stores/sidePanelStore';
@@ -48,6 +49,8 @@ function getFileName(path: string): string {
 
 function ReferencedMarkdownFileCard({ filePath }: { filePath: string }) {
   const openFileTab = useSidePanelStore((state) => state.openFileTab);
+  // 「资源管理器 / VS Code」是桌面壳能力,浏览器/移动形态隐藏这两项。
+  const canOpenWithTarget = useHostCapabilities().has('open.project-path');
   const basePath = resolveLocalMarkdownBasePath(filePath);
   const relativePath = basePath ? getProjectRelativePath(filePath, basePath) : filePath;
 
@@ -84,19 +87,23 @@ function ReferencedMarkdownFileCard({ filePath }: { filePath: string }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-40">
-          <DropdownMenuItem
-            icon={<FILE_EXPLORER_OPTION.Icon className="h-3.5 w-3.5" />}
-            onClick={() => void openWithTarget(filePath, 'file_explorer')}
-          >
-            资源管理器
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            icon={<VSCODE_OPTION.Icon className="h-3.5 w-3.5" />}
-            onClick={() => void openWithTarget(filePath, 'vscode')}
-          >
-            VS Code
-          </DropdownMenuItem>
-          <div className="my-1 h-px bg-border/60" />
+          {canOpenWithTarget ? (
+            <>
+              <DropdownMenuItem
+                icon={<FILE_EXPLORER_OPTION.Icon className="h-3.5 w-3.5" />}
+                onClick={() => void openWithTarget(filePath, 'file_explorer')}
+              >
+                资源管理器
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                icon={<VSCODE_OPTION.Icon className="h-3.5 w-3.5" />}
+                onClick={() => void openWithTarget(filePath, 'vscode')}
+              >
+                VS Code
+              </DropdownMenuItem>
+              <div className="my-1 h-px bg-border/60" />
+            </>
+          ) : null}
           <DropdownMenuItem
             icon={<Copy className="h-3.5 w-3.5" />}
             onClick={() => void copyText(filePath)}

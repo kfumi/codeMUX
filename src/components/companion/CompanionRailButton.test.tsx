@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { CompanionRailButton } from './CompanionRailButton';
 import { TooltipProvider } from '../ui/tooltip';
 
@@ -33,6 +34,10 @@ function renderButton() {
 }
 
 describe('CompanionRailButton', () => {
+  beforeEach(() => {
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+  });
+
   afterEach(() => {
     cleanup();
     companionState.status = null;
@@ -57,5 +62,14 @@ describe('CompanionRailButton', () => {
     expect(screen.getByRole('button', { name: '移动伴侣' }).className).toContain(
       'text-muted-foreground',
     );
+  });
+
+  it('非桌面宿主不渲染入口', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+
+    const { container } = renderButton();
+
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole('button', { name: '移动伴侣' })).toBeNull();
   });
 });

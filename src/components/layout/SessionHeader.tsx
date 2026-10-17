@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -31,6 +32,8 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
     markSessionUnread,
   } = useSessionStore();
   const { projects } = useProjectStore();
+  // 资源管理器是桌面壳概念,浏览器/移动形态隐藏入口(免留必然报错的操作)。
+  const canOpenExplorer = useHostCapabilities().has('shell.explorer');
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
@@ -195,12 +198,14 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           ) : null}
           {workingPath ? (
             <>
-              <DropdownMenuItem
-                icon={<FolderOpen className="h-3.5 w-3.5" />}
-                onClick={() => void handleOpenInExplorer()}
-              >
-                在资源管理器中打开
-              </DropdownMenuItem>
+              {canOpenExplorer ? (
+                <DropdownMenuItem
+                  icon={<FolderOpen className="h-3.5 w-3.5" />}
+                  onClick={() => void handleOpenInExplorer()}
+                >
+                  在资源管理器中打开
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(workingPath)}>
                 复制路径
               </DropdownMenuItem>

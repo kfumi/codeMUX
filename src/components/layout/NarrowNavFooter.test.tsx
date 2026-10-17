@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { NarrowNavFooter } from './NarrowNavFooter';
 
 const companionState = vi.hoisted(() => ({
@@ -45,6 +46,10 @@ function renderFooter(activeTarget: Parameters<typeof NarrowNavFooter>[0]['activ
 }
 
 describe('NarrowNavFooter', () => {
+  beforeEach(() => {
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+  });
+
   afterEach(() => {
     cleanup();
     companionState.status = null;
@@ -98,6 +103,14 @@ describe('NarrowNavFooter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     expect(select).toHaveBeenCalledWith('settings');
+  });
+
+  it('drops the companion row outside the desktop shell, keeping settings', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
+    renderFooter();
+
+    expect(screen.queryByRole('button', { name: '移动伴侣' })).toBeNull();
+    expect(screen.getByRole('button', { name: '设置' })).toBeTruthy();
   });
 
   it('marks the settings row as current while the settings view is active', () => {

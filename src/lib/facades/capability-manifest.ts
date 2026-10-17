@@ -82,6 +82,14 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   // shell.explorer:资源管理器是桌面壳的概念,浏览器/移动形态没有对应后端,
   // 会话/项目菜单据此隐藏「在资源管理器中打开」而不是留一个必然报错的入口。
   { id: 'shell.explorer', owner: 'shell', shellMethod: 'openInExplorer' },
+  // open.project-path(工单 02 回归):用本机默认程序/编辑器打开路径(资源管理器、
+  // VS Code 等)。同为桌面壳概念,浏览器/移动形态没有对应后端,项目菜单与
+  // 「打开项目」按钮据此隐藏,而不是留一个必然失败的入口。
+  { id: 'open.project-path', owner: 'shell', shellMethod: 'openProjectPath' },
+  // companion.manage:「移动伴侣」管理本机对外的配对码 / 局域网 / 中继暴露,
+  // daemon 管理面只接受回环来源(见 daemon-boundary/10),浏览器/移动形态点开
+  // 必然报错 → 归为壳独占,图标轨与抽屉页脚据此隐藏入口。
+  { id: 'companion.manage', owner: 'shell' },
   { id: 'host.git-check', owner: 'shell', shellMethod: 'checkGitEnvironment' },
   { id: 'host.agent-cli', owner: 'shell', shellMethod: 'checkAgentRuntimes' },
   // fs.ensure-directory:会话默认工作目录(~/CodemuxProject)的落盘创建。

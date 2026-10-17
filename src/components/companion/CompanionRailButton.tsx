@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Smartphone } from 'lucide-react';
 
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
+import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { getCompanionVisualState, companionVisualStateLabel } from '../../lib/companion';
 import { cn } from '../../lib/utils';
 import { TooltipHint } from '../ui/tooltip';
@@ -30,9 +31,16 @@ function tooltipForState(visualState: ReturnType<typeof getCompanionVisualState>
  * 图标颜色仍然承担状态（绿 = 已配对 / 琥珀 = 等待或重连 / 次级 = 未启用）。
  */
 export function CompanionRailButton() {
+  // 「移动伴侣」管理本机对外的配对/中继暴露(daemon 只接受回环来源),
+  // 浏览器/移动形态没有意义:入口隐藏,也不再轮询状态。
+  const canManageCompanion = useHostCapabilities().has('companion.manage');
   const [open, setOpen] = useState(false);
-  const controller = useCompanionStatus({ pollIntervalMs: 12_000, polling: true });
+  const controller = useCompanionStatus({ pollIntervalMs: 12_000, polling: canManageCompanion });
   const visualState = getCompanionVisualState(controller.status);
+
+  if (!canManageCompanion) {
+    return null;
+  }
 
   const handleOpen = () => {
     setOpen(true);
