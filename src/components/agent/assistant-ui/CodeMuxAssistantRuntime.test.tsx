@@ -2617,13 +2617,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-stream-short" />);
 
-    // 实时思考是一个默认展开的「思考」步骤行（streaming 时打开），正文按分帧揭示渲染。
+    // 实时思考是一个默认收起的「思考」步骤行，展开后才渲染分帧揭示的正文。
     const livePanel = container.querySelector('[data-testid="thread-viewport"] [data-streaming-reasoning="true"]');
     expect(livePanel).not.toBeNull();
     const trigger = livePanel?.querySelector('[data-slot="reasoning-trigger"]');
     expect(trigger).not.toBeNull();
-    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
     expect(trigger?.textContent).toContain('思考');
+    expect(livePanel?.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+
+    fireEvent.click(trigger!);
     expect(livePanel?.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain(shortThinking);
     expect(container.textContent).not.toContain('tokens');
     expect(container.textContent).not.toContain('tokens');
@@ -2632,14 +2635,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const longView = render(<Harness sessionId="session-stream-long" />);
     const longTrigger = longView.container.querySelector('[data-slot="reasoning-trigger"]');
     expect(longTrigger).not.toBeNull();
-    expect(longTrigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(longTrigger?.getAttribute('aria-expanded')).toBe('false');
     expect(longView.container.textContent).toContain('思考');
-    expect(longView.container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain(longThinking);
+    // 收起状态下长思考的正文不进 DOM。
+    expect(longView.container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
 
     fireEvent.click(longTrigger!);
 
-    // 收起后正文不渲染：长思考的正文不留在 DOM 里。
-    expect(longView.container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+    // 展开后正文渲染：长思考的正文进入 DOM。
+    expect(longView.container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain(longThinking);
     expect(longView.container.textContent).not.toContain('tokens');
   });
 

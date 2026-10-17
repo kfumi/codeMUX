@@ -62,29 +62,28 @@ describe('ActivityStepThinking', () => {
     expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('实时思考默认展开并带脉冲点', () => {
+  it('实时思考默认收起并带脉冲点', () => {
     const { container } = render(<ActivityStepThinking text="正在分析" streaming />);
 
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
     // SVG 的 className 是对象，断言要走 getAttribute('class')。
     expect(container.querySelector('[data-slot="reasoning-trigger-pulse"]')?.getAttribute('class'))
       .toContain('animate-pulse');
   });
 
-  it('流式思考不画行内单行摘要，思考结束收起后才显示', () => {
+  it('流式思考默认收起，右侧单行摘要用 previewText 实时跟随', () => {
     const { container, rerender } = render(
-      <ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming />,
+      <ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming previewText="先看目录结构 再核对" />,
     );
 
-    // 流式中这一行默认展开、正文就在下面：右侧摘要不跟着 delta 实时变长。
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
-    expect(container.querySelector('[data-slot="reasoning-trigger-summary"]')).toBeNull();
-    expect(container.querySelector('[data-slot="reasoning-trigger-label"]')?.textContent).toBe('思考');
-
-    rerender(<ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming={false} />);
-
-    // 思考结束、行收起：这时一次性给出摘要。
+    // 流式中这一行保持收起，右侧单行摘要跟着节流揭示的文本走。
     expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-slot="reasoning-trigger-summary"]')?.textContent).toBe('先看目录结构 再核对');
+    expect(container.querySelector('[data-slot="reasoning-trigger-label"]')?.textContent?.startsWith('思考')).toBe(true);
+
+    rerender(<ActivityStepThinking text={'先看目录结构\n再核对任务入口'} streaming />);
+
+    // 没有 previewText 时用完整思考文本压成单行。
     expect(container.querySelector('[data-slot="reasoning-trigger-summary"]')?.textContent)
       .toBe('先看目录结构 再核对任务入口');
   });
@@ -96,10 +95,14 @@ describe('ActivityStepThinking', () => {
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
   });
 
-  it('实时思考默认展开并渲染正文', () => {
+  it('实时思考默认收起，展开后才渲染正文', () => {
     const { container } = render(<ActivityStepThinking text="正在分析" streaming body={<pre>正在分析</pre>} />);
 
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开思考内容' }));
+
     expect(container.querySelector('[data-slot="activity-step-body"]')?.textContent).toContain('正在分析');
   });
 
@@ -113,8 +116,11 @@ describe('ActivityStepThinking', () => {
     expect(icon?.getAttribute('class')).toContain('size-[1.08em]');
   });
 
-  it('思考结束（streaming 由 true 变 false）后详情自动收起', () => {
+  it('思考结束后自动收起用户展开的实时正文', () => {
     const { container, rerender } = render(<ActivityStepThinking text="正在分析" streaming />);
+    // 流式中默认收起，用户展开查看实时正文。
+    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '展开思考内容' }));
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeTruthy();
 
     rerender(<ActivityStepThinking text="正在分析" streaming={false} />);
@@ -125,26 +131,25 @@ describe('ActivityStepThinking', () => {
     expect(screen.getByRole('button', { name: '展开思考内容' })).toBeTruthy();
   });
 
-  it('用户点开后 streaming 变化不再覆盖用户的展开状态', () => {
+  it('streaming 状态变化会重置手动展开（开始与结束都回到默认收起）', () => {
     const { container, rerender } = render(<ActivityStepThinking text="先看目录结构" streaming={false} />);
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '展开思考内容' }));
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeTruthy();
 
-    // 实时开始：用户已接管，保持展开。
+    // 实时开始：重置为默认收起。
     rerender(<ActivityStepThinking text="先看目录结构" streaming />);
+    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
+
+    // 实时中用户再次展开。
+    fireEvent.click(screen.getByRole('button', { name: '展开思考内容' }));
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeTruthy();
 
-    // 实时结束：不再被自动收起。
+    // 实时结束：同样重置为默认收起。
     rerender(<ActivityStepThinking text="先看目录结构" streaming={false} />);
-    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeTruthy();
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('true');
-
-    // 用户手动再收起后，实时中也不会被自动展开。
-    fireEvent.click(screen.getByRole('button', { name: '收起思考内容' }));
     expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
-    rerender(<ActivityStepThinking text="先看目录结构" streaming />);
-    expect(container.querySelector('[data-slot="activity-step-body"]')).toBeNull();
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
   });
 });

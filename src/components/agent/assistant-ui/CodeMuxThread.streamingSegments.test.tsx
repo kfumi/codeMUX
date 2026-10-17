@@ -3,7 +3,7 @@
 // thinking → assistant_message → text → assistant_message repeatedly within
 // one turn). Guards the StreamingContent visibility rules in CodeMuxThread.
 
-import { cleanup, render, act } from '@testing-library/react';
+import { cleanup, render, act, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../../stores/agentStore';
@@ -187,6 +187,12 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     send({ type: 'reasoning_delta', event_id: 'e2', index: 0, text: 'SEG1 thinking' });
     await flush();
     expectLiveReasoning(container, true);
+    // 实时思考默认收起：正文不进 DOM，先展开再断言字号。
+    const liveTrigger = container.querySelector(
+      '[data-streaming-reasoning="true"] [data-slot="reasoning-trigger"]',
+    );
+    expect(liveTrigger?.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(liveTrigger!);
     // 实时思考正文与完成后（ActivityStepThinking 自己的正文容器）同字号：都走全局正文档。
     const liveThinkingBody = container.querySelector(
       '[data-streaming-reasoning="true"] [data-slot="activity-step-body"] pre',
