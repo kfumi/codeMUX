@@ -26,6 +26,7 @@ vi.mock('./GitBranchDialog', () => ({
   GitBranchDialog: () => null,
 }));
 
+import { useGitEnvironmentStore } from '../../../stores/gitEnvironmentStore';
 import { useSummaryPanelStore } from '../../../stores/summaryPanelStore';
 import { SummaryPanelSurface } from './SummaryPanelSurface';
 
@@ -38,6 +39,7 @@ describe('SummaryPanelSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSummaryPanelStore.getState().reset();
+    useGitEnvironmentStore.getState().reset();
     gitApiMock.getRepositoryState.mockResolvedValue({
       currentBranch: 'feat/codex-ui-alignment-surfaces',
       branches: [{ name: 'master', current: false }],
@@ -98,5 +100,22 @@ describe('SummaryPanelSurface', () => {
 
     useSummaryPanelStore.getState().setPinned(false);
     await waitFor(() => expect(screen.queryByTestId('summary-panel-surface')).toBeNull());
+  });
+
+  it('重挂载复用缓存：不重复取数', async () => {
+    useSummaryPanelStore.getState().setMetrics({ availableWidth: WIDE, contentWidth: 768 });
+    useSummaryPanelStore.getState().setPinned(true);
+
+    const { unmount } = render(<SummaryPanelSurface projectPath="D:/project/app" />);
+    await screen.findByText('环境信息');
+    await waitFor(() => expect(screen.getByTestId('git-environment-changes')).toBeTruthy());
+    expect(gitApiMock.getRepositoryState.mock.calls.length).toBe(1);
+
+    unmount();
+    render(<SummaryPanelSurface projectPath="D:/project/app" />);
+    await screen.findByText('环境信息');
+    expect(screen.getByTestId('git-environment-changes')).toBeTruthy();
+
+    expect(gitApiMock.getRepositoryState.mock.calls.length).toBe(1);
   });
 });

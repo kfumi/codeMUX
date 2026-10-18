@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   ChevronDown,
@@ -13,8 +13,13 @@ import {
 import type { SubagentStatus } from '../../../lib/codeMuxProtocol';
 import { daemonFacade } from '../../../lib/facades/daemon-facade';
 import { formatErrorMessage } from '../../../lib/errorMessage';
-import type { GitRepositoryState, GitStatusChange } from '../../../lib/gitTypes';
+import type { GitRepositoryState } from '../../../lib/gitTypes';
 import { cn } from '../../../lib/utils';
+import {
+  useGitEnvironmentStore,
+  type GitEnvironmentLoadState,
+  type GitEnvironmentTotals,
+} from '../../../stores/gitEnvironmentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { subagentTabTitle, useSubagentStore } from '../../../stores/subagentStore';
@@ -213,16 +218,6 @@ function formatDelta(value: number): string {
   return value.toLocaleString('en-US');
 }
 
-function getTotals(files: GitStatusChange[]) {
-  return files.reduce(
-    (totals, file) => ({
-      additions: totals.additions + file.additions,
-      deletions: totals.deletions + file.deletions,
-    }),
-    { additions: 0, deletions: 0 },
-  );
-}
-
 function EnvironmentRowSkeleton() {
   return (
     <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5" aria-hidden>
@@ -249,9 +244,9 @@ function EnvironmentSection({
   onOpenReview,
   onOpenBranchDialog,
 }: {
-  gitLoadState: GitLoadState;
+  gitLoadState: GitEnvironmentLoadState;
   unavailableMessage: string | null;
-  totals: { additions: number; deletions: number };
+  totals: GitEnvironmentTotals;
   currentBranch: string;
   branchOpen: boolean;
   onBranchOpenChange: (open: boolean) => void;
@@ -383,75 +378,14 @@ function closeSummaryPopover() {
   useSummaryPanelStore.getState().setPopoverOpen(false);
 }
 
-type GitLoadState = 'loading' | 'ready' | 'unavailable';
+const EMPTY_TOTALS: GitEnvironmentTotals = { additions: 0, deletions: 0 };
 
-type GitSnapshot = { state: GitRepositoryState; totals: { additions: number; deletions: number } };
-
-/**
- * 摘要面板要的仓库信息：挂载即取（面板只在可见时才挂载），项目一换就重取。
- * 结果带 `cancelled` 守卫 —— 面板现在会在「浮层 / 钉住」两种面之间切换挂载点，
- * 快速切项目时旧响应不能盖住新的。
- */
-function useSummaryPanelGitState(projectPath: string) {
-  const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
-  const [totals, setTotals] = useState({ additions: 0, deletions: 0 });
-  const [gitLoadState, setGitLoadState] = useState<GitLoadState>('loading');
-  const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null);
-
-  const fetchGitState = useCallback(async (): Promise<GitSnapshot | { error: string }> => {
-    if (!projectPath) return { error: '当前项目不是 Git 仓库' };
-    try {
-      const [state, files] = await Promise.all([
-        daemonFacade.git.getRepositoryState(projectPath),
-        daemonFacade.git.getStatusChanges(projectPath, 'unstaged').catch(() => []),
-      ]);
-      return { state, totals: getTotals(files) };
-    } catch (err) {
-      return { error: formatErrorMessage(err) };
-    }
-  }, [projectPath]);
-
-  const applySnapshot = useCallback((snapshot: GitSnapshot | { error: string }) => {
-    if ('error' in snapshot) {
-      setUnavailableMessage(snapshot.error);
-      setRepositoryState(null);
-      setTotals({ additions: 0, deletions: 0 });
-      setGitLoadState('unavailable');
-      return;
-    }
-    setUnavailableMessage(null);
-    setRepositoryState(snapshot.state);
-    setTotals(snapshot.totals);
-    setGitLoadState('ready');
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setRepositoryState(null);
-    setTotals({ additions: 0, deletions: 0 });
-    setUnavailableMessage(null);
-    setGitLoadState('loading');
-    void fetchGitState().then((snapshot) => {
-      if (!cancelled) applySnapshot(snapshot);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [applySnapshot, fetchGitState]);
-
-  const reload = useCallback(async () => {
-    applySnapshot(await fetchGitState());
-  }, [applySnapshot, fetchGitState]);
-
-  return { repositoryState, totals, gitLoadState, unavailableMessage, reload };
-}
-
-/**
- * 摘要面板的正文：环境信息 / 任务 / 子智能体。
+/** 摘要面板的正文：环境信息 / 任务 / 子智能体。
  *
  * 它被两张面共用 —— 窄档的浮层（`GitEnvironmentPopover` 的 PopoverContent）与
- * 宽档钉在对话右侧的内联面（`SummaryPanelSurface`）。数据取用跟着正文走，
- * 「面板可见」是唯一的取数条件，两种面因此不会有各自的加载时序。
+ * 宽档钉在对话右侧的内联面（`SummaryPanelSurface`）。环境信息不再跟着正文挂载
+ * 走，而是从按项目缓存的应用级 store 读（见 `gitEnvironmentStore`）：正文挂载时
+ * 只 `ensure` 一次（无缓存才取），因此两种面、反复开关都复用同一份快照。
  */
 export function SummaryPanelBody({
   projectPath,
@@ -473,7 +407,21 @@ export function SummaryPanelBody({
   const [branchLoading, setBranchLoading] = useState(false);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
-  const { repositoryState, totals, gitLoadState, unavailableMessage, reload } = useSummaryPanelGitState(projectPath);
+  const ensureEnvironment = useGitEnvironmentStore((state) => state.ensure);
+  const refreshEnvironment = useGitEnvironmentStore((state) => state.refresh);
+  const environmentEntry = useGitEnvironmentStore((state) =>
+    projectPath ? state.entries[projectPath] : undefined,
+  );
+
+  // 挂载 / 项目切换时 ensure：命中缓存立刻秒显，未缓存才取一次。
+  useEffect(() => {
+    void ensureEnvironment(projectPath);
+  }, [ensureEnvironment, projectPath]);
+
+  const repositoryState = environmentEntry?.repositoryState ?? null;
+  const totals = environmentEntry?.totals ?? EMPTY_TOTALS;
+  const gitLoadState: GitEnvironmentLoadState = environmentEntry?.status ?? 'loading';
+  const unavailableMessage = environmentEntry?.unavailableMessage ?? null;
 
   const currentBranch = repositoryState?.detached
     ? 'detached HEAD'
@@ -491,7 +439,7 @@ export function SummaryPanelBody({
     try {
       await daemonFacade.git.checkoutBranch(projectPath, branchName);
       setBranchOpen(false);
-      await reload();
+      await refreshEnvironment(projectPath);
     } catch (err) {
       setBranchError(formatErrorMessage(err));
     } finally {
@@ -507,7 +455,7 @@ export function SummaryPanelBody({
       await daemonFacade.git.createBranch(projectPath, branchName, checkout);
       setBranchDialogOpen(false);
       setBranchOpen(false);
-      await reload();
+      await refreshEnvironment(projectPath);
     } catch (err) {
       setBranchError(formatErrorMessage(err));
     } finally {

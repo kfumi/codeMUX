@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const gitApiMock = vi.hoisted(() => ({
   getRepositoryState: vi.fn(),
   getStatusChanges: vi.fn(),
+  checkoutBranch: vi.fn(),
+  createBranch: vi.fn(),
 }));
 const openReviewTabMock = vi.hoisted(() => vi.fn());
 const openInSidePanelMock = vi.hoisted(() => vi.fn());
@@ -31,6 +33,7 @@ vi.mock('./GitBranchDialog', () => ({
 }));
 
 import { GitEnvironmentPopover } from './GitEnvironmentPopover';
+import { useGitEnvironmentStore } from '../../../stores/gitEnvironmentStore';
 import { useSubagentStore } from '../../../stores/subagentStore';
 import { useSummaryPanelStore } from '../../../stores/summaryPanelStore';
 
@@ -41,6 +44,8 @@ describe('GitEnvironmentPopover', () => {
     vi.clearAllMocks();
     // 摘要面板的开合是全局 store 状态（宽档下还要看测量到的对话列宽度），用例之间必须复位。
     useSummaryPanelStore.getState().reset();
+    // 环境信息按项目缓存；清掉上一用例残留，否则后续用例会命中缓存而不取数。
+    useGitEnvironmentStore.getState().reset();
     useSubagentStore.setState({
       sessions: {},
       continuationPending: {},
@@ -61,6 +66,8 @@ describe('GitEnvironmentPopover', () => {
       { additions: 34376, deletions: 2509 },
       { additions: 4, deletions: 2 },
     ]);
+    gitApiMock.checkoutBranch.mockResolvedValue(undefined);
+    gitApiMock.createBranch.mockResolvedValue(undefined);
   });
 
   it('shows the environment section immediately while git info is still loading', async () => {
@@ -116,6 +123,59 @@ describe('GitEnvironmentPopover', () => {
 
     await waitFor(() => expect(screen.getByPlaceholderText('搜索分支')).toBeTruthy());
     expect(screen.getByText('master')).toBeTruthy();
+  });
+
+  it('重开摘要复用缓存：第二次打开不再取数', async () => {
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    const trigger = screen.getByTestId('git-environment-trigger');
+    fireEvent.click(trigger);
+    await screen.findByText('环境信息');
+    await waitFor(() => expect(screen.getByTestId('git-environment-changes')).toBeTruthy());
+    const callsAfterFirstOpen = gitApiMock.getRepositoryState.mock.calls.length;
+    expect(callsAfterFirstOpen).toBe(1);
+
+    fireEvent.click(trigger); // 关闭浮层（正文卸载）
+    fireEvent.click(trigger); // 再次打开
+    await screen.findByText('环境信息');
+    expect(screen.getByTestId('git-environment-changes')).toBeTruthy();
+
+    expect(gitApiMock.getRepositoryState.mock.calls.length).toBe(callsAfterFirstOpen);
+  });
+
+  it('分支检出后刷新环境信息', async () => {
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('feat/mobile-companion');
+    const callsBeforeCheckout = gitApiMock.getRepositoryState.mock.calls.length;
+
+    fireEvent.click(screen.getByTestId('git-environment-branch'));
+    await waitFor(() => expect(screen.getByPlaceholderText('搜索分支')).toBeTruthy());
+    fireEvent.click(screen.getByText('master'));
+
+    await waitFor(() => expect(gitApiMock.checkoutBranch).toHaveBeenCalledWith('D:/project/app', 'master'));
+    await waitFor(() =>
+      expect(gitApiMock.getRepositoryState.mock.calls.length).toBe(callsBeforeCheckout + 1),
+    );
+  });
+
+  it('项目变化触发一次取数，切回命中缓存', async () => {
+    const { rerender } = render(<GitEnvironmentPopover projectPath="D:/project/a" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+    await waitFor(() => expect(screen.getByTestId('git-environment-changes')).toBeTruthy());
+    expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(1);
+    expect(gitApiMock.getRepositoryState).toHaveBeenCalledWith('D:/project/a');
+
+    rerender(<GitEnvironmentPopover projectPath="D:/project/b" />);
+    await waitFor(() => expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(2));
+    expect(gitApiMock.getRepositoryState).toHaveBeenLastCalledWith('D:/project/b');
+
+    rerender(<GitEnvironmentPopover projectPath="D:/project/a" />);
+    await screen.findByText('环境信息');
+    expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(2);
   });
 
   it('renders session todos below the environment section', async () => {

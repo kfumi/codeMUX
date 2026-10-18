@@ -14,6 +14,7 @@ import { initWorkTasksBridge } from "./lib/workTasksBridge";
 import { initBrowserHostBridge } from "./lib/browserHostBridge";
 import { initBrowserVisibilitySync } from "./lib/browserVisibility";
 import { initSessionsChangeBridge } from "./lib/sessionsChangeBridge";
+import { initGitEnvironmentTurnSync } from "./lib/gitEnvironmentSync";
 import { initLogging } from "./lib/logger";
 import { primeCodeHighlighting } from "./lib/codeHighlightWarmup";
 import "./stores/appearanceStore";
@@ -28,6 +29,7 @@ initWorkTasksBridge();
 initDaemonLifecycleBridge();
 initBrowserHostBridge();
 initBrowserVisibilitySync();
+initGitEnvironmentTurnSync();
 // Shiki 高亮器预热：把"第一次遇到代码块"造成的 380–420ms 主线程阻塞（集中在流式开始后
 // 0.6–1.0 秒）挪到应用空闲期。实测依据、反面做法与取舍见 src/lib/codeHighlightWarmup.ts
 // 顶部注释与研究文档 5.12 / 5.13 节。

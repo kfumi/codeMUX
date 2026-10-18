@@ -22,6 +22,7 @@ import { registerSkillCommands } from './lib/slashCommands';
 import { focusActiveComposer } from './lib/shortcuts/composerFocus';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
+import { resolveProjectPath } from './lib/projectPath';
 import { daemonFacade } from './lib/facades/daemon-facade';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
@@ -120,7 +121,7 @@ function App() {
 
   const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : null;
   const activeProjectId = activeSession?.project_id ?? draftProjectId ?? null;
-  const sidePanelProjectPath = activeProjectId ? projects.find((project) => project.id === activeProjectId)?.path ?? null : null;
+  const sidePanelProjectPath = resolveProjectPath(activeProjectId, projects);
   const sidePanelScopeId = activeSessionId ?? (isDraftOpen ? `draft:${draftProjectId ?? 'none'}` : 'home');
 
   useTheme();
