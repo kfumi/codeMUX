@@ -23,6 +23,7 @@ use crate::companion::browser_audit::{self, AuditRecord};
 use crate::companion::local_daemon_token;
 use crate::companion::server::{is_loopback_peer, ApiError, ServerContext};
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
+use crate::config::types::ApprovalMode;
 
 use super::guard::{self, ApprovalChoice, GateDecision, RiskClass};
 use super::page_context::PageContextCache;
@@ -239,7 +240,13 @@ pub async fn gate(
 ) -> Result<(), GateDenied> {
     let class = guard::classify(input.op);
     let sensitive = detect_sensitive(page_context, input);
-    let key = guard::session_memory_key(input.op);
+    // 审批口径(用户在设置里选,默认严格):只影响非敏感动作的提问频率。
+    let mode = app.config.lock().unwrap().computer_use.approval_mode;
+    // 记忆键按风险级分开:只读按 op 记,输入在 `session` 档只记一条「本会话输入」。
+    let key = match class {
+        RiskClass::ReadOnly => guard::session_memory_key(input.op),
+        RiskClass::Input => guard::input_memory_key().to_string(),
+    };
     let remembered = input
         .session_id
         .is_some_and(|session_id| companion.inner.approvals.is_remembered(session_id, &key));
@@ -263,7 +270,7 @@ pub async fn gate(
             .is_some()
     });
 
-    let decision = guard::decide_with_grant(class, sensitive, remembered, granted);
+    let decision = guard::decide_with_grant(class, sensitive, mode, remembered, granted);
     let GateDecision::Ask { rememberable } = decision else {
         charge_step(app, companion, input, &step_scope, max_steps, class)?;
         return Ok(());
@@ -312,10 +319,15 @@ pub async fn gate(
         risk: class,
         sensitive,
         rememberable,
-        // 输入动作上给界面一次「限时授权」的选项(只读没有这个概念);
-        // 敏感场景不出这个选项(decide 已把 rememberable 压成 false)。
-        grant_seconds: (class == RiskClass::Input && rememberable)
+        // 「限时授权」只在严格档的输入动作上出(只读没有这个概念;敏感场景已被
+        // decide 把 rememberable 压成 false,自然也不出)。
+        grant_seconds: (mode == ApprovalMode::Strict && class == RiskClass::Input && rememberable)
             .then_some(guard::CONTROL_SESSION_TTL.as_secs()),
+        // 「本会话记住」的适用范围:严格档的只读按 op 记,`session` 档的非敏感输入记一条。
+        // 严格档的输入动作走的是限时授权、不是记住,所以这里不给 scope。
+        remember_scope: (rememberable
+            && !(class == RiskClass::Input && mode == ApprovalMode::Strict))
+            .then_some("session"),
     };
 
     let rx = companion.inner.approvals.register(&request_id).await;
@@ -342,20 +354,13 @@ pub async fn gate(
     // 停在这里等放行:活动明细带一条「正在等放行」(工单 01),拿到结果就撤回 ——
     // 从标记处到这里只有这一条等待路径,所以清除放在等待之后、处置之前。
     if let Some(session_id) = input.session_id {
-        companion
-            .inner
-            .computer_use_activity
-            .set_awaiting_approval(session_id, true);
-        companion.publish_computer_use_activity_if_changed();
+        companion.set_computer_use_awaiting_approval(session_id, true);
     }
     let timeout = companion.inner.approvals.timeout();
     let waiting = tokio::time::timeout(timeout, rx).await;
     if let Some(session_id) = input.session_id {
-        companion
-            .inner
-            .computer_use_activity
-            .set_awaiting_approval(session_id, false);
-        companion.publish_computer_use_activity_if_changed();
+        // 离开等待即重新计时:动作马上就要跑,不该因为等得久(最长 120s)被判成空闲。
+        companion.set_computer_use_awaiting_approval(session_id, false);
     }
     let choice = match waiting {
         Ok(Ok(choice)) => choice,
@@ -408,8 +413,8 @@ pub async fn gate(
                 "用户拦截了「{summary}」。不要重试这一步;如确有必要,先向用户说明再等新指令。"
             )))
         }
-        ApprovalChoice::Always if class == RiskClass::Input => {
-            // 输入动作上的「always」不是「记住」,是**限时授权**(工单 13):
+        ApprovalChoice::Always if class == RiskClass::Input && mode == ApprovalMode::Strict => {
+            // 严格档下输入动作上的「always」不是「记住」,是**限时授权**(工单 13):
             // 只在当前回合作数、到期自动失效、敏感场景不适用、Esc 可收回。
             let Some((session_id, epoch)) = &step_scope else {
                 // 没有会话归属(手工直连)时退化成一放一步,不给跨调用的授权。
@@ -424,7 +429,9 @@ pub async fn gate(
             charge_step(app, companion, input, &step_scope, max_steps, class)
         }
         ApprovalChoice::Always => {
-            // 「按会话记住」只覆盖只读:敏感场景的 always 也按单步放行处理。
+            // 走到这里的是「本会话记住」:严格档的只读(按 op 记),或 `session` 档的
+            // 非敏感输入(记一条输入键)。敏感场景的 always 也按单步放行处理
+            // (rememberable 已被 decide 压成 false)。
             let remembered = rememberable;
             if remembered {
                 if let Some(session_id) = input.session_id {
@@ -528,8 +535,11 @@ pub struct ApprovalRequestSpec {
     pub risk: RiskClass,
     pub sensitive: Option<&'static str>,
     pub rememberable: bool,
-    /// 界面可提供的限时授权时长(输入动作有,只读没有)。
+    /// 界面可提供的限时授权时长(严格档的输入动作有,其余没有)。
     pub grant_seconds: Option<u64>,
+    /// 「本会话记住」的适用范围标记(目前只有 `"session"`);None = 这次没有记住选项,
+    /// 或记住走的是限时授权(严格档输入动作)。
+    pub remember_scope: Option<&'static str>,
 }
 
 pub fn build_approval_request_event(
@@ -548,6 +558,7 @@ pub fn build_approval_request_event(
             "risk": spec.risk,
             "sensitive": spec.sensitive,
             "rememberable": spec.rememberable,
+            "rememberScope": spec.remember_scope,
             "grant": spec.grant_seconds.map(|seconds| serde_json::json!({
                 "ttlSeconds": seconds,
                 "scope": "本回合的输入动作",
@@ -704,6 +715,8 @@ mod tests {
             rememberable: false,
             // 输入动作会带上限时授权时长,界面据此给出「允许 N 分钟」。
             grant_seconds: Some(guard::CONTROL_SESSION_TTL.as_secs()),
+            // 严格档输入动作走限时授权,不是「本会话记住」。
+            remember_scope: None,
         };
         let event = build_approval_request_event(&spec, &json!({ "elementId": "e3" }));
         assert_eq!(event.session_id, "session-1");
@@ -714,6 +727,7 @@ mod tests {
         assert_eq!(event.event["params"]["elementId"], "e3");
         assert_eq!(event.event["grant"]["ttlSeconds"], json!(180));
         assert_eq!(event.event["grant"]["scope"], "本回合的输入动作");
+        assert!(event.event["rememberScope"].is_null());
     }
 
     #[test]
@@ -728,12 +742,38 @@ mod tests {
             sensitive: None,
             rememberable: true,
             grant_seconds: None,
+            remember_scope: Some("session"),
         };
         let event = build_approval_request_event(&spec, &json!({}));
         assert!(
             event.event["grant"].is_null(),
             "只读没有限时授权这一说:它有「本会话记住」"
         );
+        assert_eq!(
+            event.event["rememberScope"], "session",
+            "只读的「本会话记住」按 op 记"
+        );
+    }
+
+    #[test]
+    fn a_session_mode_input_request_offers_session_memory_not_a_grant() {
+        // `session` 档:非敏感输入给「本会话记住」,不给限时授权。
+        let spec = ApprovalRequestSpec {
+            request_id: "req-3".to_string(),
+            session_id: Some("session-1".to_string()),
+            tool: "browser_click".to_string(),
+            op: "click".to_string(),
+            summary: "点击元素 e3".to_string(),
+            risk: RiskClass::Input,
+            sensitive: None,
+            rememberable: true,
+            grant_seconds: None,
+            remember_scope: Some("session"),
+        };
+        let event = build_approval_request_event(&spec, &json!({}));
+        assert!(event.event["grant"].is_null(), "session 档不给限时授权");
+        assert_eq!(event.event["rememberScope"], "session");
+        assert_eq!(event.event["rememberable"], true);
     }
 
     #[test]

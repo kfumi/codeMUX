@@ -48,6 +48,7 @@ describe('parseComputerUseApprovalEvent', () => {
         risk: 'input',
         sensitive: null,
         rememberable: false,
+        rememberScope: null,
         // 这一帧没有 limit 授权字段:界面就不该出现「允许 N 分钟」。
         grant: null,
         params: { elementId: 'e7', text: '<已脱敏 12 字>' },
@@ -107,7 +108,7 @@ describe('approval queue', () => {
 describe('granularity options', () => {
   it('offers session memory for read-only requests the daemon allows to remember', () => {
     const options = computerUseApprovalOptions(
-      request({ op: 'snapshot', risk: 'readOnly', rememberable: true }),
+      request({ op: 'snapshot', risk: 'readOnly', rememberable: true, rememberScope: 'session' }),
     );
     expect(options.map((option) => option.choice)).toEqual(['once', 'always', 'reject']);
   });
@@ -115,7 +116,18 @@ describe('granularity options', () => {
   it('never offers session memory for input actions without a grant', () => {
     const options = computerUseApprovalOptions(request({ risk: 'input' }));
     expect(options.map((option) => option.choice)).toEqual(['once', 'reject']);
-    expect(options[0].description).toContain('每次都询问');
+    expect(options[0].description).toContain('只允许这一次');
+  });
+
+  it('offers session memory for non-sensitive input in the session mode', () => {
+    // `session` 档:非敏感输入带 rememberScope='session',给「本会话记住」而不是限时授权。
+    const options = computerUseApprovalOptions(
+      request({ risk: 'input', rememberable: true, rememberScope: 'session' }),
+    );
+    expect(options.map((option) => option.choice)).toEqual(['once', 'always', 'reject']);
+    const remember = options.find((option) => option.choice === 'always');
+    expect(remember?.label).toBe('本会话记住');
+    expect(remember?.description).toContain('本会话');
   });
 
   it('offers a time-boxed grant for input actions when the daemon allows one', () => {

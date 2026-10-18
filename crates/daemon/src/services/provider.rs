@@ -323,10 +323,11 @@ pub fn set_computer_use_for_companion(
         .filter(|command| !command.is_empty());
     info!(
         target: "provider",
-        "Setting computer use enabled={} system_execution={} allowlist_entries={} max_steps={}",
+        "Setting computer use enabled={} system_execution={} allowlist_entries={} approval_mode={:?} max_steps={}",
         settings.enabled,
         settings.system_execution_enabled,
         settings.allowlist.len(),
+        settings.approval_mode,
         settings.max_steps
     );
     let mut config = state.config.lock().unwrap();

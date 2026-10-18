@@ -45,6 +45,7 @@ describe('ComputerUseApprovalCard', () => {
           op: 'snapshot',
           risk: 'readOnly',
           rememberable: true,
+          rememberScope: 'session',
           summary: '读取页面快照(编号截图加元素列表)',
         })}
         onResponse={onResponse}

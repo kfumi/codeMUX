@@ -85,6 +85,10 @@ pub struct CompanionInner {
     /// 上一次广播出去的活动状态「显著部分」(见 [`activity_change_key`]):只在它变了才
     /// 发帧 —— 步数与起始时间每走一步都会变,不能拿来当发帧依据。
     last_published_activity: Mutex<Option<ActivityChangeKey>>,
+    /// 空闲回收唤醒的代次(工单:提示条空闲自动收起)。每次标记活动都自增并预约一个
+    /// `now + ACTIVITY_IDLE` 的发布;到点时若代次没变(期间没有新动作),就把
+    /// `active:false` 推给控制面,提示条与全局 Esc 收起。
+    activity_wakeup_generation: AtomicU64,
 }
 
 /// 活动状态的显著部分:(整机有没有活动, [(会话, 有没有在等放行)])。
@@ -140,6 +144,7 @@ impl CompanionInner {
             // 初值当作「已经公布过空闲」:否则启动后第一次标记/回合开始时,会先给
             // 控制面发一帧「没有活动」的噪声 —— 那不是变化,只是还没有人说过话。
             last_published_activity: Mutex::new(Some((false, Vec::new()))),
+            activity_wakeup_generation: AtomicU64::new(0),
         }
     }
 
@@ -399,6 +404,63 @@ impl CompanionState {
             "payload": serde_json::to_value(snapshot)
                 .unwrap_or_else(|_| serde_json::json!({ "active": false, "sessions": [] })),
         })
+    }
+
+    /// 标记本会话正在驱动桌面,并把空闲兜底排上。
+    ///
+    /// 标记会刷新 `last_ms`,所以每个新动作都把提示条与 Esc 的寿命顺延
+    /// [`ACTIVITY_IDLE`](crate::computer_use::activity::ACTIVITY_IDLE);动作停了以后靠这里
+    /// 预约的一次性唤醒把它收掉 —— 只靠回合结束清除是不够的(回合可以还在跑别的事)。
+    pub fn mark_computer_use_activity(&self, session_id: &str, epoch: u64, steps: u32) {
+        self.inner
+            .computer_use_activity
+            .mark(session_id, epoch, steps);
+        self.publish_computer_use_activity_if_changed();
+        self.schedule_computer_use_idle_wakeup();
+    }
+
+    /// 审批挂起/离开,变化时广播;离开(动作即将继续)时重新计时并排下一次空闲唤醒。
+    pub fn set_computer_use_awaiting_approval(&self, session_id: &str, awaiting: bool) {
+        if !self
+            .inner
+            .computer_use_activity
+            .set_awaiting_approval(session_id, awaiting)
+        {
+            return;
+        }
+        self.publish_computer_use_activity_if_changed();
+        if !awaiting {
+            self.schedule_computer_use_idle_wakeup();
+        }
+    }
+
+    /// 预约一次 `now + ACTIVITY_IDLE` 的空闲回收发布。
+    ///
+    /// 带代次守卫:期间任何新标记/审批变化都会自增代次,到点的旧任务直接作废,更新的任务
+    /// 负责收尾。没有 tokio 运行时(同步单测路径)时静默跳过 —— 发布本身仍由各调用点触发,
+    /// 这里只补上「没人再动了」的那一次。
+    fn schedule_computer_use_idle_wakeup(&self) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let generation = self
+            .inner
+            .activity_wakeup_generation
+            .fetch_add(1, Ordering::SeqCst)
+            + 1;
+        let state = self.clone();
+        handle.spawn(async move {
+            tokio::time::sleep(crate::computer_use::activity::ACTIVITY_IDLE).await;
+            if state
+                .inner
+                .activity_wakeup_generation
+                .load(Ordering::SeqCst)
+                != generation
+            {
+                return;
+            }
+            state.publish_computer_use_activity_if_changed();
+        });
     }
 
     pub fn enqueue_message(
@@ -740,6 +802,34 @@ mod tests {
         assert_eq!(frame["type"], "event");
         assert_eq!(frame["sessionId"], "");
         assert_eq!(frame["event"]["name"], "computer-use-activity");
+    }
+
+    #[tokio::test]
+    async fn an_idle_mark_stops_being_activity() {
+        // 提示条空闲自动收起:CUA 调完、回合还在跑,超过 ACTIVITY_IDLE 没新动作就该收。
+        let state = CompanionState::new();
+        state.inner.set_loopback_running(true);
+        let epoch = state.mark_turn_active("session-a");
+        let stale = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64)
+            - crate::computer_use::activity::ACTIVITY_IDLE.as_millis() as u64
+            - 1_000;
+        state
+            .inner
+            .computer_use_activity
+            .mark_at("session-a", epoch, 0, stale);
+
+        assert!(!state.computer_use_snapshot().active, "空闲标记不再算活动");
+        assert!(
+            !state.publish_computer_use_activity_if_changed(),
+            "公布过空闲后,空闲本身不是新变化(不重复发帧)"
+        );
+
+        // 新动作重新点亮:提示条与 Esc 重新武装,空闲计时从头算。
+        state.mark_computer_use_activity("session-a", epoch, 1);
+        assert!(state.computer_use_snapshot().active);
     }
 
     #[test]

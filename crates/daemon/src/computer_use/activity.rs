@@ -13,9 +13,17 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+
+/// 空闲回收窗口:超过这么久没有新的驱动动作,该会话的标记就不再算「正在被驱动」。
+///
+/// 与只清除路径(回合结束 / 代次前移 / 急停 / 进程退出)互补:一个回合里 CUA 调完
+/// 之后模型继续做别的事,标记本来会一直挂着,提示条与全局 Esc 也就一直不撤。取 30s
+/// 而不是更短:单个桌面动作本身可以跑很久(等窗口稳定、等元素出现),太短会在动作
+/// 中途熄灭提示。
+pub const ACTIVITY_IDLE: Duration = Duration::from_secs(30);
 
 /// 一次会话的桌面活动标记。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +32,8 @@ pub struct ActivityMark {
     pub epoch: u64,
     /// 本回合第一次试图驱动桌面的时刻(Unix 毫秒)。
     pub since_ms: u64,
+    /// 本回合最近一次驱动动作(或审批状态变化)的时刻(Unix 毫秒):空闲回收据此计时。
+    pub last_ms: u64,
     /// 标记时本回合已用掉的步数(诊断信息,不是判据)。
     pub steps: u32,
     /// 本回合是否有电脑控制审批挂着(界面据此说「正在等放行」)。
@@ -71,20 +81,26 @@ impl ComputerUseActivity {
 
     /// 标记「这个回合试图驱动桌面」。
     ///
-    /// 同一回合并重复调用只刷新步数;代次变了(新回合)则重新计时,不继承上一回合的
-    /// 起始时间与待放行状态。
+    /// 同一回合并重复调用只刷新步数与最近活动时间;代次变了(新回合)则重新计时,不继承
+    /// 上一回合的起始时间与待放行状态。
     pub fn mark(&self, session_id: &str, epoch: u64, steps: u32) {
+        self.mark_at(session_id, epoch, steps, now_ms());
+    }
+
+    /// 带显式时刻的标记(测试缝:空闲判据要能被钉住)。
+    pub(crate) fn mark_at(&self, session_id: &str, epoch: u64, steps: u32, at_ms: u64) {
         let mut marks = self.marks.lock().expect("activity lock");
-        let since_ms = now_ms();
         marks
             .entry(session_id.to_string())
             .and_modify(|mark| {
                 if mark.epoch == epoch {
                     mark.steps = steps;
+                    mark.last_ms = at_ms;
                 } else {
                     *mark = ActivityMark {
                         epoch,
-                        since_ms,
+                        since_ms: at_ms,
+                        last_ms: at_ms,
                         steps,
                         awaiting_approval: false,
                     };
@@ -92,13 +108,17 @@ impl ComputerUseActivity {
             })
             .or_insert(ActivityMark {
                 epoch,
-                since_ms,
+                since_ms: at_ms,
+                last_ms: at_ms,
                 steps,
                 awaiting_approval: false,
             });
     }
 
     /// 审批挂起/离开。返回是否真的变了(没标记的会话不动)。
+    ///
+    /// 状态一变就刷新 `last_ms`:审批开始与审批回来都是「有人在管这件事」,不该因为
+    /// 审批期间没有新动作而被空闲回收掉。
     pub fn set_awaiting_approval(&self, session_id: &str, awaiting: bool) -> bool {
         let mut marks = self.marks.lock().expect("activity lock");
         let Some(mark) = marks.get_mut(session_id) else {
@@ -108,6 +128,7 @@ impl ComputerUseActivity {
             return false;
         }
         mark.awaiting_approval = awaiting;
+        mark.last_ms = now_ms();
         true
     }
 
@@ -128,14 +149,16 @@ impl ComputerUseActivity {
         count
     }
 
-    /// 取快照:只保留 `is_current(会话, 代次)` 认可的标记,并顺手剔掉不认可的
-    /// (回合已经不在跑、或代次已经前移的陈旧残留不会一直挂在状态里)。
+    /// 取快照:只保留 `is_current(会话, 代次)` 认可且未空闲的标记,并顺手剔掉不认可的
+    /// (回合已经不在跑、代次已经前移、或超过 [`ACTIVITY_IDLE`] 没动作的陈旧残留不会
+    /// 一直挂在状态里)。
     pub fn snapshot_where<F>(&self, is_current: F) -> ActivitySnapshot
     where
         F: Fn(&str, u64) -> bool,
     {
+        let now = now_ms();
         let mut marks = self.marks.lock().expect("activity lock");
-        marks.retain(|session_id, mark| is_current(session_id, mark.epoch));
+        marks.retain(|session_id, mark| is_current(session_id, mark.epoch) && !is_idle(mark, now));
         let mut sessions: Vec<ActivitySession> = marks
             .iter()
             .map(|(session_id, mark)| ActivitySession {
@@ -176,6 +199,16 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// 标记是否已经空闲:超过 [`ACTIVITY_IDLE`] 没有新的驱动动作,且此刻不在等放行。
+///
+/// 等放行不算空闲 —— 审批卡最长挂 120s,那段时间用户正在决定,提示条与 Esc 必须留着。
+fn is_idle(mark: &ActivityMark, now_ms: u64) -> bool {
+    if mark.awaiting_approval {
+        return false;
+    }
+    now_ms.saturating_sub(mark.last_ms) >= ACTIVITY_IDLE.as_millis() as u64
 }
 
 #[cfg(test)]
@@ -258,5 +291,50 @@ mod tests {
             "状态没变就不是变化"
         );
         assert!(activity.snapshot().sessions[0].awaiting_approval);
+    }
+
+    #[test]
+    fn idle_marks_are_reclaimed_once_nothing_touched_the_desktop() {
+        let activity = ComputerUseActivity::new();
+        let stale = now_ms().saturating_sub(ACTIVITY_IDLE.as_millis() as u64 + 1_000);
+        activity.mark_at("session-a", 1, 0, stale);
+
+        assert!(
+            !activity.snapshot().active,
+            "超过空闲窗口就不再算「正在被驱动」(提示条与 Esc 该收了)"
+        );
+        assert!(!activity.is_marked("session-a"), "空闲标记被顺手回收");
+    }
+
+    #[test]
+    fn is_idle_treats_awaiting_approval_as_activity() {
+        let idle = ActivityMark {
+            epoch: 1,
+            since_ms: 0,
+            last_ms: 0,
+            steps: 0,
+            awaiting_approval: false,
+        };
+        assert!(is_idle(&idle, ACTIVITY_IDLE.as_millis() as u64));
+
+        let waiting = ActivityMark {
+            awaiting_approval: true,
+            ..idle
+        };
+        assert!(
+            !is_idle(&waiting, ACTIVITY_IDLE.as_millis() as u64 * 10),
+            "等放行期间不论挂多久都不算空闲"
+        );
+    }
+
+    #[test]
+    fn a_new_action_resets_the_idle_clock() {
+        let activity = ComputerUseActivity::new();
+        let stale = now_ms().saturating_sub(ACTIVITY_IDLE.as_millis() as u64 + 5_000);
+        activity.mark_at("session-a", 1, 0, stale);
+        assert!(!activity.snapshot().active);
+
+        activity.mark_at("session-a", 1, 1, now_ms());
+        assert!(activity.snapshot().active, "同一回合里的新动作重新计时");
     }
 }

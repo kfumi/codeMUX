@@ -1036,11 +1036,7 @@ fn mark_computer_use_activity(ctx: &ServerContext, session_id: Option<&str>) {
     // 代次取的是「当前回合」:正常路径上闸门受理的调用必然属于正在跑的回合。
     let epoch = companion.turn_epoch(session_id).unwrap_or(0);
     let steps = companion.inner.step_budget.used_in_turn(session_id, epoch);
-    companion
-        .inner
-        .computer_use_activity
-        .mark(session_id, epoch, steps);
-    companion.publish_computer_use_activity_if_changed();
+    companion.mark_computer_use_activity(session_id, epoch, steps);
 }
 
 /// 一次桌面工具调用的完整链路:驱动就绪 → 参数翻译 → 动作前裁决 → 闸门 →

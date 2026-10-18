@@ -201,7 +201,7 @@
 
 ### adr
 
-架构决策记录见 [adr/](adr/),当前 0002–0014,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
+架构决策记录见 [adr/](adr/),当前 0002–0019,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
 
 近期记录:
 
@@ -213,6 +213,7 @@
 - [0016 — 模型展示名来自目录，手写映射表退役](adr/0016-model-display-names-from-catalog.md)
 - [0017 — OpenCode 免费模型以虚拟供应商进入选择器，发送走原生 opencode provider](adr/0017-opencode-free-models-virtual-provider.md)
 - [0018 — 电脑控制「正在驱动」与急停的权威移入 daemon，壳退化为显示/输入适配器](adr/0018-computer-use-activity-authority-in-daemon.md)
+- [0019 — 电脑控制审批口径（严格/本会话/持久）与提示条 30s 空闲回收](adr/0019-computer-use-approval-modes-and-idle-reclaim.md)
 
 ### agents
 

@@ -28,6 +28,7 @@ const SETTINGS: ComputerUseSettings = {
   enabled: true,
   system_execution_enabled: true,
   allowlist: ['Notepad'],
+  approval_mode: 'session',
   max_steps: 12,
   driver_command: 'cua-driver',
   driver_args: ['--stdio'],
@@ -54,6 +55,7 @@ describe('daemonFacade config patch keys', () => {
     const body = patchAppConfig.mock.calls[0][0] as { computerUse: Record<string, unknown> };
     expect(Object.keys(body.computerUse).sort()).toEqual([
       'allowlist',
+      'approval_mode',
       'driver_args',
       'driver_command',
       'driver_update_command',

@@ -3,17 +3,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
+  COMPUTER_USE_APPROVAL_MODES,
   COMPUTER_USE_MAX_STEPS,
   COMPUTER_USE_MIN_STEPS,
   formatAllowlistInput,
   normalizeComputerUse,
   parseAllowlistInput,
+  type ComputerUseApprovalMode,
 } from '../../lib/computerUseSettings';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Input } from '../ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { TooltipHint } from '../ui/tooltip';
 import { SettingsCard, SettingsRow, SettingsSection } from './SettingsRow';
@@ -81,6 +84,7 @@ export function ComputerUseSettings() {
   const [allowlistDraft, setAllowlistDraft] = useState<string | null>(null);
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
   const [installConfirmOpen, setInstallConfirmOpen] = useState(false);
+  const [alwaysConfirmOpen, setAlwaysConfirmOpen] = useState(false);
 
   const computerUse = normalizeComputerUse(config?.computer_use);
 
@@ -157,6 +161,15 @@ export function ComputerUseSettings() {
     await runAction('install', () => daemonFacade.computerUse.installDriver(), '安装脚本已执行');
   };
 
+  /** 审批方式:换成「持久放行」前先确认一次(它放宽的幅度最大)。 */
+  const chooseApprovalMode = (value: ComputerUseApprovalMode) => {
+    if (value === 'always') {
+      setAlwaysConfirmOpen(true);
+      return;
+    }
+    update({ approval_mode: value });
+  };
+
   const allowlistText = allowlistDraft ?? formatAllowlistInput(computerUse.allowlist);
   const allowlistDirty = allowlistDraft !== null;
   // daemon 不可达时退回内置清单:拒绝列表不可删除这件事必须在界面上看得见,
@@ -187,7 +200,7 @@ export function ComputerUseSettings() {
             label="系统级执行"
             description={
               <>
-                开启后驱动才能启动，智能体可操作原生界面；每一步输入动作仍要你放行
+                开启后驱动才能启动，智能体可操作原生界面；输入动作按「审批方式」放行
                 <span className="mt-0.5 block">任务期间临时接管全局 Esc 用于急停，结束即解除</span>
               </>
             }
@@ -197,6 +210,27 @@ export function ComputerUseSettings() {
                 checked={computerUse.system_execution_enabled}
                 onCheckedChange={(checked) => update({ system_execution_enabled: checked })}
               />
+            }
+          />
+          <SettingsRow
+            label="审批方式"
+            description="非敏感动作多久问一次；敏感场景始终逐步确认"
+            control={
+              <Select
+                value={computerUse.approval_mode}
+                onValueChange={(value) => chooseApprovalMode(value as ComputerUseApprovalMode)}
+              >
+                <SelectTrigger aria-label="审批方式" size="sm" className="w-44">
+                  <SelectValue placeholder="选择审批方式" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMPUTER_USE_APPROVAL_MODES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             }
           />
           <SettingsRow
@@ -377,6 +411,19 @@ export function ComputerUseSettings() {
         cancelLabel="取消"
         onConfirm={() => void runInstall()}
         loading={busy === 'install'}
+      />
+
+      <ConfirmDialog
+        open={alwaysConfirmOpen}
+        onOpenChange={setAlwaysConfirmOpen}
+        title="开启持久放行？"
+        description="非敏感输入动作将不再逐次询问；敏感场景（登录、支付、验证码、密码、删除、关闭防护）仍然每一步都要你确认。"
+        confirmLabel="开启持久放行"
+        cancelLabel="取消"
+        onConfirm={() => {
+          update({ approval_mode: 'always' });
+          setAlwaysConfirmOpen(false);
+        }}
       />
 
       <SettingsSection label="驱动配置">

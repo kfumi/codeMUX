@@ -61,6 +61,7 @@ describe('ComputerUseSettings', () => {
           enabled: false,
           system_execution_enabled: false,
           allowlist: [],
+          approval_mode: 'strict',
           max_steps: 40,
           driver_command: null,
           driver_args: [],
@@ -81,6 +82,15 @@ describe('ComputerUseSettings', () => {
     await waitFor(() => expect(screen.getByText('密码管理器')).toBeTruthy());
     expect(screen.getByText('终端')).toBeTruthy();
     expect(screen.getByText('CodeMUX 自身与安装更新器')).toBeTruthy();
+  });
+
+  it('exposes the approval mode setting', async () => {
+    render(<ComputerUseSettings />);
+
+    expect(screen.getByText('审批方式')).toBeTruthy();
+    // 描述要留一句「敏感场景始终逐步确认」:无论选哪个档位都不放宽敏感场景。
+    expect(screen.getByText(/敏感场景始终逐步确认/)).toBeTruthy();
+    expect(screen.getByLabelText('审批方式')).toBeTruthy();
   });
 
   it('persists the allowlist through the settings store', async () => {

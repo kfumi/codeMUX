@@ -94,6 +94,9 @@
 - 键位提示跟随改键：侧栏「新对话 / 搜索」在该行悬停或键盘聚焦时显示当前键位，标题栏、设置与停止按钮的 tooltip 及 `aria-keyshortcuts` 同步更新
 - 决策与取舍见 [ADR 0013](docs/adr/0013-user-configurable-keyboard-shortcuts.md)
 
+#### 电脑控制
+- 新增「审批方式」设置（设置 → 电脑控制，默认最严格）：**逐次确认**（只读按会话记住、输入动作逐步问或给限时授权）/ **本会话记住**（只读免问，非敏感输入首次确认后本会话不再问）/ **持久放行**（非敏感输入不再询问，开启前再确认一次）。敏感场景（登录/支付/验证码/密码/删除/关闭防护）、受保护目标硬拒与步数上限在任何档位下都不放宽；这仍是 CodeMUX 闸门自己的口径，输入动作在智能体任何权限模式下都不豁免
+
 #### MCP 与内置自动化
 - 新增 `computer_save_screenshot`：把某个窗口的画面直接落盘成 PNG（后台截取、不抢焦点），「截图存盘」类任务不再需要模型自己拼 shell 脚本；只做窗口级，整屏仍走 `computer_screenshot`（保留前台受保护应用的整屏拒拍）。内置 MCP 的电脑控制工具由 14 增至 15
 - 电脑控制的元素级动作（`computer_type` / `computer_key` / `computer_scroll` / `computer_click` / `computer_set_value`）明确 `elementIndex` 必须与 `computer_elements` 回包里的 `snapshotId` 成对：`computer_elements` 的回执现在带上 `snapshotId`，缺配对在本地即被拒并给出可行动的措辞（此前会带着驱动的 `bare element_index is not accepted` 失败）
@@ -111,6 +114,7 @@
 - 新增 daemon→壳受控自动化接缝：桌面 UI 事件出口（sessions-changed 等）与浏览器自动化请求队列，均复用既有控制面 WS 通道
 - 桌面 UI、移动伴侣（PWA）与本机 CLI 统一为 Daemon Client，共享回环 Companion REST/WS + CodeMUX Event 协议
 - 「电脑控制」的活动真值与急停权威收敛到 daemon 后，删掉渲染层那条旧路径（并存期结束）：渲染层不再计算「该不该武装」、不再发武装心跳，`codemux:setEmergencyStopArmed` / `codemux:emergencyStopHeartbeat` 两个 IPC 通道、心跳看门狗（`armed-heartbeat.ts`）与工具名判定（`computerUseActivity.ts`）一并退役。现在提示条与全局 Esc **只认 daemon 的活动事件**，活性判据是控制面链路（含 Ping/Pong 保活）：链路断开、daemon 报没有活动、或注册不到全局 Esc 时一律 fail-hidden；渲染进程崩掉 / 卡死 / 根本没加载都不再影响这台机器上的提示与急停
+- 「CodeMUX 正在操作电脑」提示条与全局 Esc 新增 **30s 空闲自动收起**（判据是 daemon 侧「最后一次驱动动作的时刻」）：一个回合里 CUA 调完之后模型继续做别的事时，不再长期挂着提示条、占用全局 Esc；下一次 CUA 动作重新点亮。等待你放行期间不算空闲（审批卡最长挂 120s，那段时间是你在决定）。见 [ADR 0019](docs/adr/0019-computer-use-approval-modes-and-idle-reclaim.md)
 
 #### Agent 运行时
 - 新增 `pi` 运行时：基于 pi RPC 的极简多供应商编码 Agent，支持会话恢复、工具审批、`AskUserQuestion` 与 steer

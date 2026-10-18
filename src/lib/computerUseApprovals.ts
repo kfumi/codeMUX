@@ -19,8 +19,13 @@ export interface ComputerUseApprovalRequest {
   risk: ComputerUseRisk;
   /** 命中的敏感场景（登录/支付/验证码/密码/删除/关闭防护）。 */
   sensitive?: string | null;
-  /** 界面是否提供「本会话记住」（只读）。 */
+  /** 界面是否提供「本会话记住」。 */
   rememberable: boolean;
+  /**
+   * 「本会话记住」的适用范围：`'session'` = 记住后本会话同类不再问（严格档的只读、
+   * `session` 档的非敏感输入）；null/缺省 = 没有记住选项，或记住走的是限时授权。
+   */
+  rememberScope?: 'session' | null;
   /**
    * 输入动作的限时授权（工单 13）：daemon 给出时长，界面据此提供
    * 「允许 N 分钟」——授权只在当前回合作数，到期或被 Esc 收回即失效。
@@ -76,6 +81,7 @@ export function parseComputerUseApprovalEvent(
       risk,
       sensitive: readString(value, 'sensitive') ?? null,
       rememberable: value.rememberable === true,
+      rememberScope: value.rememberScope === 'session' ? 'session' : null,
       grant: readGrant(value.grant),
       params: isRecord(value.params) ? value.params : undefined,
     },
@@ -121,8 +127,9 @@ export function dequeueComputerUseApproval(
 }
 
 /**
- * 粒度选项（需求 18、23；工单 13 补限时授权）：
- * - 只读且 daemon 允许记住 → 放行 / 本会话记住 / 拦截；
+ * 粒度选项（需求 18、23；工单 13 补限时授权；低摩擦档位补「本会话记住」的输入形态）：
+ * - daemon 允许记住（`rememberScope === 'session'`）→ 放行 / 本会话记住 / 拦截；
+ *   只读按 op 记，「本会话记住」档的非敏感输入记一条输入键；
  * - 输入动作带限时授权 → 放行 / 允许 N 分钟 / 拦截（授权限时、限本回合，
  *   敏感场景不出现这个选项，受保护目标也不在授权范围内）；
  * - 敏感场景 → 只有单步放行与拦截。
@@ -131,33 +138,29 @@ export function computerUseApprovalOptions(
   request: ComputerUseApprovalRequest,
 ): ComputerUseApprovalOption[] {
   const options: ComputerUseApprovalOption[] = [];
-  if (request.risk === 'readOnly' && request.rememberable) {
+  options.push({
+    choice: 'once',
+    label: '放行',
+    description: request.sensitive
+      ? '只允许这一次；敏感场景每一步都要确认。'
+      : '只允许这一次。',
+  });
+  if (!request.sensitive && request.grant) {
+    const minutes = Math.max(1, Math.round(request.grant.ttlSeconds / 60));
     options.push({
-      choice: 'once',
-      label: '放行',
-      description: '只允许这一次。',
+      choice: 'always',
+      label: `允许 ${minutes} 分钟`,
+      description: `本回合内的输入动作不再逐次询问；到期、本回合结束或按 Esc 都会失效，敏感场景仍然逐次确认。`,
     });
+  } else if (request.rememberable && request.rememberScope === 'session') {
     options.push({
       choice: 'always',
       label: '本会话记住',
-      description: '本会话内同类的只读操作不再询问。',
+      description:
+        request.risk === 'input'
+          ? '本会话内同类输入动作不再询问；敏感场景仍然逐次确认。'
+          : '本会话内同类的只读操作不再询问。',
     });
-  } else {
-    options.push({
-      choice: 'once',
-      label: '放行',
-      description: request.sensitive
-        ? '只允许这一次；敏感场景每一步都要确认。'
-        : '只允许这一次；输入动作每次都询问。',
-    });
-    if (!request.sensitive && request.grant) {
-      const minutes = Math.max(1, Math.round(request.grant.ttlSeconds / 60));
-      options.push({
-        choice: 'always',
-        label: `允许 ${minutes} 分钟`,
-        description: `本回合内的输入动作不再逐次询问；到期、本回合结束或按 Esc 都会失效，敏感场景仍然逐次确认。`,
-      });
-    }
   }
   options.push({
     choice: 'reject',

@@ -178,11 +178,16 @@ export interface BrowserControlSettings {
   ignore_certificate_errors: boolean;
 }
 
+/** 电脑控制的审批口径(与 daemon `ApprovalMode` 的 snake_case 一致)。 */
+export type ComputerUseApprovalMode = 'strict' | 'session' | 'always';
+
 export interface ComputerUseSettings {
   enabled: boolean;
   system_execution_enabled: boolean;
   /** 允许列表:空 = 除内置拒绝外全部可操作;逐行写应用名。 */
   allowlist: string[];
+  /** 审批口径:strict 逐次确认(默认) / session 本会话记住 / always 持久放行。 */
+  approval_mode: ComputerUseApprovalMode;
   /** 步数上限(循环护栏)。 */
   max_steps: number;
   /** 外部驱动命令(stdio MCP)。 */

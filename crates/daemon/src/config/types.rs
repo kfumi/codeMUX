@@ -138,6 +138,23 @@ fn default_listen_address() -> String {
     "0.0.0.0".to_string()
 }
 
+/// 电脑控制审批口径(低摩擦档位,用户可选)。
+///
+/// 默认 [`ApprovalMode::Strict`] = 逐次确认(工单 03/13 的原始口径)。宽松档位只降低
+/// **非敏感输入**的提问频率,三条不变量原样保留:敏感场景逐次确认、受保护目标硬拒、
+/// 步数上限照常。批准一次覆盖的范围由档位显式给出,不是隐式的「记住」。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    /// 逐次确认:只读本会话记住,输入动作逐步问(或点一次限时授权)。
+    #[default]
+    Strict,
+    /// 只读免问;非敏感输入「本会话记住」(首次弹一次后本会话免问)。
+    Session,
+    /// 只读免问;非敏感输入持久放行(设置本身即用户同意)。
+    Always,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComputerUseConfig {
     /// 桌面只读观测总开关(窗口清单/截图/活动窗口)。
@@ -149,6 +166,9 @@ pub struct ComputerUseConfig {
     /// 允许列表:空 = 除内置拒绝外全部可操作;逐行写应用名。
     #[serde(default)]
     pub allowlist: Vec<String>,
+    /// 审批口径(见 [`ApprovalMode`])。默认 `strict`。
+    #[serde(default)]
+    pub approval_mode: ApprovalMode,
     /// 步数上限(循环护栏)。
     #[serde(default = "default_computer_use_max_steps")]
     pub max_steps: u32,
@@ -173,6 +193,7 @@ impl Default for ComputerUseConfig {
             enabled: false,
             system_execution_enabled: false,
             allowlist: Vec::new(),
+            approval_mode: ApprovalMode::Strict,
             max_steps: default_computer_use_max_steps(),
             driver_command: None,
             driver_args: Vec::new(),

@@ -2,14 +2,15 @@
 //!
 //! 分权模型(需求 18、21、23):
 //!
-//! - **只读**(快照、截图、窗口列表)走轻量确认,可「按会话记住」;
-//! - **输入**(点击、输入、滚动、选择,以及任意 JS/CDP)一次一放行,
-//!   「记住」不生效;
+//! - **只读**(快照、截图、窗口列表)走轻量确认;
+//! - **输入**(点击、输入、滚动、选择,以及任意 JS/CDP)默认一次一放行;
 //! - **敏感场景**(登录、支付、验证码、密码、删除、关闭防护)强制人工确认,
-//!   会话记忆一律不命中。
+//!   会话记忆/宽松档位/限时授权一律不命中。
 //!
-//! 「输入动作在任何权限模式下都不豁免」在类型上就成立:[`decide`] 没有接收
-//! 权限档位的入参,调用方无法用 full_access/bypass 之类的东西换到放行。
+//! 提问频率由 **CodeMUX 闸门自己的口径** [`ApprovalMode`] 决定(用户在设置里选,
+//! 默认 [`ApprovalMode::Strict`] = 逐次确认):`session` 档只读免问、非敏感输入本会话
+//! 记住,`always` 档非敏感输入持久放行。这**不是**智能体的权限档位 —— 后者仍然无从
+//! 传入(`decide_with_grant` 只收闸门口径),所以 full_access/bypass 换不到豁免。
 //! 本模块全部是纯函数,便于行列式测试。
 
 use std::collections::{HashMap, HashSet};
@@ -17,6 +18,8 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use tokio::sync::{oneshot, Mutex};
+
+use crate::config::types::ApprovalMode;
 
 /// 人工放行的等待上限:超时按拒绝收口(fail closed)。
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -138,42 +141,63 @@ pub enum GateDecision {
     Ask { rememberable: bool },
 }
 
-/// 粒度决策。注意入参里没有权限档位 —— 输入动作与敏感场景的「必须人工
-/// 放行」不是靠校验某个模式实现的,而是无处可传,调用方换不到豁免。
-/// 粒度决策。注意入参里没有权限档位 —— 输入动作与敏感场景的「必须人工
-/// 放行」不是靠校验某个模式实现的,而是无处可传,调用方换不到豁免。
+/// 粒度决策(按默认严格口径)。
 pub fn decide(
     class: RiskClass,
     sensitive: Option<&str>,
     remembered_for_session: bool,
 ) -> GateDecision {
-    decide_with_grant(class, sensitive, remembered_for_session, false)
+    decide_with_grant(
+        class,
+        sensitive,
+        ApprovalMode::Strict,
+        remembered_for_session,
+        false,
+    )
 }
 
-/// 带限时授权的粒度决策(工单 13)。
+/// 带口径与限时授权的粒度决策(工单 13 + 低摩擦档位)。
 ///
-/// 授权只对**输入动作 × 非敏感**那一格生效:敏感场景永远逐次确认,只读
-/// 记忆只覆盖只读观测 —— 三条规矩互不覆盖,也不会互相借道。
+/// `mode` 是 CodeMUX 闸门自己的口径,不是智能体权限档位。无论哪个档位,敏感场景
+/// 永远逐次确认;`granted_for_turn` 只在 `strict` 的输入动作上有意义;
+/// `remembered_for_session` 在 `strict` 下是只读记忆键、在 `session` 下是「本会话的
+/// 非敏感输入」键(调用方按风险级取对应键)。
 pub fn decide_with_grant(
     class: RiskClass,
     sensitive: Option<&str>,
+    mode: ApprovalMode,
     remembered_for_session: bool,
     granted_for_turn: bool,
 ) -> GateDecision {
     if sensitive.is_some() {
-        // 敏感场景每一步都要人在当下确认:只读记忆不认,限时授权也不认。
+        // 敏感场景每一步都要人在当下确认:宽松档位、会话记忆、限时授权一律不认。
         return GateDecision::Ask {
             rememberable: false,
         };
     }
     match class {
-        RiskClass::ReadOnly if remembered_for_session => GateDecision::Auto,
-        RiskClass::ReadOnly => GateDecision::Ask { rememberable: true },
-        // 授权由人给出、限时、随回合作废,不改变「输入动作默认要问」。
-        RiskClass::Input if granted_for_turn => GateDecision::Auto,
-        // 这里的 `rememberable` 对输入动作的含义是「界面可提供限时授权」,
-        // 不是「本会话记住」—— 分流在 approval.rs,落地为 ControlSessions。
-        RiskClass::Input => GateDecision::Ask { rememberable: true },
+        RiskClass::ReadOnly => match mode {
+            // 宽松档位:只读观测不再逐次确认(执行仍记审计)。
+            ApprovalMode::Session | ApprovalMode::Always => GateDecision::Auto,
+            ApprovalMode::Strict if remembered_for_session => GateDecision::Auto,
+            ApprovalMode::Strict => GateDecision::Ask { rememberable: true },
+        },
+        RiskClass::Input => {
+            // 授权由人给出、限时、随回合作废,不改变「输入动作默认要问」。
+            if granted_for_turn {
+                return GateDecision::Auto;
+            }
+            match mode {
+                // 持久放行:用户在设置里开了这个档位,即视为对非敏感输入的持续同意。
+                ApprovalMode::Always => GateDecision::Auto,
+                // 本会话记住:命中即放行,否则问一次并允许记住。
+                ApprovalMode::Session if remembered_for_session => GateDecision::Auto,
+                ApprovalMode::Session => GateDecision::Ask { rememberable: true },
+                // 逐次确认:每次问;这里的 `rememberable` 对输入动作的含义是
+                // 「界面可提供限时授权」,不是「本会话记住」(分流在 approval.rs)。
+                ApprovalMode::Strict => GateDecision::Ask { rememberable: true },
+            }
+        }
     }
 }
 
@@ -238,6 +262,14 @@ impl ControlSessions {
 /// 会话记忆键:同一会话内记住的是「哪一类只读操作」,不是某一次调用。
 pub fn session_memory_key(op: &str) -> String {
     format!("read-only:{op}")
+}
+
+/// `session` 档「本会话记住」的输入记忆键:一个会话一条,覆盖全部非敏感输入动作。
+///
+/// 与只读键分开:只读记忆在 `strict` 档就有,输入记忆只在 `session` 档由用户显式
+/// 记住,两者互不借道(在 `strict` 档输入动作仍逐次确认)。
+pub fn input_memory_key() -> &'static str {
+    "input"
 }
 
 /// 人工决策(与既有审批界面同一套词:单步放行 / 按会话记住 / 拦截)。
@@ -507,12 +539,12 @@ mod tests {
     #[test]
     fn only_an_explicit_time_boxed_grant_skips_the_ask_for_input() {
         assert_eq!(
-            decide_with_grant(RiskClass::Input, None, false, true),
+            decide_with_grant(RiskClass::Input, None, ApprovalMode::Strict, false, true),
             GateDecision::Auto,
             "人工给过限时授权,授权内不再逐次问"
         );
         assert_eq!(
-            decide_with_grant(RiskClass::Input, None, true, false),
+            decide_with_grant(RiskClass::Input, None, ApprovalMode::Strict, true, false),
             GateDecision::Ask { rememberable: true },
             "授权不是「记住」:没有授权,只读记忆也换不到输入豁免"
         );
@@ -527,7 +559,13 @@ mod tests {
             }
         );
         assert_eq!(
-            decide_with_grant(RiskClass::Input, Some("支付"), true, true),
+            decide_with_grant(
+                RiskClass::Input,
+                Some("支付"),
+                ApprovalMode::Strict,
+                true,
+                true
+            ),
             GateDecision::Ask {
                 rememberable: false
             },
@@ -538,13 +576,57 @@ mod tests {
     #[test]
     fn input_actions_are_not_exempted_in_any_permission_mode() {
         for mode in PERMISSION_MODES {
-            // 权限档位不是 decide 的入参:这里按「最宽松」的场景构造输入动作
-            // (本会话已记住 + 已有授权也只在授权内生效),没有授权时必须仍是 Ask。
-            let decision = decide_with_grant(RiskClass::Input, None, true, false);
+            // 智能体权限档位不是 decide 的入参:这里按默认(严格)闸门口径、最宽松的场景
+            // 构造输入动作(本会话已记住 + 无授权),必须仍是 Ask。
+            let decision =
+                decide_with_grant(RiskClass::Input, None, ApprovalMode::Strict, true, false);
             assert_eq!(
                 decision,
                 GateDecision::Ask { rememberable: true },
                 "{mode} 下输入动作仍须人工放行"
+            );
+        }
+    }
+
+    #[test]
+    fn session_mode_remembers_non_sensitive_input_but_never_read_only_prompts() {
+        // 只读:两种宽松档位都免问。
+        for mode in [ApprovalMode::Session, ApprovalMode::Always] {
+            assert_eq!(
+                decide_with_grant(RiskClass::ReadOnly, None, mode, false, false),
+                GateDecision::Auto,
+                "{mode:?} 下只读免问"
+            );
+        }
+        // 非敏感输入:本会话记住前先问一次,记住后免问。
+        assert_eq!(
+            decide_with_grant(RiskClass::Input, None, ApprovalMode::Session, false, false),
+            GateDecision::Ask { rememberable: true }
+        );
+        assert_eq!(
+            decide_with_grant(RiskClass::Input, None, ApprovalMode::Session, true, false),
+            GateDecision::Auto,
+            "记住后本会话免问"
+        );
+    }
+
+    #[test]
+    fn always_mode_lets_non_sensitive_input_through_without_asking() {
+        assert_eq!(
+            decide_with_grant(RiskClass::Input, None, ApprovalMode::Always, false, false),
+            GateDecision::Auto
+        );
+    }
+
+    #[test]
+    fn lax_modes_still_confirm_sensitive_scenarios() {
+        for mode in [ApprovalMode::Session, ApprovalMode::Always] {
+            assert_eq!(
+                decide_with_grant(RiskClass::Input, Some("支付"), mode, true, false),
+                GateDecision::Ask {
+                    rememberable: false
+                },
+                "{mode:?} 下敏感场景仍逐步确认,且不给「记住」"
             );
         }
     }
@@ -583,6 +665,11 @@ mod tests {
         assert_ne!(
             session_memory_key("snapshot"),
             session_memory_key("screenshot")
+        );
+        assert_ne!(
+            input_memory_key(),
+            session_memory_key("snapshot"),
+            "输入记忆与只读记忆是两套键,互不借道"
         );
     }
 

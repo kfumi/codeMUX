@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  COMPUTER_USE_APPROVAL_MODES,
   COMPUTER_USE_MAX_STEPS,
   formatAllowlistInput,
   normalizeComputerUse,
@@ -13,6 +14,7 @@ describe('normalizeComputerUse', () => {
       enabled: false,
       system_execution_enabled: false,
       allowlist: [],
+      approval_mode: 'strict',
       max_steps: 40,
       driver_command: null,
       driver_args: [],
@@ -24,14 +26,25 @@ describe('normalizeComputerUse', () => {
     const settings = normalizeComputerUse({
       enabled: true,
       allowlist: ['Notepad'],
+      approval_mode: 'session',
       max_steps: 12,
       driver_command: 'cua-driver',
     });
     expect(settings.enabled).toBe(true);
     expect(settings.system_execution_enabled).toBe(false);
     expect(settings.allowlist).toEqual(['Notepad']);
+    expect(settings.approval_mode).toBe('session');
     expect(settings.max_steps).toBe(12);
     expect(settings.driver_command).toBe('cua-driver');
+  });
+
+  it('falls back to the strictest mode for unknown approval values', () => {
+    // 字段缺失/被写坏时不能放宽:一律回落到逐次确认。
+    expect(normalizeComputerUse({ approval_mode: 'nonsense' as never }).approval_mode).toBe(
+      'strict',
+    );
+    expect(normalizeComputerUse(null).approval_mode).toBe('strict');
+    expect(COMPUTER_USE_APPROVAL_MODES[0].value).toBe('strict');
   });
 
   it('clamps the step budget into the daemon-accepted range', () => {
