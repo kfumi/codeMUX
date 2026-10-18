@@ -97,7 +97,7 @@ describe('resolveSummaryPanelContentShift', () => {
 });
 
 describe('resolveSummaryPanelView', () => {
-  it('把测量值、档位、让位一次算齐', () => {
+  it('把测量值、档位、位移一次算齐', () => {
     expect(resolveSummaryPanelView({
       availableWidth: 1400,
       contentWidth: 768,
@@ -106,20 +106,20 @@ describe('resolveSummaryPanelView', () => {
     })).toEqual({
       displayMode: 'shift',
       panelWidth: 300,
-      paneReserve: 308,
+      contentShift: -154,
       shouldHideInlineImmediately: false,
       shouldShow: true,
       visibleSurface: 'inline',
     });
   });
 
-  it('gutter 档不让位：面板落进空槽，正文不动', () => {
+  it('gutter 档不位移：面板落进空槽，正文不动', () => {
     expect(resolveSummaryPanelView({
       availableWidth: 1920,
       contentWidth: 768,
       isPinned: true,
       isPopoverOpen: false,
-    })).toMatchObject({ displayMode: 'gutter', paneReserve: 0 });
+    })).toMatchObject({ displayMode: 'gutter', contentShift: 0 });
   });
 
   it('还没测到宽度时按最窄处理，先在 overlay 档待着', () => {
@@ -128,7 +128,7 @@ describe('resolveSummaryPanelView', () => {
       contentWidth: 768,
       isPinned: true,
       isPopoverOpen: true,
-    })).toMatchObject({ displayMode: 'overlay', paneReserve: 0, visibleSurface: 'popover' });
+    })).toMatchObject({ displayMode: 'overlay', contentShift: 0, visibleSurface: 'popover' });
   });
 });
 

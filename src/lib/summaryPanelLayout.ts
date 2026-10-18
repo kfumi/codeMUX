@@ -125,11 +125,15 @@ export function resolveSummaryPanelSurface({
 }
 
 /**
- * shift 档下正文列要左移多少（负值，单位 px）。
+ * shift 档下正文列要左移多少（负值，单位 px）—— Codex 的 `contentShift`。
  *
- * Codex 把它喂给一个弹簧，作用在正文列上；CodeMUX 用等价的「给对话列预留
- * 右侧内边距」表达 —— 正文列是 `mx-auto` 居中的，右侧留出 `2 * |shift|`
- * 的内边距后，正文列正好左移 `|shift|`，两者是同一个读数。
+ * 落到渲染上是一个作用在**正文列自己**上的位移（见 `CodeMuxThread` 的
+ * `thread-content-shell`：`position: relative` + `left: var(--summary-content-shift)`）。
+ *
+ * 早先 CodeMUX 把它换算成「给对话列加 `2 * |shift|` 的右侧内边距」表达 —— 正文列
+ * `mx-auto` 居中，加内边距后确实左移 `|shift|`，读数没错。但内边距加在对话列上会
+ * 把**滚动容器**一起挤窄，滚动条跟着离开窗口最右侧、漂到浮岛左边。位移必须只作用在
+ * 正文列上，滚动容器保持满宽，滚动条才留在最右边。
  */
 export function resolveSummaryPanelContentShift({
   displayMode,
@@ -146,8 +150,8 @@ export function resolveSummaryPanelContentShift({
 }
 
 export interface SummaryPanelView extends SummaryPanelSurfaceState {
-  /** 对话列要为内联面板预留的右侧内边距（等价于 Codex 的 contentShift）。 */
-  paneReserve: number;
+  /** 正文列要左移多少（负值，px）—— 只作用在正文列上，见 `resolveSummaryPanelContentShift`。 */
+  contentShift: number;
   /** 面板浮在对话区里时的宽度。 */
   panelWidth: number;
 }
@@ -180,7 +184,7 @@ export function resolveSummaryPanelView({
 
   return {
     ...surface,
-    paneReserve: shift === 0 ? 0 : -shift * 2,
+    contentShift: shift,
     panelWidth,
   };
 }

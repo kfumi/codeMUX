@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, useLayoutEffect, type CSSProperties, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
@@ -155,12 +155,16 @@ export function MainLayout({
     && hostForm === 'desktop' && !windowMaximized;
 
   /*
-   * 摘要面板（环境信息/任务/子智能体）的档位与让位。
+   * 摘要面板（环境信息/任务/子智能体）的档位与正文列让位。
    *
    * Codex 把面板按「对话列还剩多少空槽」分成三档：窄了挂浮层、中等就压住右侧空槽
    * 并把正文列左移、宽了就落进空槽谁也不动。算法与阈值逐字抄在
-   * [`summaryPanelLayout`](../../lib/summaryPanelLayout.ts)，这里只负责两件落地的事：
-   * 量对话列宽度，以及按档位给对话列留出右侧内边距。
+   * [`summaryPanelLayout`](../../lib/summaryPanelLayout.ts)，这里只负责量对话列宽度，
+   * 并把「正文列要左移多少」写成一个 CSS 变量交给正文列自己消费。
+   *
+   * 关键：位移**不能**做成给对话列加内边距 —— 那会把滚动容器一起挤窄，滚动条离开
+   * 窗口最右侧、漂到浮岛左边。变量落在面板这一层，由 `CodeMuxThread` 的正文列
+   * 自己施加，滚动容器因此保持满宽。
    */
   const conversationPaneRef = useRef<HTMLDivElement>(null);
   useSummaryPanelLayout(conversationPaneRef);
@@ -364,17 +368,15 @@ export function MainLayout({
                   data-conversation-pane
                   /*
                     摘要面板的内联面就浮在这一列里（绝对定位、右对齐），所以这一列
-                    必须是定位上下文。shift 档额外留出右侧内边距：正文列是 `mx-auto`
-                    居中的，右侧留出面板占位后正文列自动左移半个占位宽 —— 与 Codex
-                    给正文列上的 `contentShift` 是同一个读数，只是用内边距表达，
-                    不必逐个元素加 transform。
+                    必须是定位上下文。shift 档「正文列左移」由 CSS 变量
+                    `--summary-content-shift` 表达（写在下面），由正文列自己施加 ——
+                    对话列本身不缩窄，滚动条因此留在最右侧。
                   */
                   className={cn(
                     'relative flex flex-1 flex-col bg-[hsl(var(--background))]',
                     isNarrow ? 'min-w-0' : 'min-w-110',
-                    'transition-[padding-right] duration-slow ease-motion-in-out',
                   )}
-                  style={summaryView.paneReserve > 0 ? { paddingRight: summaryView.paneReserve } : undefined}
+                  style={{ '--summary-content-shift': `${summaryView.contentShift}px` } as CSSProperties}
                 >
                   {children}
                   <SummaryPanelSurface projectPath={projectOpenPath} todos={todos} />

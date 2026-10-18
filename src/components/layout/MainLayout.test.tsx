@@ -102,7 +102,7 @@ describe('MainLayout', () => {
     expect(shell?.firstElementChild).toBe(document.querySelector('[data-testid="title-bar"]'));
   });
 
-  it('宽档钉住摘要时给对话列让位，并把内联面挂进对话列', () => {
+  it('宽档钉住摘要时把「正文列左移」写成 CSS 变量，并把内联面挂进对话列', () => {
     useSummaryPanelStore.getState().setMetrics({ availableWidth: 1400, contentWidth: 768 });
     useSummaryPanelStore.getState().setPinned(true);
 
@@ -113,8 +113,10 @@ describe('MainLayout', () => {
     );
 
     const pane = document.querySelector('[data-conversation-pane]') as HTMLElement;
-    // shift 档：对话列右侧留出面板占位（300 + 8），正文列随之左移半个占位宽。
-    expect(pane.style.paddingRight).toBe('308px');
+    // shift 档：正文列左移 -154px。位移交给正文列自己施加（滚动容器保持满宽，
+    // 滚动条因此留在最右侧），对话列本身不加内边距、不缩窄。
+    expect(pane.style.getPropertyValue('--summary-content-shift')).toBe('-154px');
+    expect(pane.style.paddingRight).toBe('');
 
     const surface = document.querySelector('[data-testid="summary-panel-surface"]');
     // 面板浮在**对话列里面**：它跟正文是同一层的邻居，不能跑到内容面之外。
@@ -122,7 +124,7 @@ describe('MainLayout', () => {
     expect(pane.contains(surface)).toBe(true);
   });
 
-  it('空槽够宽（gutter 档）时面板落进空槽，对话列不让位', () => {
+  it('空槽够宽（gutter 档）时面板落进空槽，正文不位移', () => {
     useSummaryPanelStore.getState().setMetrics({ availableWidth: 1920, contentWidth: 768 });
     useSummaryPanelStore.getState().setPinned(true);
 
@@ -133,7 +135,7 @@ describe('MainLayout', () => {
     );
 
     const pane = document.querySelector('[data-conversation-pane]') as HTMLElement;
-    expect(pane.style.paddingRight).toBe('');
+    expect(pane.style.getPropertyValue('--summary-content-shift')).toBe('0px');
     expect(document.querySelector('[data-testid="summary-panel-surface"]')).toBeTruthy();
   });
 

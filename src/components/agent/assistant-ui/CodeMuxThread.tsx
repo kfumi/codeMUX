@@ -607,10 +607,13 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               data-testid="thread-content-shell"
               data-long-thread={events.length > LONG_THREAD_EVENT_THRESHOLD ? '' : undefined}
               className={cn(
-                'mx-auto flex w-full flex-1 flex-col pt-4',
+                'relative mx-auto flex w-full flex-1 flex-col pt-4',
                 showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
               )}
-              style={{ maxWidth: 'var(--content-width, 52rem)' }}
+              // 摘要面板钉住时正文列整体左移（Codex 的 contentShift）。位移施加在正文列
+              // **自己**身上（`relative` + `left`），滚动容器因此保持满宽 —— 滚动条留在
+              // 窗口最右侧，而不是被让位内边距挤到浮岛左边。
+              style={{ maxWidth: 'var(--content-width, 52rem)', left: 'var(--summary-content-shift, 0px)' }}
             >
               {shouldRenderFirstFrameSpacer({
                 bounded: threadWindow.bounded,
