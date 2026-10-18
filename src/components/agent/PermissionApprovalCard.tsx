@@ -211,10 +211,10 @@ function PermissionApprovalBody({
               className={cn(
                 'flex w-full items-start gap-3 border-0 px-3 py-2 text-left transition-colors',
                 active
-                  ? 'bg-muted/92 text-foreground dark:bg-[hsl(var(--muted-foreground))/0.28]'
-                  : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+                  ? 'bg-foreground/8 text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/4 hover:text-foreground',
                 submitting && 'cursor-wait opacity-70',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
+                'focus-visible:outline-none focus-visible:inset-ring-1 focus-visible:inset-ring-foreground/35',
               )}
             >
               <span className={cn(

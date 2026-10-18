@@ -1,4 +1,5 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
+import { normalizeAskUserQuestionAnswers, ASK_USER_QUESTION_IGNORED_MESSAGE } from './askUserQuestionCancel.js';
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
 import {
@@ -442,10 +443,18 @@ export class OpenCodeRuntime {
       this.questionTimeouts.delete(requestId);
     }
     const client = this.client;
+    const { cancelled } = normalizeAskUserQuestionAnswers(answers.length, answers);
     try {
       if (client?.respondToQuestion) {
-        await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
-        this.emitToolFinished(requestId, JSON.stringify({ answers }));
+        // OpenCode's native question.reject settles the tool as aborted and stops the
+        // turn (the agent never gets to react). Reply instead, with an answer that tells
+        // the model the user ignored the card and to keep going on its own judgement —
+        // that is the only path that keeps the conversation alive, matching Claude's deny.
+        const payload = cancelled
+          ? answers.map(() => [ASK_USER_QUESTION_IGNORED_MESSAGE])
+          : answers;
+        await client.respondToQuestion({ requestId, answers: payload, directory: this.config.cwd });
+        this.emitToolFinished(requestId, JSON.stringify(cancelled ? { cancelled: true } : { answers }));
       }
     } finally {
       this.pendingQuestionIds.delete(requestId);

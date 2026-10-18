@@ -50,6 +50,7 @@ import {
   setActivePermissionState,
 } from './activePermissionState.js';
 import { detectShellInputSynthesis, shellInputSynthesisMessage } from './shellInputSynthesis.js';
+import { normalizeAskUserQuestionAnswers, ASK_USER_QUESTION_IGNORED_MESSAGE } from './askUserQuestionCancel.js';
 import {
   buildClaudeUserMessageContent,
   getDisplayPayloadAttachments,
@@ -1238,11 +1239,19 @@ export class SessionRuntime {
               toolUseID: toolUseId,
             };
           }
-          const userAnswers = response.value as string[];
+          const { cancelled, answers } = normalizeAskUserQuestionAnswers(questions.length, response.value);
+          if (cancelled) {
+            // AskUserQuestion is optional clarification: a real deny lets the agent skip it
+            // instead of seeing a fake "__cancelled__" answer.
+            return {
+              behavior: 'deny',
+              message: ASK_USER_QUESTION_IGNORED_MESSAGE,
+              toolUseID: toolUseId,
+            };
+          }
           const answersRecord: Record<string, string> = {};
           questions.forEach((q: any, i: number) => {
-            const answer = userAnswers[i];
-            answersRecord[q.question] = Array.isArray(answer) ? answer.join(', ') : String(answer ?? '');
+            answersRecord[q.question] = answers[i] ?? '';
           });
           return { behavior: 'allow', updatedInput: { ...input, questions, answers: answersRecord } };
         }

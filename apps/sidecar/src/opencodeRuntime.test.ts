@@ -7,6 +7,7 @@ import {
   type OpenCodeSdkPort,
   type OpenCodeSdkStartFailure,
 } from './opencodeSdk.js';
+import { ASK_USER_QUESTION_IGNORED_MESSAGE } from './askUserQuestionCancel.js';
 
 const sdkMocks = vi.hoisted(() => {
   const prompt = vi.fn().mockResolvedValue({ data: { info: {}, parts: [] } });
@@ -290,6 +291,43 @@ describe('OpenCodeRuntime', () => {
         type: 'tool_finished', tool_use_id: 'question-1', content: '{"answers":[["继续"]]}', sequence: 2,
       },
     ]);
+    await runtime.shutdown();
+  });
+
+  it('answers with an ignore instruction when the user ignores the card, keeping the turn alive', async () => {
+    const { port, client } = createPort();
+    const respondToQuestion = vi.fn().mockResolvedValue(true);
+    Object.assign(client, { respondToQuestion });
+    const emitted: Array<Record<string, unknown>> = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+      eventIdFactory: () => 'event-1',
+    });
+
+    await runtime.start();
+    onEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'opencode-new',
+        questions: [{ question: '继续吗？', multiple: true, options: [{ label: '继续' }] }],
+      },
+    });
+    await runtime.respondToQuestion('question-1', [['__cancelled__']]);
+
+    expect(respondToQuestion).toHaveBeenCalledWith({
+      requestId: 'question-1',
+      answers: [[ASK_USER_QUESTION_IGNORED_MESSAGE]],
+      directory: 'D:/workspace/demo',
+    });
+    expect(emitted.at(-1)).toMatchObject({
+      type: 'tool_finished', tool_use_id: 'question-1', content: '{"cancelled":true}', sequence: 2,
+    });
     await runtime.shutdown();
   });
 

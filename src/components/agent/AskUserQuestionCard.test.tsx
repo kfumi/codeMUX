@@ -213,12 +213,15 @@ describe('AskUserQuestionCard', () => {
     expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByText('批准').closest('button')?.classList.contains('bg-muted/92')).toBe(false);
     const otherRow = screen.getByPlaceholderText('输入你的回答...').closest('[data-other-input-row]');
-    expect(otherRow?.classList.contains('bg-muted/92')).toBe(false);
+    expect(otherRow?.classList.contains('bg-foreground/8')).toBe(false);
     expect(otherRow?.textContent).toContain('2');
 
     fireEvent.focus(screen.getByPlaceholderText('输入你的回答...'));
+    expect(otherRow?.classList.contains('bg-foreground/8')).toBe(false);
+
+    fireEvent.change(screen.getByPlaceholderText('输入你的回答...'), { target: { value: '请补充测试' } });
     expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
-    expect(otherRow?.classList.contains('bg-muted/92')).toBe(true);
+    expect(otherRow?.classList.contains('bg-foreground/8')).toBe(true);
   });
 
   it('renders the composer other input as the next numbered list row', () => {
@@ -262,6 +265,28 @@ describe('AskUserQuestionCard', () => {
     expect(screen.getByText('轻音乐').closest('button')?.className).toContain('border-0');
     expect(screen.getByText('摇滚').closest('button')?.className).toContain('border-0');
     expect(screen.getByRole('tablist').querySelectorAll('svg')).toHaveLength(0);
+  });
+
+  it('does not focus a composer option on mount; the list starts keyboard navigation', async () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="composer-focus-1"
+        variant="composer"
+        questions={[{
+          question: '你希望我采用哪些风格偏好？',
+          options: [{ label: '简洁回答' }, { label: '详细解释' }],
+        }]}
+      />,
+    );
+
+    const firstOption = screen.getByText('简洁回答').closest('button');
+    const list = firstOption?.parentElement;
+    expect(list).toBeTruthy();
+    expect(document.activeElement).not.toBe(firstOption);
+
+    fireEvent.keyDown(list!, { key: 'ArrowDown' });
+    await waitFor(() => expect(document.activeElement).toBe(firstOption));
   });
 
   it('uses square controls for composer multi-select options and round controls for single-select options', () => {
@@ -344,6 +369,36 @@ describe('AskUserQuestionCard', () => {
     expect(screen.getByText('宅家打游戏')).toBeTruthy();
     expect(screen.getAllByText('时间机器')).toHaveLength(2);
     expect(screen.getByText('周末')).toBeTruthy();
+  });
+
+  it('renders an ignored OpenCode question as 已忽略 instead of the raw cancel payload', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="opencode-ignored-1"
+        submitted
+        resultContent={JSON.stringify({ cancelled: true })}
+        questions={[{ header: '沟通语言', question: '你希望我用哪些语言与你沟通？', multiple: true, options: [{ label: '中文' }] }]}
+      />,
+    );
+
+    expect(screen.getByText('已忽略')).toBeTruthy();
+    expect(screen.queryByText('未作答')).toBeNull();
+    expect(screen.queryByText('{"cancelled":true}')).toBeNull();
+  });
+
+  it('renders ignored questions as 已忽略 when the marker is a plain string', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="ignored-marker-1"
+        submitted
+        resultContent="__cancelled__"
+        questions={[{ question: '继续吗？', options: [{ label: '继续' }] }]}
+      />,
+    );
+
+    expect(screen.getByText('已忽略')).toBeTruthy();
   });
 
   it('renders structured OpenCode answers as chips and expands numeric multi-select answers', () => {
@@ -440,9 +495,77 @@ describe('AskUserQuestionCard', () => {
 
     await waitFor(() => {
       expect(firstOption?.getAttribute('aria-pressed')).toBe('false');
-      expect(input.closest('[data-other-input-row]')?.classList.contains('bg-muted/92')).toBe(true);
+      expect(input.closest('[data-other-input-row]')?.classList.contains('bg-foreground/8')).toBe(true);
       expect(screen.getByRole('tab', { name: /仓库地址/ }).getAttribute('data-state')).toBe('active');
     }, { timeout: 500 });
+  });
+
+  it('submits every selected option together with the free-form answer in multi-select', async () => {
+    sendToolResponse.mockResolvedValue(undefined);
+
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="multi-other-submit-1"
+        variant="composer"
+        questions={[{
+          header: '偏好设置',
+          question: '你希望我采用哪些风格偏好？',
+          multiSelect: true,
+          options: [
+            { label: '简洁回答' },
+            { label: '详细解释' },
+            { label: '先给计划' },
+          ],
+        }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('简洁回答'));
+    fireEvent.click(screen.getByText('先给计划'));
+    fireEvent.change(screen.getByPlaceholderText('输入你的回答...'), { target: { value: '先跑基准测试' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      expect(sendToolResponse).toHaveBeenCalledWith(
+        'session-1',
+        'multi-other-submit-1',
+        [['简洁回答', '先给计划', '先跑基准测试']],
+      );
+    });
+  });
+
+  it('unselects the free-form row and excludes it from the answer once cleared', async () => {
+    sendToolResponse.mockResolvedValue(undefined);
+
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="clear-other-1"
+        variant="composer"
+        questions={[{
+          question: '选择多个',
+          multiSelect: true,
+          options: [{ label: '甲' }, { label: '乙' }],
+        }]}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('输入你的回答...');
+    const otherRow = input.closest('[data-other-input-row]');
+
+    fireEvent.change(input, { target: { value: '自定义回答' } });
+    expect(otherRow?.classList.contains('bg-foreground/8')).toBe(true);
+
+    fireEvent.change(input, { target: { value: '' } });
+    expect(otherRow?.classList.contains('bg-foreground/8')).toBe(false);
+
+    fireEvent.click(screen.getByText('甲'));
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      expect(sendToolResponse).toHaveBeenCalledWith('session-1', 'clear-other-1', [['甲']]);
+    });
   });
 
   it('keeps a multi-question tab row horizontally scrollable without vertical overflow', () => {
@@ -463,7 +586,7 @@ describe('AskUserQuestionCard', () => {
     expect(tabList.classList.contains('overflow-y-hidden')).toBe(true);
   });
 
-  it('cancels with a readable submitted answer', async () => {
+  it('ignores the card with a readable submitted answer', async () => {
     sendToolResponse.mockResolvedValue(undefined);
 
     render(
@@ -477,11 +600,11 @@ describe('AskUserQuestionCard', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('取消'));
+    fireEvent.click(screen.getByText('忽略'));
 
     await waitFor(() => {
       expect(sendToolResponse).toHaveBeenCalledWith('session-1', 'tool-1', ['__cancelled__']);
-      expect(screen.getByText('已取消')).toBeTruthy();
+      expect(screen.getByText('已忽略')).toBeTruthy();
     });
   });
 
@@ -500,7 +623,7 @@ describe('AskUserQuestionCard', () => {
 
     expect(screen.getByText('等待用户回复超时，请重新发送消息继续')).toBeTruthy();
     expect(screen.getByRole('button', { name: '提交' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: '取消' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '忽略' }).hasAttribute('disabled')).toBe(true);
 
     fireEvent.click(screen.getByText('继续'));
     fireEvent.click(screen.getByRole('button', { name: '提交' }));

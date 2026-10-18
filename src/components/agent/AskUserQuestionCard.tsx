@@ -47,10 +47,17 @@ function normalizeAnswerValues(value: unknown): string[] {
   return [String(value)];
 }
 
+/** Shown for a question the user ignored; the agent keeps working on its own judgement. */
+const IGNORED_ANSWER = '已忽略';
+
+export function isIgnoredAnswers(answers: string[]): boolean {
+  return answers.length === 1 && answers[0] === IGNORED_ANSWER;
+}
+
 /** Try to extract answers from tool_result content */
 function parseResultAnswers(resultContent: string, questions: AskUserQuestion[]): string[][] {
   if (resultContent.trim() === '__cancelled__') {
-    return questions.map(() => ['已取消']);
+    return questions.map(() => [IGNORED_ANSWER]);
   }
 
   const normalizeByQuestion = (values: unknown[]): string[][] => {
@@ -67,6 +74,10 @@ function parseResultAnswers(resultContent: string, questions: AskUserQuestion[])
 
   try {
     const parsed = JSON.parse(resultContent);
+    // `{ cancelled: true }` is what runtimes emit when the card was ignored.
+    if (parsed?.cancelled === true) {
+      return questions.map(() => [IGNORED_ANSWER]);
+    }
     if (Array.isArray(parsed)) return normalizeByQuestion(parsed);
     if (Array.isArray(parsed?.answers)) return normalizeByQuestion(parsed.answers);
     if (parsed?.answers && typeof parsed.answers === 'object') {
@@ -154,6 +165,7 @@ export function AskUserQuestionCard({
   const isComposer = variant === 'composer';
   const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const otherInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const questionListRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const showsComposerOtherInput = (question: AskUserQuestion) =>
     question.presentation === 'plan-approval' || question.allowOther !== false;
@@ -202,6 +214,10 @@ export function AskUserQuestionCard({
       return next;
     });
 
+    if (!isMultiSelectQuestion(questions[qIdx]) && oIdx !== OTHER_IDX) {
+      setOtherTexts((prev) => (prev[qIdx] ? { ...prev, [qIdx]: '' } : prev));
+    }
+
     if (!isMultiSelectQuestion(questions[qIdx]) && hasMultipleQuestions && qIdx < questions.length - 1 && oIdx !== OTHER_IDX) {
       setTimeout(() => setActiveTab(String(qIdx + 1)), 200);
     }
@@ -215,8 +231,33 @@ export function AskUserQuestionCard({
   };
 
   const focusOtherInputElement = (qIdx: number) => {
-    focusOtherInput(qIdx);
     window.requestAnimationFrame(() => otherInputRefs.current[`${qIdx}`]?.focus());
+  };
+
+  // Composer options are not pre-selected: the list container holds focus on mount so
+  // keyboard navigation can start without painting a focus ring on the first option
+  // (which read as a stray line at the top of the card).
+  const activeQuestionIndex = hasMultipleQuestions ? Number(activeTab) : 0;
+  useEffect(() => {
+    if (!isComposer || submitted) return;
+    const frame = window.requestAnimationFrame(() => questionListRefs.current[activeQuestionIndex]?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [isComposer, submitted, activeQuestionIndex]);
+
+  const handleQuestionListKeyDown = (event: KeyboardEvent<HTMLDivElement>, qIdx: number) => {
+    // Only handle keys when the list itself holds focus; option/input keydowns bubble here.
+    if (event.target !== event.currentTarget) return;
+    const optionCount = questions[qIdx]?.options.length ?? 0;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'Tab') {
+      event.preventDefault();
+      if (optionCount > 0) focusOption(qIdx, event.key === 'Tab' && event.shiftKey ? -1 : 0);
+      else focusOtherInputElement(qIdx);
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusOption(qIdx, -1);
+    }
   };
 
   const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, qIdx: number, oIdx: number) => {
@@ -254,20 +295,27 @@ export function AskUserQuestionCard({
 
   const isOtherSelected = (qIdx: number) => selections[qIdx]?.has(OTHER_IDX);
 
-  const focusOtherInput = (qIdx: number) => {
-    if (submitted || expired) return;
+  // The free-form "other" row is only a real answer once it has text: typing keeps
+  // OTHER_IDX selected, clearing the input drops it again.
+  const handleOtherTextChange = (qIdx: number, value: string) => {
+    setOtherTexts((prev) => ({ ...prev, [qIdx]: value }));
 
     setSelections((prev) => {
-      const next = { ...prev };
       const question = questions[qIdx];
-      const selection = new Set(prev[qIdx]);
+      const filled = value.trim().length > 0;
+
       if (isMultiSelectQuestion(question)) {
-        selection.add(OTHER_IDX);
-        next[qIdx] = selection;
-      } else {
-        next[qIdx] = new Set([OTHER_IDX]);
+        const selection = new Set(prev[qIdx]);
+        if (filled) selection.add(OTHER_IDX);
+        else selection.delete(OTHER_IDX);
+        return { ...prev, [qIdx]: selection };
       }
-      return next;
+
+      if (filled) return { ...prev, [qIdx]: new Set([OTHER_IDX]) };
+
+      const selection = new Set(prev[qIdx]);
+      selection.delete(OTHER_IDX);
+      return { ...prev, [qIdx]: selection };
     });
   };
 
@@ -293,8 +341,6 @@ export function AskUserQuestionCard({
     event.preventDefault();
     event.stopPropagation();
 
-    focusOtherInput(qIdx);
-
     const question = questions[qIdx];
     if (!isMultiSelectQuestion(question) && otherTexts[qIdx]?.trim()) {
       advanceToNextQuestion(qIdx);
@@ -307,9 +353,6 @@ export function AskUserQuestionCard({
     setSubmitting(true);
 
     const answers = questions.map((q, i) => {
-      if ((isComposer || q.presentation === 'plan-approval') && selections[i]?.has(OTHER_IDX) && otherTexts[i]?.trim()) {
-        return otherTexts[i].trim();
-      }
       const selected = Array.from(selections[i]).map((idx) => {
         if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
         return getSelectedOptionValue(q, idx);
@@ -318,17 +361,10 @@ export function AskUserQuestionCard({
       return isMultiSelectQuestion(q) ? selected : selected[0];
     });
 
-    const displayAnswers = questions.map((q, i) => {
-      if ((isComposer || q.presentation === 'plan-approval') && selections[i]?.has(OTHER_IDX) && otherTexts[i]?.trim()) {
-        return [otherTexts[i].trim()];
-      }
-      const selected = Array.from(selections[i]).map((idx) => {
-        if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
-        return getSelectedOptionLabel(q, idx);
-      });
-
-      return selected;
-    });
+    const displayAnswers = questions.map((q, i) => Array.from(selections[i]).map((idx) => {
+      if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
+      return getSelectedOptionLabel(q, idx);
+    }));
 
     try {
       const permissionElevation = findPermissionElevationAnswer(answers);
@@ -361,7 +397,7 @@ export function AskUserQuestionCard({
 
     try {
       await daemonFacade.respondToInteractiveViaDaemon(sessionId, toolUseId, questions.map(() => '__cancelled__'));
-      setSubmittedAnswers(questions.map(() => ['已取消']));
+      setSubmittedAnswers(questions.map(() => [IGNORED_ANSWER]));
       setSubmitted(true);
       onSubmitted?.();
     } catch (err) {
@@ -383,7 +419,12 @@ export function AskUserQuestionCard({
           {q.question}
         </p>
       ) : null}
-      <div className={cn('space-y-1.5', isComposer && 'space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22')}>
+      <div
+        ref={(element) => { questionListRefs.current[qIdx] = element; }}
+        tabIndex={isComposer ? -1 : undefined}
+        onKeyDown={isComposer ? (event) => handleQuestionListKeyDown(event, qIdx) : undefined}
+        className={cn('space-y-1.5', isComposer && 'space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22 focus-visible:outline-none')}
+      >
         {q.options.map((opt, oIdx) => {
           const selected = selections[qIdx]?.has(oIdx);
 
@@ -394,7 +435,6 @@ export function AskUserQuestionCard({
               ref={(element) => { optionRefs.current[`${qIdx}:${oIdx}`] = element; }}
               onClick={() => toggleOption(qIdx, oIdx)}
               onKeyDown={(event) => handleOptionKeyDown(event, qIdx, oIdx)}
-              autoFocus={isComposer && qIdx === 0 && oIdx === 0}
               aria-pressed={selected}
               disabled={expired}
               className={cn(
@@ -403,12 +443,15 @@ export function AskUserQuestionCard({
                 isComposer ? 'rounded-none border-0' : 'rounded-md border',
                 selected
                   ? isComposer
-                    ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+                    ? 'bg-foreground/8 text-foreground'
                     : 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
                   : isComposer
-                    ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground'
+                    ? 'border-transparent text-muted-foreground hover:bg-foreground/4 hover:text-foreground focus-visible:text-foreground'
                     : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
+                'focus-visible:outline-none',
+                isComposer
+                  ? 'focus-visible:bg-foreground/4 focus-visible:inset-ring-1 focus-visible:inset-ring-foreground/35'
+                  : 'focus-visible:ring-1 focus-visible:ring-foreground/35',
               )}
             >
               <div className="flex min-w-0 items-center gap-2">
@@ -476,8 +519,8 @@ export function AskUserQuestionCard({
             className={cn(
               'flex min-w-0 items-center gap-2 px-3 py-2 text-sm transition-colors',
               isOtherSelected(qIdx)
-                ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
-                : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+                ? 'bg-foreground/8 text-foreground'
+                : 'text-muted-foreground hover:bg-foreground/4 hover:text-foreground',
             )}
           >
             <span
@@ -495,8 +538,7 @@ export function AskUserQuestionCard({
               ref={(element) => { otherInputRefs.current[`${qIdx}`] = element; }}
               type="text"
               value={otherTexts[qIdx] || ''}
-              onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
-              onFocus={() => focusOtherInput(qIdx)}
+              onChange={(event) => handleOtherTextChange(qIdx, event.target.value)}
               onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
               placeholder={q.inputPlaceholder || '输入你的回答...'}
               disabled={expired}
@@ -509,14 +551,13 @@ export function AskUserQuestionCard({
               ref={(element) => { otherInputRefs.current[`${qIdx}`] = element; }}
               type="text"
               value={otherTexts[qIdx] || ''}
-              onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
-              onFocus={() => focusOtherInput(qIdx)}
+              onChange={(event) => handleOtherTextChange(qIdx, event.target.value)}
               onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
               placeholder={q.inputPlaceholder || '输入你的回答...'}
               disabled={expired}
               className={cn(
                 'w-full rounded-md bg-background/45 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0',
-                isOtherSelected(qIdx) ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28]' : '',
+                isOtherSelected(qIdx) ? 'bg-foreground/8' : '',
               )}
             />
           </div>
@@ -526,7 +567,6 @@ export function AskUserQuestionCard({
               type="text"
               value={otherTexts[qIdx] || ''}
               onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
-              onFocus={() => focusOtherInput(qIdx)}
               onKeyDown={(event) => handleOtherInputKeyDown(event, qIdx)}
               placeholder="请输入..."
               autoFocus
@@ -552,6 +592,7 @@ export function AskUserQuestionCard({
       : [];
     const hasPreviousSubmittedQuestion = submittedIndex > 0;
     const hasNextSubmittedQuestion = submittedIndex < questions.length - 1;
+    const ignored = submittedQuestionAnswers.length === 0 || isIgnoredAnswers(submittedQuestionAnswers);
 
     return (
       <div data-compact="true" className="my-1.5">
@@ -568,14 +609,21 @@ export function AskUserQuestionCard({
                 {submittedQuestion.question}
               </span>
             </div>
-            <div className="mt-2 flex min-w-0 items-start gap-2 rounded-lg border border-success/35 bg-success/10 px-2.5 py-2 text-ui-meta text-success">
-              <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className={cn(
+              'mt-2 flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 text-ui-meta',
+              ignored
+                ? 'border-border/45 bg-muted/35 text-muted-foreground'
+                : 'border-success/35 bg-success/10 text-success',
+            )}>
+              {ignored
+                ? <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                : <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
               <div className="min-w-0 flex flex-wrap gap-x-2 gap-y-1 font-medium">
-                {submittedQuestionAnswers.length > 0
-                  ? submittedQuestionAnswers.map((answer, answerIndex) => (
+                {ignored
+                  ? <span>{IGNORED_ANSWER}</span>
+                  : submittedQuestionAnswers.map((answer, answerIndex) => (
                     <span key={`${answer}-${answerIndex}`} title={answer}>{answer}</span>
-                  ))
-                  : <span>未作答</span>}
+                  ))}
               </div>
             </div>
             {questions.length > 1 ? (
@@ -659,7 +707,7 @@ export function AskUserQuestionCard({
             disabled={submitting || expired}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground disabled:opacity-60"
           >
-            {questions[0]?.presentation === 'plan-approval' ? '忽略' : '跳过'}
+            忽略
           </button>
           <button
             type="button"
@@ -753,7 +801,7 @@ export function AskUserQuestionCard({
                       </div>
                     </div>
                     <div className={cn('mt-2 flex flex-wrap gap-1.5 pl-7', compact && 'mt-1 gap-1 pl-6')}>
-                      {answers.length > 0 ? answers.map((answer, answerIndex) => (
+                      {answers.length > 0 && !isIgnoredAnswers(answers) ? answers.map((answer, answerIndex) => (
                         <span
                           key={`${answer}-${answerIndex}`}
                           className={cn(
@@ -765,7 +813,10 @@ export function AskUserQuestionCard({
                           {answer}
                         </span>
                       )) : (
-                        <span className="text-xs text-muted-foreground/65">未作答</span>
+                        <span className="inline-flex items-center gap-1 rounded-md border border-border/45 bg-muted/35 px-2 py-1 text-ui-meta font-medium text-muted-foreground">
+                          <Info className="h-3 w-3" />
+                          {IGNORED_ANSWER}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -798,7 +849,7 @@ export function AskUserQuestionCard({
                   disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
-                  取消
+                  忽略
                 </button>
                 <button
                   type="button"
@@ -824,7 +875,7 @@ export function AskUserQuestionCard({
                   disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
-                  取消
+                  忽略
                 </button>
                 <button
                   type="button"
