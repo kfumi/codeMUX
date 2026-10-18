@@ -54,6 +54,7 @@ describe('GitCommitOrPushDialog', () => {
         totals={{ additions: 3, deletions: 1 }}
         open
         onOpenChange={onOpenChange}
+        onRequestPush={vi.fn()}
         onCompleted={onCompleted}
       />,
     );
@@ -82,6 +83,7 @@ describe('GitCommitOrPushDialog', () => {
         totals={{ additions: 1, deletions: 0 }}
         open
         onOpenChange={vi.fn()}
+        onRequestPush={vi.fn()}
         onCompleted={onCompleted}
       />,
     );
@@ -104,6 +106,7 @@ describe('GitCommitOrPushDialog', () => {
         totals={{ additions: 1, deletions: 0 }}
         open
         onOpenChange={vi.fn()}
+        onRequestPush={vi.fn()}
         onCompleted={vi.fn()}
       />,
     );
@@ -115,7 +118,8 @@ describe('GitCommitOrPushDialog', () => {
     );
   });
 
-  it('推送按钮：无上游时也能推（首次推送）', async () => {
+  it('推送：改为请求打开确认弹窗，不直接推送', async () => {
+    const onRequestPush = vi.fn();
     render(
       <GitCommitOrPushDialog
         projectPath="D:/project/app"
@@ -123,6 +127,7 @@ describe('GitCommitOrPushDialog', () => {
         totals={{ additions: 0, deletions: 0 }}
         open
         onOpenChange={vi.fn()}
+        onRequestPush={onRequestPush}
         onCompleted={vi.fn()}
       />,
     );
@@ -130,7 +135,8 @@ describe('GitCommitOrPushDialog', () => {
     const pushButton = screen.getByTestId('git-commit-or-push-push') as HTMLButtonElement;
     expect(pushButton.disabled).toBe(false);
     fireEvent.click(pushButton);
-    await waitFor(() => expect(gitApiMock.pushBranch).toHaveBeenCalledWith('D:/project/app'));
+    await waitFor(() => expect(onRequestPush).toHaveBeenCalled());
+    expect(gitApiMock.pushBranch).not.toHaveBeenCalled();
   });
 
   it('无可提交/推送时禁用入口动作', () => {
@@ -141,6 +147,7 @@ describe('GitCommitOrPushDialog', () => {
         totals={{ additions: 0, deletions: 0 }}
         open
         onOpenChange={vi.fn()}
+        onRequestPush={vi.fn()}
         onCompleted={vi.fn()}
       />,
     );

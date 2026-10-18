@@ -33,6 +33,7 @@ import type { TodoItem } from '../../../types/agent';
 import { GitBranchDialog } from './GitBranchDialog';
 import { canCommitOrPush, GitCommitOrPushDialog } from './GitCommitOrPushDialog';
 import { GitGraphDialog } from './GitGraphDialog';
+import { GitPushConfirmDialog } from './GitPushConfirmDialog';
 import { TodoStatusIcon } from '../../agent/TodoStatusIcon';
 
 /** 超过该数量时折叠前面的条目，仅展示最后 N 条 */
@@ -443,6 +444,7 @@ export function SummaryPanelBody({
   const [branchLoading, setBranchLoading] = useState(false);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [graphDialogOpen, setGraphDialogOpen] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
   const ensureEnvironment = useGitEnvironmentStore((state) => state.ensure);
@@ -550,6 +552,18 @@ export function SummaryPanelBody({
         totals={totals}
         open={commitDialogOpen}
         onOpenChange={setCommitDialogOpen}
+        onRequestPush={() => {
+          setCommitDialogOpen(false);
+          setPushDialogOpen(true);
+        }}
+        onCompleted={() => void refreshEnvironment(projectPath)}
+      />
+
+      <GitPushConfirmDialog
+        projectPath={projectPath}
+        state={repositoryState}
+        open={pushDialogOpen}
+        onOpenChange={setPushDialogOpen}
         onCompleted={() => void refreshEnvironment(projectPath)}
       />
 

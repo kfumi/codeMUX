@@ -13,6 +13,11 @@ const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
 const COMMIT_MESSAGE_DIFF_LIMIT: usize = 12_000;
 const PR_COMMIT_LOG_LIMIT: usize = 200;
 const PR_DIFF_LIMIT: usize = 20_000;
+/// 提交信息 / PR 描述生成的最大输出 token。推理模型（如 deepseek-flash）会先用掉大量
+/// 预算做思考；预算太小时正文会被吃光（曾表现为「AI 未返回可用的提交信息」）。
+const GIT_LLM_MAX_TOKENS: u32 = 2048;
+/// 模型把输出预算耗在思考上、正文被截断时的提示，避免伪装成「未返回可用的提交信息」。
+const AI_OUTPUT_TRUNCATED: &str = "AI 输出被截断（模型的思考占满了输出预算），请重试或减少改动范围";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1440,6 +1445,9 @@ fn clean_commit_message(raw: &str) -> Result<String, String> {
 }
 
 fn anthropic_response_text(body: &serde_json::Value) -> Result<String, String> {
+    if body.get("stop_reason").and_then(|value| value.as_str()) == Some("max_tokens") {
+        return Err(AI_OUTPUT_TRUNCATED.to_string());
+    }
     body.get("content")
         .and_then(|content| content.as_array())
         .and_then(|content| {
@@ -1453,14 +1461,21 @@ fn anthropic_response_text(body: &serde_json::Value) -> Result<String, String> {
 }
 
 fn openai_response_text(body: &serde_json::Value) -> Result<String, String> {
-    body.get("choices")
+    let choice = body
+        .get("choices")
         .and_then(|choices| choices.as_array())
         .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"))
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+    if choice.get("finish_reason").and_then(|value| value.as_str()) == Some("length") {
+        return Err(AI_OUTPUT_TRUNCATED.to_string());
+    }
+    choice
+        .get("message")
         .and_then(|message| message.get("content"))
         .and_then(|content| content.as_str())
+        .filter(|text| !text.trim().is_empty())
         .map(|text| text.to_string())
-        .ok_or_else(|| "AI 响应缺少提交信息".to_string())
+        .ok_or_else(|| "AI 未返回可用的提交信息".to_string())
 }
 
 #[cfg(test)]
@@ -1592,7 +1607,11 @@ async fn request_llm_generation(
         match generate_with_anthropic(&client, provider, prompt, max_tokens).await {
             Ok(text) => return Ok(text),
             Err(err) => {
-                if err.contains("认证失败") || provider.openai_base_url.trim().is_empty() {
+                // 认证失败或输出被截断时回落没有意义（同一个模型会同样失败），直接报错。
+                if err.contains("认证失败")
+                    || err == AI_OUTPUT_TRUNCATED
+                    || provider.openai_base_url.trim().is_empty()
+                {
                     return Err(err);
                 }
             }
@@ -1607,7 +1626,7 @@ async fn request_llm_generation(
 }
 
 async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<String, String> {
-    clean_commit_message(&request_llm_generation(provider, prompt, 220).await?)
+    clean_commit_message(&request_llm_generation(provider, prompt, GIT_LLM_MAX_TOKENS).await?)
 }
 
 pub async fn generate_git_commit_message_in_project(
@@ -1844,7 +1863,7 @@ pub async fn generate_pull_request_description_in_project(
         &config.git.pull_request_instructions,
     );
     let provider = select_commit_message_provider(config)?;
-    let raw = request_llm_generation(&provider, &prompt, 1024).await?;
+    let raw = request_llm_generation(&provider, &prompt, GIT_LLM_MAX_TOKENS).await?;
 
     parse_pull_request_suggestion(&raw, &base)
 }
@@ -2492,6 +2511,46 @@ mod tests {
         assert_eq!(
             message,
             "fix: 处理脏工作区切换分支\n\n- 阻止存在未提交修改时切换"
+        );
+    }
+
+    #[test]
+    fn git_commit_message_parser_reports_truncated_anthropic_response() {
+        let body = serde_json::json!({
+            "stop_reason": "max_tokens",
+            "content": [{ "type": "thinking", "thinking": "先分析改动……" }]
+        });
+
+        let err = parse_anthropic_commit_message_response(&body).unwrap_err();
+
+        assert!(err.contains("截断"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_commit_message_parser_reports_truncated_openai_response() {
+        let body = serde_json::json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": { "content": "", "reasoning_content": "先分析改动……" }
+            }]
+        });
+
+        let err = parse_openai_commit_message_response(&body).unwrap_err();
+
+        assert!(err.contains("截断"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_commit_message_parser_reports_empty_openai_content() {
+        let body = serde_json::json!({
+            "choices": [{ "finish_reason": "stop", "message": { "content": "" } }]
+        });
+
+        let err = parse_openai_commit_message_response(&body).unwrap_err();
+
+        assert!(
+            err.contains("未返回可用的提交信息"),
+            "unexpected error: {err}"
         );
     }
 

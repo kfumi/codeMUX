@@ -49,6 +49,8 @@ interface GitCommitOrPushDialogProps {
   totals: GitEnvironmentTotals;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 选择「推送」时改为打开推送确认弹窗（对照 ZCode：推送不直接执行）。 */
+  onRequestPush: () => void;
   /** 提交/推送成功后回调（刷新摘要面环境信息等）。 */
   onCompleted: () => void;
 }
@@ -59,6 +61,7 @@ export function GitCommitOrPushDialog({
   totals,
   open,
   onOpenChange,
+  onRequestPush,
   onCompleted,
 }: GitCommitOrPushDialogProps) {
   const [message, setMessage] = useState('');
@@ -68,11 +71,10 @@ export function GitCommitOrPushDialog({
   const [selectedAction, setSelectedAction] = useState<CommitDialogActionId>('commit');
   const [generating, setGenerating] = useState(false);
   const [committing, setCommitting] = useState(false);
-  const [pushing, setPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const busy = generating || committing || pushing;
+  const busy = generating || committing;
   const branchLabel = state?.detached ? 'detached HEAD' : state?.currentBranch ?? '无分支';
   const canIncludeUnstaged = Boolean(state?.hasUncommittedChanges);
   const shouldIncludeUnstaged = includeUnstaged && canIncludeUnstaged;
@@ -123,7 +125,7 @@ export function GitCommitOrPushDialog({
       icon: <CloudUpload className="size-4" />,
       label: '提交并推送',
       disabled: commitActionDisabled,
-      pending: committing || pushing,
+      pending: committing,
       run: () => runCommit(true),
     },
     {
@@ -131,8 +133,8 @@ export function GitCommitOrPushDialog({
       icon: <CloudUpload className="size-4" />,
       label: '推送',
       disabled: busy || !canPush,
-      pending: pushing,
-      run: handlePush,
+      pending: false,
+      run: onRequestPush,
     },
   ];
 
@@ -230,21 +232,6 @@ export function GitCommitOrPushDialog({
       setError(formatErrorMessage(err));
     } finally {
       setCommitting(false);
-    }
-  }
-
-  async function handlePush() {
-    if (!projectPath || busy || !canPush) return;
-    setError(null);
-    setPushing(true);
-    try {
-      await daemonFacade.git.pushBranch(projectPath);
-      onOpenChange(false);
-      onCompleted();
-    } catch (err) {
-      setError(formatErrorMessage(err));
-    } finally {
-      setPushing(false);
     }
   }
 
