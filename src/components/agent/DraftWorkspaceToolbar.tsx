@@ -237,10 +237,13 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                   setProjectOpen(false);
                   setProjectQuery('');
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
-              >
-                <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+className={cn(
+                  "option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82",
+                  project.id === draftProjectId && 'option-row-selected',
+                )}
+                >
+                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
                 {project.id === draftProjectId ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
               </button>
             ))}
@@ -250,7 +253,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
               <button
                 type="button"
                 onClick={() => void handleOpenFolder()}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+                className="option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82"
               >
                 <FolderPlus className="h-3.5 w-3.5 text-muted-foreground" />
                 <span>打开文件夹</span>
@@ -263,7 +266,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                 setProjectOpen(false);
                 setProjectQuery('');
               }}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+              className="option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82"
             >
               <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
               <span>不在项目中工作</span>
@@ -295,7 +298,10 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                 <button
                   type="button"
                   onClick={handleSelectLocal}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+                  className={cn(
+                  "option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82",
+                  isLocalSelected && "option-row-selected",
+                )}
                 >
                   <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">本地</span>
@@ -306,7 +312,10 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                   data-testid="draft-worktree-create-option"
                   onClick={handleSelectWorktree}
                   disabled={!gitAvailable}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
+                  className={cn(
+                  "option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 disabled:cursor-not-allowed disabled:opacity-55",
+                  isWorktreeSelected && "option-row-selected",
+                )}
                 >
                   <GitBranchPlus className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">新建工作树</span>
@@ -317,7 +326,12 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                     key={entry.path}
                     type="button"
                     onClick={() => handleSelectExistingWorktree(entry.path)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+                    className={cn(
+                    "option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82",
+                    draftWorkspace.kind === 'existing' &&
+                      draftWorkspace.worktreePath === entry.path &&
+                      'option-row-selected',
+                  )}
                   >
                     <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
                     <TooltipHint content={entry.path}>
@@ -363,7 +377,10 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
                         type="button"
                         data-testid={`draft-branch-option-${branch.name.replace(/\//g, '--')}`}
                         onClick={() => handleSelectBaseBranch(branch.name)}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55"
+                        className={cn(
+                          "option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82",
+                          isSelected && "option-row-selected",
+                        )}
                       >
                         <GitBranch className={cn(
                           'h-3.5 w-3.5',

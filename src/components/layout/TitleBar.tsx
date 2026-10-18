@@ -191,6 +191,7 @@ export function TitleBar({
                     onClick={() => {
                       void setTheme(value);
                     }}
+                    className={cn(currentTheme === value && 'option-row-selected')}
                   >
                     <div className="flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-ui-meta -mx-0.5 -my-0.5">
                       <Icon className="h-3.5 w-3.5" />

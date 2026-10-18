@@ -1172,17 +1172,30 @@ function TriggerMenu({
   const totalItems = char === '/' ? slashGroups.reduce((sum, g) => sum + g.items.length, 0) : fileItems.length;
   let index = 0;
 
+  // 键盘上下键移动光标时把高亮行带进视野：技能一多列表就长，不跟随的话
+  // 「选中了哪一条」只能靠看不见的那一行。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-menu-index="${highlightedIndex}"]`,
+    );
+    node?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex]);
+
   return (
     <div className="absolute bottom-full left-0 right-0 z-50 mb-3 max-h-[min(28rem,calc(100vh-6rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-elevation backdrop-blur-lg">
-      <div className="max-h-[inherit] overflow-y-auto py-2">
+      <div ref={scrollRef} className="max-h-[inherit] overflow-y-auto py-2">
         {totalItems === 0 ? (
           <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">
             {char === '/' ? '没有匹配的命令' : '没有匹配的文件'}
           </div>
         ) : char === '/' ? (
           slashGroups.map((group) => (
-            <div key={group.category.id}>
-              <div className="flex items-center gap-2 px-3 py-1.5 text-ui-micro font-semibold uppercase tracking-normal text-muted-foreground/60">
+            // 内缩放在这一层，不放在行上：`<button>` 即便 `display:flex`，`mx-*` 也不会
+            // 把盒子撑到满宽（那会让药丸缩成一小团，只包住文字）。父级 padding + 行 `w-full`
+            // 才是可靠的内缩药丸。分组标题同层同内缩，于是标题图标与行图标对齐。
+            <div key={group.category.id} className="px-2">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-micro font-semibold uppercase tracking-normal text-muted-foreground/60">
                 {getCategoryIcon(group.category.id)}
                 <span>{group.category.label}</span>
               </div>
@@ -1203,20 +1216,24 @@ function TriggerMenu({
           ))
         ) : (
           <>
-            <div className="flex items-center gap-2 px-3 pb-1.5 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-              <FileCode2 className="h-3.5 w-3.5" />
-              <span>引用文件</span>
+            <div className="px-2">
+              <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-0 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+                <FileCode2 className="h-3.5 w-3.5" />
+                <span>引用文件</span>
+              </div>
             </div>
-            {fileItems.map((item, itemIndex) => (
-              <TriggerMenuItem
-                key={item.id}
-                item={item}
-                index={itemIndex}
-                highlighted={itemIndex === highlightedIndex}
-                onHighlight={onHighlight}
-                onSelect={onSelect}
-              />
-            ))}
+            <div className="px-2">
+              {fileItems.map((item, itemIndex) => (
+                <TriggerMenuItem
+                  key={item.id}
+                  item={item}
+                  index={itemIndex}
+                  highlighted={itemIndex === highlightedIndex}
+                  onHighlight={onHighlight}
+                  onSelect={onSelect}
+                />
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -1244,31 +1261,45 @@ function TriggerMenuItem({
       type="button"
       data-command-id={item.type === 'command' ? item.id : undefined}
       data-file-id={isFile ? item.id : undefined}
+      data-menu-index={index}
+      aria-current={highlighted || undefined}
       onMouseEnter={() => onHighlight(index)}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => onSelect(item)}
       className={cn(
-        'flex w-full items-start gap-3 px-3 py-2 text-left transition-colors',
-        highlighted ? 'bg-muted/56' : 'hover:bg-muted/46',
+        // ZCode 那套：单行、**中性**内缩药丸，不用 accent。高亮靠「药丸压在面板上」
+        // 这件事本身成立，不靠颜色跳出来 —— 满幅底色 + 竖条 + 彩色图标三样一起上
+        // 会把整张列表压得又花又吵。
+        // 单行是关键：描述独占一行会把每条撑到 48px，十来条命令就把菜单拉得又高又稀。
+        // `w-full` 不能省，见上面 group 那层的注释。
+        'option-row flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left',
+        highlighted ? 'option-row-selected' : 'option-row-hover',
       )}
     >
-      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
+      {/* 只留字形不留底块：药丸里再嵌一个实心小方块，深色下会读成「药丸里开了个洞」。
+          单行布局下图标缩到 16px 当「类型提示」用，folder 与文件同名时才分得开。 */}
+      <span
+        className={cn(
+          'inline-flex shrink-0 items-center justify-center',
+          highlighted ? 'text-foreground' : 'text-muted-foreground',
+        )}
+      >
         {isFile ? (item.type === 'directory' ? <Folder className="h-4 w-4" /> : <FileTypeIcon filePath={item.id} className="h-4 w-4" />) : getCommandIcon(item.id)}
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-ui)' }}>
-            {item.label}
-          </span>
-          {getCommandSourceLabel(item) && (
-            <span className="shrink-0 text-ui-caption text-muted-foreground/65">
-              {getCommandSourceLabel(item)}
-            </span>
-          )}
-          {getItemArgsHint(item) && <span className="shrink-0 text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}
-        </div>
-        {item.description && <div className="truncate text-xs text-muted-foreground">{item.description}</div>}
-      </div>
+      <span className="shrink-0 truncate text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-ui)' }}>
+        {item.label}
+      </span>
+      {getCommandSourceLabel(item) && (
+        <span className="shrink-0 text-ui-caption text-muted-foreground">
+          {getCommandSourceLabel(item)}
+        </span>
+      )}
+      {getItemArgsHint(item) && (
+        <span className="shrink-0 text-xs text-muted-foreground">{getItemArgsHint(item)}</span>
+      )}
+      {item.description && (
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{item.description}</span>
+      )}
     </button>
   );
 }

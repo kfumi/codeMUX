@@ -125,8 +125,8 @@ export function BranchPicker({
               type="button"
               onClick={() => select('')}
               className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body hover:bg-muted/70',
-                value === '' && 'bg-muted/50',
+                'option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body',
+                value === '' && 'option-row-selected',
               )}
             >
               <span className="min-w-0 flex-1 truncate">默认：当前分支（{currentBranch}）</span>
@@ -145,8 +145,8 @@ export function BranchPicker({
                   type="button"
                   onClick={() => select(branch.name)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body hover:bg-muted/70',
-                    isSelected && 'bg-muted/50',
+                    'option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body',
+                    isSelected && 'option-row-selected',
                   )}
                 >
                   <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />

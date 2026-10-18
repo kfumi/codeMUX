@@ -231,16 +231,19 @@ export function AgentPermissionSelector({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => selectMode(option.mode)}
                     className={cn(
-                      'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
-                      active && 'bg-muted/64',
+                      // 原来 `hover:bg-muted/56` + `active: 'bg-muted/64'`：浅色主题下
+                      // --muted≈98.8% 压在 surface-2 面板上，两个 alpha 都≈纯白，
+                      // 选中与悬停读不出差别。改走共享的三档 option-row。
+                      'option-row option-row-hover flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left',
+                      active && 'option-row-selected',
                     )}
                   >
-                    <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
+                    <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium text-foreground">{option.label}</span>
                       <span className="block truncate text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
                     </span>
-                    {active && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                    {active && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
                   </button>
                 );
               })}

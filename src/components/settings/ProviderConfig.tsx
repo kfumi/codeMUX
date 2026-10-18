@@ -801,8 +801,8 @@ export function ProviderConfigPanel() {
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
                     selected
-                      ? 'bg-muted/80 text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+                      ? 'bg-[hsl(var(--foreground)/0.08)] text-foreground'
+                      : 'text-muted-foreground hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground',
                   )}
                 >
                   <ProviderBrandIcon templateId={row.templateId} name={row.name} />
@@ -825,7 +825,7 @@ export function ProviderConfigPanel() {
           <button
             type="button"
             onClick={() => setAddDialogOpen(true)}
-            className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground"
           >
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-dashed border-border">
               <Plus className="h-4 w-4" />

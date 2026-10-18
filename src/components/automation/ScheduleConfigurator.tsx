@@ -28,7 +28,7 @@ const WEEKDAY_OPTIONS = [
 const MONTHLY_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
 
 const menuItemClassName =
-  'flex w-full items-center justify-between rounded-md px-2.5 py-2 text-ui-body text-foreground/90 hover:bg-muted/65';
+  'option-row option-row-hover flex w-full items-center justify-between rounded-md px-2.5 py-2 text-ui-body text-foreground/90';
 
 export interface ScheduleConfiguratorValue {
   scheduleKind: ScheduleKind;
@@ -162,7 +162,7 @@ export function ScheduleConfigurator({ value, timezone, onChange }: ScheduleConf
                   type="button"
                   className={cn(
                     menuItemClassName,
-                    value.scheduleKind === option.value && 'bg-muted/55',
+                    value.scheduleKind === option.value && 'option-row-selected',
                   )}
                   onClick={() => setKind(option.value)}
                 >
@@ -201,7 +201,7 @@ export function ScheduleConfigurator({ value, timezone, onChange }: ScheduleConf
                     <button
                       key={option.value}
                       type="button"
-                      className={cn(menuItemClassName, selected && 'bg-muted/55')}
+                      className={cn(menuItemClassName, selected && 'option-row-selected')}
                       onClick={() => toggleWeekday(option.value)}
                     >
                       <span>{option.fullLabel}</span>
@@ -229,7 +229,7 @@ export function ScheduleConfigurator({ value, timezone, onChange }: ScheduleConf
                       type="button"
                       className={cn(
                         menuItemClassName,
-                        value.monthlyDay === day && 'bg-muted/55',
+                        value.monthlyDay === day && 'option-row-selected',
                       )}
                       onClick={() => {
                         onChange({ ...value, monthlyDay: day });

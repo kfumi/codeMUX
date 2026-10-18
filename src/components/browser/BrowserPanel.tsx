@@ -295,7 +295,7 @@ function BrowserViewportChrome({
           {BROWSER_VIEWPORT_OPTIONS.map((option) => (
             <DropdownMenuItem
               key={String(option.value)}
-              className={cn(option.value === viewportMode && 'bg-muted/70 text-foreground')}
+              className={cn(option.value === viewportMode && 'option-row-selected text-foreground')}
               onClick={() => onSelectMode(option.value)}
             >
               {option.label}

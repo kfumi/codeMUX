@@ -75,7 +75,7 @@ export function BrowserElementPills({ sessionId }: BrowserElementPillsProps) {
       <div
         className={cn(
           'inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-border/55 bg-muted/40 px-2 text-ui-caption text-foreground/82',
-          open && 'border-border/80 bg-muted/55',
+          open && 'border-border/80 option-row-selected',
         )}
       >
         <MousePointer2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

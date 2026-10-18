@@ -571,6 +571,39 @@ html.cmx-panel-resizing webview {
     border-color: hsl(var(--surface-edge));
     background: hsl(var(--surface-3));
   }
+
+  /* 选项列表的三档底色：常态 / 悬停（或键盘光标）/ 已选中。
+     单独抽出来是因为早先各处手写 `bg-muted/56` + `bg-muted/64` 这种相邻 alpha，
+     而浅色主题下 `--muted` ≈ 98.8%，压在 `--surface-2` 面板上两者都≈纯白 ——
+     选中与悬停读不出差别，等于没有选中态。改成往 ink 混合，亮暗主题都成立。
+
+     光标档覆盖 `:hover` / `:focus` / `[data-highlighted]`（Radix 2.x 把键盘光标
+     打在 data-highlighted 上，Select 早期版本走 DOM focus）。
+
+     末两条**必须**用属性选择器写死，不能写成 Tailwind 的 `data-[…]:option-row-selected`：
+     那些变体只会生成 Tailwind 自己的 utility，认不得 option-row-* 这个手写类，
+     写上去会被静默丢弃 —— 编译产物里根本没有对应规则，选中态就彻底没了底色。
+     同理「已选中的那一行再被悬停」不许退回浅色，所以这条排在光标档之后。 */
+  .option-row {
+    transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+  }
+
+  .option-row-hover:hover,
+  .option-row-hover:focus,
+  .option-row-hover[data-highlighted] {
+    background: hsl(var(--foreground) / 0.045);
+  }
+
+  .option-row-selected,
+  .option-row-selected.option-row-hover:hover {
+    background: hsl(var(--foreground) / 0.08);
+  }
+
+  /* Radix Select / RadioGroup 的「已选中」、cmdk 的 data-selected（键盘光标）。 */
+  [data-state='checked'].option-row,
+  [data-selected='true'].option-row {
+    background: hsl(var(--foreground) / 0.08);
+  }
 }
 
 /* 墨色低 alpha 的软瓦片 —— 与 Codex 的 hover 公式同源(ink 的 .04 → .065),

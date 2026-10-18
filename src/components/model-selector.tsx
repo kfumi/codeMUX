@@ -593,7 +593,9 @@ function ModelSelectorItem({
       }}
       className={cn(
         "relative cursor-pointer items-start gap-2 rounded-lg py-2 ps-3 pe-9 text-ui-compact [&_svg:not([class*='size-'])]:size-3.5",
-        "data-[selected=true]:!bg-neutral-200 data-[selected=true]:!text-neutral-800 dark:data-[selected=true]:!bg-neutral-700 dark:data-[selected=true]:!text-neutral-100",
+        // 原来写死 `!bg-neutral-200` / `!bg-neutral-700` 并带 `!important`：绕开主题
+        // token（换强调色 / 调对比度都不动），且在浅色下只是很淡一层灰。
+        // `option-row` 由 CommandItem 基类提供，这里只需字色；底色见 globals.css。
         className,
       )}
       {...props}
@@ -675,9 +677,12 @@ function ModelSelectorEffort({
             key={option.id}
             value={option.id}
             className={cn(
-              "focus-visible:ring-neutral-400/50 text-muted-foreground hover:text-foreground rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-              "data-[state=checked]:bg-neutral-200 data-[state=checked]:text-neutral-800 data-[state=checked]:font-medium dark:data-[state=checked]:bg-neutral-700 dark:data-[state=checked]:text-neutral-100",
-            )}
+          "option-row focus-visible:ring-ring/50 text-muted-foreground hover:text-foreground rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
+          // 原来写死 `bg-neutral-200` + `dark:bg-neutral-700`：既绕开了主题 token
+          // （换强调色 / 调对比度都不跟着动），在浅色下也只有很淡的一层灰。
+          // 选中底色由 globals.css 的 `[data-state='checked'].option-row` 给。
+          "data-[state=checked]:text-foreground data-[state=checked]:font-medium",
+        )}
           >
             {option.name}
           </RadioGroupPrimitive.Item>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { AGENT_REGISTRY, getAgentDefinition } from '../../types/agentRegistry';
@@ -49,7 +49,7 @@ export function AgentSelector({ value, onChange, variant = 'inline', disabled = 
             ? 'group relative justify-center rounded-lg border border-border/60 bg-card p-4 shadow-elevation hover:border-[hsl(var(--primary)/0.28)] hover:shadow-elevation-prominent'
             : isHero
             ? 'group relative justify-center'
-            : 'h-9 gap-1.5 rounded-md px-3 py-2 text-sm outline-none hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-0 dark:hover:bg-neutral-800 dark:hover:text-neutral-100',
+            : 'h-9 gap-1.5 rounded-md px-3 py-2 text-sm outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-0',
           )}
         >
           {isFloating ? (
@@ -82,18 +82,24 @@ export function AgentSelector({ value, onChange, variant = 'inline', disabled = 
         (isFloating || isHero) &&
           'rounded-lg border border-border/60 bg-popover p-1.5 shadow-elevation',
       )}>
-        {SELECTABLE_AGENTS.map((agent) => (
-          <DropdownMenuItem key={agent.kind} onClick={() => onChange(agent.kind)}>
-            <div className={cn(
-              'flex min-w-45 items-center gap-2',
-              agent.kind === value && 'text-foreground'
-            )}>
-              <AgentBrandIcon agent={agent} size="sm" />
-              <span className="font-medium text-foreground">{agent.label}</span>
-              {agent.kind === value && <span className="ml-auto text-foreground/80">✓</span>}
-            </div>
-          </DropdownMenuItem>
-        ))}
+        {SELECTABLE_AGENTS.map((agent) => {
+          const isCurrent = agent.kind === value;
+          return (
+            <DropdownMenuItem
+              key={agent.kind}
+              onClick={() => onChange(agent.kind)}
+              // 原来只有一�� `✓` 文字符号标当前项，**完全没有底色** ——
+              // 选中态读不出来。接上共享的 option-row 选中档。
+              className={cn(isCurrent && 'option-row-selected')}
+            >
+              <div className={cn('flex min-w-45 items-center gap-2', isCurrent && 'text-foreground')}>
+                <AgentBrandIcon agent={agent} size="sm" />
+                <span className="font-medium text-foreground">{agent.label}</span>
+                {isCurrent && <Check className="ml-auto h-4 w-4 text-foreground" aria-hidden />}
+              </div>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

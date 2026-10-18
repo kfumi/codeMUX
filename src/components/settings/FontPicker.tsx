@@ -102,6 +102,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
                   onChange('');
                   setOpen(false);
                 }}
+                className={cn(!value.trim() && 'option-row-selected')}
               >
                 <Check className={cn('mr-2 h-4 w-4', value.trim() ? 'opacity-0' : 'opacity-100')} />
                 系统默认
@@ -117,6 +118,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
                     onChange(font.name);
                     setOpen(false);
                   }}
+                  className={cn(value === font.name && 'option-row-selected')}
                 >
                   <Check className={cn('mr-2 h-4 w-4', value === font.name ? 'opacity-100' : 'opacity-0')} />
                   <span style={{ fontFamily: formatFontFamilyForCss(font.name) }}>{font.name}</span>
@@ -133,6 +135,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
                     onChange(font);
                     setOpen(false);
                   }}
+                  className={cn(value === font && 'option-row-selected')}
                 >
                   <Check className={cn('mr-2 h-4 w-4', value === font ? 'opacity-100' : 'opacity-0')} />
                   <span style={{ fontFamily: formatFontFamilyForCss(font) }}>{font}</span>

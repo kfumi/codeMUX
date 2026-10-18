@@ -12,6 +12,10 @@ import { CODEMUX_FORMATTER, CodeMuxComposer, createCodeMuxFormatter, findLatestP
 
 let composerText = '';
 
+// jsdom 没实现 scrollIntoView，而 TriggerMenu 用它把键盘光标行带进视野。
+// 单个用例要断言调用时自己换成 vi.fn()。
+Element.prototype.scrollIntoView = () => {};
+
 /** 附件列表在 `useAuiState` 里是可控的：默认挂着那张图（与 Attachments 原语的桩一致），
  * 需要验「没有附件时不留空行」的用例把它清空即可。 */
 const ATTACHMENT_FIXTURE = {
@@ -684,6 +688,57 @@ describe('CodeMuxComposer', () => {
 
     expect(editorSetTextMock).toHaveBeenCalledWith('[App.tsx](App.tsx) ');
     expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
+  });
+
+  it('moves the highlight with arrow keys and marks it as the current row', () => {
+    composerText = '/';
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-menu-index]'));
+    const first = rows()[0];
+    expect(first.getAttribute('aria-current')).toBe('true');
+
+    fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'ArrowDown' });
+
+    const afterDown = rows();
+    expect(afterDown[0].getAttribute('aria-current')).toBeNull();
+    expect(afterDown[1].getAttribute('aria-current')).toBe('true');
+    // 光标移动要把高亮行带进视野，否则「选中了哪条」只能靠看不见的那一行。
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+
+    fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'ArrowUp' });
+    expect(rows()[0].getAttribute('aria-current')).toBe('true');
+  });
+
+  it('paints the highlighted row as a neutral inset pill, stronger than its hover fill', () => {
+    composerText = '/';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const highlighted = document.querySelector('[data-menu-index="0"]') as HTMLElement;
+    const plain = document.querySelector('[data-menu-index="1"]') as HTMLElement;
+    // 底色来自 globals.css 的 option-row 阶梯（见 optionRowTokens.test.ts）。
+    expect(highlighted.className).toContain('option-row-selected');
+    expect(plain.className).toContain('option-row-hover');
+    expect(plain.className).not.toContain('option-row-selected');
+    // ZCode 那套是中性药丸：高亮不许混进 accent 颜色，否则整张列表又花又吵。
+    expect(highlighted.className).not.toContain('bg-primary');
+  });
+
+  it('keeps the row pill full width by insetting the group, not the button', () => {
+    composerText = '/';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const row = document.querySelector('[data-menu-index="0"]') as HTMLElement;
+    // `<button>` 上写 `mx-2` 不会把盒子撑满 —— 药丸会缩成只包住文字的一小团。
+    // 内缩必须在父级 padding 上，行本身要 w-full。
+    expect(row.className).toContain('w-full');
+    expect(row.className).not.toMatch(/(^|\s)mx-/);
+    expect((row.parentElement as HTMLElement).className).toContain('px-2');
   });
 
   it('does not reopen file suggestions for completed file references while typing after them', () => {

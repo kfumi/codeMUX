@@ -78,7 +78,9 @@ export function PreviewPanel() {
                   aria-label="文件树"
                   className={cn(
                     'rounded-lg p-1.5 transition-all duration-normal',
-                    showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
+                    showFileTree
+                      ? 'option-row-selected text-foreground'
+                      : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
                   )}
                 >
                   <PanelLeft className="h-3.5 w-3.5" />

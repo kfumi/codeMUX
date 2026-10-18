@@ -78,8 +78,8 @@ export function AutomationProjectPicker({
                   key={project.id}
                   type="button"
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body hover:bg-muted/70',
-                    isSelected && 'bg-muted/50',
+                    'option-row option-row-hover flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-ui-body',
+                    isSelected && 'option-row-selected',
                   )}
                   onClick={() => {
                     onChange(project.id);

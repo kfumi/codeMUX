@@ -209,10 +209,11 @@ function PermissionApprovalBody({
               autoFocus={index === 0}
               aria-pressed={active}
               className={cn(
-                'flex w-full items-start gap-3 border-0 px-3 py-2 text-left transition-colors',
-                active
-                  ? 'bg-foreground/8 text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/4 hover:text-foreground',
+                'option-row flex w-full items-start gap-3 border-0 px-3 py-2 text-left',
+                // 与 option-row 阶梯同值（选中 ink 8% / 悬停 4.5%），改走共享类，
+                // 免得三档底色在两处各写一遍。
+                active ? 'option-row-selected' : 'option-row-hover text-muted-foreground',
+                active && 'text-foreground',
                 submitting && 'cursor-wait opacity-70',
                 'focus-visible:outline-none focus-visible:inset-ring-1 focus-visible:inset-ring-foreground/35',
               )}

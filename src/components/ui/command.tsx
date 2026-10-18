@@ -113,7 +113,10 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected='true']:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+      // cmdk 的 data-selected 是**键盘光标**（上下键会移动它），不是「已选中的那一条」。
+      // 原来写 `bg-accent`：一次跳到强调色相，与同排其它菜单的中性药丸不是一套语言。
+      // 底色由 globals.css 的 `.option-row` 阶梯给（`[data-selected='true']` 一档）。
+      "option-row option-row-hover relative flex cursor-pointer gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:text-foreground data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
       className
     )}
     {...props}

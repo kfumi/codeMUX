@@ -336,8 +336,8 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
               <div key={file.path} className="border-b border-border/18 last:border-b-0">
                 <div
                   className={cn(
-                    'flex w-full items-center gap-2 px-2 py-2 text-left transition-colors',
-                    expanded ? 'bg-muted/52' : 'hover:bg-foreground/8',
+                    'option-row flex w-full items-center gap-2 px-2 py-2 text-left',
+                    expanded ? 'option-row-selected' : 'option-row-hover',
                   )}
                 >
                   <button

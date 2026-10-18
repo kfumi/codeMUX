@@ -128,7 +128,11 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-sm outline-none transition-colors focus:bg-accent/14 focus:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+      "option-row option-row-hover relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-sm outline-none focus:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+      // 「已选中」与「键盘光标」是两件事：Radix 用 data-highlighted 表示光标
+      // （上下键会移动它），用 data-state=checked 表示真正选中的那一条。
+      // 两者各自的底色都写在 globals.css 的 `.option-row` 阶梯里 ——
+      // 别在这里写 `data-[state=checked]:…`，Tailwind 变体认不得手写类。
       className
     )}
     {...props}

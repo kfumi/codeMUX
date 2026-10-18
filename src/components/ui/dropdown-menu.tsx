@@ -56,7 +56,10 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'outline-none flex w-full cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-foreground/82 transition-colors duration-fast hover:bg-muted hover:text-foreground',
+      // `option-row-hover` 同时覆盖 :hover 与 `data-[highlighted]`（Radix 的键盘光标），
+      // 方向键在菜单里移动时才有可见的一档；原来只有 `hover:bg-muted`，
+      // 键盘导航全程没有反馈。
+      'option-row option-row-hover outline-none flex w-full cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-foreground/82',
       danger && 'text-destructive hover:bg-[hsl(var(--destructive)/0.1)] hover:text-destructive',
       className,
     )}
