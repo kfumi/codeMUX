@@ -55,6 +55,24 @@ export interface SemanticSeeds {
   diffAdded: string;
   /** diff 删除行色 —— 用户可配（按明暗各一套）。 */
   diffRemoved: string;
+  /**
+   * 明亮变体（`--success-vivid` / `--warning-vivid` / `--destructive-vivid`）。
+   *
+   * 语义色要同时服务两类用法，而它们的约束是相反的：
+   *  - **文字**（错误行、提示条、状态标签）压在近白/近黑面上，需要足够的对比度
+   *    —— 所以 `success` / `warning` / `destructive` 取 Codex 那套偏深的色值
+   *    （浅色 warning `#a16207` 对白 4.8:1，满足正文 AA）。
+   *  - **图标 / 圆点 / 转圈 / 进度条 / 文件夹图标**这类**图形**要的是「跳出来」，
+   *    偏深的色值在这类用法里读起来发闷、发褐（实测：文件夹的琥珀、会话列表的
+   *    转圈、运行中的圆点全部因此显得脏）。
+   *
+   * 于是拆成两档：无后缀那份留给文字，`-vivid` 留给图形。深色下基准色本身已经
+   * 够亮（`#e0a32e` / `#40c977` / `#fa423e` 都是 L52–61），所以深色的 vivid 与基准
+   * 同值 —— 不在深色里制造第二个观感，改动只落在浅色。
+   */
+  successVivid: string;
+  warningVivid: string;
+  destructiveVivid: string;
 }
 
 export const CODEX_LIGHT_SEEDS: ThemeSeeds = {
@@ -86,6 +104,11 @@ export const SEMANTIC_SEEDS: { light: SemanticSeeds; dark: SemanticSeeds } = {
     destructive: '#ba2623',
     diffAdded: '#00a240',
     diffRemoved: '#ba2623',
+    // 图形档：比基准亮一档、饱和一档，对白 3.1–4.7:1 —— 图标/圆点读得清，文字则
+    // 一律走上面那三个基准色（`--warning` 仍满足正文 AA）。
+    successVivid: '#16a34a',
+    warningVivid: '#c2830a',
+    destructiveVivid: '#dc2626',
   },
   dark: {
     success: '#40c977',
@@ -93,6 +116,10 @@ export const SEMANTIC_SEEDS: { light: SemanticSeeds; dark: SemanticSeeds } = {
     destructive: '#fa423e',
     diffAdded: '#40c977',
     diffRemoved: '#fa423e',
+    // 深色基准色已足够醒目，vivid 与基准同值（见 `SemanticSeeds` 注释）。
+    successVivid: '#40c977',
+    warningVivid: '#e0a32e',
+    destructiveVivid: '#fa423e',
   },
 };
 
@@ -484,6 +511,10 @@ export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<st
   set('--destructive-foreground', surface);
   set('--success', hexToRgb(semantic.success));
   set('--warning', hexToRgb(semantic.warning));
+  // 图形档：图标 / 圆点 / 转圈 / 进度条 / 文件夹图标读这三个，文字读上面三个基准色。
+  set('--success-vivid', hexToRgb(semantic.successVivid));
+  set('--warning-vivid', hexToRgb(semantic.warningVivid));
+  set('--destructive-vivid', hexToRgb(semantic.destructiveVivid));
   // diff 增删与状态色分开：状态色是「MCP 连上了 / 任务完成了」这类语义，
   // diff 色是「这一行代码是新增/删除」。分开才能让用户只改 diff 的观感。
   set('--diff-added', hexToRgb(semantic.diffAdded));

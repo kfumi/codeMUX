@@ -266,7 +266,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
           </div>
         ) : error ? (
           <div className="flex flex-col items-center gap-2 px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
-            <FileWarning className="h-5 w-5 text-[hsl(var(--destructive))]/75" />
+            <FileWarning className="h-5 w-5 text-[hsl(var(--destructive-vivid))]/75" />
             <span>文件树加载失败</span>
             <span className="break-all text-ui-micro text-[hsl(var(--sidebar-fg))]/70">{error}</span>
             <button

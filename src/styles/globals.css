@@ -159,6 +159,11 @@
   /* diff 增删色：与状态色（success/destructive）分开，用户可在外观设置里单独配。 */
   --color-diff-added: hsl(var(--diff-added));
   --color-diff-removed: hsl(var(--diff-removed));
+  /* 语义色的图形档（图标/圆点/转圈/进度条/文件夹图标）——文字仍走上面三个基准色。
+     两档的存在理由见 `src/lib/colorDerivation.ts` 的 `SemanticSeeds.vivid` 注释。 */
+  --color-success-vivid: hsl(var(--success-vivid));
+  --color-warning-vivid: hsl(var(--warning-vivid));
+  --color-destructive-vivid: hsl(var(--destructive-vivid));
 
   /*
    * 圆角阶梯（Codex 的 --radius-*-base）。
@@ -274,6 +279,9 @@
     --warning: 35.45 91.67% 32.94%;
     --diff-added: 143.7 100% 31.76%;
     --diff-removed: 1.19 68.33% 43.33%;
+    --success-vivid: 142.13 76.22% 36.27%;
+    --warning-vivid: 39.46 90.2% 40%;
+    --destructive-vivid: 0 72.22% 50.59%;
     --border: 0 0% 91.37%;
     --border-light: 0 0% 94.12%;
     --input: 0 0% 91.37%;
@@ -337,6 +345,9 @@
     --warning: 39.44 74.17% 52.94%;
     --diff-added: 144.09 55.92% 51.96%;
     --diff-removed: 1.28 94.95% 61.18%;
+    --success-vivid: 144.09 55.92% 51.96%;
+    --warning-vivid: 39.44 74.17% 52.94%;
+    --destructive-vivid: 1.28 94.95% 61.18%;
     --border: 0 0% 13.73%;
     --border-light: 0 0% 10.2%;
     --input: 0 0% 13.73%;

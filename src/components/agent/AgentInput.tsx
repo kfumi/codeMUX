@@ -198,7 +198,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     aria-label="停止"
                     className={cn(
                       'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-normal',
-                      'bg-[hsl(var(--destructive)/0.10)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.16)]',
+                      'bg-[hsl(var(--destructive-vivid)/0.10)] text-[hsl(var(--destructive-vivid))] hover:bg-[hsl(var(--destructive-vivid)/0.16)]',
                     )}
                   >
                     <Square className="h-3.5 w-3.5" fill="currentColor" />

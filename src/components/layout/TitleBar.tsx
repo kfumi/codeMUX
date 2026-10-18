@@ -223,7 +223,7 @@ export function TitleBar({
                 <MaximizeIcon restored={maximized} />
               </button>
               <button
-                className="flex h-full w-12.5 items-center justify-center rounded-none text-foreground transition-colors duration-fast hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
+                className="flex h-full w-12.5 items-center justify-center rounded-none text-foreground transition-colors duration-fast hover:bg-[hsl(var(--destructive-vivid)/0.92)] hover:text-white"
                 onClick={() => void shellFacade.closeWindow().catch(() => {})}
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.5} />

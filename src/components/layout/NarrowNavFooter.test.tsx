@@ -130,7 +130,7 @@ describe('NarrowNavFooter', () => {
     const status = screen.getByRole('status');
     expect(status.getAttribute('aria-label')).toBe('Proxy 运行中 · :4312');
     expect(status.textContent).toBe('Proxy 运行中 · :4312');
-    expect(status.querySelector('svg')?.getAttribute('class')).toContain('text-[hsl(var(--success))]');
+    expect(status.querySelector('svg')?.getAttribute('class')).toContain('text-[hsl(var(--success-vivid))]');
   });
 
   it('sits on the sidebar surface: hover uses the sidebar tier, not the chrome tier', () => {

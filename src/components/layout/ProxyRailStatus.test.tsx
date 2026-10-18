@@ -48,7 +48,7 @@ describe('ProxyRailStatus', () => {
 
     const status = screen.getByRole('status');
     expect(status.getAttribute('aria-label')).toBe('Proxy 运行中 · :4312');
-    expect(status.className).toContain('text-[hsl(var(--success))]');
+    expect(status.className).toContain('text-[hsl(var(--success-vivid))]');
   });
 
   it('状态是只读的：可聚焦、可读，但不是按钮', () => {

@@ -10,10 +10,10 @@ import { CompanionDialog } from './CompanionDialog';
 
 function iconClassForState(visualState: ReturnType<typeof getCompanionVisualState>): string {
   if (visualState === 'paired') {
-    return 'text-[hsl(var(--success))]';
+    return 'text-[hsl(var(--success-vivid))]';
   }
   if (visualState === 'waiting' || visualState === 'reconnecting') {
-    return 'text-[hsl(var(--warning))]';
+    return 'text-[hsl(var(--warning-vivid))]';
   }
   return 'text-muted-foreground';
 }

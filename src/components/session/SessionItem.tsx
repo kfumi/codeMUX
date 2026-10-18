@@ -71,11 +71,11 @@ function SessionStatusIcon({
   const isUnread = useSessionStore((s) => s.unreadSessions.has(session.id));
 
   const dotColor = flowActive
-    ? 'bg-[hsl(var(--warning))]'
+    ? 'bg-[hsl(var(--warning-vivid))]'
     : hasError
-      ? 'bg-[hsl(var(--destructive))]'
+      ? 'bg-[hsl(var(--destructive-vivid))]'
       : isUnread
-        ? 'bg-[hsl(var(--success))]'
+        ? 'bg-[hsl(var(--success-vivid))]'
         : null;
 
   return (
@@ -230,7 +230,7 @@ export function SessionItem({
                             等待确认
                           </span>
                         ) : flowActive ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning-vivid))]" />
                         ) : (
                           <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/70">
                             {timeLabel}

@@ -84,7 +84,7 @@ export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
         >
           <item.Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
           {showBadge && (
-            <span className="absolute right-1 top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-ui-micro font-medium leading-none text-destructive-foreground">
+            <span className="absolute right-1 top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive-vivid px-0.5 text-ui-micro font-medium leading-none text-destructive-foreground">
               {attentionCount > 99 ? '99+' : attentionCount}
             </span>
           )}

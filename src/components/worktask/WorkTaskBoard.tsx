@@ -95,8 +95,8 @@ function saveFilters(filters: PersistedFilters): void {
 const COLUMN_META: Record<WorkTaskColumnId, { title: string; barClass: string }> = {
   todo: { title: '待办', barClass: 'bg-muted-foreground/50' },
   inProgress: { title: '进行中', barClass: 'bg-primary' },
-  attention: { title: '等你处理', barClass: 'bg-warning' },
-  done: { title: '完成', barClass: 'bg-success' },
+  attention: { title: '等你处理', barClass: 'bg-warning-vivid' },
+  done: { title: '完成', barClass: 'bg-success-vivid' },
 };
 
 interface WorkTaskBoardProps {

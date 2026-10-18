@@ -166,7 +166,7 @@ export function PreviewPanel() {
                           )}
                           <FileTypeIcon filePath={file.path} />
                           <span className="max-w-35 truncate">{fileName}</span>
-                          {fileIsModified && <span className="text-[hsl(var(--warning))] text-[10px]">●</span>}
+                          {fileIsModified && <span className="text-[hsl(var(--warning-vivid))] text-[10px]">●</span>}
                           <button
                             className="ml-0.5 rounded-sm p-0.5 text-muted-foreground/34 transition-colors hover:bg-muted/50 hover:text-muted-foreground/72"
                             onClick={(event) => {

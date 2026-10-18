@@ -164,8 +164,8 @@ function StatRow({ label, value }: { label: string; value: number }) {
 }
 
 function getProgressColor(percentage: number) {
-  if (percentage >= 85) return 'hsl(var(--destructive))';
-  if (percentage >= 65) return 'hsl(var(--warning))';
+  if (percentage >= 85) return 'hsl(var(--destructive-vivid))';
+  if (percentage >= 65) return 'hsl(var(--warning-vivid))';
   return 'hsl(var(--muted-foreground))';
 }
 

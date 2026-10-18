@@ -352,11 +352,11 @@ export function McpSettingsPanel() {
     const anyEnabled = server.builtin || Object.values(server.apps).some(Boolean);
     const statusClass = anyEnabled
       ? probeStatus[server.id] === 'connected'
-        ? 'bg-[hsl(var(--success))]'
+        ? 'bg-[hsl(var(--success-vivid))]'
         : probeStatus[server.id] === 'pending'
-          ? 'bg-[hsl(var(--warning))]'
+          ? 'bg-[hsl(var(--warning-vivid))]'
           : probeStatus[server.id] === 'failed'
-            ? 'bg-[hsl(var(--destructive))]'
+            ? 'bg-[hsl(var(--destructive-vivid))]'
             : 'bg-muted-foreground/45'
       : 'bg-muted-foreground/28';
     return (

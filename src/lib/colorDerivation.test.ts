@@ -379,6 +379,7 @@ describe('colorDerivation', () => {
       '--composer-action-bar-bg': '0 0% 94.9%',
       '--destructive': '1.19 68.33% 43.33%',
       '--destructive-foreground': '0 0% 98.82%',
+      '--destructive-vivid': '0 72.22% 50.59%',
       '--diff-added': '143.7 100% 31.76%',
       '--diff-removed': '1.19 68.33% 43.33%',
       '--foreground': '0 0% 5.1%',
@@ -409,6 +410,7 @@ describe('colorDerivation', () => {
       '--sidebar-glow': '216.83 92.2% 59.8%',
       '--sidebar-muted': '0 0% 94.12%',
       '--success': '145.79 78.1% 26.86%',
+      '--success-vivid': '142.13 76.22% 36.27%',
       '--surface-1': '0 0% 99.22%',
       '--surface-2': '0 0% 98.82%',
       '--surface-3': '0 0% 94.12%',
@@ -419,6 +421,7 @@ describe('colorDerivation', () => {
       '--surface-shadow-strong': '0 0% 0%',
       '--user-message-bg': '0 0% 95.29%',
       '--warning': '35.45 91.67% 32.94%',
+      '--warning-vivid': '39.46 90.2% 40%',
     });
 
     expect(deriveThemeTokens(CODEX_DARK_SEEDS, true)).toEqual({
@@ -442,6 +445,7 @@ describe('colorDerivation', () => {
       '--composer-action-bar-bg': '0 0% 12.55%',
       '--destructive': '1.28 94.95% 61.18%',
       '--destructive-foreground': '0 0% 6.67%',
+      '--destructive-vivid': '1.28 94.95% 61.18%',
       '--diff-added': '144.09 55.92% 51.96%',
       '--diff-removed': '1.28 94.95% 61.18%',
       '--foreground': '0 0% 92.94%',
@@ -472,6 +476,7 @@ describe('colorDerivation', () => {
       '--sidebar-glow': '216.83 92.2% 59.8%',
       '--sidebar-muted': '0 0% 13.73%',
       '--success': '144.09 55.92% 51.96%',
+      '--success-vivid': '144.09 55.92% 51.96%',
       '--surface-1': '0 0% 17.65%',
       '--surface-2': '0 0% 12.55%',
       '--surface-3': '0 0% 13.73%',
@@ -482,6 +487,7 @@ describe('colorDerivation', () => {
       '--surface-shadow-strong': '0 0% 0%',
       '--user-message-bg': '0 0% 14.12%',
       '--warning': '39.44 74.17% 52.94%',
+      '--warning-vivid': '39.44 74.17% 52.94%',
     });
   });
 

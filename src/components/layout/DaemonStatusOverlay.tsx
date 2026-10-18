@@ -38,8 +38,8 @@ export function DaemonStatusOverlay() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 backdrop-blur-sm">
       <div className="surface-panel w-full max-w-sm space-y-4 rounded-xl border border-border p-6 text-center shadow-lg">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-warning/15">
-          <AlertTriangle className="h-6 w-6 text-warning" aria-hidden />
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-warning-vivid/15">
+          <AlertTriangle className="h-6 w-6 text-warning-vivid" aria-hidden />
         </div>
         <div className="space-y-1.5">
           <p className="text-ui-title text-foreground">后台服务已断开</p>

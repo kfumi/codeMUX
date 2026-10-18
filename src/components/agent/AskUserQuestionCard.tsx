@@ -668,7 +668,7 @@ export function AskUserQuestionCard({
                   <TabsTrigger key={i} value={String(i)} className="relative">
                     {q.header || `问题 ${i + 1}`}
                     {isQuestionAnswered(i) && (
-                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success))]" />
+                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success-vivid))]" />
                     )}
                   </TabsTrigger>
                 ))}
@@ -754,7 +754,7 @@ export function AskUserQuestionCard({
             <div className="truncate text-xs text-muted-foreground/70">{headerText}</div>
           ) : null}
         </div>
-        {submitted && <Check className="ml-auto h-4 w-4 text-[hsl(var(--success))]" />}
+        {submitted && <Check className="ml-auto h-4 w-4 text-[hsl(var(--success-vivid))]" />}
       </div>
 
       {isExpanded && (
@@ -830,7 +830,7 @@ export function AskUserQuestionCard({
                   <TabsTrigger key={i} value={String(i)} className="relative">
                     {q.header || `问题 ${i + 1}`}
                     {isQuestionAnswered(i) && (
-                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success))]" />
+                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success-vivid))]" />
                     )}
                   </TabsTrigger>
                 ))}

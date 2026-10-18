@@ -20,9 +20,9 @@ function formatDuration(ms: number): string {
 
 const STATUS_DOT = {
   pending: 'bg-muted-foreground/30',
-  running: 'bg-[hsl(var(--warning))] animate-pulse-soft',
-  done: 'bg-[hsl(var(--success))]',
-  error: 'bg-[hsl(var(--destructive))]',
+  running: 'bg-[hsl(var(--warning-vivid))] animate-pulse-soft',
+  done: 'bg-[hsl(var(--success-vivid))]',
+  error: 'bg-[hsl(var(--destructive-vivid))]',
 };
 
 export function ToolCallCard({

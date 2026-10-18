@@ -141,7 +141,7 @@ function ToolFallbackTrigger({
       data-slot="tool-fallback-status"
       role="status"
       aria-live="polite"
-      className="inline-flex shrink-0 items-center self-center text-[hsl(var(--warning))]"
+      className="inline-flex shrink-0 items-center self-center text-[hsl(var(--warning-vivid))]"
     >
       <AlertCircleIcon className="size-3.5" aria-hidden />
     </span>

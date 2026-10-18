@@ -796,7 +796,7 @@ tokenUsage,
                       onClick={() => void onStop?.()}
                       aria-label="停止当前任务"
                       aria-keyshortcuts={abortAria ?? undefined}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-fast hover:bg-[hsl(var(--destructive)/0.18)]"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive-vivid)/0.12)] text-[hsl(var(--destructive-vivid))] transition-colors duration-fast hover:bg-[hsl(var(--destructive-vivid)/0.18)]"
                     >
                       <Square className="h-3.5 w-3.5" fill="currentColor" />
                     </button>

@@ -27,7 +27,7 @@ function StatusBadge({ visualState, latestDeviceName }: { visualState: ReturnTyp
   if (visualState === 'paired') {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
-        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--success))]" />
+        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--success-vivid))]" />
         {companionVisualStateLabel(visualState)}
         {latestDeviceName ? <span className="text-xs text-foreground/55">· {latestDeviceName}</span> : null}
       </span>
@@ -36,7 +36,7 @@ function StatusBadge({ visualState, latestDeviceName }: { visualState: ReturnTyp
   if (visualState === 'reconnecting') {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
-        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning))]" />
+        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning-vivid))]" />
         {companionVisualStateLabel(visualState)}
       </span>
     );
@@ -44,7 +44,7 @@ function StatusBadge({ visualState, latestDeviceName }: { visualState: ReturnTyp
   if (visualState === 'waiting') {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
-        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning))]" />
+        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning-vivid))]" />
         {companionVisualStateLabel(visualState)}
       </span>
     );
@@ -219,10 +219,10 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                     <span className="inline-flex items-center gap-1.5 text-xs text-foreground/70">
                       <span className={`inline-block h-2 w-2 rounded-full ${
                         status.relay.connectionState === 'connected'
-                          ? 'bg-[hsl(var(--success))]'
+                          ? 'bg-[hsl(var(--success-vivid))]'
                           : status.relay.connectionState === 'error'
-                            ? 'bg-destructive'
-                            : 'bg-[hsl(var(--warning))]'
+                            ? 'bg-[hsl(var(--destructive-vivid))]'
+                            : 'bg-[hsl(var(--warning-vivid))]'
                       }`} />
                       {relayStateLabel(status.relay.connectionState)}
                     </span>

@@ -1080,7 +1080,7 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
       <div className="flex min-w-0 items-center gap-1">
         {indicator === 'installed' && !empty && (
           <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[hsl(var(--success))]"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[hsl(var(--success-vivid))]"
             aria-label="已安装"
           />
         )}
@@ -1121,7 +1121,7 @@ function ProxyRouteSection({ proxyRunning, proxyUrl }: ProxyRouteSectionProps) {
           <div className="space-y-1">
             <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               {proxyRunning ? (
-                <CircleDot className="h-4 w-4 text-[hsl(var(--success))]" />
+                <CircleDot className="h-4 w-4 text-[hsl(var(--success-vivid))]" />
               ) : (
                 <CircleDot className="h-4 w-4 text-muted-foreground" />
               )}

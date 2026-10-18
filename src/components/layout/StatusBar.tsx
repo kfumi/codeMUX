@@ -14,7 +14,7 @@ export function StatusBar() {
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="flex items-center gap-1.5 rounded-sm px-1.5 py-0.5">
-              <span className={proxyRunning ? 'inline-block h-2 w-2 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-2 w-2 rounded-full bg-muted-foreground/50'} />
+              <span className={proxyRunning ? 'inline-block h-2 w-2 rounded-full bg-[hsl(var(--success-vivid))]' : 'inline-block h-2 w-2 rounded-full bg-muted-foreground/50'} />
               <span>
                 {proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy 未运行'}
               </span>

@@ -33,10 +33,10 @@ interface NarrowNavFooterProps {
 
 function companionIconColor(visualState: CompanionVisualState): string {
   if (visualState === 'paired') {
-    return 'text-[hsl(var(--success))]';
+    return 'text-[hsl(var(--success-vivid))]';
   }
   if (visualState === 'waiting' || visualState === 'reconnecting') {
-    return 'text-[hsl(var(--warning))]';
+    return 'text-[hsl(var(--warning-vivid))]';
   }
   return 'text-muted-foreground';
 }
@@ -93,7 +93,7 @@ function ProxyRow() {
       className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-ui-meta"
     >
       <Radio
-        className={cn('h-4 w-4 shrink-0', proxyRunning ? 'text-[hsl(var(--success))]' : 'text-muted-foreground')}
+        className={cn('h-4 w-4 shrink-0', proxyRunning ? 'text-[hsl(var(--success-vivid))]' : 'text-muted-foreground')}
         strokeWidth={1.75}
       />
       <span className="flex-1 text-left text-foreground">{label}</span>

@@ -13,7 +13,7 @@ export function TodoStatusIcon({ status, className }: { status: TodoItem['status
       <span
         data-slot="todo-status-icon"
         data-status="completed"
-        className={cn('flex size-4 shrink-0 items-center justify-center rounded-full bg-success/12 text-success', className)}
+        className={cn('flex size-4 shrink-0 items-center justify-center rounded-full bg-success-vivid/12 text-success-vivid', className)}
       >
         <Check className="size-2.5" strokeWidth={3} />
       </span>
@@ -25,9 +25,9 @@ export function TodoStatusIcon({ status, className }: { status: TodoItem['status
       <span
         data-slot="todo-status-icon"
         data-status="in_progress"
-        className={cn('flex size-4 shrink-0 items-center justify-center rounded-full bg-warning/12', className)}
+        className={cn('flex size-4 shrink-0 items-center justify-center rounded-full bg-warning-vivid/12', className)}
       >
-        <span className="size-2 rounded-full bg-warning" />
+        <span className="size-2 rounded-full bg-warning-vivid" />
       </span>
     );
   }

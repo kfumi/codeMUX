@@ -43,7 +43,7 @@ export function ProxyRailStatus() {
         aria-label={label}
         className={cn(
           'flex h-10 w-10 shrink-0 items-center justify-center rounded-md outline-none',
-          proxyRunning ? 'text-[hsl(var(--success))]' : 'text-muted-foreground',
+          proxyRunning ? 'text-[hsl(var(--success-vivid))]' : 'text-muted-foreground',
           'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--chrome-bg))]',
         )}
       >

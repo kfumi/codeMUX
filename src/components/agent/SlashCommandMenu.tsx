@@ -23,10 +23,10 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_COLORS: Record<string, string> = {
   session: 'text-[hsl(var(--primary))]',
-  info: 'text-[hsl(var(--warning))]',
-  builtin: 'text-[hsl(var(--success))]',
+  info: 'text-[hsl(var(--warning-vivid))]',
+  builtin: 'text-[hsl(var(--success-vivid))]',
   custom: 'text-muted-foreground',
-  skill: 'text-[hsl(var(--warning))]',
+  skill: 'text-[hsl(var(--warning-vivid))]',
 };
 
 function getCommandIcon(name: string) {

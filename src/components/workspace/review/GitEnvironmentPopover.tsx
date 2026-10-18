@@ -101,13 +101,13 @@ function getSubagentStatusIcon(status: SubagentStatus) {
     case 'running':
       return (
         <span className="relative flex h-4 w-4 items-center justify-center">
-          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning)/0.4)]" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning))]" />
+          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning-vivid)/0.4)]" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning-vivid))]" />
         </span>
       );
     case 'completed':
       return (
-        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success-vivid)/0.12)] text-[hsl(var(--success-vivid))]">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="2 5.5 4 7.5 8 3" />
           </svg>
@@ -115,7 +115,7 @@ function getSubagentStatusIcon(status: SubagentStatus) {
       );
     case 'failed':
       return (
-        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]">
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--destructive-vivid)/0.12)] text-[hsl(var(--destructive-vivid))]">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 3L7 7M7 3L3 7" />
           </svg>

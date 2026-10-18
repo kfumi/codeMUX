@@ -66,7 +66,7 @@ export function NarrowNavSwitcher({ activeTarget, onSelect }: NarrowNavSwitcherP
             <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             <span className="truncate">{label}</span>
             {showBadge && (
-              <span className="flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded-full bg-destructive px-0.5 text-ui-micro font-medium leading-none text-destructive-foreground">
+              <span className="flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded-full bg-destructive-vivid px-0.5 text-ui-micro font-medium leading-none text-destructive-foreground">
                 {attentionCount > 99 ? '99+' : attentionCount}
               </span>
             )}
