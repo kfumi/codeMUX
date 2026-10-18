@@ -22,6 +22,7 @@ import type {
   GitRepositoryState,
   GitWorktree,
   GitCommitMessageSuggestion,
+  GitCommitGraphResult,
   GitPullRequestSuggestion,
   CreatePullRequestRequest,
   CreatePullRequestResult,
@@ -237,6 +238,8 @@ export const gitViaDaemon = {
     (await ensureDaemonClient()).gitChangedFilesSinceHead(projectPath) as Promise<GitChangedFile[]>,
   getRepositoryState: async (projectPath: string) =>
     (await ensureDaemonClient()).gitRepositoryState(projectPath) as Promise<GitRepositoryState>,
+  getCommitGraph: async (projectPath: string, maxCount?: number, skip?: number) =>
+    (await ensureDaemonClient()).gitCommitGraph(projectPath, maxCount, skip) as Promise<GitCommitGraphResult>,
   getStatusChanges: async (
     projectPath: string,
     area: GitStatusArea,

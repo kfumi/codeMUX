@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const gitApiMock = vi.hoisted(() => ({
   getRepositoryState: vi.fn(),
   getStatusChanges: vi.fn(),
+  getCommitGraph: vi.fn(),
   checkoutBranch: vi.fn(),
   createBranch: vi.fn(),
 }));
@@ -66,6 +67,7 @@ describe('GitEnvironmentPopover', () => {
       { additions: 34376, deletions: 2509 },
       { additions: 4, deletions: 2 },
     ]);
+    gitApiMock.getCommitGraph.mockResolvedValue({ commits: [], hasMore: false });
     gitApiMock.checkoutBranch.mockResolvedValue(undefined);
     gitApiMock.createBranch.mockResolvedValue(undefined);
   });
@@ -123,6 +125,31 @@ describe('GitEnvironmentPopover', () => {
 
     await waitFor(() => expect(screen.getByPlaceholderText('搜索分支')).toBeTruthy());
     expect(screen.getByText('master')).toBeTruthy();
+  });
+
+  it('opens the commit-or-push dialog from the environment panel', async () => {
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+    await waitFor(() => expect(screen.getByTestId('git-environment-commit')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('git-environment-commit'));
+
+    expect(await screen.findByTestId('git-commit-or-push-dialog')).toBeTruthy();
+  });
+
+  it('opens the Git graph dialog from the branch popover', async () => {
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('feat/mobile-companion');
+    fireEvent.click(screen.getByTestId('git-environment-branch'));
+    await waitFor(() => expect(screen.getByPlaceholderText('搜索分支')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('git-environment-graph'));
+
+    expect(await screen.findByTestId('git-graph-dialog')).toBeTruthy();
   });
 
   it('重开摘要复用缓存：第二次打开不再取数', async () => {

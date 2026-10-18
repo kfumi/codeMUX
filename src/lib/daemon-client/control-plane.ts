@@ -132,6 +132,11 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
         method: 'POST',
         body: JSON.stringify({ projectPath }),
       }),
+    gitCommitGraph: (projectPath: string, maxCount?: number, skip?: number) =>
+      fetch(config, '/workspace/git/commit-graph', {
+        method: 'POST',
+        body: JSON.stringify({ projectPath, maxCount, skip }),
+      }),
     gitStatusChanges: (projectPath: string, area: string) =>
       fetch<unknown[]>(config, '/workspace/git/status-changes', {
         method: 'POST',

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   GitBranch,
   GitCommitHorizontal,
+  GitGraph,
   Plus,
   Search,
   SlidersHorizontal,
@@ -30,6 +31,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { TooltipHint } from '../../ui/tooltip';
 import type { TodoItem } from '../../../types/agent';
 import { GitBranchDialog } from './GitBranchDialog';
+import { canCommitOrPush, GitCommitOrPushDialog } from './GitCommitOrPushDialog';
+import { GitGraphDialog } from './GitGraphDialog';
 import { TodoStatusIcon } from '../../agent/TodoStatusIcon';
 
 /** 超过该数量时折叠前面的条目，仅展示最后 N 条 */
@@ -243,6 +246,9 @@ function EnvironmentSection({
   onCheckoutBranch,
   onOpenReview,
   onOpenBranchDialog,
+  commitOrPushEnabled,
+  onCommitOrPush,
+  onOpenGitGraph,
 }: {
   gitLoadState: GitEnvironmentLoadState;
   unavailableMessage: string | null;
@@ -258,6 +264,9 @@ function EnvironmentSection({
   onCheckoutBranch: (branchName: string) => void;
   onOpenReview: () => void;
   onOpenBranchDialog: () => void;
+  commitOrPushEnabled: boolean;
+  onCommitOrPush: () => void;
+  onOpenGitGraph: () => void;
 }) {
   return (
     <div data-testid="git-environment-section">
@@ -326,7 +335,7 @@ function EnvironmentSection({
                   autoFocus
                 />
               </div>
-              <div className="mt-2 max-h-56 overflow-y-auto">
+              <div className="mt-2 max-h-56 overflow-y-auto border-t border-border pt-1.5">
                 {filteredBranches.map((branch) => (
                   <button
                     key={branch.name}
@@ -346,18 +355,45 @@ function EnvironmentSection({
                 ))}
               </div>
               {branchError ? <p className="px-2 py-1 text-xs text-destructive">{branchError}</p> : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-1 h-7 w-full justify-start gap-2 px-2 text-xs"
-                onClick={onOpenBranchDialog}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                创建并检出新分支...
-              </Button>
+              <div className="mt-1.5 border-t border-border pt-1.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-full justify-start gap-2 px-2 text-xs"
+                  onClick={onOpenBranchDialog}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  创建并检出新分支...
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="git-environment-graph"
+                  className="mt-0.5 h-7 w-full justify-start gap-2 px-2 text-xs"
+                  onClick={onOpenGitGraph}
+                >
+                  <GitGraph className="h-3.5 w-3.5" />
+                  Git 图谱
+                </Button>
+              </div>
             </PopoverContent>
           </Popover>
+
+          <button
+            type="button"
+            data-testid="git-environment-commit"
+            onClick={onCommitOrPush}
+            disabled={!commitOrPushEnabled}
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/8 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
+              <GitCommitHorizontal className="h-3 w-3" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">提交或推送</span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
+          </button>
         </>
       ) : null}
 
@@ -406,6 +442,8 @@ export function SummaryPanelBody({
   const [branchQuery, setBranchQuery] = useState('');
   const [branchLoading, setBranchLoading] = useState(false);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [graphDialogOpen, setGraphDialogOpen] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
   const ensureEnvironment = useGitEnvironmentStore((state) => state.ensure);
   const refreshEnvironment = useGitEnvironmentStore((state) => state.refresh);
@@ -486,6 +524,12 @@ export function SummaryPanelBody({
           setBranchOpen(false);
           setBranchDialogOpen(true);
         }}
+        commitOrPushEnabled={canCommitOrPush(repositoryState)}
+        onCommitOrPush={() => setCommitDialogOpen(true)}
+        onOpenGitGraph={() => {
+          setBranchOpen(false);
+          setGraphDialogOpen(true);
+        }}
       />
 
       <TodoSection todos={todos} />
@@ -498,6 +542,21 @@ export function SummaryPanelBody({
         error={branchError}
         onOpenChange={setBranchDialogOpen}
         onCreate={(branchName, checkout) => void createBranch(branchName, checkout)}
+      />
+
+      <GitCommitOrPushDialog
+        projectPath={projectPath}
+        state={repositoryState}
+        totals={totals}
+        open={commitDialogOpen}
+        onOpenChange={setCommitDialogOpen}
+        onCompleted={() => void refreshEnvironment(projectPath)}
+      />
+
+      <GitGraphDialog
+        projectPath={projectPath}
+        open={graphDialogOpen}
+        onOpenChange={setGraphDialogOpen}
       />
     </>
   );

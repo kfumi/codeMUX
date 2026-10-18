@@ -87,6 +87,7 @@ pub(crate) fn extend_api_router(router: Router<ServerContext>) -> Router<ServerC
             "/workspace/git/repository-state",
             post(git_repository_state),
         )
+        .route("/workspace/git/commit-graph", post(git_commit_graph))
         .route("/workspace/git/status-changes", post(git_status_changes))
         .route(
             "/workspace/git/status-change-detail",
@@ -923,6 +924,27 @@ async fn git_repository_state(
     let repo = crate::services::git::get_git_repository_state(body.project_path)
         .map_err(ApiError::bad_request)?;
     Ok(Json(serde_json::json!(repo)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitGraphRequest {
+    project_path: String,
+    max_count: Option<usize>,
+    skip: Option<usize>,
+}
+
+async fn git_commit_graph(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<GitCommitGraphRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let graph =
+        crate::services::git::get_git_commit_graph(body.project_path, body.max_count, body.skip)
+            .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!(graph)))
 }
 
 #[derive(Debug, Deserialize)]

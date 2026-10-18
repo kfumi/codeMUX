@@ -84,6 +84,32 @@ pub struct GitPullRequestSuggestion {
     pub base: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitGraphRef {
+    pub name: String,
+    /// branch | remote | tag | head
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitGraphCommit {
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub refs: Vec<GitCommitGraphRef>,
+    pub subject: String,
+    pub author_name: Option<String>,
+    pub authored_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitGraph {
+    pub commits: Vec<GitCommitGraphCommit>,
+    pub has_more: bool,
+}
+
 fn run_git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     run_git_with_env(root, args, None)
 }
@@ -597,6 +623,164 @@ fn read_upstream_tracking(root: &Path) -> Result<(Option<String>, Option<String>
     };
 
     Ok((upstream_branch, upstream_ref))
+}
+
+const COMMIT_GRAPH_DEFAULT_MAX_COUNT: usize = 50;
+const COMMIT_GRAPH_MAX_MAX_COUNT: usize = 200;
+
+fn parse_commit_graph_refs(raw_decorations: &str) -> Vec<GitCommitGraphRef> {
+    let mut refs: Vec<GitCommitGraphRef> = Vec::new();
+    let mut push = |name: String, kind: &str| {
+        if name.is_empty() || refs.iter().any(|r| r.name == name && r.kind == kind) {
+            return;
+        }
+        refs.push(GitCommitGraphRef {
+            name,
+            kind: kind.to_string(),
+        });
+    };
+
+    for decoration in raw_decorations.split(", ") {
+        let decoration = decoration.trim();
+        if decoration.is_empty() {
+            continue;
+        }
+        if let Some(head_target) = decoration.strip_prefix("HEAD -> ") {
+            push("HEAD".to_string(), "head");
+            let name = head_target
+                .strip_prefix("refs/heads/")
+                .unwrap_or(head_target);
+            push(name.to_string(), "branch");
+            continue;
+        }
+        if let Some(tag) = decoration.strip_prefix("tag: ") {
+            let name = tag.strip_prefix("refs/tags/").unwrap_or(tag);
+            push(name.to_string(), "tag");
+            continue;
+        }
+        if let Some(name) = decoration.strip_prefix("refs/heads/") {
+            push(name.to_string(), "branch");
+            continue;
+        }
+        if let Some(name) = decoration.strip_prefix("refs/remotes/") {
+            push(name.to_string(), "remote");
+            continue;
+        }
+        if let Some(name) = decoration.strip_prefix("refs/tags/") {
+            push(name.to_string(), "tag");
+            continue;
+        }
+        push(
+            decoration.to_string(),
+            if decoration.contains('/') {
+                "remote"
+            } else {
+                "branch"
+            },
+        );
+    }
+
+    refs
+}
+
+fn parse_commit_graph(stdout: &[u8], max_count: usize) -> GitCommitGraph {
+    let text = String::from_utf8_lossy(stdout);
+    let mut commits: Vec<GitCommitGraphCommit> = Vec::new();
+
+    for record in text.split('\u{1e}') {
+        let record = record.trim();
+        if record.is_empty() {
+            continue;
+        }
+        let mut fields = record.split('\u{1f}');
+        let hash = fields.next().unwrap_or("").trim().to_string();
+        if hash.is_empty() {
+            continue;
+        }
+        let parents = fields
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let author_name = fields.next().unwrap_or("").trim().to_string();
+        let authored_at_ms = fields
+            .next()
+            .unwrap_or("")
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .map(|seconds| seconds * 1000);
+        let subject = fields.next().unwrap_or("").to_string();
+        let refs = parse_commit_graph_refs(fields.next().unwrap_or(""));
+
+        commits.push(GitCommitGraphCommit {
+            hash,
+            parents,
+            refs,
+            subject,
+            author_name: (!author_name.is_empty()).then_some(author_name),
+            authored_at_ms,
+        });
+    }
+
+    let has_more = commits.len() > max_count;
+    commits.truncate(max_count);
+    GitCommitGraph { commits, has_more }
+}
+
+/// 读取当前仓库的提交图（HEAD + 本地分支 + 标签 + 远程分支）。
+/// 空仓库（还没有任何提交）返回空图，不当作错误。
+pub fn read_git_commit_graph_in_project(
+    project_path: &Path,
+    max_count: Option<usize>,
+    skip: Option<usize>,
+) -> Result<GitCommitGraph, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
+
+    let max_count = max_count
+        .unwrap_or(COMMIT_GRAPH_DEFAULT_MAX_COUNT)
+        .clamp(1, COMMIT_GRAPH_MAX_MAX_COUNT);
+    let skip = skip.unwrap_or(0);
+    let args = [
+        "log",
+        "HEAD",
+        "--branches",
+        "--tags",
+        "--remotes",
+        "--date-order",
+        "--topo-order",
+        "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s%x1f%D%x1e",
+    ];
+    let skip_arg = format!("--skip={}", skip);
+    let count_arg = format!("--max-count={}", max_count + 1);
+    let mut full_args: Vec<&str> = args.to_vec();
+    full_args.push(&skip_arg);
+    full_args.push(&count_arg);
+
+    match run_git(&root, &full_args) {
+        Ok(output) => Ok(parse_commit_graph(&output, max_count)),
+        Err(error) => {
+            let lower = error.to_lowercase();
+            if lower.contains("does not have any commits")
+                || lower.contains("unknown revision")
+                || lower.contains("bad default revision")
+                || lower.contains("ambiguous argument")
+            {
+                Ok(GitCommitGraph {
+                    commits: Vec::new(),
+                    has_more: false,
+                })
+            } else {
+                Err(error)
+            }
+        }
+    }
 }
 
 pub fn create_git_branch_in_project(
@@ -1860,6 +2044,14 @@ pub fn commit_git_changes(project_path: String, message: String) -> Result<Strin
 
 pub fn push_git_branch(project_path: String) -> Result<(), String> {
     push_git_branch_in_project(Path::new(&project_path))
+}
+
+pub fn get_git_commit_graph(
+    project_path: String,
+    max_count: Option<usize>,
+    skip: Option<usize>,
+) -> Result<GitCommitGraph, String> {
+    read_git_commit_graph_in_project(Path::new(&project_path), max_count, skip)
 }
 
 #[cfg(test)]

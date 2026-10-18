@@ -47,6 +47,27 @@ export interface GitCommitMessageSuggestion {
   message: string;
 }
 
+export type GitCommitGraphRefKind = 'branch' | 'remote' | 'tag' | 'head';
+
+export interface GitCommitGraphRef {
+  name: string;
+  kind: GitCommitGraphRefKind;
+}
+
+export interface GitCommitGraphCommit {
+  hash: string;
+  parents: string[];
+  refs: GitCommitGraphRef[];
+  subject: string;
+  authorName: string | null;
+  authoredAtMs: number | null;
+}
+
+export interface GitCommitGraphResult {
+  commits: GitCommitGraphCommit[];
+  hasMore: boolean;
+}
+
 export interface GitPullRequestSuggestion {
   title: string;
   body: string;
