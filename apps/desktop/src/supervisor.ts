@@ -24,6 +24,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';impor
 import http from 'node:http';
 import path from 'node:path';
 import { formatLocalTimestamp } from './log-format';
+import { rotateLogIfOversized } from './log-rotation';
 
 /** 与 Rust `DaemonRunState` 同形的 run-state 条目(serde 无 rename → snake_case 键)。 */
 export interface DaemonRunState {
@@ -35,6 +36,9 @@ export interface DaemonRunState {
 }
 
 export const RUN_STATE_FILE = 'daemon-run-state.json';
+
+/** raw stdout/stderr 落盘文件名;daemon 自身的结构化日志按天写 `daemon-YYYY-MM-DD.log`。 */
+export const DAEMON_STDERR_LOG_FILE = 'daemon-stderr.log';
 
 /** /api/health 响应中 supervisor 关心的字段。 */
 export interface DaemonHealth {
@@ -274,14 +278,18 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
   }
 
   /**
-   * spawn 独立 daemon:stdout/stderr 追加重定向到 `<appDataDir>/logs/daemon.log`,
+   * spawn 独立 daemon:把 raw stdout/stderr 追加重定向到
+   * `<appDataDir>/logs/daemon-stderr.log`(daemon 自身的结构化日志由 daemon 按天
+   * 写 `daemon-YYYY-MM-DD.log`,这里只兜住 panic / 启动早期输出),
    * 轮询 run-state 直到出现本 child 的条目且健康探活通过(对齐 Rust spawn_managed_daemon)。
    */
   async function spawnManagedDaemon(): Promise<void> {
     mkdirSync(appDataDir, { recursive: true });
     const logDir = path.join(appDataDir, 'logs');
     mkdirSync(logDir, { recursive: true });
-    const logPath = path.join(logDir, 'daemon.log');
+    const logPath = path.join(logDir, DAEMON_STDERR_LOG_FILE);
+    // 启动前封顶(daemon 运行期间 fd 被持有,Windows 无法改名;此文件只装 stderr)。
+    rotateLogIfOversized(logPath);
     // append 语义(Rust 版以 append fd 打开);启动时追加一行分隔便于排障。
     appendFileSync(logPath, `\n[shell] spawning daemon (${nowLocalTimestamp()})\n`);
     const logFd = openSync(logPath, 'a');
@@ -521,7 +529,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
   };
 }
 
-/** daemon 运行日志路径(与壳自身日志同目录,排障可见)。 */
-export function daemonLogPath(appDataDir: string): string {
-  return path.join(appDataDir, 'logs', 'daemon.log');
+/** daemon raw stderr 日志路径(结构化日志由 daemon 自己按天写,见 logging.rs)。 */
+export function daemonStderrLogPath(appDataDir: string): string {
+  return path.join(appDataDir, 'logs', DAEMON_STDERR_LOG_FILE);
 }

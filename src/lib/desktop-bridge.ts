@@ -24,6 +24,13 @@ export interface LogFileInfo {
   modified: string;
 }
 
+/** readLogFile 返回值:文件尾部内容(超过上限时只给末尾)+ 是否截断 + 原始字节数。 */
+export interface LogFileContent {
+  content: string;
+  truncated: boolean;
+  totalBytes: number;
+}
+
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
 
 /** 本机 Git 探测结果(壳独占能力 host.git-check)。 */
@@ -188,7 +195,7 @@ export interface CodemuxDesktopBridge {
   getUserHomeDirectory(): Promise<string>;
   getLogDirectory(): Promise<string>;
   getLogFiles(): Promise<LogFileInfo[]>;
-  readLogFile(fileName: string): Promise<string>;
+  readLogFile(fileName: string): Promise<LogFileContent>;
   readHomeFile(relativePath: string): Promise<string>;
   /** 确保绝对路径目录存在(缺则递归创建)。返回 false = 不可用,调用方降级。 */
   ensureDirectory(path: string): Promise<boolean>;

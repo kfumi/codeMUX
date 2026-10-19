@@ -39,6 +39,19 @@ describe('daemon client', () => {
     );
   });
 
+  it('每个请求带 trace 头,失败时把同一 trace 挂到错误上', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('boom', { status: 500 }));
+    const client = createDaemonClient(config);
+    const error = (await client.health().catch((caught: unknown) => caught)) as {
+      traceId?: string;
+    };
+
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    const headers = (call?.[1]?.headers ?? {}) as Record<string, string>;
+    expect(headers['x-codemux-trace-id']).toBeTruthy();
+    expect(error.traceId).toBe(headers['x-codemux-trace-id']);
+  });
+
   it('requests an authenticated image preview by absolute path', async () => {
     const dataUrl = 'data:image/png;base64,UE5H';
     vi.mocked(fetch).mockResolvedValueOnce(

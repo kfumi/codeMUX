@@ -159,7 +159,11 @@ describe('shell-bridge 日志/主目录文件通道', () => {
       registerShellBridge(createDeps({ getLogDir: () => logDir }));
       const handler = getHandler('readLogFile');
 
-      await expect(handler(null, { fileName: 'daemon.log' })).resolves.toBe('hello daemon');
+      await expect(handler(null, { fileName: 'daemon.log' })).resolves.toEqual({
+        content: 'hello daemon',
+        truncated: false,
+        totalBytes: 'hello daemon'.length,
+      });
       await expect(handler(null, undefined)).rejects.toThrow('fileName must be a string');
       await expect(handler(null, { fileName: 123 })).rejects.toThrow('fileName must be a string');
       await expect(handler(null, { fileName: '../escape.log' })).rejects.toThrow('must not contain path separators');

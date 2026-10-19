@@ -1,6 +1,7 @@
 import { createControlPlaneMethods, type ControlPlaneMethods } from './control-plane';
 import { createTerminalMethods, type TerminalMethods } from './terminal';
 import { usePerfStore } from '../../stores/perfStore';
+import { logger } from '../logger';
 import { extractErrorText } from '../errorMessage';
 
 export interface DaemonConnectionConfig {
@@ -107,27 +108,57 @@ async function daemonFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  // 每个请求一个 trace:随请求头发给 daemon(daemon 的日志与响应头都带同一 id),
+  // 失败时本地日志也带它,这样 renderer 与 daemon 两边能按 id 对上。
+  const traceId = createTraceId();
+  const method = init?.method ?? 'GET';
+
   if (config.transport) {
-    const result = await config.transport.request(path, init);
+    let result: { status: number; body: string };
+    try {
+      result = await config.transport.request(path, init);
+    } catch (error) {
+      logRequestFailure(traceId, method, path, undefined, error);
+      throw error;
+    }
     if (result.status < 200 || result.status >= 300) {
-      throw new Error(extractErrorText(result.body, `Daemon request failed: ${result.status}`));
+      const error = new Error(
+        extractErrorText(result.body, `Daemon request failed: ${result.status}`),
+      );
+      logRequestFailure(traceId, method, path, result.status, error);
+      throw attachTraceId(error, traceId);
     }
     if (!result.body.trim()) {
       return undefined as T;
     }
-    return JSON.parse(result.body) as T;
+    try {
+      return JSON.parse(result.body) as T;
+    } catch (error) {
+      logRequestFailure(traceId, method, path, undefined, error);
+      throw attachTraceId(error, traceId);
+    }
   }
-  const response = await fetch(`${config.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${config.token}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+        'x-codemux-trace-id': traceId,
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    logRequestFailure(traceId, method, path, undefined, error);
+    throw error;
+  }
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(extractErrorText(body, `Daemon request failed: ${response.status}`));
+    const error = new Error(extractErrorText(body, `Daemon request failed: ${response.status}`));
+    logRequestFailure(traceId, method, path, response.status, error);
+    throw attachTraceId(error, traceId);
   }
   if (response.status === 204 || response.status === 202) {
     return undefined as T;
@@ -137,6 +168,49 @@ async function daemonFetch<T>(
     return undefined as T;
   }
   return JSON.parse(text) as T;
+}
+
+export function createTraceId(): string {
+  const cryptoApi = globalThis.crypto as Crypto | undefined;
+  if (typeof cryptoApi?.randomUUID === 'function') {
+    try {
+      return cryptoApi.randomUUID();
+    } catch {
+      // 非安全上下文等场景退回随机串。
+    }
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function attachTraceId<T>(error: T, traceId: string): T {
+  if (error && typeof error === 'object') {
+    (error as { traceId?: string }).traceId = traceId;
+  }
+  return error;
+}
+
+// 轮询/健康检查在 daemon 停机时每 2.5s 失败一次;同一路径 10s 内只记一条,避免刷屏。
+const FAILURE_LOG_WINDOW_MS = 10_000;
+const FAILURE_LOG_MAX_KEYS = 200;
+const lastFailureLogAt = new Map<string, number>();
+
+function logRequestFailure(
+  traceId: string,
+  method: string,
+  path: string,
+  status: number | undefined,
+  error: unknown,
+): void {
+  try {
+    const key = `${method} ${path}`;
+    const now = Date.now();
+    if (now - (lastFailureLogAt.get(key) ?? 0) < FAILURE_LOG_WINDOW_MS) return;
+    if (lastFailureLogAt.size >= FAILURE_LOG_MAX_KEYS) lastFailureLogAt.clear();
+    lastFailureLogAt.set(key, now);
+    logger.error('daemon request failed', { traceId, method, path, status }, error);
+  } catch {
+    // 日志失败不影响请求路径。
+  }
 }
 
 type SessionHandlers = {

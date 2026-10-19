@@ -99,12 +99,12 @@ fn parse_mcp_control_cli(mut args: impl Iterator<Item = String>) -> Result<McpCo
 }
 
 fn main() {
-    init_stderr_logger();
-
     // 子命令:`codemux-daemon mcp-control --app-data-dir <dir> [--port <n>]`
-    // (内置控制 MCP server,stdio;详见 builtin_mcp 模块文档)。
+    // (内置控制 MCP server,stdio;详见 builtin_mcp 模块文档)。短生命周期,
+    // 日志走 stderr(stdout 是协议面)。
     let mut cli_args = std::env::args().skip(1);
     if cli_args.next().as_deref() == Some(codemux_lib::builtin_mcp::SUBCOMMAND) {
+        codemux_lib::logging::init_stderr();
         match parse_mcp_control_cli(cli_args) {
             Ok((app_data_dir, port, session_id)) => {
                 let app_data_dir = app_data_dir.unwrap_or_else(|| {
@@ -140,6 +140,8 @@ fn main() {
             .expect("无法定位应用数据目录(请用 --app-data-dir 显式指定)")
             .join("com.codemux.desktop")
     });
+    // daemon 自己按天写 <app_data_dir>/logs/daemon-YYYY-MM-DD.log(见 logging.rs)。
+    codemux_lib::logging::init_file(&app_data_dir.join("logs"));
     let roots = PathRoots {
         app_data_dir,
         resource_dir: cli.resource_dir,
@@ -157,34 +159,4 @@ fn main() {
         eprintln!("codemux-daemon: 启动失败: {}", error);
         std::process::exit(1);
     }
-}
-
-/// 极简 stderr 日志:supervisor 会把 stderr 重定向到日志文件;
-/// 完整日志体系随壳侧工单接入。
-/// 行首本地时间戳与 renderer.log(log-format.ts)保持同一格式。
-fn init_stderr_logger() {
-    struct StderrLogger;
-
-    impl log::Log for StderrLogger {
-        fn enabled(&self, metadata: &log::Metadata) -> bool {
-            metadata.level() <= log::Level::Info
-        }
-
-        fn log(&self, record: &log::Record) {
-            if self.enabled(record.metadata()) {
-                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-                eprintln!(
-                    "[{timestamp} {} {}] {}",
-                    record.level(),
-                    record.target(),
-                    record.args()
-                );
-            }
-        }
-
-        fn flush(&self) {}
-    }
-
-    let _ = log::set_boxed_logger(Box::new(StderrLogger));
-    log::set_max_level(log::LevelFilter::Info);
 }

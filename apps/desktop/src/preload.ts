@@ -74,7 +74,8 @@ const bridge = {
   getUserHomeDirectory: () => invoke<string>('getUserHomeDirectory'),
   getLogDirectory: () => invoke<string>('getLogDirectory'),
   getLogFiles: () => invoke('getLogFiles'),
-  readLogFile: (fileName: string) => invoke<string>('readLogFile', { fileName }),
+  readLogFile: (fileName: string) =>
+    invoke<{ content: string; truncated: boolean; totalBytes: number }>('readLogFile', { fileName }),
   readHomeFile: (relativePath: string) => invoke<string>('readHomeFile', { relativePath }),
   ensureDirectory: (path: string) => invoke<boolean>('ensureDirectory', { path }),
 

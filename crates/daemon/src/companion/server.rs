@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
@@ -41,6 +41,7 @@ use crate::companion::routes_terminal;
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
 use crate::config::types::AgentKind;
 use crate::db::operations;
+use crate::log_ctx::{LogCtx, TRACE_HEADER};
 
 #[derive(Clone)]
 pub(crate) struct ServerContext {
@@ -476,6 +477,7 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
             HeaderValue::from_static("no-store"),
         ))
         .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(trace_context_middleware))
         .with_state(ctx)
 }
 
@@ -494,6 +496,54 @@ async fn origin_guard_middleware(
         return ApiError::forbidden("Request origin is not allowed").into_response();
     }
     next.run(request).await
+}
+
+/// trace 只接受短 token,拒绝换行/空白等会破坏日志行与响应头的字符。
+fn normalize_trace_id(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    if value.is_empty() || value.len() > 64 {
+        return None;
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn session_id_from_path(path: &str) -> Option<String> {
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    if parts.next()? != "api" || parts.next()? != "sessions" {
+        return None;
+    }
+    let candidate = parts.next()?;
+    if matches!(candidate, "archived" | "import" | "imports") {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+/// 为每个请求建立日志上下文:trace 由客户端提供(缺省生成),并回写到响应头。
+async fn trace_context_middleware(request: Request, next: Next) -> Response {
+    let trace_id = normalize_trace_id(
+        request
+            .headers()
+            .get(TRACE_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )
+    .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+    let session_id = session_id_from_path(request.uri().path());
+    let mut ctx = LogCtx::with_trace(&trace_id);
+    ctx.session_id = session_id;
+    let mut response = crate::log_ctx::with_ctx(ctx, || next.run(request)).await;
+    if let Ok(value) = HeaderValue::from_str(&trace_id) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static(TRACE_HEADER), value);
+    }
+    response
 }
 
 /// 读取网页端托管配置(静态目录覆盖 + 放行 Origin 列表),一次锁内快照;
@@ -1502,7 +1552,37 @@ fn parse_listen_addr(listen_address: &str, port: u16) -> Result<SocketAddr, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{has_sendable_input, SendMessageRequest, SessionSettingsRequest};
+    use super::{
+        has_sendable_input, normalize_trace_id, session_id_from_path, SendMessageRequest,
+        SessionSettingsRequest,
+    };
+
+    #[test]
+    fn accepts_sanitized_client_trace_and_rejects_unsafe_values() {
+        assert_eq!(
+            normalize_trace_id(Some(" 0123-abcd.ef_1 ")),
+            Some("0123-abcd.ef_1".to_string())
+        );
+        assert_eq!(normalize_trace_id(Some("bad value")), None);
+        assert_eq!(normalize_trace_id(Some("bad\nvalue")), None);
+        assert_eq!(normalize_trace_id(Some(&"x".repeat(65))), None);
+        assert_eq!(normalize_trace_id(Some("   ")), None);
+    }
+
+    #[test]
+    fn extracts_session_id_from_api_paths_only() {
+        assert_eq!(
+            session_id_from_path("/api/sessions/abc/messages"),
+            Some("abc".to_string())
+        );
+        assert_eq!(session_id_from_path("/api/sessions/archived"), None);
+        assert_eq!(
+            session_id_from_path("/api/sessions/import/candidates"),
+            None
+        );
+        assert_eq!(session_id_from_path("/api/projects"), None);
+        assert_eq!(session_id_from_path("/api/sessions"), None);
+    }
 
     #[test]
     fn accepts_attachment_only_mobile_messages() {

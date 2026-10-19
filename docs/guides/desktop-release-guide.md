@@ -150,10 +150,15 @@ $names | ForEach-Object {
 
 ### 更新排障日志
 
-更新全过程落盘 `%APPDATA%/com.codemux.desktop/logs/updater.log`(与 daemon.log /
-renderer.log 同目录,应用内「日志」面板可看):壳侧生命周期(check 结果、下载
-成功/失败、每个转发给渲染层的事件)+ electron-updater 本体日志(HTTP、重试、
-校验和)。更新没反应或失败时先看这个文件。
+更新全过程落盘 `%APPDATA%/com.codemux.desktop/logs/updater-YYYY-MM-DD.log`(按天归档,
+与 `daemon-YYYY-MM-DD.log` / `renderer-YYYY-MM-DD.log` 同目录,应用内「日志」面板可看):
+壳侧生命周期(check 结果、下载成功/失败、每个转发给渲染层的事件)+ electron-updater
+本体日志(HTTP、重试、校验和)。更新没反应或失败时先看这个文件。日志按天归档,默认保留
+最近 7 天;每个 base 另有 20 MB 总量上限,超出从最旧日期删起。单条记录超过 8 KB 会截断
+并标注 `...[truncated N chars]`。
+
+daemon 的每条请求日志带 `[trace=<id>]`(客户端可用 `x-codemux-trace-id` 头指定,缺省由
+daemon 生成并回写响应头);renderer 请求失败时本地日志也带同一个 `traceId`,两边按 id 对时间线。
 
 更新失败时 UI 不会静默:标题栏入口变成红色的「更新失败」并可点击重试,关于页
 展示失败原因与进度条(两处口径共用 `src/features/update/updateDisplay.ts`)。

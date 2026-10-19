@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { dailyLogFileName } from '../src/daily-log';
 
 const autoUpdaterMock = vi.hoisted(() => ({
   setFeedURL: vi.fn(),
@@ -63,7 +63,7 @@ function createService(isPackaged = true, overrides: Record<string, unknown> = {
   return {
     service,
     sendToRenderer,
-    readLog: () => readFileSync(path.join(logDir, 'updater.log'), 'utf8'),
+    readLog: () => readFileSync(path.join(logDir, dailyLogFileName('updater', new Date())), 'utf8'),
   };
 }
 

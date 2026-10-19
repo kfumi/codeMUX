@@ -22,6 +22,7 @@ pub mod daemon;
 mod db;
 mod forge;
 mod log_ctx;
+pub mod logging;
 mod mcp;
 mod model_providers;
 pub mod paths;

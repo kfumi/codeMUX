@@ -16,6 +16,7 @@ import {
   DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE,
   desktopBridge,
   type CodemuxDesktopBridge,
+  type LogFileContent,
 } from '../desktop-bridge';
 
 /**
@@ -46,7 +47,7 @@ export const shellFacade = {
   getUserHomeDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getUserHomeDirectory()),
   checkGitEnvironment: () => bridgeCall((bridge) => bridge.checkGitEnvironment()),
   getLogFiles: () => bridgeCall((bridge) => bridge.getLogFiles()),
-  readLogFile: (fileName: string): Promise<string> => bridgeCall((bridge) => bridge.readLogFile(fileName)),
+  readLogFile: (fileName: string): Promise<LogFileContent> => bridgeCall((bridge) => bridge.readLogFile(fileName)),
   checkAgentRuntimes: () => bridgeCall((bridge) => bridge.checkAgentRuntimes()),
   upgradeAgentRuntime: (agentKind: string) => bridgeCall((bridge) => bridge.upgradeAgentRuntime(agentKind)),
   probeAgentInstallations: (agentKind: string) => bridgeCall((bridge) => bridge.probeAgentInstallations(agentKind)),

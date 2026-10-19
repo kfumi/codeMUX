@@ -1,16 +1,16 @@
-// 更新器落盘日志契约:行格式、Error 归一化、electron-updater Logger 适配、
-// 懒建目录与写盘失败静默。
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// 更新器落盘日志契约:按天文件命名、行格式、Error 归一化、electron-updater Logger
+// 适配、跨天切档、写盘失败静默。
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  UPDATER_LOG_FILE,
   createElectronUpdaterLogger,
   createUpdaterLogRecorder,
   formatUpdaterMessage,
 } from '../src/updater-log';
+import { MAX_LOG_TEXT_CHARS } from '../src/log-format';
 
 const tempDirs: string[] = [];
 
@@ -27,10 +27,10 @@ afterEach(() => {
 });
 
 describe('createUpdaterLogRecorder', () => {
-  it('追加写入 [本地时间] [级别] 消息 行,并懒建日志目录', () => {
+  it('按本地日期命名文件并追加 [时间] [级别] 消息 行,懒建日志目录', () => {
     const logDir = path.join(makeTempDir(), 'logs', 'nested');
     const recorder = createUpdaterLogRecorder(logDir, () => new Date(2026, 8, 12, 8, 9, 10, 481));
-    expect(recorder.filePath).toBe(path.join(logDir, UPDATER_LOG_FILE));
+    expect(recorder.filePath).toBe(path.join(logDir, 'updater-2026-09-12.log'));
 
     recorder.record('info', '开始检查更新');
     recorder.record('error', '下载失败');
@@ -42,12 +42,41 @@ describe('createUpdaterLogRecorder', () => {
     ]);
   });
 
+  it('跨天写入新日期文件', () => {
+    const dir = makeTempDir();
+    let clock = new Date(2026, 8, 12, 23, 59, 0);
+    const recorder = createUpdaterLogRecorder(dir, () => clock);
+    recorder.record('info', 'day1');
+    clock = new Date(2026, 8, 13, 0, 1, 0);
+    recorder.record('info', 'day2');
+
+    expect(readFileSync(path.join(dir, 'updater-2026-09-12.log'), 'utf8')).toContain('day1');
+    expect(readFileSync(path.join(dir, 'updater-2026-09-13.log'), 'utf8')).toContain('day2');
+  });
+
+  it('超过上限时在写入前轮转为 .1', () => {
+    const dir = makeTempDir();
+    const filePath = path.join(dir, 'updater-2026-09-12.log');
+    writeFileSync(filePath, 'old'.repeat(500), 'utf8');
+    const recorder = createUpdaterLogRecorder(dir, () => new Date(2026, 8, 12), 1024);
+
+    recorder.record('info', 'after rotate');
+
+    expect(readFileSync(filePath, 'utf8')).toContain('[info] after rotate');
+    expect(readFileSync(`${filePath}.1`, 'utf8')).toBe('old'.repeat(500));
+  });
+
+  it('单条消息超长时截断并标注', () => {
+    const recorder = createUpdaterLogRecorder(makeTempDir(), () => new Date(2026, 8, 12));
+    recorder.record('info', 'y'.repeat(MAX_LOG_TEXT_CHARS + 7));
+    expect(readFileSync(recorder.filePath, 'utf8')).toContain('...[truncated 7 chars]');
+  });
+
   it('写盘失败静默吞掉(日志不反噬壳)', () => {
     const blocker = path.join(makeTempDir(), 'occupied');
     writeFileSync(blocker, 'not a dir', 'utf8');
     const broken = createUpdaterLogRecorder(path.join(blocker, 'logs'));
     expect(() => broken.record('info', 'should not throw')).not.toThrow();
-    expect(existsSync(path.join(blocker, 'logs'))).toBe(false);
   });
 });
 
@@ -68,7 +97,7 @@ describe('formatUpdaterMessage', () => {
 
 describe('createElectronUpdaterLogger', () => {
   it('info/warn/error 映射到对应级别,debug 记为 info', () => {
-    const recorder = createUpdaterLogRecorder(makeTempDir(), () => new Date('2026-09-12T00:00:00Z'));
+    const recorder = createUpdaterLogRecorder(makeTempDir(), () => new Date(2026, 8, 12));
     const logger = createElectronUpdaterLogger(recorder);
 
     logger.info('checking');

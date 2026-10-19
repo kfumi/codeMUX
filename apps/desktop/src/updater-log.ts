@@ -1,4 +1,4 @@
-//! 更新器落盘日志:<appDataDir>/logs/updater.log(与 daemon.log / renderer.log 同目录)。
+//! 更新器落盘日志:<appDataDir>/logs/updater-YYYY-MM-DD.log(按天归档,与 daemon 日志同目录)。
 //!
 //! 起因:updater.ts 原先把 `autoUpdater.logger` 设成 null,又把所有更新事件
 //! 只往渲染层丢 —— 更新失败(网络/404/校验和/未先 check)在磁盘上不留任何痕迹,
@@ -8,16 +8,21 @@
 //! 写盘失败一律静默吞掉:日志绝不反噬壳(与 renderer-log.ts 同一取舍)。
 
 import { appendFileSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-import { formatLocalTimestamp } from './log-format';
+import { dailyLogPath, LOG_KEEP_DAYS, localDateStamp, scheduleDailyLogPrune } from './daily-log';
+import { clampLogText, formatLocalTimestamp } from './log-format';
+import { MAX_LOG_BYTES, rotateLogIfOversized } from './log-rotation';
 
-export const UPDATER_LOG_FILE = 'updater.log';
+/** 日志文件名 base:实际文件为 `<base>-YYYY-MM-DD.log`。 */
+export const UPDATER_LOG_BASE = 'updater';
+
+/** 每累计写入这么多字节才做一次大小判定(避免每条日志都 stat)。 */
+const ROTATE_CHECK_EVERY_BYTES = 64 * 1024;
 
 export type UpdaterLogLevel = 'info' | 'warn' | 'error';
 
 export interface UpdaterLogRecorder {
-  /** 目标文件绝对路径(排障时直接让用户去看这个文件)。 */
-  filePath: string;
+  /** 当前日志文件绝对路径(跨天会变)。 */
+  readonly filePath: string;
   record(level: UpdaterLogLevel, message: string): void;
 }
 
@@ -42,22 +47,42 @@ export function formatUpdaterMessage(message: unknown): string {
   }
 }
 
-/** 创建更新器日志记录器:懒建目录,逐行追加,任何写盘错误静默忽略。 */
+/** 创建更新器日志记录器:懒建目录,按天追加,任何写盘错误静默忽略。 */
 export function createUpdaterLogRecorder(
   logDir: string,
   now: () => Date = () => new Date(),
+  maxBytes: number = MAX_LOG_BYTES,
+  keepDays: number = LOG_KEEP_DAYS,
 ): UpdaterLogRecorder {
-  const filePath = path.join(logDir, UPDATER_LOG_FILE);
+  let currentStamp = localDateStamp(now());
+  let currentPath = dailyLogPath(logDir, UPDATER_LOG_BASE, now());
   let dirReady = false;
+  let bytesSinceCheck = Number.POSITIVE_INFINITY;
   return {
-    filePath,
+    get filePath(): string {
+      return currentPath;
+    },
     record(level, message) {
       try {
         if (!dirReady) {
           mkdirSync(logDir, { recursive: true });
           dirReady = true;
+          scheduleDailyLogPrune(logDir, UPDATER_LOG_BASE, keepDays);
         }
-        appendFileSync(filePath, `[${formatLocalTimestamp(now())}] [${level}] ${message}\n`, 'utf8');
+        const stamp = localDateStamp(now());
+        if (stamp !== currentStamp) {
+          currentStamp = stamp;
+          currentPath = dailyLogPath(logDir, UPDATER_LOG_BASE, now());
+          bytesSinceCheck = Number.POSITIVE_INFINITY;
+          scheduleDailyLogPrune(logDir, UPDATER_LOG_BASE, keepDays);
+        }
+        if (bytesSinceCheck >= ROTATE_CHECK_EVERY_BYTES) {
+          rotateLogIfOversized(currentPath, maxBytes);
+          bytesSinceCheck = 0;
+        }
+        const entry = `[${formatLocalTimestamp(now())}] [${level}] ${clampLogText(message)}\n`;
+        appendFileSync(currentPath, entry, 'utf8');
+        bytesSinceCheck += Buffer.byteLength(entry);
       } catch {
         // 日志失败不反噬壳(磁盘满/目录被删等)。
       }

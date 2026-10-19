@@ -2,14 +2,19 @@
 //!
 //! 前端 src/lib/logger.ts 现仅输出 console;打包态没有 devtools 时这些日志
 //! 会丢失。main 进程把主窗口的 `console-message` 事件接到这里,追加写入
-//! `<appDataDir>/logs/renderer.log`(与 daemon.log 同目录)。纯 Node 可测;
-//! 写盘失败静默吞掉 —— 日志绝不反噬壳。
+//! `<appDataDir>/logs/renderer-YYYY-MM-DD.log`(按天归档,与 daemon 日志同目录)。
+//! 纯 Node 可测;写盘失败静默吞掉 —— 日志绝不反噬壳。
 
 import { appendFileSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-import { formatLocalTimestamp } from './log-format';
+import { dailyLogPath, LOG_KEEP_DAYS, localDateStamp, scheduleDailyLogPrune } from './daily-log';
+import { clampLogText, formatLocalTimestamp } from './log-format';
+import { MAX_LOG_BYTES, rotateLogIfOversized } from './log-rotation';
 
-export const RENDERER_LOG_FILE = 'renderer.log';
+/** 日志文件名 base:实际文件为 `<base>-YYYY-MM-DD.log`。 */
+export const RENDERER_LOG_BASE = 'renderer';
+
+/** 每累计写入这么多字节才做一次大小判定(避免每条日志都 stat)。 */
+const ROTATE_CHECK_EVERY_BYTES = 64 * 1024;
 
 /** Electron console-message 的 level 枚举(legacy 数字签名)。 */
 const LEVEL_NAMES: Record<number, string> = {
@@ -20,29 +25,50 @@ const LEVEL_NAMES: Record<number, string> = {
 };
 
 export interface RendererLogRecorder {
-  /** 目标文件绝对路径(排障/日志清单入口用)。 */
-  filePath: string;
+  /** 当前日志文件绝对路径(跨天会变)。 */
+  readonly filePath: string;
   record(level: number, message: string, line: number, sourceId: string): void;
 }
 
-/** 创建渲染层日志记录器:懒建目录,逐行追加,任何写盘错误静默忽略。 */
+/** 创建渲染层日志记录器:懒建目录,按天追加,任何写盘错误静默忽略。 */
 export function createRendererLogRecorder(
   logDir: string,
   now: () => Date = () => new Date(),
+  maxBytes: number = MAX_LOG_BYTES,
+  keepDays: number = LOG_KEEP_DAYS,
 ): RendererLogRecorder {
-  const filePath = path.join(logDir, RENDERER_LOG_FILE);
+  let currentStamp = localDateStamp(now());
+  let currentPath = dailyLogPath(logDir, RENDERER_LOG_BASE, now());
   let dirReady = false;
+  let bytesSinceCheck = Number.POSITIVE_INFINITY;
   return {
-    filePath,
+    get filePath(): string {
+      return currentPath;
+    },
     record(level, message, line, sourceId) {
       try {
         if (!dirReady) {
           mkdirSync(logDir, { recursive: true });
           dirReady = true;
+          scheduleDailyLogPrune(logDir, RENDERER_LOG_BASE, keepDays);
+        }
+        // 跨天:切到新日期的文件,并清理过期归档。
+        const stamp = localDateStamp(now());
+        if (stamp !== currentStamp) {
+          currentStamp = stamp;
+          currentPath = dailyLogPath(logDir, RENDERER_LOG_BASE, now());
+          bytesSinceCheck = Number.POSITIVE_INFINITY;
+          scheduleDailyLogPrune(logDir, RENDERER_LOG_BASE, keepDays);
+        }
+        if (bytesSinceCheck >= ROTATE_CHECK_EVERY_BYTES) {
+          rotateLogIfOversized(currentPath, maxBytes);
+          bytesSinceCheck = 0;
         }
         const levelName = LEVEL_NAMES[level] ?? `level${level}`;
         const origin = sourceId ? ` (${sourceId}:${line})` : '';
-        appendFileSync(filePath, `[${formatLocalTimestamp(now())}] [${levelName}] ${message}${origin}\n`, 'utf8');
+        const entry = `[${formatLocalTimestamp(now())}] [${levelName}] ${clampLogText(message)}${origin}\n`;
+        appendFileSync(currentPath, entry, 'utf8');
+        bytesSinceCheck += Buffer.byteLength(entry);
       } catch {
         // 日志失败不反噬壳(磁盘满/目录被删等)。
       }

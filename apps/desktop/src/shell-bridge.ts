@@ -35,6 +35,7 @@ import {
 import { clearBrowserProfileData, type BrowserGuestTracker } from './browser-host';
 import { capturePrimaryScreen } from './desktop-capture-host';
 import { readLocalDaemonTokenOrThrow } from './daemon-token';
+import { readLogTail } from './log-tail';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
 import type { UpdaterService } from './updater';
@@ -216,7 +217,8 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
     if (!existsSync(target)) {
       throw new Error(`Failed to read log file ${target}: not found`);
     }
-    return readFileSync(target, 'utf8');
+    // 只读文件末尾,避免整份日志(可达数 MB)同步读进 main 进程并经 IPC 全量传输。
+    return readLogTail(target);
   });
   handle('readHomeFile', (payload: unknown) => {
     const { relativePath } = (payload ?? {}) as { relativePath?: unknown };
