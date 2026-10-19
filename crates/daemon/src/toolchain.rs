@@ -126,6 +126,7 @@ mod tests {
         let node_dir = temp.path().join("node");
         fs::create_dir_all(&node_dir).expect("mkdir");
         let binary = node_binary_in(&node_dir);
+        fs::create_dir_all(binary.parent().expect("binary parent")).expect("mkdir bin");
         fs::write(&binary, b"stub").expect("write stub");
 
         assert_eq!(

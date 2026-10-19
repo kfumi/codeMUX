@@ -454,6 +454,7 @@ mod tests {
         let node_dir = temp.path().join("node");
         std::fs::create_dir_all(&node_dir).expect("mkdir");
         let binary = crate::toolchain::node_binary_in(&node_dir);
+        std::fs::create_dir_all(binary.parent().expect("binary parent")).expect("mkdir bin");
         std::fs::write(&binary, b"stub").expect("write stub");
 
         let path = resolve_node_runtime_path(Some(temp.path()), BuildEnvironment::Release)
