@@ -402,37 +402,58 @@ pub async fn lookup_model(
     }
 }
 
-/// Input modalities for a batch of model ids, keyed by the id as given.
+/// The catalog's capabilities for one model id, as the picker needs them.
+///
+/// Limits are `Option` because a catalog row may publish modalities without a
+/// `limit` block; absent stays absent (ADR 0015), never a fabricated number.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogCapabilities {
+    pub input_modalities: Vec<String>,
+    pub context_window: Option<u64>,
+    pub max_input_tokens: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+}
+
+/// Catalog capabilities for a batch of model ids, keyed by the id as given.
 ///
 /// The fetch-models route joins this onto a freshly fetched `/models` list so
-/// rows added from the picker carry the catalog's answer instead of a guess.
-/// Same precedence as [`lookup_in`]: a scoped provider hit wins, then the
-/// global id fallback; ids the catalog does not list are simply absent — a
-/// miss stays "undeclared", never a fabricated text-only verdict.
-pub async fn input_modalities_for_ids(
+/// rows added from the picker carry the catalog's answer instead of a guess —
+/// modalities *and* the context/output limits, which is what the send box and
+/// the agent runtimes read back out of the saved entry. Same precedence as
+/// [`lookup_in`]: a scoped provider hit wins, then the global id fallback; ids
+/// the catalog does not list are simply absent.
+pub async fn capabilities_for_ids(
     roots: &PathRoots,
     provider: Option<&str>,
     ids: &[String],
-) -> std::collections::BTreeMap<String, Vec<String>> {
+) -> std::collections::BTreeMap<String, CatalogCapabilities> {
     let snapshot = ensure_snapshot(roots).await;
-    modalities_from_snapshot(&snapshot, provider, ids)
+    capabilities_from_snapshot(&snapshot, provider, ids)
 }
 
-/// The synchronous join behind [`input_modalities_for_ids`], split out so the
+/// The synchronous join behind [`capabilities_for_ids`], split out so the
 /// precedence rules are testable against a fixture without touching the
 /// network or the process-wide snapshot.
-fn modalities_from_snapshot(
+fn capabilities_from_snapshot(
     snapshot: &Snapshot,
     provider: Option<&str>,
     ids: &[String],
-) -> std::collections::BTreeMap<String, Vec<String>> {
+) -> std::collections::BTreeMap<String, CatalogCapabilities> {
     let mut result = std::collections::BTreeMap::new();
     for id in ids {
         if id.trim().is_empty() || result.contains_key(id) {
             continue;
         }
         if let Some(entry) = lookup_in(snapshot, provider, id) {
-            result.insert(id.clone(), entry.input_modalities);
+            result.insert(
+                id.clone(),
+                CatalogCapabilities {
+                    input_modalities: entry.input_modalities,
+                    context_window: entry.context_window,
+                    max_input_tokens: entry.max_input_tokens,
+                    max_output_tokens: entry.max_output_tokens,
+                },
+            );
         }
     }
     result
@@ -502,7 +523,7 @@ mod tests {
                     "name": "Claude Sonnet 4.5 (latest)",
                     "reasoning": true,
                     "reasoning_options": [{ "type": "effort", "values": ["low", "medium", "high", "xhigh", "max"] }],
-                    "limit": { "context": 1000000, "output": 64000 },
+                    "limit": { "context": 1000000, "input": 800000, "output": 64000 },
                     "modalities": { "input": ["text", "image", "pdf"] }
                 },
                 "toggle-model": {
@@ -545,6 +566,7 @@ mod tests {
             vec!["low", "medium", "high", "xhigh", "max"]
         );
         assert_eq!(entry.context_window, Some(1_000_000));
+        assert_eq!(entry.max_input_tokens, Some(800_000));
         assert_eq!(entry.max_output_tokens, Some(64_000));
         // pdf is not a modality we track for pi/codex input; only image counts.
         assert_eq!(entry.input_modalities, vec!["text", "image"]);
@@ -606,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_modalities_join_scopes_then_falls_back_and_skips_misses() {
+    fn batch_capabilities_join_scopes_then_falls_back_and_skips_misses() {
         let snapshot = fixture_snapshot();
         let ids = vec![
             "claude-sonnet-4-5".to_string(),
@@ -615,11 +637,17 @@ mod tests {
             "my-proxy/internal-7".to_string(),
             "  ".to_string(),
         ];
-        let result = modalities_from_snapshot(&snapshot, Some("some-relay"), &ids);
-        // pdf is dropped and text is always seeded, matching the single lookup.
+        let result = capabilities_from_snapshot(&snapshot, Some("some-relay"), &ids);
+        // pdf is dropped and text is always seeded, matching the single lookup;
+        // the limits ride along so a picked model carries the catalog's window.
         assert_eq!(
             result.get("claude-sonnet-4-5"),
-            Some(&vec!["text".to_string(), "image".to_string()])
+            Some(&CatalogCapabilities {
+                input_modalities: vec!["text".to_string(), "image".to_string()],
+                context_window: Some(1_000_000),
+                max_input_tokens: Some(800_000),
+                max_output_tokens: Some(64_000),
+            })
         );
         // All normalizations of the same id resolve, each keyed as given.
         assert!(result.contains_key("CLAUDE-SONNET-4-5"));
@@ -627,6 +655,18 @@ mod tests {
         // A miss is absent — the caller records "undeclared", not a guess.
         assert!(!result.contains_key("my-proxy/internal-7"));
         assert!(!result.contains_key("  "));
+    }
+
+    #[test]
+    fn batch_capabilities_leave_limits_undeclared_when_the_row_publishes_none() {
+        // A row without a `limit` block must stay absent rather than borrow the
+        // context window of some other provider's entry with the same id.
+        let snapshot = fixture_snapshot();
+        let ids = vec!["plain-model".to_string()];
+        let result = capabilities_from_snapshot(&snapshot, Some("anthropic"), &ids);
+        let capabilities = result.get("plain-model").expect("row is listed");
+        assert_eq!(capabilities.context_window, None);
+        assert_eq!(capabilities.max_output_tokens, None);
     }
 
     #[test]

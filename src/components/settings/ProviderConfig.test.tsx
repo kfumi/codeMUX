@@ -312,6 +312,46 @@ describe('ProviderConfigPanel', () => {
     });
   });
 
+  it('records the catalog window and limits from fetched picker rows', async () => {
+    fetchProviderModels.mockResolvedValueOnce([
+      {
+        id: 'glm-5.3-flash',
+        owned_by: 'zai',
+        input_modalities: ['text', 'image'],
+        context_window: 1_000_000,
+        max_output_tokens: 131_072,
+      },
+      { id: 'internal-text-only', owned_by: 'relay' },
+    ]);
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /获取模型列表/ })).toBeTruthy();
+    });
+
+    const keyInput = screen.getByPlaceholderText('保存可留空，启用时必填');
+    fireEvent.change(keyInput, { target: { value: 'sk-test' } });
+    fireEvent.click(screen.getByRole('button', { name: /获取模型列表/ }));
+
+    fireEvent.click(await screen.findByLabelText('添加 glm-5.3-flash'));
+    fireEvent.click(await screen.findByLabelText('添加 internal-text-only'));
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      const byId = new Map(saved.models.map((model) => [model.id, model]));
+      // 勾选即带上目录的窗口/上限：发送框与 agent runtime 都读条目里的这一份，
+      // 缺了它就只能退回 200k 兜底。
+      expect(byId.get('glm-5.3-flash')?.context_window).toBe(1_000_000);
+      expect(byId.get('glm-5.3-flash')?.max_output_tokens).toBe(131_072);
+      // 目录没收录的行保持未声明，不编造数字。
+      expect(byId.get('internal-text-only')).not.toHaveProperty('context_window');
+      expect(byId.get('internal-text-only')).not.toHaveProperty('max_output_tokens');
+    });
+  });
+
   it('allows renaming custom providers but not builtins', async () => {
     settingsState.config = {
       model_providers: [

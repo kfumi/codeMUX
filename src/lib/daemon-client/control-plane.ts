@@ -287,7 +287,15 @@ export function createControlPlaneMethods(config: DaemonConnectionConfig, fetch:
       }),
     providersFetchModels: (apiKey: string, baseUrl: string, provider?: string | null) =>
       fetch<
-        Array<{ id: string; name?: string | null; input_modalities?: InputModality[] | null }>
+        Array<{
+          id: string;
+          name?: string | null;
+          input_modalities?: InputModality[] | null;
+          /** models.dev 的窗口/上限；目录没收录的 id 保持未声明（ADR 0015）。 */
+          context_window?: number | null;
+          max_input_tokens?: number | null;
+          max_output_tokens?: number | null;
+        }>
       >(config, '/providers/fetch-models', {
         method: 'POST',
         body: JSON.stringify({ apiKey, baseUrl, provider: provider ?? null }),

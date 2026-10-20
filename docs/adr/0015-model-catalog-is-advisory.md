@@ -76,3 +76,8 @@ id 是用户自己定的（`space-bunny-free`、`deepseek-flash`…），其中�
   查到的真值。
 - pi 会话不再对所有声明支持的模型强行开放 `xhigh` / `max`；只有用户勾了才写。
 - 目录未收录的模型行为与今天一致（未声明），不倒退。
+- 勾选模型时目录值作为**条目初值**落进 `provider.models`：`/providers/fetch-models`
+  的 join 从「只补输入模态」扩到同时补 `context_window` / `max_input_tokens` /
+  `max_output_tokens`，抽屉里的自动补也照旧。这不违反「不自动写盘」——落盘仍要用户点
+  「保存」，且只填用户还没填的字段；发送框与 agent runtime 都读条目里的这一份，缺了
+  它只能退回 200k 兜底（真实症状：中转 id 勾选后保存，1M 的模型在发送框显示 200k）。

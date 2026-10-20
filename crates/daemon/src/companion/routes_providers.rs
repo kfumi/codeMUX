@@ -208,18 +208,26 @@ async fn fetch_provider_models_route(
         crate::services::provider::fetch_provider_models_for_companion(body.api_key, body.base_url)
             .await
             .map_err(ApiError::bad_request)?;
-    // Join models.dev's modalities onto the rows so the picker records the
-    // catalog's answer instead of guessing one. Advisory (ADR 0015): ids the
-    // catalog does not list stay undeclared.
+    // Join models.dev's capabilities onto the rows so the picker records the
+    // catalog's answer instead of guessing one — modalities and the
+    // context/output limits alike. Advisory (ADR 0015): ids the catalog does
+    // not list stay undeclared, and a row with no `limit` block keeps its
+    // window undeclared rather than borrowing another model's number.
     let ids: Vec<String> = models.iter().map(|model| model.id.clone()).collect();
-    let modalities = crate::services::model_catalog::input_modalities_for_ids(
+    let capabilities = crate::services::model_catalog::capabilities_for_ids(
         &ctx.daemon.roots,
         body.provider.as_deref(),
         &ids,
     )
     .await;
     for model in &mut models {
-        model.input_modalities = modalities.get(&model.id).cloned();
+        let Some(entry) = capabilities.get(&model.id) else {
+            continue;
+        };
+        model.input_modalities = Some(entry.input_modalities.clone());
+        model.context_window = entry.context_window;
+        model.max_input_tokens = entry.max_input_tokens;
+        model.max_output_tokens = entry.max_output_tokens;
     }
     Ok(Json(serde_json::json!(models)))
 }

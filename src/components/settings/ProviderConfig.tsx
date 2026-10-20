@@ -175,6 +175,9 @@ function builtinCatalogModels(template: BuiltinProviderTemplate | undefined): Pi
       providerTemplateId: template.id,
     }),
     input_modalities: model.input_modalities ?? null,
+    context_window: model.context_window ?? null,
+    max_input_tokens: model.max_input_tokens ?? null,
+    max_output_tokens: model.max_output_tokens ?? null,
   }));
 }
 
@@ -729,16 +732,25 @@ export function ProviderConfigPanel() {
         baseUrl,
         current.builtin_template_id,
       );
-      // The daemon joins models.dev's modalities onto the rows; keep them
-      // alongside the registry-resolved names so added models carry the
-      // catalog's answer instead of the text-only default.
-      const modalitiesById = new Map(
-        fetched.map((item) => [item.id.trim(), item.input_modalities ?? null] as const),
+      // The daemon joins models.dev's capabilities onto the rows — modalities
+      // and the window/limits alike; keep them alongside the registry-resolved
+      // names so an added model carries the catalog's answer instead of the
+      // text-only default and an undeclared 200k window.
+      const capabilitiesById = new Map(
+        fetched.map((item) => [
+          item.id.trim(),
+          {
+            input_modalities: item.input_modalities ?? null,
+            context_window: item.context_window ?? null,
+            max_input_tokens: item.max_input_tokens ?? null,
+            max_output_tokens: item.max_output_tokens ?? null,
+          },
+        ] as const),
       );
       const catalog = enrichFetchedModels(
         current.builtin_template_id,
         fetched.map((item) => ({ id: item.id, name: item.name })),
-      ).map((row) => ({ ...row, input_modalities: modalitiesById.get(row.id) ?? null }));
+      ).map((row) => ({ ...row, ...(capabilitiesById.get(row.id) ?? {}) }));
       if (catalog.length > 0) {
         setPickerCatalog(catalog);
         setPickerSource('api');

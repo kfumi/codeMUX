@@ -20,7 +20,38 @@ export type PickerModel = {
   id: string;
   name: string;
   input_modalities?: InputModality[] | null;
+  /** models.dev 公布的窗口/上限；目录没收录的行保持不声明。 */
+  context_window?: number | null;
+  max_input_tokens?: number | null;
+  max_output_tokens?: number | null;
 };
+
+/** Positive integers only — a catalog miss stays undeclared, never a 0. */
+function positiveLimit(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/**
+ * The entry a picker row turns into. Identity and modalities come from the row;
+ * the catalog's window/limits ride along when models.dev publishes them, so a
+ * model added from the list lands in `provider.models` complete — otherwise the
+ * send box has no configured window to read and falls back to its 200k default.
+ */
+export function modelEntryFromPickerRow(model: PickerModel): ProviderModel {
+  const contextWindow = positiveLimit(model.context_window);
+  const maxInputTokens = positiveLimit(model.max_input_tokens);
+  const maxOutputTokens = positiveLimit(model.max_output_tokens);
+  return {
+    id: model.id,
+    name: resolveModelDisplayName(model),
+    input_modalities: inferDefaultInputModalities(model.input_modalities),
+    ...(contextWindow !== undefined ? { context_window: contextWindow } : {}),
+    ...(maxInputTokens !== undefined ? { max_input_tokens: maxInputTokens } : {}),
+    ...(maxOutputTokens !== undefined ? { max_output_tokens: maxOutputTokens } : {}),
+  };
+}
 
 type ProviderModelsPickerProps = {
   open: boolean;
@@ -61,14 +92,7 @@ export function ProviderModelsPicker({
 
   function addModel(model: PickerModel) {
     if (selectedIds.has(model.id)) return;
-    onChangeSelected([
-      ...selected,
-      {
-        id: model.id,
-        name: resolveModelDisplayName(model),
-        input_modalities: inferDefaultInputModalities(model.input_modalities),
-      },
-    ]);
+    onChangeSelected([...selected, modelEntryFromPickerRow(model)]);
   }
 
   function removeModel(modelId: string) {
@@ -83,11 +107,7 @@ export function ProviderModelsPicker({
     );
     for (const model of filtered) {
       if (!merged.has(model.id)) {
-        merged.set(model.id, {
-          id: model.id,
-          name: resolveModelDisplayName(model),
-          input_modalities: inferDefaultInputModalities(model.input_modalities),
-        });
+        merged.set(model.id, modelEntryFromPickerRow(model));
       }
     }
     onChangeSelected(Array.from(merged.values()));

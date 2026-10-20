@@ -465,6 +465,16 @@ pub struct ModelInfo {
     /// invent a text-only verdict for ids the catalog does not know.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_modalities: Option<Vec<String>>,
+    /// models.dev's context window and token limits for this id, same advisory
+    /// rule: `None` stays undeclared rather than guessing. Carrying them on the
+    /// row lets a model picked from the list land in `provider.models` with the
+    /// catalog's window, so the send box does not fall back to 200k.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
 }
 
 /// Pick the first non-empty display-name field from an OpenAI-compatible model object.
@@ -494,6 +504,9 @@ fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
             .to_string(),
         name: extract_model_display_name(model, &id),
         input_modalities: None,
+        context_window: None,
+        max_input_tokens: None,
+        max_output_tokens: None,
         id,
     })
 }
@@ -770,6 +783,9 @@ mod tests {
                 owned_by: "openai".to_string(),
                 name: Some("GPT-4o".to_string()),
                 input_modalities: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
             })
         );
 
@@ -785,6 +801,9 @@ mod tests {
                 owned_by: "deepseek".to_string(),
                 name: None,
                 input_modalities: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
             })
         );
     }
