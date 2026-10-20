@@ -429,6 +429,23 @@ describe('TaskEditorDialog 表单间距', () => {
     }
   });
 
+  // 防回归：不用 Radix 模态（RemoveScroll 会拦掉 body 上弹层的滚轮，且菜单会被
+  // 判成越界而一闪而过），改为非模态 + 自铺遮罩。遮罩必须挡住背景点击。
+  it('非模态 + 自铺遮罩：背景被挡住，点遮罩关闭对话框', () => {
+    const onOpenChange = vi.fn();
+    render(<TaskEditorDialog open onOpenChange={onOpenChange} />);
+
+    expect(document.body.style.pointerEvents).not.toBe('none');
+    const scrim = document.querySelector('[data-dialog-scrim]') as HTMLElement;
+    expect(scrim).toBeTruthy();
+    expect(scrim.className).toContain('fixed');
+    expect(scrim.className).toContain('inset-0');
+    expect(scrim.className).toContain('pointer-events-auto');
+
+    fireEvent.pointerDown(scrim);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it('指令使用 composer：智能体 / 模型 / 思考强度在输入框底部工具栏', () => {
     render(<TaskEditorDialog open onOpenChange={noop} />);
 

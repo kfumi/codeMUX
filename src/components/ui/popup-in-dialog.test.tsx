@@ -25,6 +25,10 @@ import { Popover, PopoverContent, PopoverTrigger } from './popover';
  * 2. 承载这些选择器的对话框改用非模态(`modal={false}`),从根上不产生 body 级
  *    指针屏蔽与焦点抢占——见 TaskEditorDialog。
  *
+ * 注意模态 Dialog 还挂了 RemoveScroll:portal 到 body 的弹层落在它的 shard 之外,
+ * 滚轮会被拦掉;弹层也可能被判成越界交互而一闪而过。所以这里不能退回模态,
+ * 「背景不可点」由对话框自铺的遮罩负责。
+ *
  * jsdom 不跑 Tailwind、也不完整模拟指针事件,所以这里只守样式契约;交互行为由
  * 真机验证(在对话框里点开智能体下拉)。
  */

@@ -19,6 +19,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPortal,
   DialogTitle,
 } from '../ui/dialog';
 import { Input } from '../ui/input';
@@ -195,11 +196,25 @@ export function TaskEditorDialog({
   };
 
   return (
-    // modal={false}:对话框里有 Radix 下拉/浮层(智能体、模型、思考强度)。模态
-    // Dialog 会把 body 设成 pointer-events:none 并抢占焦点,portal 到 body 的弹层
-    // 继承该屏蔽后点不动(表现为「点开没选项」)。非模态不产生这些副作用,弹层
-    // 行为与页面上下文一致;点外部/Esc 关闭语义仍由 Radix 保留。
+    // 保持非模态 + 自己铺一层遮罩:
+    // 1. Radix 模态 Dialog 会给 DialogContent 套 RemoveScroll。这里的下拉/浮层
+    //    (智能体、模型、项目、分支)portal 到 body,落在 RemoveScroll 的 shard
+    //    之外,滚轮被它拦掉 —— 表现就是「菜单能开但滚不动」。
+    // 2. 模态还会让弹层一开就被判定为焦点/交互越界(菜单一闪而过)。
+    // 所以不用 Radix 的模态,改由下面的遮罩负责变暗与挡住背景点击;弹层仍靠
+    // `pointer-events-auto`(见 ui/popover、ui/dropdown-menu)正常工作。
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
+      {/* 常驻挂载、用透明度淡入淡出:关闭时随 DialogContent 一起退场,不瞬切。 */}
+      <DialogPortal>
+        <div
+          data-dialog-scrim
+          aria-hidden="true"
+          className={`fixed inset-0 z-50 bg-black/60 transition-opacity duration-normal ease-motion-out ${
+            open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+          onPointerDown={() => onOpenChange(false)}
+        />
+      </DialogPortal>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑任务' : '新建待办任务'}</DialogTitle>
