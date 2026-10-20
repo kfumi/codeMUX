@@ -30,21 +30,46 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
+import { REASONING_EFFORT_OPTIONS, coerceToOptions } from "@/lib/reasoningEffort";
 
 export type ModelSelectorEffortOption = {
   id: string;
   name: string;
 };
 
-export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
-  { id: "none", name: "关闭" },
-  { id: "low", name: "低" },
-  { id: "medium", name: "中" },
-  { id: "high", name: "高" },
-  { id: "xhigh", name: "极高" },
-  { id: "max", name: "最高" },
+/** The canonical levels in ascending order. Aliased to the single source of
+ * truth in `lib/reasoningEffort` so the two lists cannot drift apart. */
+export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] =
+  REASONING_EFFORT_OPTIONS;
+
+/**
+ * Seeds for the max-level bubble flow: fixed so re-renders don't reshuffle the
+ * stagger. `top` and `size` are px; `duration` is seconds and `delay` is a
+ * negative second offset so the bubbles start mid-flight instead of all
+ * launching at once.
+ */
+const EFFORT_BUBBLES = [
+  { top: 4, size: 2, duration: 2.6, delay: -0.4 },
+  { top: 14, size: 3, duration: 3.2, delay: -2.1 },
+  { top: 8, size: 4, duration: 2.8, delay: -1.1 },
+  { top: 18, size: 2, duration: 3.6, delay: -0.8 },
+  { top: 3, size: 3, duration: 3, delay: -2.5 },
+  { top: 12, size: 2, duration: 3.4, delay: -1.7 },
+  { top: 6, size: 3, duration: 3.1, delay: -0.9 },
+  { top: 17, size: 4, duration: 2.9, delay: -2.3 },
+  { top: 10, size: 2, duration: 3.5, delay: -0.2 },
+  { top: 2, size: 2, duration: 2.7, delay: -1.8 },
+  { top: 15, size: 3, duration: 3.3, delay: -1.2 },
+  { top: 7, size: 4, duration: 3.6, delay: -3.1 },
 ];
+
+/** Thumb diameter in px. Must match `--effort-thumb-size` in globals.css —
+ * the track is inset by half of it at both ends, so the first and last stop
+ * centres line up with the thumb at either extreme. */
+const EFFORT_THUMB_SIZE = 28;
+
+/** A pointer within this many px of a stop's centre counts as hovering it. */
+const EFFORT_STOP_HOVER_RADIUS = 10;
 
 export type ModelOption = {
   id: string;
@@ -626,68 +651,241 @@ function ModelSelectorItem({
 
 export type ModelSelectorEffortProps = ComponentPropsWithoutRef<"div"> & {
   label?: ReactNode;
+  /**
+   * The levels to offer, already narrowed to the selected model. Omit to fall
+   * back to the levels `ModelSelector.Root` derived from the model's `efforts`.
+   *
+   * A caller that knows the model's declared `thinking_levels` can be more
+   * precise than the generic `efforts` flag, which is why this exists.
+   */
+  options?: readonly ModelSelectorEffortOption[];
+  disabled?: boolean;
 };
 
+/**
+ * The stop index the pointer is on, or null when it is not within
+ * `EFFORT_STOP_HOVER_RADIUS` of any stop's centre.
+ *
+ * Exported and pure so it can be tested directly: jsdom reports every
+ * `getBoundingClientRect()` as zero, so this cannot be exercised through a real
+ * pointer event.
+ */
+export function hoveredStopAt(
+  clientX: number,
+  rect: { left: number; width: number },
+  count: number,
+): number | null {
+  if (count < 2) return null;
+  const track = rect.width - EFFORT_THUMB_SIZE;
+  if (track <= 0) return null;
+  const index = Math.round(
+    ((clientX - rect.left - EFFORT_THUMB_SIZE / 2) / track) * (count - 1),
+  );
+  if (index < 0 || index >= count) return null;
+  const centre =
+    rect.left + EFFORT_THUMB_SIZE / 2 + (track * index) / (count - 1);
+  return Math.abs(clientX - centre) <= EFFORT_STOP_HOVER_RADIUS ? index : null;
+}
+
+/**
+ * The thinking-level slider that sits under the model list.
+ *
+ * A native `<input type="range">` carries the interaction — dragging, keyboard
+ * stepping and the `slider` role all come from the platform — with an
+ * `aria-hidden`, `pointer-events-none` layer drawn on top for the track,
+ * gradient fill, level stops and thumb. The native track and thumb are made
+ * transparent but keep the visual thumb's dimensions, so the pointer
+ * coordinates line up.
+ */
 function ModelSelectorEffort({
   label = "思考强度",
+  options,
+  disabled = false,
   className,
-  onKeyDown,
   ...props
 }: ModelSelectorEffortProps) {
   const { efforts, effort, setEffort } = useModelSelectorEfforts();
+  // Declared before the early return below: `levels` flips between undefined and
+  // a list as the selected model changes, and a hook placed after a conditional
+  // return would change the hook count between renders.
+  const [hoveredStop, setHoveredStop] = useState<number | null>(null);
 
-  if (!efforts?.length) return null;
+  const levels = options ?? efforts;
+  const ariaLabel = typeof label === "string" ? label : "思考强度";
+
+  // No configurable levels: keep the whole row out of the popover.
+  if (!levels?.length) return null;
+
+  // Coerced first so `currentIndex` is always valid — a session can be holding
+  // a level the current model no longer offers.
+  const current = coerceToOptions(effort ?? "", levels);
+  const currentIndex = levels.findIndex((level) => level.id === current);
+  const currentLabel = levels[currentIndex]?.name ?? "—";
+
+  // A single level has nothing to adjust. A disabled slider would imply it
+  // does, so report the value instead.
+  if (levels.length < 2) {
+    return (
+      <div
+        data-slot="model-selector-effort"
+        className={cn(
+          "flex items-center justify-between gap-3 border-t px-3 py-2",
+          className,
+        )}
+        {...props}
+      >
+        <span className="text-muted-foreground text-xs">{label}</span>
+        <span className="text-xs">{currentLabel}</span>
+      </div>
+    );
+  }
+
+  const ratio = currentIndex / (levels.length - 1);
+  const atMax = currentIndex === levels.length - 1;
 
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn(
-        "flex items-center justify-between gap-3 border-t px-3 py-2",
-        className,
-      )}
-      onKeyDown={(e) => {
-        onKeyDown?.(e);
-        if (e.defaultPrevented) return;
-        // cmdk's Command root claims Home/End to jump the model list; stop
-        // them here so only the radiogroup reacts.
-        if (e.key === "Home" || e.key === "End") e.stopPropagation();
-        // Vertical arrows refocus cmdk's input before the event bubbles to
-        // the Command root: the same keypress then moves the list highlight,
-        // and Enter selects again (cmdk's Enter is inert while a radio has
-        // focus, so the highlight would otherwise move with no way to act).
-        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-          e.currentTarget
-            .closest("[cmdk-root]")
-            ?.querySelector<HTMLInputElement>("[cmdk-input]")
-            ?.focus();
-        }
-      }}
+      className={cn("flex flex-col gap-1.5 border-t px-3 py-2", className)}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">{label}</span>
-      <RadioGroupPrimitive.Root
-        value={effort ?? ""}
-        onValueChange={setEffort}
-        orientation="horizontal"
-        aria-label={typeof label === "string" ? label : "思考强度"}
-        className="flex items-center gap-0.5"
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-muted-foreground text-xs">{label}</span>
+        <span className="text-xs">{currentLabel}</span>
+      </div>
+
+      <div
+        className="effort-slider relative w-full rounded-full"
+        data-disabled={disabled}
       >
-        {efforts.map((option) => (
-          <RadioGroupPrimitive.Item
-            key={option.id}
-            value={option.id}
-            className={cn(
-          "option-row focus-visible:ring-ring/50 text-muted-foreground hover:text-foreground rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-          // 原来写死 `bg-neutral-200` + `dark:bg-neutral-700`：既绕开了主题 token
-          // （换强调色 / 调对比度都不跟着动），在浅色下也只有很淡的一层灰。
-          // 选中底色由 globals.css 的 `[data-state='checked'].option-row` 给。
-          "data-[state=checked]:text-foreground data-[state=checked]:font-medium",
-        )}
-          >
-            {option.name}
-          </RadioGroupPrimitive.Item>
-        ))}
-      </RadioGroupPrimitive.Root>
+        <div
+          // Remount the visual layer when the level list changes so it does not
+          // tween across models. Keyed on the level ids only — including the
+          // current value would remount the layer mid-drag.
+          key={levels.map((level) => level.id).join("|")}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+        >
+          <div className="effort-slider-track absolute inset-x-0 overflow-hidden rounded-full bg-foreground/10">
+            {/* The stroke sits underneath so the filled area covers it. */}
+            <div className="absolute inset-0 rounded-full border border-foreground/10" />
+            <div
+              data-max={atMax}
+              className="effort-slider-fill absolute inset-y-0 left-0 overflow-hidden rounded-full"
+              style={{
+                width: `calc(var(--effort-thumb-inset) + (100% - 2 * var(--effort-thumb-inset)) * ${ratio})`,
+              }}
+            >
+              {atMax ? (
+                <div className="absolute inset-0">
+                  {EFFORT_BUBBLES.map((bubble, index) => (
+                    <span
+                      key={index}
+                      className="effort-slider-bubble absolute inset-x-0"
+                      style={{
+                        top: bubble.top,
+                        animationDuration: `${bubble.duration}s`,
+                        animationDelay: `${bubble.delay}s`,
+                      }}
+                    >
+                      <span
+                        className="effort-slider-bubble-dot block rounded-full"
+                        style={{ width: bubble.size, height: bubble.size }}
+                      />
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="effort-slider-stops absolute inset-y-0 flex items-center justify-between">
+            {levels.map((level, index) => (
+              <span
+                key={level.id}
+                data-filled={index <= currentIndex}
+                data-hovered={hoveredStop === index}
+                className="effort-slider-stop shrink-0 rounded-full"
+              />
+            ))}
+          </div>
+
+          <div
+            className="effort-slider-thumb absolute rounded-full shadow-elevation-subtle"
+            style={{
+              left: `calc((100% - var(--effort-thumb-size)) * ${ratio})`,
+            }}
+          />
+        </div>
+
+        <input
+          type="range"
+          min={0}
+          max={levels.length - 1}
+          step={1}
+          value={currentIndex}
+          // `aria-disabled` rather than the native `disabled`: the native
+          // attribute moves focus away, dropping the user back onto cmdk's list.
+          aria-disabled={disabled}
+          aria-label={ariaLabel}
+          aria-valuetext={currentLabel}
+          data-slot="model-selector-effort-slider"
+          className="effort-slider-range absolute inset-0 m-0 w-full cursor-pointer appearance-none bg-transparent outline-none aria-disabled:cursor-default"
+          onPointerDown={(event) => {
+            // Only preventDefault when disabled. Stopping propagation here would
+            // leave Radix's internal click marker behind, and the first click
+            // outside would then fail to dismiss the popover.
+            if (disabled) event.preventDefault();
+          }}
+          onPointerMove={(event) => {
+            // The native range covers the stops, so hover is derived from the
+            // pointer's x rather than from the stops themselves.
+            if (disabled || event.pointerType === "touch") {
+              setHoveredStop(null);
+              return;
+            }
+            setHoveredStop(
+              hoveredStopAt(
+                event.clientX,
+                event.currentTarget.getBoundingClientRect(),
+                levels.length,
+              ),
+            );
+          }}
+          onPointerLeave={() => setHoveredStop(null)}
+          onKeyDown={(event) => {
+            // Escape must still reach Radix to close the popover; Tab belongs
+            // to the browser.
+            if (event.key === "Escape" || event.key === "Tab") return;
+            // Space has no native behaviour on a range, but it would scroll the
+            // nearest scrollable ancestor — there is none inside the popover, so
+            // it would scroll the chat behind it.
+            if (event.key === " ") event.preventDefault();
+            // Everything else stops here. cmdk's Command root handles
+            // ArrowUp/Down, Home/End and Enter in its own React onKeyDown, and
+            // Enter is the dangerous one: cmdk dispatches `cmdk-item-select` to
+            // the item marked `aria-selected="true"` — which, because
+            // ModelSelector.Content passes `defaultValue={value}`, is the
+            // currently selected model. Without this, Enter on the slider would
+            // re-select that model and close the popover.
+            //
+            // Note this only stops propagation, never preventDefault: stepping
+            // the range on an arrow key is its *default action*, which
+            // preventDefault would cancel.
+            //
+            // Side effect, on purpose: stopPropagation also hides these keys
+            // from the window-level shortcut dispatcher. They are all
+            // unmodified, and unmodified keys are unbindable in this app
+            // (keyboardShortcuts requires a modifier or F1–F12); the only
+            // overlap, Ctrl+J / Ctrl+K, is already swallowed by cmdk first.
+            event.stopPropagation();
+          }}
+          onChange={(event) => {
+            const level = levels[Number(event.currentTarget.value)];
+            if (!disabled && level) setEffort(level.id);
+          }}
+        />
+      </div>
     </div>
   );
 }

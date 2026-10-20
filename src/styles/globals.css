@@ -635,6 +635,187 @@ html.cmx-panel-resizing webview {
   background: hsl(var(--foreground) / 0.065);
 }
 
+/* ── 思考强度滑块（模型弹层底部） ─────────────────────────────────────────────
+
+   交互由**原生 `<input type="range">`** 承担（拖拽、键盘步进、无障碍语义全部
+   白送），上面叠一层 `aria-hidden` + `pointer-events-none` 的视觉层画轨道、
+   渐变填充、档位圆点与手柄。原生 input 的 track/thumb 被透明化，但**尺寸必须
+   与可视手柄一致**，否则点击与拖拽的坐标映射会整体偏移。
+
+   几何尺寸全部由下面的变量派生，是唯一事实来源；组件里只保留定位模式、圆角
+   与颜色这类非几何的 utility，避免「一半 Tailwind 一半 CSS」的漂移。
+
+   填充色用 `--success-vivid` 而不是 `--success`：后者的浅色种子是 #0f7a3d
+   （L 26.86%）的深林绿，比参考实现明显暗一档；`--success-vivid` 是「语义色的
+   图形档」（图标/圆点/进度条），浅色下正是参考实现的绿，深色下与 `--success`
+   同值 —— 所以只有浅色主题会变。
+
+   圆点一律**固定白**（手柄 / 已填充档位 / 气泡），不跟随主题：`--foreground`
+   浅色近黑、深色近白，同一个圆点会在两套主题间来回翻色。代价是强调色选
+   「黑色」且深色主题时，渐变末端本身就是纯白，最高档的白色气泡会落在同色上；
+   参考实现有同样的行为，这里跟随。 */
+.effort-slider {
+  /* px, not rem: these must agree exactly with the `EFFORT_THUMB_SIZE` constant
+     the hover maths in the component uses, and rem would drift with the user's
+     interface font-size setting. */
+  --effort-thumb-size: 28px;
+  /* 固定白，不参与主题翻转（见上面的说明）。裸三元组，与其余 token 同形，
+     这样既能 `hsl(var(--effort-dot))` 也能带 alpha 用。 */
+  --effort-dot: 0 0% 100%;
+  --effort-thumb-inset: calc(var(--effort-thumb-size) / 2);
+  --effort-stop-size: 4px;
+  --effort-track-height: 24px;
+  --effort-slider-height: 32px;
+  height: var(--effort-slider-height);
+}
+
+.effort-slider[data-disabled='true'] {
+  opacity: 0.5;
+}
+
+/* 焦点环画在外层容器上：原生 input 是全尺寸透明覆盖层，它自己的 outline
+   会贴在弹层边缘被 `overflow-hidden` 切掉。 */
+.effort-slider:has(input:focus-visible) {
+  outline: 2px solid hsl(var(--ring) / 0.5);
+  outline-offset: 2px;
+}
+
+.effort-slider-track {
+  top: calc((var(--effort-slider-height) - var(--effort-track-height)) / 2);
+  height: var(--effort-track-height);
+}
+
+.effort-slider-fill {
+  background: hsl(var(--success-vivid));
+  transition: width var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.effort-slider-fill::before {
+  /* 纯色与渐变背景无法直接插值；常驻渐变层用透明度过渡，反向调档才不会瞬切。 */
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* 继承填充层的胶囊圆角。写 50% 会让这条非正方形的长条变成椭圆。 */
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
+  /* 沿较短色相路径经过青色，保留高饱和度，避免中段发灰。
+     270deg = 向左侧：蓝色落在右端、绿色落在左端，与参考实现一致。 */
+  background: linear-gradient(
+    270deg in oklch shorter hue,
+    hsl(var(--primary)) 0%,
+    hsl(var(--success-vivid)) 100%
+  );
+}
+
+/* 只有最高档才把渐变层显现。 */
+.effort-slider-fill[data-max='true']::before {
+  opacity: 1;
+}
+
+.effort-slider-thumb {
+  top: calc((var(--effort-slider-height) - var(--effort-thumb-size)) / 2);
+  width: var(--effort-thumb-size);
+  height: var(--effort-thumb-size);
+  background: hsl(var(--effort-dot));
+  /* 拖拽也是离散档位切换，禁用过渡会造成跳动；保留与点击一致的短过渡。 */
+  transition: left var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.effort-slider-stops {
+  /* Inset by the thumb radius *minus* half a stop, so the first and last stop
+     centres — not their box edges — land under the thumb centre at either
+     extreme. */
+  inset-inline: calc(var(--effort-thumb-inset) - var(--effort-stop-size) / 2);
+}
+
+.effort-slider-stop {
+  width: var(--effort-stop-size);
+  height: var(--effort-stop-size);
+  background: hsl(var(--foreground) / 0.25);
+  scale: 1;
+  transition:
+    scale var(--motion-duration-fast) var(--motion-ease-out),
+    opacity var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.effort-slider-stop[data-filled='true'] {
+  background: hsl(var(--effort-dot) / 0.35);
+}
+
+.effort-slider-stop[data-hovered='true'] {
+  scale: 1.75;
+  opacity: 1;
+}
+
+/* 最高档专属的流动气泡。这是全应用**唯一**的装饰性连续动画，例外理由见 AGENTS.md
+   的动效条款：它只存在于「弹层打开 + 最高档」这一瞬时状态（弹层关闭即卸载），
+   只动 transform / opacity 两个合成器属性（不触发 layout / paint），规模小于
+   已在跑的 DotMatrix。时长与错峰延迟由组件内联给出（同 DotMatrix 的做法）。
+
+   prefers-reduced-motion 无需在这里写守卫：globals.css 的全局通配规则会把时长压成
+   0.01ms 且只播一次，动画停在 100% 关键帧（opacity: 0），气泡自动不可见。 */
+.effort-slider-bubble {
+  opacity: 0;
+  animation-name: effort-slider-bubble-flow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.effort-slider-bubble-dot {
+  background: hsl(var(--effort-dot));
+}
+
+@keyframes effort-slider-bubble-flow {
+  0% {
+    transform: translateX(104%);
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateX(-4%);
+    opacity: 0;
+  }
+}
+
+/* 原生 range 的轨道与手柄透明化，尺寸与可视滑块对齐。 */
+.effort-slider-range::-webkit-slider-runnable-track {
+  height: var(--effort-slider-height);
+  background: transparent;
+}
+
+.effort-slider-range::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--effort-thumb-size);
+  height: var(--effort-thumb-size);
+  margin-top: calc(
+    (var(--effort-slider-height) - var(--effort-thumb-size)) / 2
+  );
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.effort-slider-range::-moz-range-track {
+  height: var(--effort-slider-height);
+  background: transparent;
+}
+
+.effort-slider-range::-moz-range-thumb {
+  width: var(--effort-thumb-size);
+  height: var(--effort-thumb-size);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.effort-slider-range::-moz-range-progress {
+  background: transparent;
+}
+
 .terminal-panel,
 .terminal-panel-container,
 .terminal-panel-container .xterm {

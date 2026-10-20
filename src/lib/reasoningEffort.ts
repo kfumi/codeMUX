@@ -36,6 +36,38 @@ export function reasoningEffortLabel(effort: ReasoningEffort): string {
 }
 
 /**
+ * Snap a stored level onto the nearest level `options` actually offers,
+ * searching downward first then upward — the same rule pi applies in
+ * `clampThinkingLevel`, so the UI matches what the runtime will do.
+ *
+ * Generic over the option shape so both the slider's `{ id, name }` options and
+ * any other `{ id }` carrier can use it. Accepts a plain `string` because
+ * coercing values that are *not* canonical is the whole point: an unknown value
+ * falls back to the lowest offered level instead of crashing on a `-1` index.
+ */
+export function coerceToOptions<T extends { id: string }>(
+  value: string,
+  options: readonly T[],
+): T['id'] {
+  if (!options.length) {
+    throw new Error('coerceToOptions requires at least one option');
+  }
+  const exact = options.find((option) => option.id === value);
+  if (exact) return exact.id;
+
+  const index = (REASONING_EFFORTS as readonly string[]).indexOf(value);
+  for (let i = Math.max(0, index); i < REASONING_EFFORTS.length; i += 1) {
+    const found = options.find((option) => option.id === REASONING_EFFORTS[i]);
+    if (found) return found.id;
+  }
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const found = options.find((option) => option.id === REASONING_EFFORTS[i]);
+    if (found) return found.id;
+  }
+  return options[0].id;
+}
+
+/**
  * Coerce one entry of a thinking-level whitelist onto the canonical vocabulary.
  * `off` / `disabled` fold onto `none`, `minimal` onto `low` — pi and resumed
  * sessions hand us those spellings. Returns `null` for anything unrecognizable.

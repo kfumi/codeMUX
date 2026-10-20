@@ -20,6 +20,7 @@ import type { AgentInputPayload } from './types/agentInput';
 import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, resolveDraftSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { focusActiveComposer } from './lib/shortcuts/composerFocus';
+import { cycleActiveThoughtLevel } from './lib/shortcuts/thoughtLevelCycle';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { resolveProjectPath } from './lib/projectPath';
@@ -382,6 +383,9 @@ function App() {
       },
       focusComposer: () => {
         focusActiveComposer();
+      },
+      cycleThoughtLevel: () => {
+        cycleActiveThoughtLevel();
       },
     });
   }, [activeView, handleBack, handleForward, handleNewSession, handleOpenSettings, isNarrowViewport]);

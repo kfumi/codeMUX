@@ -6,7 +6,8 @@ import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ReasoningEffortSelector } from './ReasoningEffortSelector';
 import { cn } from '@/lib/utils';
 import { getProviderModel } from '@/lib/modelProviders';
-import { effortOptionsForModel } from '@/lib/reasoningEffort';
+import { coerceToOptions, effortOptionsForModel } from '@/lib/reasoningEffort';
+import { registerThoughtLevelCycle } from '@/lib/shortcuts/thoughtLevelCycle';
 import {
   decodeModelSelectorValue,
   encodeModelSelectorValue,
@@ -29,6 +30,18 @@ export interface AgentModelSelectorProps {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   disabled?: boolean;
   compact?: boolean;
+  /**
+   * Where the thinking-level control lives.
+   *
+   * - `"dropdown"` (default) — the standalone select beside the trigger. The
+   *   default keeps every host that is *not* the conversation send box on its
+   *   existing UI: the work-task editor and the automation editor.
+   * - `"slider"` — the slider inside the model popover, under the model list, so
+   *   picking a model and picking a level are one gesture. Used by the two states
+   *   of the conversation send box: `AgentPanel` (session active) and
+   *   `NewSessionPanel` (no session yet — the cold-start home page).
+   */
+  effortControl?: 'dropdown' | 'slider';
   /** 向 assistant-ui 运行时注册模型上下文（供 composer 读取）。仅在
    *  AuiProvider 内有意义——脱离会话运行时的宿主（如工作任务的编辑对话框）
    *  必须传 false，否则 register 在 effect 里抛 "requires an AuiProvider"。 */
@@ -66,8 +79,10 @@ export function AgentModelSelector({
   onReasoningEffortChange,
   disabled,
   compact,
+  effortControl = 'dropdown',
   enableModelContextRegistration = true,
 }: AgentModelSelectorProps) {
+  const useEffortSlider = effortControl === 'slider';
   const api = useAui();
   const { models, isLoading } = useAgentModels(agentKind, providers, activeProviderId);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -100,10 +115,30 @@ export function AgentModelSelector({
     }
     return getProviderModel(providers, activeProviderId, effectiveModelId);
   }, [activeProviderId, effectiveModelId, providers, selectorValue]);
+  // Always resolves to a concrete list, never `undefined`. An undeclared
+  // `thinking_levels` means the full ladder — the same thing the standalone
+  // dropdown showed. Do *not* fall back to the model's `efforts` flag instead:
+  // free catalog models carry `efforts: false` (see `toOpenCodeFreeModelOption`)
+  // purely as a conservative default, so deferring to it would make the control
+  // disappear on the models the new-session page starts on.
   const effortOptions = useMemo(
     () => effortOptionsForModel(selectedModel),
     [selectedModel],
   );
+
+  useEffect(() => {
+    // 只有滑块模式注册「切换思考强度」（`Mod+T`）：档位阶梯是按当前模型收窄的，
+    // 只有这里知道该循环哪几档；下拉模式的宿主（工单任务 / 自定化的编辑对话框）
+    // 仍用各自的独立控件，不该被这条全局命令碰到。单档位没什么可切，也不注册。
+    if (!useEffortSlider || effortOptions.length < 2) return undefined;
+    return registerThoughtLevelCycle(() => {
+      // 先吸附再循环：会话可能停在当前模型已不提供的档位上。
+      const current = coerceToOptions(reasoningEffort ?? '', effortOptions);
+      const index = effortOptions.findIndex((level) => level.id === current);
+      const next = effortOptions[(index + 1) % effortOptions.length];
+      if (next) onReasoningEffortChange(next.id);
+    });
+  }, [useEffortSlider, effortOptions, reasoningEffort, onReasoningEffortChange]);
 
   useEffect(() => {
     // 脱离 AuiProvider 的宿主不注册（见 props 注释）——modelContext() 会直接抛错。
@@ -144,7 +179,14 @@ export function AgentModelSelector({
         }),
         group: model.group,
         description: model.description,
-        efforts: model.efforts,
+        // The resolved ladder, not the raw `efforts` flag. ModelSelector derives
+        // the levels it offers *and* resolves the current level against them, so
+        // handing it the flag would make it drop the level entirely for free
+        // catalog models (`efforts: false`) and render the control at the bottom
+        // of the ladder instead of where the session actually is.
+        efforts: effortOptionsForModel(
+          getProviderModel(providers, model.providerId, model.modelId),
+        ),
         keywords: [model.group, model.modelId, model.name, model.providerId],
         icon: (
           <ProviderBrandIcon
@@ -155,7 +197,7 @@ export function AgentModelSelector({
           />
         ),
       })),
-    [agentKind, models],
+    [agentKind, models, providers],
   );
 
   const providerFilters: ProviderFilter[] = useMemo(() => {
@@ -216,7 +258,10 @@ export function AgentModelSelector({
         disabled={disabled || isLoading || models.length === 0}
         className="min-w-0 max-w-full"
       >
-        <ModelSelector.Value showEffort={false} hideName={compact} />
+        {/* With the slider the level only lives inside the popover, so the
+            trigger has to carry it — otherwise there is no way to read the
+            current level without opening the popover. */}
+        <ModelSelector.Value showEffort={useEffortSlider} hideName={compact} />
       </ModelSelector.Trigger>
       <ModelSelector.Content className="w-80" searchable>
         <ModelSelector.Search placeholder="搜索模型..." />
@@ -272,15 +317,26 @@ export function AgentModelSelector({
             </ModelSelector.Group>
           ))}
         </ModelSelector.List>
+        {useEffortSlider ? (
+          // Sibling of the list, never inside it: `[cmdk-list]` is a listbox and
+          // only accepts options, and cmdk's filter re-orders the list's
+          // children.
+          <ModelSelector.Effort
+            options={effortOptions}
+            disabled={disabled || isLoading || models.length === 0}
+          />
+        ) : null}
       </ModelSelector.Content>
       </ModelSelector.Root>
-      <ReasoningEffortSelector
-        value={reasoningEffort}
-        onChange={onReasoningEffortChange}
-        disabled={disabled || isLoading || models.length === 0}
-        compact={compact}
-        options={effortOptions}
-      />
+      {useEffortSlider ? null : (
+        <ReasoningEffortSelector
+          value={reasoningEffort}
+          onChange={onReasoningEffortChange}
+          disabled={disabled || isLoading || models.length === 0}
+          compact={compact}
+          options={effortOptions}
+        />
+      )}
     </div>
   );
 }

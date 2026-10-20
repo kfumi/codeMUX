@@ -388,6 +388,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onChange={handleModelChange}
                   reasoningEffort={selectedReasoningEffort}
                   onReasoningEffortChange={setSelectedReasoningEffort}
+                  // This is the same send box as AgentPanel, just with no active
+                  // session yet (the cold-start home page), so it must match.
+                  effortControl="slider"
                 />
               )}
               permissionSelector={(

@@ -35,6 +35,7 @@ export const SHORTCUT_COMMAND_IDS = [
   'toggleSidePanel',
   'abort',
   'focusComposer',
+  'cycleThoughtLevel',
 ] as const;
 
 export type ShortcutCommandId = (typeof SHORTCUT_COMMAND_IDS)[number];
@@ -118,6 +119,13 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommand[] = [
     label: '聚焦输入框',
     description: '把光标移到消息输入框',
     defaultBinding: 'Mod+L',
+  },
+  {
+    id: 'cycleThoughtLevel',
+    group: 'agent',
+    label: '切换思考强度',
+    description: '在当前模型支持的档位间循环切换',
+    defaultBinding: 'Mod+T',
   },
 ];
 

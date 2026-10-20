@@ -40,9 +40,9 @@ function command(id: string) {
 }
 
 describe('命令目录', () => {
-  it('首版收录 9 条命令且 id 唯一', () => {
-    expect(SHORTCUT_COMMANDS).toHaveLength(9);
-    expect(new Set(SHORTCUT_COMMANDS.map((entry) => entry.id)).size).toBe(9);
+  it('收录 10 条命令且 id 唯一', () => {
+    expect(SHORTCUT_COMMANDS).toHaveLength(10);
+    expect(new Set(SHORTCUT_COMMANDS.map((entry) => entry.id)).size).toBe(10);
   });
 
   it('分组都在已知分组内，且每条命令都有标签与说明', () => {

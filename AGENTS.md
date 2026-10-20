@@ -146,6 +146,12 @@ The palette is **derived**, not listed. `src/lib/colorDerivation.ts` holds the o
 - `animate-in`/`animate-out` (tw-animate-css) read their duration and easing from the same `duration-*` / `ease-motion-*` utilities (`--tw-duration` / `--tw-ease`), so entrance animations use them too — never `animation-duration-[...]` or `[animation-timing-function:...]`.
 - Do not write literal numeric `duration-*` values, arbitrary square-bracket durations, hand-written `cubic-bezier(...)` easing utilities, or keyword easings. All motion stays ≤300ms and there are no decorative/continuous animations.
 - The raw values live in `:root` as `--motion-duration-*` / `--motion-ease-*`; the utilities are mapped in `@theme`. In plain CSS use `var(--motion-duration-fast)` etc. — do not re-declare values. `prefers-reduced-motion` handling is centralized in the `globals.css` media query; do not add per-component `motion-reduce:` guards for status animations.
+- **The one sanctioned exception — the max-level bubble flow on the thinking-effort slider** (`.effort-slider-bubble` in `globals.css`). It is allowed because all four of these hold; a new continuous animation must meet the same bar:
+  - It exists only while the model popover is open *and* the top level is selected. `PopoverContent` has no `forceMount`, so Radix unmounts it on close — it is never a background animation.
+  - It animates `transform` and `opacity` only. Both are compositor properties: no layout, no paint, no main-thread cost per frame.
+  - It is smaller than the `DotMatrix` status indicator (25 dots, `animation-iteration-count: infinite`) that already runs.
+  - It needs no `prefers-reduced-motion` handling of its own: the global wildcard rule in `globals.css` pins it to a single 0.01ms iteration that ends on `opacity: 0`, so it is already invisible under `reduce`. Do not add a `motion-reduce:` guard for it.
+  Per-element duration and stagger are set inline, exactly as `DotMatrix` does; the animation name, `linear` timing and infinite iteration live in the CSS class.
 
 **When a token is missing:**
 

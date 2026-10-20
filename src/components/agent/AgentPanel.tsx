@@ -566,6 +566,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       onReasoningEffortChange={handleReasoningEffortChange}
                       disabled={isRunning || isReadOnly}
                       compact={compact}
+                      // The conversation composer is the one surface where
+                      // picking a model and picking a level should be a single
+                      // gesture; every other host keeps the standalone dropdown.
+                      effortControl="slider"
                     />
                   )}
                   permissionSelector={(

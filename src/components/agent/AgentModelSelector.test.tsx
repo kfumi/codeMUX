@@ -34,12 +34,23 @@ vi.mock('@/components/model-selector', () => ({
       onValueChange,
     }: {
       children: React.ReactNode;
-      models: { id: string; group?: string }[];
+      models: { id: string; group?: string; efforts?: unknown }[];
       onValueChange?: (value: string) => void;
     }) => (
       <div
+        data-testid="selector-root"
         data-models={models.map((model) => model.id).join(',')}
         data-groups={[...new Set(models.map((model) => model.group).filter(Boolean))].join(',')}
+        // What the host hands ModelSelector as each model's levels. It resolves
+        // the current level against these, so the raw `efforts` flag is not
+        // enough — see the free-model regression test below.
+        data-efforts={models
+          .map((model) =>
+            Array.isArray(model.efforts)
+              ? model.efforts.map((level: { id: string }) => level.id).join('|')
+              : String(model.efforts ?? 'none'),
+          )
+          .join(',')}
       >
         {onValueChange ? (
           <button
@@ -91,7 +102,21 @@ vi.mock('@/components/model-selector', () => ({
     Item: ({ model }: { model: { id: string; name: string } }) => (
       <div data-testid="selector-item">{model.name}</div>
     ),
-    Effort: ({ label }: { label?: string }) => <div data-testid="selector-effort">{label}</div>,
+    // `options` is the ladder the host resolved; `none` means it handed the
+    // decision to ModelSelector's own context.
+    Effort: ({
+      label,
+      options,
+    }: {
+      label?: string;
+      options?: { id: string }[];
+    }) => (
+      <div
+        data-testid="selector-effort"
+        data-label={label}
+        data-options={options ? options.map((option) => option.id).join(',') : 'none'}
+      />
+    ),
   },
 }));
 
@@ -323,5 +348,86 @@ describe('AgentModelSelector', () => {
     // provider-2 declares the full ladder, so 极高 must be present even though
     // provider-1's copy of the same model id declares none.
     expect(screen.getByRole('option', { name: '极高' })).toBeTruthy();
+  });
+
+  // The slider is opt-in. Every host except the conversation composer must keep
+  // the standalone dropdown exactly as it was.
+  describe('effortControl', () => {
+    const renderWith = (effortControl?: 'dropdown' | 'slider') => {
+      mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+      mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false });
+
+      render(
+        <AgentModelSelector
+          agentKind="pi"
+          providers={sampleProviders}
+          activeProviderId="provider-1"
+          value="gpt-5"
+          onChange={vi.fn()}
+          reasoningEffort="high"
+          onReasoningEffortChange={vi.fn()}
+          {...(effortControl ? { effortControl } : {})}
+        />,
+      );
+    };
+
+    it('defaults to the standalone dropdown', () => {
+      renderWith();
+
+      expect(screen.getByRole('combobox', { name: '思考强度' })).toBeTruthy();
+      expect(screen.queryByTestId('selector-effort')).toBeNull();
+    });
+
+    it('moves the control into the popover when asked for a slider', () => {
+      renderWith('slider');
+
+      expect(screen.queryByRole('combobox', { name: '思考强度' })).toBeNull();
+      expect(screen.getByTestId('selector-effort')).toBeTruthy();
+    });
+
+    it('still offers the full ladder for a model that declares no levels', () => {
+      // Regression: free catalog models are flagged `efforts: false` as a
+      // conservative default and declare no `thinking_levels`. Deferring to that
+      // flag made the slider vanish on the very models the new-session page
+      // starts on, while the dropdown had always shown all six.
+      mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+      mockedUseAgentModels.mockReturnValue({
+        models: [
+          {
+            id: 'opencode-free::deepseek-v4.1-flash-free',
+            modelId: 'deepseek-v4.1-flash-free',
+            providerId: 'opencode-free',
+            providerTemplateId: 'opencode',
+            name: 'Deepseek V4.1 Flash Free',
+            group: 'OpenCode 免费模型',
+            efforts: false,
+          },
+        ],
+        isLoading: false,
+      });
+
+      render(
+        <AgentModelSelector
+          agentKind="pi"
+          providers={[]}
+          activeProviderId={null}
+          value="opencode-free::deepseek-v4.1-flash-free"
+          onChange={vi.fn()}
+          reasoningEffort="high"
+          onReasoningEffortChange={vi.fn()}
+          effortControl="slider"
+        />,
+      );
+
+      expect(screen.getByTestId('selector-effort').getAttribute('data-options')).toBe(
+        'none,low,medium,high,xhigh,max',
+      );
+      // ModelSelector must get the same ladder, not the `false` flag: it resolves
+      // the session's level against these, so the flag would leave the slider
+      // pinned to the bottom of the range.
+      expect(screen.getByTestId('selector-root').getAttribute('data-efforts')).toBe(
+        'none|low|medium|high|xhigh|max',
+      );
+    });
   });
 });
