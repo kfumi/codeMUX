@@ -104,10 +104,11 @@ export const SEMANTIC_SEEDS: { light: SemanticSeeds; dark: SemanticSeeds } = {
     destructive: '#ba2623',
     diffAdded: '#00a240',
     diffRemoved: '#ba2623',
-    // 图形档：比基准亮一档、饱和一档，对白 3.1–4.7:1 —— 图标/圆点读得清，文字则
-    // 一律走上面那三个基准色（`--warning` 仍满足正文 AA）。
-    successVivid: '#16a34a',
-    warningVivid: '#c2830a',
+    // 图形档：黄/绿直接取深色档的同值 —— 白底上虽然只剩 ~2.1:1，但图标/圆点仍然
+    // 看得清，且和用户认可的深色观感同一套色。红保留一档更深的 `#dc2626`（4.7:1），
+    // 因为未读角标是白字压红底，`#fa423e` 会让白字掉到 2.9:1。
+    successVivid: '#40c977',
+    warningVivid: '#e0a32e',
     destructiveVivid: '#dc2626',
   },
   dark: {
