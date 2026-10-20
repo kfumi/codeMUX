@@ -382,19 +382,33 @@ export function ProviderConfigPanel() {
     setEditingThinkingLevels(normalizeThinkingLevels([...editingThinkingLevels, level]));
   };
 
+  // 草稿是从哪个选中项克隆出来的。用来把「切换选中项 → 重置草稿」和「配置
+  // 刷新」区分开：`providers` 每次配置变更都会换引用（面板挂载的 fetchConfig、
+  // 别的供应商增删改后的 fetchConfig），若跟着一起重置，抽屉里尚未保存的编辑
+  // —— 包括目录自动补的窗口/档位 —— 会被静默丢掉，用户只看到值自己消失。
+  // 模板分支不需要这道闸：它用函数式 setDraft，本来就保留未保存的草稿。
+  const draftCloneKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selection) {
+      draftCloneKeyRef.current = null;
       setDraft(null);
       return;
     }
     if (selection.kind === 'draft') {
       return;
     }
+    const cloneKey = `${selection.kind}:${selection.id}`;
     if (selection.kind === 'provider') {
+      if (draftCloneKeyRef.current === cloneKey) {
+        return;
+      }
+      draftCloneKeyRef.current = cloneKey;
       const selected = providers.find((provider) => provider.id === selection.id) ?? null;
       setDraft(selected ? structuredClone(selected) : null);
       return;
     }
+    // 记下 key，免得 provider → template → 同一个 provider 时被误判成"没换过"。
+    draftCloneKeyRef.current = cloneKey;
     const instance = providers.find((provider) => provider.builtin_template_id === selection.id);
     if (instance) {
       setSelection({ kind: 'provider', id: instance.id });
@@ -530,6 +544,10 @@ export function ProviderConfigPanel() {
     try {
       await upsertModelProvider(cleaned);
       toast.success('供应商已保存');
+      // 保存后把草稿重新对齐到落盘版本（清理过的端点/模型、按目录解析过的
+      // 显示名）。上面的 effect 平时不再因 providers 变化重置草稿，所以这里
+      // 显式放开一次。
+      draftCloneKeyRef.current = null;
       setSelection({ kind: 'provider', id: cleaned.id });
     } catch (error) {
       toast.error(String(error));

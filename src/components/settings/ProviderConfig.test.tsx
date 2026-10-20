@@ -126,6 +126,12 @@ vi.mock('sonner', () => ({
 
 import { ProviderConfigPanel, resolveProviderApiKeyUrl } from './ProviderConfig';
 
+/** 抽屉里按标签定位数字输入框（上下文窗口 / 最大输入 Token / 最大输出 Token）。 */
+function modelLimitInput(dialog: HTMLElement, label: string): HTMLInputElement {
+  const labelEl = within(dialog).getByText(label).closest('label') as HTMLElement;
+  return within(labelEl).getByRole('spinbutton') as HTMLInputElement;
+}
+
 describe('ProviderConfigPanel', () => {
   afterEach(() => {
     cleanup();
@@ -349,6 +355,58 @@ describe('ProviderConfigPanel', () => {
       // 目录没收录的行保持未声明，不编造数字。
       expect(byId.get('internal-text-only')).not.toHaveProperty('context_window');
       expect(byId.get('internal-text-only')).not.toHaveProperty('max_output_tokens');
+    });
+  });
+
+  it('keeps unsaved model edits when the provider list refreshes', async () => {
+    const provider = {
+      id: 'openai-only',
+      name: 'OpenAI Only',
+      enabled: true,
+      api_key: 'sk-test',
+      endpoints: [
+        {
+          protocol: 'openai_compatible',
+          base_url: 'https://api.openai.com/v1',
+          api_key_override: null,
+          codex_needs_proxy: false,
+        },
+      ],
+      models: [{ id: 'gpt-5', name: 'GPT-5' }],
+      default_model: 'gpt-5',
+      builtin_template_id: null,
+      opencode_provider_key: null,
+      opencode_npm: null,
+    };
+    settingsState.config = { model_providers: [provider], active_provider_id: 'openai-only' };
+
+    const { rerender } = render(<ProviderConfigPanel />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+    const windowInput = modelLimitInput(screen.getByRole('dialog'), '上下文窗口');
+    fireEvent.change(windowInput, { target: { value: '1000000' } });
+    expect(windowInput.value).toBe('1000000');
+
+    // 任何一次配置刷新都会换掉 providers 的引用（面板挂载、别的供应商增删改
+    // 之后的 fetchConfig）。未保存的编辑 —— 包括抽屉里目录自动补的值 —— 必须
+    // 活下来，否则用户只看到值自己消失、保存下去的是空条目。
+    settingsState.config = {
+      model_providers: [{ ...provider }],
+      active_provider_id: 'openai-only',
+    };
+    rerender(<ProviderConfigPanel />);
+
+    expect(modelLimitInput(screen.getByRole('dialog'), '上下文窗口').value).toBe('1000000');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }));
+    await waitFor(() => {
+      const saved = upsertModelProvider.mock.calls.at(-1)?.[0] as {
+        models: Array<Record<string, unknown>>;
+      };
+      expect(saved.models[0]?.context_window).toBe(1_000_000);
     });
   });
 
