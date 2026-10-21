@@ -15,7 +15,6 @@
 import { app, BrowserWindow, globalShortcut, Menu, protocol, Tray, nativeImage } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
@@ -33,16 +32,7 @@ import { ensureNotificationIdentity } from './notification-identity';
 import { createRendererLogRecorder, type RendererLogRecorder } from './renderer-log';
 import { createSupervisor, type DaemonLifecycleEvent } from './supervisor';
 import { registerShellBridge } from './shell-bridge';
-import {
-  applyUnreadBadgeForPlatform,
-  createTaskbarOverlayApplier,
-  createTrayBadgeApplier,
-  renderTaskbarOverlayDot,
-  resolveTaskbarOverlayLayout,
-  supportsTrayUnreadBadge,
-  TASKBAR_OVERLAY_LOGICAL_SIZE,
-  TRAY_LOGICAL_SIZE,
-} from './unread-badge';
+import { createUnreadBadgeSync } from './unread-badge-wiring';
 import { createUpdaterService } from './updater';
 import { isVendorAssetPath } from './vendor-assets';
 import { attachWindowStatePersistence, loadWindowState } from './window-state';
@@ -433,12 +423,10 @@ function createMainWindow(): BrowserWindow {
   // 与普通窗口一致,不再是「先出假窗口再换真窗口」。
   window.once('ready-to-show', () => {
     window.show();
-    // 渲染层可能早于窗口就绪就同步过未读数(角标要先有窗口才能画);
-    // 这里补一次,避免「启动时已有未读却要等下一个 Turn 才亮」。走平台分叉,
-    // 否则 macOS / Linux 上的应用级角标同样会漏掉。
-    if (unreadBadgeCount > 0) {
-      syncUnreadBadge(unreadBadgeCount);
-    }
+    // 渲染层可能早于窗口就绪就同步过未读数(角标要先有窗口才能画);这里补一次,
+    // 避免「启动时已有未读却要等下一个 Turn 才亮」。内部走平台分叉,否则
+    // macOS / Linux 上的应用级角标同样会漏掉。
+    unreadBadgeSync.reapply();
   });
 
   // Browser Host(工单 07):<webview> guest 附挂前校验 —— 剥 preload、禁 Node、
@@ -482,88 +470,25 @@ function createTray(onQuit: () => void): void {
   tray.setContextMenu(menu);
   tray.on('double-click', () => showMainWindow());
   // 托盘晚于渲染层首次同步时,把当前值补到托盘上(任务栏由窗口 ready-to-show 补)。
-  // 只补托盘:应用级角标 / overlay 的补齐走各自时机,避免同一值被应用两次。
-  // macOS 虽也会建托盘,但托盘角标只在 Windows / Linux 上生效(Dock 角标承担 macOS)。
-  if (unreadBadgeCount > 0 && supportsTrayUnreadBadge(process.platform)) {
-    applyTrayUnreadBadge(unreadBadgeCount);
-  }
+  unreadBadgeSync.reapplyToTray();
 }
 
 // ---------------------------------------------------------------------------
 // 未读角标(spec: docs/specs/2026-10-21-desktop-unread-badge.md)
 // ---------------------------------------------------------------------------
 
-/**
- * 当前未读数。渲染层是唯一真值源,壳只保存最近一次同步的值 ——
- * 用于托盘晚于首次同步创建、以及窗口重建后的补齐。
- */
-let unreadBadgeCount = 0;
 /** 托盘原始图标:合成红点后靠它恢复原样。 */
 let trayBaseImage: Electron.NativeImage | null = null;
 
-const WINDOWS_OVERLAY_LAYOUT = resolveTaskbarOverlayLayout(os.release());
-
-/**
- * Windows 固定把 overlay 显示为 16×16。直接传硬边 32px 圆再让 Shell 缩放会发糊、
- * 边缘像缺口;这里提供原生 1x(16px) + 2x(32px) 纯红抗锯齿表示。只画红点,
- * 数量在无障碍描述里。
- */
-const applyWindowsTaskbarOverlay = createTaskbarOverlayApplier({
+/** 未读数同步的壳侧接线;像素与平台分叉在 unread-badge.ts / unread-badge-wiring.ts。 */
+const unreadBadgeSync = createUnreadBadgeSync({
+  platform: process.platform,
   getAllWindows: () => BrowserWindow.getAllWindows(),
-  createBadgeImage: () => {
-    const image = nativeImage.createEmpty();
-    image.addRepresentation({
-      scaleFactor: 1,
-      width: TASKBAR_OVERLAY_LOGICAL_SIZE,
-      height: TASKBAR_OVERLAY_LOGICAL_SIZE,
-      buffer: Buffer.from(renderTaskbarOverlayDot(1, WINDOWS_OVERLAY_LAYOUT)),
-    });
-    image.addRepresentation({
-      scaleFactor: 2,
-      width: TASKBAR_OVERLAY_LOGICAL_SIZE * 2,
-      height: TASKBAR_OVERLAY_LOGICAL_SIZE * 2,
-      buffer: Buffer.from(renderTaskbarOverlayDot(2, WINDOWS_OVERLAY_LAYOUT)),
-    });
-    return image;
-  },
-});
-
-const applyTrayUnreadBadge = createTrayBadgeApplier({
+  createImage: () => nativeImage.createEmpty(),
+  setBadgeCount: (count) => app.setBadgeCount(count),
   getTray: () => tray,
-  getBaseImage: () => trayBaseImage,
-  createBadgeImage: (oneX, twoX) => {
-    const image = nativeImage.createEmpty();
-    image.addRepresentation({
-      scaleFactor: 1,
-      width: TRAY_LOGICAL_SIZE,
-      height: TRAY_LOGICAL_SIZE,
-      buffer: oneX,
-    });
-    image.addRepresentation({
-      scaleFactor: 2,
-      width: TRAY_LOGICAL_SIZE * 2,
-      height: TRAY_LOGICAL_SIZE * 2,
-      buffer: twoX,
-    });
-    return image;
-  },
+  getTrayBaseImage: () => trayBaseImage,
 });
-
-/**
- * 渲染层同步未读数(IPC `codemux:syncUnreadBadgeCount`)的唯一出口。
- * Windows 走任务栏 overlay + 托盘,macOS / Linux 走应用级角标(Linux 另有托盘兜底)。
- */
-function syncUnreadBadge(count: number): void {
-  unreadBadgeCount = count;
-
-  applyUnreadBadgeForPlatform({
-    platform: process.platform,
-    totalUnreadCount: count,
-    setBadgeCount: (value) => app.setBadgeCount(value),
-    applyOverlay: applyWindowsTaskbarOverlay,
-    applyTrayBadge: applyTrayUnreadBadge,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // supervisor 装配
@@ -768,7 +693,7 @@ if (!gotLock) {
       updater,
       sendToRenderer,
       browserGuests: guests,
-      syncUnreadBadge,
+      syncUnreadBadge: unreadBadgeSync.sync,
     });
     createTray(() => {
       void quitApplication();

@@ -6,7 +6,7 @@
 
 **Blocked by:** 01 — Windows 任务栏红点（最小闭环）
 
-**Status:** done
+**Status:** done（代码完成；Windows 手工验收未执行）
 
 - [x] 托盘创建时记住原始图标，供后续合成与恢复复用
 - [x] 红点合成进托盘图标位图右上角：预乘 alpha 混合、边界安全裁剪

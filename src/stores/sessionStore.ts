@@ -52,7 +52,14 @@ interface SessionState {
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
-  markSessionUnread: (sessionId: string) => void;
+  /**
+   * 标记未读。`source` 区分来源(默认 `auto`):
+   * - `auto`:Turn 完成 / 会话变更后的自动标记。应用在前台且正看着该会话时跳过
+   *   (工单 04),其余情况记入后台补记集合,回焦时自动清除。
+   * - `manual`:用户从菜单显式标记。任何情况下都生效,且不进后台补记集合,
+   *   回焦不会误清 —— 工单 01 的手工验收入口就靠它。
+   */
+  markSessionUnread: (sessionId: string, source?: UnreadSource) => void;
   /**
    * 回焦自动清除(工单 04):只清「自动标记」的未读。用户离开期间切去看过
    * 别的 Session 时调用方不调它,未读因此保留作为回来处理的提醒。
@@ -159,17 +166,21 @@ function createSessionAction(
   return createSession;
 }
 
-type UnreadState = Pick<SessionState, 'unreadSessions' | 'autoMarkedUnreadSessions'>;
+/** 未读标记的来源:自动(Turn 完成 / 会话变更)或用户从菜单显式标记。 */
+type UnreadSource = 'auto' | 'manual';
+
+type UnreadPatch = Pick<SessionState, 'unreadSessions' | 'autoMarkedUnreadSessions'>;
 
 /**
  * 未读集合的单一写入口:从两份集合里同时剔除若干 Session。
- * 无变化时返回空对象,调用方可以无脑展开进 `set` 的 patch。
+ * 无变化时返回 null —— 调用方原样返回 `state`,zustand 靠 `Object.is` 跳过通知;
+ * 返回一个新建的空对象会白推一次通知。
  */
-function withoutUnread(state: UnreadState, sessionIds: string[]): Partial<UnreadState> {
+function withoutUnread(state: SessionState, sessionIds: string[]): UnreadPatch | null {
   const removed = sessionIds.filter(
     (sessionId) => state.unreadSessions.has(sessionId) || state.autoMarkedUnreadSessions.has(sessionId),
   );
-  if (removed.length === 0) return {};
+  if (removed.length === 0) return null;
 
   const unreadSessions = new Set(state.unreadSessions);
   const autoMarkedUnreadSessions = new Set(state.autoMarkedUnreadSessions);
@@ -180,15 +191,30 @@ function withoutUnread(state: UnreadState, sessionIds: string[]): Partial<Unread
   return { unreadSessions, autoMarkedUnreadSessions };
 }
 
-/** 新增一条未读,并按来源决定是否记入自动标记集合。 */
-function withUnread(state: UnreadState & Pick<SessionState, 'activeSessionId'>, sessionId: string): Partial<UnreadState> {
-  if (state.unreadSessions.has(sessionId)) return {};
+/**
+ * 新增一条未读。只有 `auto` 来源、且该 Session 正是活跃 Session 时才记入后台补记
+ * 集合 —— 「活跃但应用在后台」标上的未读才该被回焦自动清除,手动标记的不算。
+ * 无变化时返回 null(见 `withoutUnread`)。
+ */
+function withUnread(state: SessionState, sessionId: string, source: UnreadSource): UnreadPatch | null {
+  const alreadyUnread = state.unreadSessions.has(sessionId);
+  const shouldAutoMark = source === 'auto' && state.activeSessionId === sessionId;
+  const autoMarked = state.autoMarkedUnreadSessions.has(sessionId);
+  if (alreadyUnread && shouldAutoMark === autoMarked) return null;
 
-  const unreadSessions = new Set(state.unreadSessions).add(sessionId);
-  // 「活跃但应用在后台」标上的未读才可被回焦自动清除;手动标记的不算。
-  const autoMarkedUnreadSessions = state.activeSessionId === sessionId
-    ? new Set(state.autoMarkedUnreadSessions).add(sessionId)
-    : state.autoMarkedUnreadSessions;
+  const unreadSessions = alreadyUnread
+    ? state.unreadSessions
+    : new Set(state.unreadSessions).add(sessionId);
+
+  let autoMarkedUnreadSessions = state.autoMarkedUnreadSessions;
+  if (shouldAutoMark !== autoMarked) {
+    autoMarkedUnreadSessions = new Set(autoMarkedUnreadSessions);
+    if (shouldAutoMark) {
+      autoMarkedUnreadSessions.add(sessionId);
+    } else {
+      autoMarkedUnreadSessions.delete(sessionId);
+    }
+  }
   return { unreadSessions, autoMarkedUnreadSessions };
 }
 
@@ -299,7 +325,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           sessions: newSessions,
           archivedSessions: newArchivedSessions,
           activeSessionId: newActiveId,
-          ...withoutUnread(state, [sessionId]),
+          ...(withoutUnread(state, [sessionId]) ?? {}),
           isLoading: false,
         };
       });
@@ -327,7 +353,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           ? (sessions[0]?.id ?? null)
           : state.activeSessionId,
         // 工单 05:被删掉的会话不能再留在未读集合里,否则角标会留下点不掉的幽灵。
-        ...withoutUnread(state, sessionIds),
+        ...(withoutUnread(state, sessionIds) ?? {}),
         isLoading: false,
       };
     });
@@ -347,7 +373,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           archivedSessions: nextArchivedSessions,
           activeSessionId: nextActiveId,
           // 工单 05:归档区不参与常驻提醒,归档即清掉未读。
-          ...withoutUnread(state, [sessionId]),
+          ...(withoutUnread(state, [sessionId]) ?? {}),
         };
       });
     } catch (error) {
@@ -454,21 +480,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     daemonFacade.touchSession(sessionId).catch(() => {});
   },
   markSessionRead: (sessionId: string) => {
-    set((state) => withoutUnread(state, [sessionId]));
+    set((state) => withoutUnread(state, [sessionId]) ?? state);
   },
-  markSessionUnread: (sessionId: string) => {
+  markSessionUnread: (sessionId: string, source: UnreadSource = 'auto') => {
     set((state) => {
-      // 只有「应用在前台且正看着这个会话」才跳过(工单 04)。窗口在后台时用户
-      // 其实没在看,该标就标 —— 这正是最需要提醒的场景。
-      if (state.activeSessionId === sessionId && isAppFocused()) return {};
-      return withUnread(state, sessionId);
+      // 工单 04:自动标记只在「应用在前台且正看着这个会话」时跳过 —— 窗口在后台
+      // 时用户其实没在看,该标就标,那正是最需要提醒的场景。
+      // 手动标记是用户的显式意图,不吃这个守卫:否则「标记为未读」菜单挂在活跃
+      // 会话上,永远点不出未读,工单 01 的手工验收也走不通。
+      if (source === 'auto' && state.activeSessionId === sessionId && isAppFocused()) return state;
+      return withUnread(state, sessionId, source) ?? state;
     });
   },
   clearAutoMarkedUnread: (sessionId: string) => {
-    set((state) => {
-      if (!state.autoMarkedUnreadSessions.has(sessionId)) return {};
-      return withoutUnread(state, [sessionId]);
-    });
+    set((state) => (
+      state.autoMarkedUnreadSessions.has(sessionId) ? withoutUnread(state, [sessionId]) ?? state : state
+    ));
   },
 }));
 

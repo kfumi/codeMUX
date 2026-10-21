@@ -6,7 +6,7 @@
 
 **Blocked by:** 01 — Windows 任务栏红点（最小闭环）
 
-**Status:** done
+**Status:** done（代码完成；手工验收未执行）
 
 - [x] 删除会话时同步从未读集合中移除这些 Session
 - [x] 归档会话时同步从未读集合中移除该 Session

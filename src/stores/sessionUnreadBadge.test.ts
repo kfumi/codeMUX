@@ -101,6 +101,17 @@ describe('焦点感知的未读标记', () => {
     expect(useSessionStore.getState().autoMarkedUnreadSessions.has('a')).toBe(false);
   });
 
+  it('跳过的标记不推通知(no-op 复用同一个 state 引用)', () => {
+    prime([session('a')], [], 'a');
+    const before = useSessionStore.getState();
+
+    useSessionStore.getState().markSessionUnread('a');
+    useSessionStore.getState().markSessionRead('b');
+    useSessionStore.getState().clearAutoMarkedUnread('a');
+
+    expect(useSessionStore.getState()).toBe(before);
+  });
+
   it('活跃会话但应用在后台时照样标未读,并记入后台补记集合', () => {
     focused.value = false;
     prime([session('a')], [], 'a');
@@ -119,6 +130,27 @@ describe('焦点感知的未读标记', () => {
 
     expect(useSessionStore.getState().unreadSessions.has('b')).toBe(true);
     expect(useSessionStore.getState().autoMarkedUnreadSessions.has('b')).toBe(false);
+  });
+
+  it('手动标记对「前台且正看着」的活跃会话照样生效(工单 01 的验收入口)', () => {
+    prime([session('a')], [], 'a');
+
+    useSessionStore.getState().markSessionUnread('a', 'manual');
+
+    expect(useSessionStore.getState().unreadSessions.has('a')).toBe(true);
+    expect(useSessionStore.getState().autoMarkedUnreadSessions.has('a')).toBe(false);
+    expect(countBadge()).toBe(1);
+  });
+
+  it('手动标记会把手动之前自动标上的未读转成不可回焦清除', () => {
+    focused.value = false;
+    prime([session('a')], [], 'a');
+    useSessionStore.getState().markSessionUnread('a');
+    expect(useSessionStore.getState().autoMarkedUnreadSessions.has('a')).toBe(true);
+
+    useSessionStore.getState().markSessionUnread('a', 'manual');
+
+    expect(useSessionStore.getState().autoMarkedUnreadSessions.has('a')).toBe(false);
   });
 });
 

@@ -216,7 +216,9 @@ describe('SessionHeader', () => {
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('标记为未读'));
-    expect(useSessionStore.getState().unreadSessions.has('session-1')).toBe(false);
+    // 菜单挂在活跃会话上,手动标记必须生效(工单 01 的验收入口),且不进后台补记集合。
+    expect(useSessionStore.getState().unreadSessions.has('session-1')).toBe(true);
+    expect(useSessionStore.getState().autoMarkedUnreadSessions.has('session-1')).toBe(false);
 
     fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('在资源管理器中打开'));

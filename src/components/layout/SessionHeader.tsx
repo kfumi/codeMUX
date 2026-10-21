@@ -185,7 +185,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           <DropdownMenuItem icon={<Archive className="h-3.5 w-3.5" />} onClick={() => void handleArchive()}>
             归档任务
           </DropdownMenuItem>
-          <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
+          <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId, 'manual')}>
             标记为未读
           </DropdownMenuItem>
           {canResyncFromCli ? (

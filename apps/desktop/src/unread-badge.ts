@@ -1,22 +1,27 @@
-//! 未读角标的像素与平台分叉(工单 01;spec 见 docs/specs/2026-10-21-desktop-unread-badge.md)。
-//!
-//! 本文件**不 import electron**:徽章图是纯像素计算,平台判断只吃字符串,
-//! 所以圆点几何、预乘 alpha 合成、Windows 版本分叉都能在 Node 里单测。
-//! Electron 侧(nativeImage / BrowserWindow / Tray)由 main.ts 注入。
-//!
-//! Windows 的 `app.setBadgeCount` 是 no-op,任务栏角标只能走窗口级
-//! `setOverlayIcon`;overlay 由 Shell 固定画在任务栏按钮右下角,不负责渲染数字,
-//! 所以生产上只画红点,数量只进无障碍描述。
+/**
+ * 未读角标的像素与平台分叉(工单 01;spec 见 docs/specs/2026-10-21-desktop-unread-badge.md)。
+ *
+ * 本文件**不 import electron**:徽章图是纯像素计算,平台判断只吃字符串,
+ * 所以圆点几何、预乘 alpha 合成、Windows 版本分叉都能在 Node 里单测。
+ * Electron 侧(nativeImage / BrowserWindow / Tray)由 main.ts 注入。
+ *
+ * Windows 的 `app.setBadgeCount` 是 no-op,任务栏角标只能走窗口级
+ * `setOverlayIcon`;overlay 由 Shell 固定画在任务栏按钮右下角,不负责渲染数字,
+ * 所以生产上只画红点,数量只进无障碍描述。
+ */
 
 /** 任务栏 overlay 在 100% DPI 下的显示尺寸;1x/2x 表示分别产出 16/32。 */
 export const TASKBAR_OVERLAY_LOGICAL_SIZE = 16;
+
+/** 任务栏红点半径(逻辑像素):直径 7px,托盘角标取同一观感。 */
+export const TASKBAR_DOT_RADIUS = 3.5;
 
 /** 托盘图标在通知区域的实际显示尺寸;红点尺寸独立于任务栏。 */
 export const TRAY_LOGICAL_SIZE = 16;
 /** 托盘红点画布:贴到图标右上角,不铺满。 */
 export const TRAY_DOT_CANVAS_SIZE = 9;
-/** 托盘红点半径:直径 7px,与任务栏角标同一观感(约 8px)。 */
-export const TRAY_DOT_RADIUS = 3.5;
+/** 托盘红点半径:与任务栏角标同一观感,故与它同值。 */
+export const TRAY_DOT_RADIUS = TASKBAR_DOT_RADIUS;
 
 /**
  * 红点颜色取 `--destructive-vivid` 的浅色种子(#dc2626)。任务栏/托盘不属于应用
@@ -65,27 +70,27 @@ export interface AntialiasedDotOptions {
   centerX: number;
   centerY: number;
   radius: number;
-  /** 每像素每轴的采样数;4 次方 16 个样本已足够平滑 16px 圆点。 */
-  supersample?: number;
 }
+
+/** 每像素每轴的采样数;4 次方 16 个样本已足够平滑 16px 圆点。 */
+const SUPERSAMPLE = 4;
 
 /**
  * 预乘 alpha 的 BGRA 圆点(与 Electron `toBitmap` / `createFromBitmap` 契约一致)。
  * 圆内完全不透明,圆外全透明;抗锯齿边缘保持同一红色,不与底图混成白边或脏边。
  */
 export function renderStatusDotPixels(options: AntialiasedDotOptions): Uint8Array {
-  const supersample = options.supersample ?? 4;
   const pixels = new Uint8Array(options.size * options.size * 4);
-  const samplesPerPixel = supersample * supersample;
+  const samplesPerPixel = SUPERSAMPLE * SUPERSAMPLE;
   const radiusSquared = options.radius * options.radius;
 
   for (let y = 0; y < options.size; y += 1) {
     for (let x = 0; x < options.size; x += 1) {
       let coveredSamples = 0;
-      for (let sy = 0; sy < supersample; sy += 1) {
-        for (let sx = 0; sx < supersample; sx += 1) {
-          const sampleX = x + (sx + 0.5) / supersample;
-          const sampleY = y + (sy + 0.5) / supersample;
+      for (let sy = 0; sy < SUPERSAMPLE; sy += 1) {
+        for (let sx = 0; sx < SUPERSAMPLE; sx += 1) {
+          const sampleX = x + (sx + 0.5) / SUPERSAMPLE;
+          const sampleY = y + (sy + 0.5) / SUPERSAMPLE;
           const dx = sampleX - options.centerX;
           const dy = sampleY - options.centerY;
           if (dx * dx + dy * dy <= radiusSquared) coveredSamples += 1;
@@ -118,7 +123,7 @@ export function renderTaskbarOverlayDot(
     size: TASKBAR_OVERLAY_LOGICAL_SIZE * scale,
     centerX: center * scale,
     centerY: center * scale,
-    radius: 3.5 * scale,
+    radius: TASKBAR_DOT_RADIUS * scale,
   });
 }
 
@@ -198,6 +203,20 @@ export function applyTaskbarOverlayToWindows(options: {
 }
 
 /**
+ * 徽章图只画红点、与计数无关,是事件级更新:第一次需要时创建一张并长期复用。
+ * 计数为 0 时不建图(不画空点),建图失败(返回 null)时下次再试。
+ */
+function createLazyBadgeImage(create: () => unknown): (needed: boolean) => unknown {
+  let image: unknown = null;
+  return (needed) => {
+    if (needed && image === null) {
+      image = create();
+    }
+    return image;
+  };
+}
+
+/**
  * 角标只在 Turn 结束或用户查看会话时变化,是事件级更新;徽章图只画红点,
  * 与计数无关,所以在第一次需要时渲染一张并长期复用。
  * skipTaskbar 窗口(控制提示条)设置 overlay 无副作用,不单独排除。
@@ -206,16 +225,13 @@ export function createTaskbarOverlayApplier(deps: {
   getAllWindows: () => Iterable<TaskbarOverlayWindow>;
   createBadgeImage: () => unknown;
 }): (totalUnreadCount: number) => void {
-  let badgeImage: unknown = null;
+  const badgeImage = createLazyBadgeImage(deps.createBadgeImage);
 
   return (totalUnreadCount) => {
-    if (hasUnreadBadge(totalUnreadCount) && badgeImage === null) {
-      badgeImage = deps.createBadgeImage();
-    }
     applyTaskbarOverlayToWindows({
       totalUnreadCount,
       windows: deps.getAllWindows(),
-      badgeImage,
+      badgeImage: badgeImage(hasUnreadBadge(totalUnreadCount)),
     });
   };
 }
@@ -266,7 +282,13 @@ export function createTrayBadgeApplier(deps: {
   getBaseImage: () => TrayBaseImage | null;
   createBadgeImage: (oneX: Buffer, twoX: Buffer) => unknown;
 }): (totalUnreadCount: number) => void {
-  let badgeImage: unknown = null;
+  const badgeImage = createLazyBadgeImage(() => {
+    const source = deps.getBaseImage();
+    if (!source) return null;
+    const oneX = composeTrayBadgeBitmap(source, 1);
+    const twoX = composeTrayBadgeBitmap(source, 2);
+    return oneX && twoX ? deps.createBadgeImage(oneX, twoX) : null;
+  });
 
   return (totalUnreadCount) => {
     const tray = deps.getTray();
@@ -277,17 +299,13 @@ export function createTrayBadgeApplier(deps: {
 
     if (!hasUnreadBadge(totalUnreadCount)) {
       // 归零:恢复原始图标(原始图标本身就是多分辨率 ico,不需要重新合成)。
-      tray.setImage(deps.getBaseImage());
+      tray.setImage(baseImage);
       return;
     }
 
-    if (badgeImage === null) {
-      const oneX = composeTrayBadgeBitmap(baseImage, 1);
-      const twoX = composeTrayBadgeBitmap(baseImage, 2);
-      if (!oneX || !twoX) return;
-      badgeImage = deps.createBadgeImage(oneX, twoX);
-    }
-    tray.setImage(badgeImage);
+    const image = badgeImage(true);
+    if (image === null) return;
+    tray.setImage(image);
   };
 }
 

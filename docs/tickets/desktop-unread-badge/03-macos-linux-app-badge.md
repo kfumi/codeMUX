@@ -6,7 +6,7 @@
 
 **Blocked by:** 01 — Windows 任务栏红点（最小闭环）
 
-**Status:** done
+**Status:** done（代码完成；macOS / Linux 实机效果未实测）
 
 - [x] 壳侧按平台分叉：Windows 走 overlay，macOS / Linux 走应用级角标，其余平台 no-op
 - [x] macOS 不合成托盘红点（托盘角标只在 Windows / Linux 生效），由 Dock 角标承担
