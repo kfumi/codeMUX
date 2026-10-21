@@ -51,7 +51,48 @@ export function wipeClaudeModelAliasEnv(env: Record<string, string | undefined>)
       env[key] = '';
     }
   }
-  for (const key of CLAUDE_MODEL_ALIAS_ENV_WIPE_EXACT) {
+  wipeEnvKeys(env, CLAUDE_MODEL_ALIAS_ENV_WIPE_EXACT);
+}
+
+/**
+ * Env keys that Claude Code reads from the `env` block of user settings
+ * (`~/.claude/settings.json`) and that override CodeMUX's own context
+ * configuration. The managed runtime loads user settings
+ * (`settingSources: ['user','project']`), so a settings file written by another
+ * tool can silently cap the session's context window. Observed case: a
+ * Magpie-managed settings.json set `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`,
+ * which Claude Code applies as the auto-compact window
+ * (`window = min(modelWindow, configured)`), so a `[1m]` 1M-context session
+ * still auto-compacted at ~239k tokens (272000 − 20000 output reserve − 13000).
+ *
+ * These keys must be cleared both in the subprocess `env` and in the SDK
+ * `settings.env` flag layer (the highest-precedence user layer) so the in-app
+ * model context config wins over an external settings.json.
+ */
+export const CLAUDE_CONTEXT_ENV_KEYS = [
+  'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
+  'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+  'CLAUDE_CODE_DISABLE_1M_CONTEXT',
+] as const;
+
+/** Clear context/compaction env keys so they cannot cap the session window. */
+export function wipeClaudeContextEnv(env: Record<string, string | undefined>): void {
+  wipeEnvKeys(env, CLAUDE_CONTEXT_ENV_KEYS);
+}
+
+/** The same wipe as a fresh object, for injection into `settings.env`. */
+export function buildClaudeContextEnvWipe(): Record<string, string> {
+  const env: Record<string, string> = {};
+  wipeClaudeContextEnv(env);
+  return env;
+}
+
+/** Empty string is the "unset" convention used by every Claude env wipe here. */
+function wipeEnvKeys(
+  env: Record<string, string | undefined>,
+  keys: readonly string[],
+): void {
+  for (const key of keys) {
     env[key] = '';
   }
 }

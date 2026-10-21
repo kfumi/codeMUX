@@ -13,6 +13,11 @@ export interface ClaudeSdkModule {
    * 旧版 Runtime 没有该导出,调用方需给出可理解的升级提示。
    */
   forkSession?: typeof import('@anthropic-ai/claude-agent-sdk').forkSession;
+  /**
+   * 模块级原生会话元数据读取器（`SDKSessionInfo`），非 `Query` 实例方法。
+   * 原生标题同步依赖它；旧版 Runtime 缺该导出时为 undefined，调用方静默跳过。
+   */
+  getSessionInfo?: typeof import('@anthropic-ai/claude-agent-sdk').getSessionInfo;
 }
 
 /** OpenCode SDK client 模块导出。 */

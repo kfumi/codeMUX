@@ -437,6 +437,34 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime.shutdown();
   });
 
+  it('clears user-settings context env so it cannot cap the 1M window', async () => {
+    const previous = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '272000';
+    try {
+      runtime = new SessionRuntime();
+      await ensure({ model: 'opencode-go/deepseek-v4.1-flash[1m]', baseUrl: 'https://gateway.example/anthropic', apiKey: 'k' });
+      installFakeSdk();
+
+      await runtime.sendInput('hello');
+      await flush();
+
+      const env = harness2.lastQueryOptions.current?.env as Record<string, string | undefined>;
+      expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('');
+      expect(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('');
+      expect(env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBe('');
+
+      const settingsEnv = (harness2.lastQueryOptions.current?.settings as { env?: Record<string, string> } | undefined)?.env;
+      expect(settingsEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('');
+      expect(settingsEnv?.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('');
+      expect(settingsEnv?.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBe('');
+
+      runtime.shutdown();
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+      else process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = previous;
+    }
+  });
+
   it('leaves model-alias env untouched for direct Anthropic sessions', async () => {
     runtime = new SessionRuntime();
     await ensure({ model: 'claude-sonnet-4-5' });

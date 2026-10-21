@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyClaudeModelAliasEnv,
+  buildClaudeContextEnvWipe,
   buildClaudeModelAliasEnv,
+  CLAUDE_CONTEXT_ENV_KEYS,
   CLAUDE_MODEL_ALIAS_ENV_KEYS,
+  wipeClaudeContextEnv,
   wipeClaudeModelAliasEnv,
 } from './claudeModelAliasEnv.js';
 
@@ -62,5 +65,30 @@ describe('applyClaudeModelAliasEnv', () => {
 
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('keep');
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+  });
+});
+
+describe('wipeClaudeContextEnv', () => {
+  it('clears context/compaction env keys that cap the session window', () => {
+    const env: Record<string, string | undefined> = {
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '272000',
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '200000',
+      CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
+      ANTHROPIC_API_KEY: 'keep',
+    };
+    wipeClaudeContextEnv(env);
+
+    for (const key of CLAUDE_CONTEXT_ENV_KEYS) {
+      expect(env[key]).toBe('');
+    }
+    expect(env.ANTHROPIC_API_KEY).toBe('keep');
+  });
+
+  it('buildClaudeContextEnvWipe returns the wipe as a settings.env object', () => {
+    expect(buildClaudeContextEnvWipe()).toEqual({
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '',
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '',
+      CLAUDE_CODE_DISABLE_1M_CONTEXT: '',
+    });
   });
 });

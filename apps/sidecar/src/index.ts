@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   Query,
+  QueryTitleGenerator,
   WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
@@ -64,7 +65,9 @@ import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { isClaudeSidechainMessage, shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
 import {
   applyClaudeModelAliasEnv,
+  buildClaudeContextEnvWipe,
   buildClaudeModelAliasEnv,
+  wipeClaudeContextEnv,
   wipeClaudeModelAliasEnv,
 } from './claudeModelAliasEnv.js';
 import { ClaudeTaskProtocolSource } from './claudeTaskProtocolSource.js';
@@ -102,6 +105,14 @@ const MESSAGE_TIMEOUT_MS = 300_000;
 const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 /** Silence window after which a pending continuation turn is considered ended. */
 const CONTINUATION_QUIESCENCE_MS = 10_000;
+/**
+ * Delay ladder for re-reading the Claude session title: the CLI writes the
+ * ai-title asynchronously *after* `result`, so the first reads can still see the
+ * first-prompt fallback and must be retried.
+ */
+const CLAUDE_TITLE_SYNC_DELAYS_MS = [4_000, 12_000, 30_000, 60_000] as const;
+/** A hung `generateSessionTitle` must not wedge title sync forever. */
+const CLAUDE_TITLE_GENERATE_TIMEOUT_MS = 20_000;
 
 // Gate per-message stderr logs. Each stderr line is read by the Rust backend,
 // mutex-locked into a capture buffer, and logged via tracing — so per-message
@@ -206,6 +217,18 @@ function isSidecarEntrypoint(scriptPath: string | undefined): boolean {
   } catch {
     return path.resolve(scriptPath) === entrypoint;
   }
+}
+
+/** Resolve `undefined` if the SDK title generation does not settle in time. */
+function withClaudeTitleTimeout<T>(promise: Promise<T>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), CLAUDE_TITLE_GENERATE_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 export function waitForClaudeToolResponse(
@@ -371,9 +394,13 @@ export class SessionRuntime {
    */
   private continuationQuiescenceTimer: ReturnType<typeof setTimeout> | null = null;
   continuationQuiescenceMs = CONTINUATION_QUIESCENCE_MS;
-  /** 原生标题同步：首轮结束后拉取一次 getSessionInfo（ai-title 由后台生成，延迟两次尝试）。 */
+  /** 原生标题同步：首轮结束后主动让 Claude 生成一次标题（成功即止，失败可再试）。 */
   private claudeTitleSynced = false;
+  private claudeTitleInFlight = false;
   private lastEmittedNativeTitle: string | null = null;
+  /** 梯子定时器按运行代际归属：reconfigure/切会话时必须全部撤销。 */
+  private claudeTitleTimers = new Set<ReturnType<typeof setTimeout>>();
+  private claudeTitleRunId = 0;
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
@@ -821,6 +848,7 @@ export class SessionRuntime {
     clearClaudeToolResponses(this.config?.sessionId);
     this.finishTurn();
     this.closeQueryHandle('reconfigure');
+    this.resetClaudeTitleSync();
     this.subagents.reset();
     if (this.warmQuery) {
       this.warmQuery.close();
@@ -828,6 +856,21 @@ export class SessionRuntime {
     }
     this.warmPromise = null;
     this.abortController = null;
+  }
+
+  /**
+   * Drop every pending title-sync attempt and bump the run id so an in-flight
+   * generation/read can no longer emit for the session that just went away.
+   */
+  private resetClaudeTitleSync(): void {
+    this.claudeTitleRunId += 1;
+    this.claudeTitleSynced = false;
+    this.claudeTitleInFlight = false;
+    this.lastEmittedNativeTitle = null;
+    for (const timer of this.claudeTitleTimers) {
+      clearTimeout(timer);
+    }
+    this.claudeTitleTimers.clear();
   }
 
   private clearStaleResumeMapping(reason: unknown): boolean {
@@ -1114,23 +1157,31 @@ export class SessionRuntime {
     subprocessEnv.ANTHROPIC_AUTH_TOKEN = '';
     subprocessEnv.ANTHROPIC_COOKIE = '';
     wipeClaudeModelAliasEnv(subprocessEnv);
+    wipeClaudeContextEnv(subprocessEnv);
     // Subagents resolve fast-model aliases internally; on a custom gateway
     // those alias codes do not exist, so pin every alias to the session model.
     if (config.baseUrl) {
       applyClaudeModelAliasEnv(subprocessEnv, config.model);
     }
 
-    const cleanSettings: Record<string, unknown> = {};
+    // `settings.env` is the highest-precedence layer, so the context wipe must
+    // live here too: user `~/.claude/settings.json` (loaded via settingSources)
+    // could otherwise pin CLAUDE_CODE_AUTO_COMPACT_WINDOW and cap the model's
+    // 1M-context window. Applied to every Claude session — direct Anthropic
+    // included — so the in-app context config always wins. An empty string is
+    // the "unset" convention already used for ANTHROPIC_AUTH_TOKEN / aliases.
+    const managedEnv: Record<string, string> = buildClaudeContextEnvWipe();
     if (config.apiKey || config.baseUrl) {
-      cleanSettings.env = {
-        ...(config.apiKey ? { ANTHROPIC_API_KEY: config.apiKey } : {}),
-        ...(config.baseUrl ? { ANTHROPIC_BASE_URL: config.baseUrl } : {}),
-        ANTHROPIC_AUTH_TOKEN: '',
-        ANTHROPIC_COOKIE: '',
-        DISABLE_AUTOUPDATER: '1',
-        ...(config.baseUrl ? buildClaudeModelAliasEnv(config.model) : {}),
-      };
+      if (config.apiKey) managedEnv.ANTHROPIC_API_KEY = config.apiKey;
+      if (config.baseUrl) {
+        managedEnv.ANTHROPIC_BASE_URL = config.baseUrl;
+        Object.assign(managedEnv, buildClaudeModelAliasEnv(config.model));
+      }
+      managedEnv.ANTHROPIC_AUTH_TOKEN = '';
+      managedEnv.ANTHROPIC_COOKIE = '';
+      managedEnv.DISABLE_AUTOUPDATER = '1';
     }
+    const cleanSettings: Record<string, unknown> = { env: managedEnv };
 
     if (!this.abortController || this.abortController.signal.aborted) {
       this.abortController = new AbortController();
@@ -1627,7 +1678,7 @@ export class SessionRuntime {
         if (msg.type === 'result') {
           sawResult = true;
           this.clearContinuationQuiescence();
-          this.scheduleClaudeTitleSync(queryHandle, appSessionId);
+          this.scheduleClaudeTitleSync(queryHandle, appSessionId, prompt);
           if (this.turnActive) {
             writeLog('[claude-task]', 'sendInput COMPLETE');
             this.finishTurn();
@@ -1722,39 +1773,104 @@ export class SessionRuntime {
   }
 
   /**
-   * 首轮结束后拉取 Claude 原生标题（`getSessionInfo().summary`，custom →
-   * ai-title → first prompt 的兜底链）。ai-title 由后台 Haiku 请求异步写入，
-   * result 时点大概率还没生成，因此延迟两次尝试；重复值由 lastEmitted 过滤，
-   * daemon 侧也只对变化写入。旧版 SDK 无此 API 时静默跳过。
+   * 首轮结束后同步 Claude 会话标题。
+   *
+   * 关键：headless/SDK 模式下 Claude Code **不会**自动生成 `ai-title`，宿主必须
+   * 调用 `query.generateSessionTitle(text, { persist: true })`，由 CLI 侧跑一次
+   * 标题模型并把结果写进 transcript。之前只读 `getSessionInfo().summary`，拿到的
+   * 永远是 first prompt 兜底值，所以标题看起来没变。
+   *
+   * 生成失败或旧版 Runtime 无该方法时，退回到 `getSessionInfo()`。注意 ai-title
+   * 是 CLI 在 `result` **之后**才异步写进 transcript 的，早读只会拿到 first
+   * prompt 兜底值；那种值由 `extractClaudeSessionTitle` 丢弃，这里按阶梯重试，
+   * 直到真正的原生标题出现（最长 60s）。重试不依赖 query 是否还活着——空闲
+   * 关闭 query 不影响从磁盘读元数据。
    */
-  private scheduleClaudeTitleSync(queryHandle: Query, appSessionId: string | undefined): void {
-    if (this.claudeTitleSynced || !appSessionId) return;
+  private scheduleClaudeTitleSync(
+    queryHandle: Query,
+    appSessionId: string | undefined,
+    firstPrompt?: string,
+  ): void {
+    if (this.claudeTitleSynced || this.claudeTitleInFlight || !appSessionId) return;
     const sdkSessionId = this.config?.agentSessionId;
+    if (!sdkSessionId && !firstPrompt) return;
+    const runId = ++this.claudeTitleRunId;
+    this.claudeTitleInFlight = true;
+
+    void this.generateClaudeSessionTitle(queryHandle, appSessionId, firstPrompt, sdkSessionId)
+      .finally(() => {
+        if (this.claudeTitleRunId === runId) this.claudeTitleInFlight = false;
+      });
+
     if (!sdkSessionId) return;
-    this.claudeTitleSynced = true;
-    for (const delayMs of [4_000, 12_000]) {
+    for (const delayMs of CLAUDE_TITLE_SYNC_DELAYS_MS) {
       const timer = setTimeout(() => {
-        if (this.queryHandle !== queryHandle) return;
-        void this.fetchClaudeSessionTitle(queryHandle, appSessionId, sdkSessionId);
+        this.claudeTitleTimers.delete(timer);
+        if (this.claudeTitleRunId !== runId || this.claudeTitleSynced) return;
+        void this.fetchClaudeSessionTitle(sdkSessionId, appSessionId);
       }, delayMs);
       timer.unref?.();
+      this.claudeTitleTimers.add(timer);
     }
   }
 
-  private async fetchClaudeSessionTitle(queryHandle: Query, appSessionId: string, sdkSessionId: string): Promise<void> {
+  /** 主动让 Claude Code 生成标题（CLI 侧持久化为 ai-title）。 */
+  private async generateClaudeSessionTitle(
+    queryHandle: Query,
+    appSessionId: string,
+    firstPrompt: string | undefined,
+    sdkSessionId: string | undefined,
+  ): Promise<void> {
+    const text = firstPrompt?.trim();
+    const generate = (queryHandle as unknown as QueryTitleGenerator).generateSessionTitle;
+
+    if (!text || typeof generate !== 'function') return;
+    const startedAt = Date.now();
     try {
-      const getSessionInfo = (queryHandle as unknown as {
-        getSessionInfo?: (sessionId?: string) => Promise<unknown>;
-      }).getSessionInfo;
-      if (typeof getSessionInfo !== 'function') return;
-      const info = await getSessionInfo.call(queryHandle, sdkSessionId);
+      // `persist: true` 走 CLI 自己的落盘路径，但它只在描述通过内部校验时才真的
+      // 调用标题模型，否则立刻返回 null。标题模型的输出是否可解出 JSON 取决于
+      // 供应商能力（部分网关只能时好时坏地产出），失败时交给下面的
+      // `getSessionInfo()` 阶梯重试，不在这里自建标题请求。
+      const title = await withClaudeTitleTimeout(generate.call(queryHandle, text, { persist: true }));
+      const value = typeof title === 'string' ? title.trim() : '';
+      if (value) {
+        this.emitClaudeTitle(appSessionId, value);
+        return;
+      }
+    } catch (error) {
+      process.stderr.write(
+        `[sidecar] Claude session title generation failed: ${error instanceof Error ? error.message : String(error)} elapsed_ms=${Date.now() - startedAt}\n`,
+      );
+    }
+    // 生成没结果时立刻用兜底读一次，别等 4s/12s。
+    if (sdkSessionId) await this.fetchClaudeSessionTitle(sdkSessionId, appSessionId);
+  }
+
+  private async fetchClaudeSessionTitle(sdkSessionId: string, appSessionId: string): Promise<void> {
+    try {
+      // `getSessionInfo` 是 SDK 的模块级导出，不是 Query 实例方法；从托管
+      // Runtime 加载的 SDK 模块上取。旧版 Runtime 无此导出时静默跳过。
+      const getSessionInfo = this.claudeSdk?.getSessionInfo;
+      if (typeof getSessionInfo !== 'function') {
+        return;
+      }
+      const info = await getSessionInfo.call(this.claudeSdk, sdkSessionId);
       const title = extractClaudeSessionTitle(info);
-      if (!title || title === this.lastEmittedNativeTitle) return;
-      this.lastEmittedNativeTitle = title;
-      emit(buildSessionTitleEvent({ appSessionId, agentKind: 'claude_code', title }));
+      if (!title) return;
+      this.emitClaudeTitle(appSessionId, title);
     } catch (error) {
       process.stderr.write(`[sidecar] Claude session title sync failed: ${error instanceof Error ? error.message : String(error)}\n`);
     }
+  }
+
+  private emitClaudeTitle(appSessionId: string, title: string): void {
+    if (!title || title === this.lastEmittedNativeTitle) return;
+    // A delayed read from a session that has since been replaced must not
+    // overwrite the current session's title or mark it as already synced.
+    if (this.config?.sessionId !== appSessionId) return;
+    this.lastEmittedNativeTitle = title;
+    this.claudeTitleSynced = true;
+    emit(buildSessionTitleEvent({ appSessionId, agentKind: 'claude_code', title }));
   }
 
   private async pollMcpServerStatus(queryHandle: Query): Promise<void> {
