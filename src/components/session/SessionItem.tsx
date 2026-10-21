@@ -12,6 +12,7 @@ import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 import { SessionInfoCard } from './SessionInfoCard';
+import { OverflowMarqueeText } from '../ui/overflow-marquee-text';
 import { TooltipHint } from '../ui/tooltip';
 import { sessionAwaitsUserConfirmation } from '../../lib/pendingUserInput';
 import { cn } from '../../lib/utils';
@@ -189,6 +190,7 @@ export function SessionItem({
           <ContextMenuTrigger asChild>
             <HoverCardTrigger asChild>
               <div
+                data-marquee-hover-target="true"
                 className={cn(
                   'group relative flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast select-none [-webkit-touch-callout:none]',
                   'cursor-pointer text-[hsl(var(--sidebar-fg))]/86',
@@ -215,9 +217,9 @@ export function SessionItem({
                   />
                 ) : (
                   <>
-                    <span className="flex-1 truncate font-medium transition-colors duration-normal">
+                    <OverflowMarqueeText className="font-medium transition-colors duration-normal">
                       {session.title || '未命名对话'}
-                    </span>
+                    </OverflowMarqueeText>
                     {session.is_read_only && (
                       <TooltipHint content="导入的只读快照">
                         <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
