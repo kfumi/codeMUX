@@ -76,7 +76,7 @@ export function GeneralSettings() {
         <SettingsCard>
           <SettingsRow
             label="交互行为"
-            description="运行中发消息：引导它改变方向，或直接打断"
+            description="运行中发消息：引导注入当前任务，或排队等本轮结束"
             control={
               <Select
               value={immediateRunMode}
@@ -86,12 +86,12 @@ export function GeneralSettings() {
             >
               <SelectTrigger aria-label="交互行为" size="sm" className="w-full shrink-0 sm:w-32">
                 <SelectValue>
-                  {immediateRunMode === 'interrupt' ? '中断' : '引导'}
+                  {immediateRunMode === 'interrupt' ? '队列' : '引导'}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="end">
                 <SelectItem value="steer">引导</SelectItem>
-                <SelectItem value="interrupt">中断</SelectItem>
+                <SelectItem value="interrupt">队列</SelectItem>
               </SelectContent>
               </Select>
             }

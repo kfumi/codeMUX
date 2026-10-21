@@ -76,7 +76,7 @@ describe('GeneralSettings', () => {
     expect(screen.getByText('引导')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('交互行为'));
-    fireEvent.click(screen.getByText('中断'));
+    fireEvent.click(screen.getByText('队列'));
 
     expect(setImmediateRunModeMock).toHaveBeenCalledWith('interrupt');
   });

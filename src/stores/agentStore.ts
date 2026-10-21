@@ -1834,7 +1834,12 @@ function updateSessionWorkingPaths(
 
 export const useAgentStore = create<AgentState>((set, get) => {
   const queuedDispatches = new Map<string, Promise<void>>();
-  const inflightSteerRequests = new Map<string, { sessionId: string; query: QueuedAgentQuery }>();
+  // fallback 决定 steer 不可用时的落点：'interrupt'（立即按钮，抢占当前轮）或
+  // 'enqueue'（运行中发送即引导，退回队列，不打断当前轮）。
+  const inflightSteerRequests = new Map<
+    string,
+    { sessionId: string; query: QueuedAgentQuery; fallback?: 'interrupt' | 'enqueue' }
+  >();
 
   const createQueuedQuery = (
     prompt: string,
@@ -1965,7 +1970,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
   const consumeSteerResultEvent = (
     raw: string | Record<string, unknown>,
-    onUnavailable: (sessionId: string, query: QueuedAgentQuery) => void,
+    onUnavailable: (sessionId: string, query: QueuedAgentQuery, fallback: 'interrupt' | 'enqueue') => void,
   ): boolean => {
     try {
       const data = (
@@ -1981,7 +1986,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const pending = inflightSteerRequests.get(data.request_id);
       inflightSteerRequests.delete(data.request_id);
       if (pending && data.ok !== true) {
-        onUnavailable(pending.sessionId, pending.query);
+        onUnavailable(pending.sessionId, pending.query, pending.fallback ?? 'interrupt');
       }
       return true;
     } catch {
@@ -2025,6 +2030,37 @@ export const useAgentStore = create<AgentState>((set, get) => {
     void interruptAndRunQueuedQuery(sessionId, query.id);
   };
 
+  /**
+   * 运行中「引导」模式：发送即注入当前活动轮（对齐 ZCode 的 guide，由底层运行时
+   * 在下一次模型请求前消费）。与队列不同，它不进 queuedQueries；steer 不可用时
+   * 退回队列，不打断当前轮。
+   */
+  const steerRunningTurn = async (
+    sessionId: string,
+    query: Omit<QueuedAgentQuery, 'id' | 'createdAt'>,
+  ): Promise<void> => {
+    const requestId = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const inflight: QueuedAgentQuery = { ...query, id: requestId, createdAt: Date.now() };
+    inflightSteerRequests.set(requestId, { sessionId, query: inflight, fallback: 'enqueue' });
+    try {
+      await daemonFacade.sendMessageViaDaemon(
+        sessionId,
+        query.prompt,
+        query.inputPayload,
+        { delivery: 'steer', requestId },
+      );
+    } catch (error) {
+      inflightSteerRequests.delete(requestId);
+      logger.error('Agent steer-on-send failed; enqueueing instead', { sessionId }, serializeError(error));
+      set((state) => ({
+        queuedQueries: {
+          ...state.queuedQueries,
+          [sessionId]: [...(state.queuedQueries[sessionId] ?? []), inflight],
+        },
+      }));
+    }
+  };
+
 function createSessionEventHandler(
   sessionId: string,
   get: () => AgentState,
@@ -2040,8 +2076,12 @@ function createSessionEventHandler(
     if (useSubagentStore.getState().routeSubagentSidecarEvent(raw, sessionId)) {
       return;
     }
-    if (consumeSteerResultEvent(raw, (failedSessionId, query) => {
-      void fallbackQueuedQueryNow(failedSessionId, query);
+    if (consumeSteerResultEvent(raw, (failedSessionId, query, fallback) => {
+      if (fallback === 'enqueue') {
+        restoreQueuedQueryAtFront(failedSessionId, query);
+      } else {
+        void fallbackQueuedQueryNow(failedSessionId, query);
+      }
     })) {
       return;
     }
@@ -3003,6 +3043,28 @@ function createSessionEventHandler(
       subagentSession?.order.some((id) => subagentSession.descriptors[id]?.status === 'running'),
     );
     const continuationPending = Boolean(useSubagentStore.getState().continuationPending[sessionId]);
+    // 「引导」模式（immediate_run_mode=steer）：运行中发送即注入当前活动轮，
+    // 不进队列、不打断。仅当确实有活动轮（isRunning）、没有派发在途、且运行时
+    // 支持 steer 时生效；否则回落到下面的排队分支。
+    const steerOnSend =
+      !fromQueue
+      && normalizeImmediateRunMode(useSettingsStore.getState().config?.immediate_run_mode) === 'steer'
+      && Boolean(currentState.isRunning[sessionId])
+      && !queuedDispatches.has(sessionId)
+      && !isSteerBlockedPrompt(prompt)
+      && !!targetSession
+      && supportsCapability(targetSession.agent_kind, 'supports_steer');
+    if (steerOnSend) {
+      await steerRunningTurn(sessionId, {
+        prompt,
+        cwd,
+        reasoningEffort,
+        displayContent,
+        inputPayload,
+        modelForVision,
+      });
+      return;
+    }
     const shouldQueue =
       !fromQueue
       && (

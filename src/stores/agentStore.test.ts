@@ -245,6 +245,14 @@ describe('agent store Codex history loading', () => {
     return session;
   }
 
+  // 「交互行为」两档：'steer' = 引导（运行中发送即注入当前轮）；'interrupt' = 队列
+  // （运行中发送进本地队列，等本轮结束后按序派发）。
+  function setImmediateRunMode(mode: 'steer' | 'interrupt') {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, immediate_run_mode: mode } : state.config,
+    }));
+  }
+
   beforeEach(async () => {
     vi.useRealTimers();
     startSessionMock.mockClear();
@@ -346,6 +354,7 @@ describe('agent store Codex history loading', () => {
 
   it('queues messages submitted during a running turn and dispatches them in order', async () => {
     const session = await primeSession('codex');
+    setImmediateRunMode('interrupt');
     let finishFirstTurn: ((event: string) => void) | undefined;
 
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
@@ -452,6 +461,7 @@ describe('agent store Codex history loading', () => {
 
   it('does not let a background synthetic boundary steal an active user turn', async () => {
     const session = await primeSession('claude_code');
+    setImmediateRunMode('interrupt');
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
       void onEvent;
     });
@@ -482,6 +492,7 @@ describe('agent store Codex history loading', () => {
 
   it('queues pi follow-ups during a running turn instead of sending them immediately', async () => {
     const session = await primeSession('pi');
+    setImmediateRunMode('interrupt');
     startSessionMock.mockImplementationOnce(async () => undefined);
 
     await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
@@ -501,8 +512,54 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
+  it('运行中发送在「引导」模式下注入当前轮而不入队列', async () => {
+    const session = await primeSession('codex');
+    startSessionMock.mockImplementationOnce(async () => undefined);
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'guide me', 'D:\\workspace');
+
+    expect(useAgentStore.getState().queuedQueries[session.id] ?? []).toEqual([]);
+    expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
+      session.id,
+      'guide me',
+      undefined,
+      expect.objectContaining({ delivery: 'steer', requestId: expect.any(String) }),
+    );
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+  });
+
+  it('「引导」模式发送在 steer 不可用时退回队列而不打断当前轮', async () => {
+    const session = await primeSession('codex');
+    let onEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (_s, _p, _c, handler) => {
+      onEvent = handler;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'guide me', 'D:\\workspace');
+
+    const steerCall = sendMessageViaDaemonMock.mock.calls.find((call) => (
+      (call[3] as { delivery?: string })?.delivery === 'steer'
+    ));
+    const requestId = (steerCall?.[3] as { requestId: string }).requestId;
+
+    onEvent?.(JSON.stringify({
+      type: 'steer_result',
+      request_id: requestId,
+      ok: false,
+      unavailable: true,
+    }));
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().queuedQueries[session.id]?.[0]?.prompt).toBe('guide me');
+    });
+    expect(interruptViaDaemonMock).not.toHaveBeenCalled();
+  });
+
   it('runQueuedQueryNow steers a running pi turn and keeps the remaining queue', async () => {
     const session = await primeSession('pi');
+    setImmediateRunMode('interrupt');
     let firstOnEvent: ((event: string) => void) | undefined;
 
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
@@ -517,6 +574,7 @@ describe('agent store Codex history loading', () => {
     const promoted = queueBefore[1];
     expect(promoted?.prompt).toBe('third message');
 
+    setImmediateRunMode('steer');
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
     expect(interruptViaDaemonMock).not.toHaveBeenCalled();
@@ -883,6 +941,7 @@ describe('agent store Codex history loading', () => {
 
   it('runQueuedQueryNow steers the active Codex turn without interrupting', async () => {
     const session = await primeSession('codex');
+    setImmediateRunMode('interrupt');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -895,6 +954,7 @@ describe('agent store Codex history loading', () => {
     expect(promoted?.prompt).toBe('third message');
     expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
 
+    setImmediateRunMode('steer');
     await useAgentStore.getState().runQueuedQueryNow(session.id, promoted!.id);
 
     expect(interruptViaDaemonMock).not.toHaveBeenCalled();
@@ -914,6 +974,7 @@ describe('agent store Codex history loading', () => {
 
   it('keeps isRunning true after runQueuedQueryNow steers the queued message', async () => {
     const session = await primeSession('codex');
+    setImmediateRunMode('interrupt');
 
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -923,6 +984,7 @@ describe('agent store Codex history loading', () => {
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
     expect(queued?.prompt).toBe('queued second');
 
+    setImmediateRunMode('steer');
     await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
     expect(sendMessageViaDaemonMock).toHaveBeenCalledWith(
@@ -1047,6 +1109,7 @@ describe('agent store Codex history loading', () => {
 
   it('falls back to interrupt when steer_result reports unavailable', async () => {
     const session = await primeSession('codex');
+    setImmediateRunMode('interrupt');
     let firstOnEvent: ((event: string) => void) | undefined;
 
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
@@ -1057,6 +1120,7 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().startQuery(session.id, 'steer me', 'D:\\workspace');
 
     const queued = useAgentStore.getState().queuedQueries[session.id]?.[0];
+    setImmediateRunMode('steer');
     await useAgentStore.getState().runQueuedQueryNow(session.id, queued!.id);
 
     const steerCall = sendMessageViaDaemonMock.mock.calls.find((call) => (
@@ -1132,6 +1196,7 @@ describe('agent store Codex history loading', () => {
 
   it('dispatches composer input after failure before retaining and running prior queued messages', async () => {
     const session = await primeSession('codex');
+    setImmediateRunMode('interrupt');
     let finishFirstTurn: ((event: string) => void) | undefined;
 
     startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
