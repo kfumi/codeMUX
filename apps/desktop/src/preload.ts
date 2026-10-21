@@ -101,6 +101,8 @@ const bridge = {
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }) =>
     invoke<void>('sendAgentNotification', payload),
   showMainWindow: () => invoke<void>('showMainWindow'),
+  // 未读角标(工单 01):单向、幂等的计数同步;壳负责画到任务栏/托盘。
+  syncUnreadBadgeCount: (count: number) => invoke<void>('syncUnreadBadgeCount', count),
 
   // 应用内更新器(工单 06;electron-updater;进度事件经 onUpdaterEvent 转发)
   checkForUpdates: () => invoke('checkForUpdates'),

@@ -221,6 +221,11 @@ export interface CodemuxDesktopBridge {
   // 通知 / 主窗口
   sendAgentNotification(payload: { title: string; body: string; sessionId: string }): Promise<void>;
   showMainWindow(): Promise<void>;
+  /**
+   * 未读角标(工单 01):把未读对话数同步给壳,由壳画到任务栏 / 托盘。
+   * 单向、幂等;浏览器形态没有壳桥,调用方应静默跳过。
+   */
+  syncUnreadBadgeCount(count: number): Promise<void>;
 
   // 应用内更新器(工单 06;进度事件经 onUpdaterEvent 转发)
   checkForUpdates(): Promise<DesktopUpdaterCheckResult>;

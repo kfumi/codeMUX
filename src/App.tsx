@@ -9,6 +9,7 @@ import { navTargetForView, type NavRailTarget } from './components/layout/NavRai
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
+import { useUnreadBadge } from './hooks/useUnreadBadge';
 import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useEmergencyStop } from './hooks/useEmergencyStop';
@@ -127,6 +128,7 @@ function App() {
 
   useTheme();
   useAgentNotifications();
+  useUnreadBadge();
   useModelDisplayNames();
 
   useEffect(() => {

@@ -38,6 +38,7 @@ import { readLocalDaemonTokenOrThrow } from './daemon-token';
 import { readLogTail } from './log-tail';
 import { openInExplorerPath, openProjectPath } from './open-project';
 import type { Supervisor } from './supervisor';
+import { parseUnreadBadgeCount } from './unread-badge';
 import type { UpdaterService } from './updater';
 
 export interface ShellBridgeDeps {
@@ -57,6 +58,11 @@ export interface ShellBridgeDeps {
   sendToRenderer(channel: string, payload: unknown): void;
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
+  /**
+   * 未读角标同步(工单 01):渲染层是未读真值源,壳只负责画到任务栏/托盘。
+   * 载荷校验在本方法内完成,非法值直接拒绝。
+   */
+  syncUnreadBadge(totalUnreadCount: number): void;
 }
 
 function webContentsOf(window: BrowserWindow | null): WebContents | null {
@@ -307,6 +313,17 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   });
   handle('showMainWindow', () => {
     deps.showMainWindow();
+  });
+
+  // --- 未读角标(工单 01;spec docs/specs/2026-10-21-desktop-unread-badge.md) ---
+  // 单向、幂等:同一计数重复发送等价于一次。载荷校验在 unread-badge 的纯函数里,
+  // 非法值一律拒绝而不是猜一个数(猜错会画出骗人的角标)。
+  handle('syncUnreadBadgeCount', (payload: unknown) => {
+    const totalUnreadCount = parseUnreadBadgeCount(payload);
+    if (totalUnreadCount === null) {
+      throw new Error('syncUnreadBadgeCount 需要非负整数');
+    }
+    deps.syncUnreadBadge(totalUnreadCount);
   });
 
   // --- 外链(工单 09:接替 @tauri-apps/plugin-shell open) --------------------

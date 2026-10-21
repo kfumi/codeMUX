@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AgentKind, Session, SessionMode } from '../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
+import { isAppFocused } from '../lib/appActivity';
 import { isValidWorkingPath } from '../lib/sessionCwd';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useAgentStore } from './agentStore';
@@ -22,6 +23,12 @@ interface SessionState {
   error: string | null;
   /** Session IDs that have unread status (completed or errored since last viewed) */
   unreadSessions: Set<string>;
+  /**
+   * 「活跃但应用在后台」时被自动标上的未读(工单 04)。它不是第二个未读真值,
+   * 只是标记来源的元数据:窗口重新聚焦且仍停在该 Session 上时自动清除这些,
+   * 手动标记的未读不在其中,因此不会被回焦误清。
+   */
+  autoMarkedUnreadSessions: Set<string>;
   fetchSessions: () => Promise<void>;
   fetchArchivedSessions: () => Promise<void>;
   createSession: CreateSessionAction;
@@ -46,6 +53,11 @@ interface SessionState {
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
   markSessionUnread: (sessionId: string) => void;
+  /**
+   * 回焦自动清除(工单 04):只清「自动标记」的未读。用户离开期间切去看过
+   * 别的 Session 时调用方不调它,未读因此保留作为回来处理的提醒。
+   */
+  clearAutoMarkedUnread: (sessionId: string) => void;
 }
 
 type CreateSessionAction = {
@@ -147,6 +159,39 @@ function createSessionAction(
   return createSession;
 }
 
+type UnreadState = Pick<SessionState, 'unreadSessions' | 'autoMarkedUnreadSessions'>;
+
+/**
+ * 未读集合的单一写入口:从两份集合里同时剔除若干 Session。
+ * 无变化时返回空对象,调用方可以无脑展开进 `set` 的 patch。
+ */
+function withoutUnread(state: UnreadState, sessionIds: string[]): Partial<UnreadState> {
+  const removed = sessionIds.filter(
+    (sessionId) => state.unreadSessions.has(sessionId) || state.autoMarkedUnreadSessions.has(sessionId),
+  );
+  if (removed.length === 0) return {};
+
+  const unreadSessions = new Set(state.unreadSessions);
+  const autoMarkedUnreadSessions = new Set(state.autoMarkedUnreadSessions);
+  for (const sessionId of removed) {
+    unreadSessions.delete(sessionId);
+    autoMarkedUnreadSessions.delete(sessionId);
+  }
+  return { unreadSessions, autoMarkedUnreadSessions };
+}
+
+/** 新增一条未读,并按来源决定是否记入自动标记集合。 */
+function withUnread(state: UnreadState & Pick<SessionState, 'activeSessionId'>, sessionId: string): Partial<UnreadState> {
+  if (state.unreadSessions.has(sessionId)) return {};
+
+  const unreadSessions = new Set(state.unreadSessions).add(sessionId);
+  // 「活跃但应用在后台」标上的未读才可被回焦自动清除;手动标记的不算。
+  const autoMarkedUnreadSessions = state.activeSessionId === sessionId
+    ? new Set(state.autoMarkedUnreadSessions).add(sessionId)
+    : state.autoMarkedUnreadSessions;
+  return { unreadSessions, autoMarkedUnreadSessions };
+}
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   archivedSessions: [],
@@ -156,6 +201,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   hasLoadedOnce: false,
   error: null,
   unreadSessions: new Set<string>(),
+  autoMarkedUnreadSessions: new Set<string>(),
   fetchSessions: async () => {
     const requestGeneration = ++sessionsRequestGeneration;
     set({ isLoading: true, error: null });
@@ -253,6 +299,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           sessions: newSessions,
           archivedSessions: newArchivedSessions,
           activeSessionId: newActiveId,
+          ...withoutUnread(state, [sessionId]),
           isLoading: false,
         };
       });
@@ -279,6 +326,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeSessionId: state.activeSessionId && deletedIds.has(state.activeSessionId)
           ? (sessions[0]?.id ?? null)
           : state.activeSessionId,
+        // 工单 05:被删掉的会话不能再留在未读集合里,否则角标会留下点不掉的幽灵。
+        ...withoutUnread(state, sessionIds),
         isLoading: false,
       };
     });
@@ -297,6 +346,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           sessions: remainingSessions,
           archivedSessions: nextArchivedSessions,
           activeSessionId: nextActiveId,
+          // 工单 05:归档区不参与常驻提醒,归档即清掉未读。
+          ...withoutUnread(state, [sessionId]),
         };
       });
     } catch (error) {
@@ -347,9 +398,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setActiveSession: (sessionId: string | null) => {
     set((state) => {
       if (!sessionId) return { activeSessionId: null };
-      const next = new Set(state.unreadSessions);
-      next.delete(sessionId);
-      return { activeSessionId: sessionId, unreadSessions: next };
+      return { activeSessionId: sessionId, ...withoutUnread(state, [sessionId]) };
     });
   },
   updateSessionTitle: async (sessionId: string, title: string, options?: { titleLocked?: boolean }) => {
@@ -405,20 +454,36 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     daemonFacade.touchSession(sessionId).catch(() => {});
   },
   markSessionRead: (sessionId: string) => {
-    set((state) => {
-      if (!state.unreadSessions.has(sessionId)) return state;
-      const next = new Set(state.unreadSessions);
-      next.delete(sessionId);
-      return { unreadSessions: next };
-    });
+    set((state) => withoutUnread(state, [sessionId]));
   },
   markSessionUnread: (sessionId: string) => {
     set((state) => {
-      if (state.activeSessionId === sessionId) return state;
-      if (state.unreadSessions.has(sessionId)) return state;
-      const next = new Set(state.unreadSessions);
-      next.add(sessionId);
-      return { unreadSessions: next };
+      // 只有「应用在前台且正看着这个会话」才跳过(工单 04)。窗口在后台时用户
+      // 其实没在看,该标就标 —— 这正是最需要提醒的场景。
+      if (state.activeSessionId === sessionId && isAppFocused()) return {};
+      return withUnread(state, sessionId);
+    });
+  },
+  clearAutoMarkedUnread: (sessionId: string) => {
+    set((state) => {
+      if (!state.autoMarkedUnreadSessions.has(sessionId)) return {};
+      return withoutUnread(state, [sessionId]);
     });
   },
 }));
+
+/**
+ * 未读角标计数(工单 01):与侧栏状态点同源 —— 只数仍在会话列表里、且未归档的
+ * 未读 Session。被删除的会话即使还残留在集合里也不计入(兜底),归档同理。
+ */
+export function selectUnreadBadgeCount(
+  state: Pick<SessionState, 'sessions' | 'unreadSessions'>,
+): number {
+  if (state.unreadSessions.size === 0) return 0;
+  let count = 0;
+  for (const session of state.sessions) {
+    if (session.is_archived) continue;
+    if (state.unreadSessions.has(session.id)) count += 1;
+  }
+  return count;
+}

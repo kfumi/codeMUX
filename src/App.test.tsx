@@ -135,24 +135,36 @@ vi.mock('./stores/projectStore', () => ({
   }),
 }));
 
-vi.mock('./stores/sessionStore', () => ({
-  useSessionStore: Object.assign(
-    (selector: (state: {
-      createSession: ReturnType<typeof vi.fn>;
-      activeSessionId: string | null;
-      sessions: never[];
-      setActiveSession: ReturnType<typeof vi.fn>;
-    }) => unknown) => selector({
-      createSession: vi.fn(),
-      activeSessionId: null,
-      sessions: [],
-      setActiveSession: vi.fn(),
-    }),
-    {
-      setState: vi.fn(),
-    },
-  ),
-}));
+// 部分替身:保留真实的选择器导出(未读角标计数),只替掉 store 本身。
+vi.mock('./stores/sessionStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./stores/sessionStore')>();
+  return {
+    ...actual,
+    useSessionStore: Object.assign(
+      (selector: (state: {
+        createSession: ReturnType<typeof vi.fn>;
+        activeSessionId: string | null;
+        sessions: never[];
+        setActiveSession: ReturnType<typeof vi.fn>;
+        unreadSessions: Set<string>;
+      }) => unknown) => selector({
+        createSession: vi.fn(),
+        activeSessionId: null,
+        sessions: [],
+        setActiveSession: vi.fn(),
+        unreadSessions: new Set<string>(),
+      }),
+      {
+        setState: vi.fn(),
+        getState: vi.fn(() => ({
+          activeSessionId: null,
+          autoMarkedUnreadSessions: new Set<string>(),
+          clearAutoMarkedUnread: vi.fn(),
+        })),
+      },
+    ),
+  };
+});
 
 vi.mock('./stores/settingsStore', () => ({
   useSettingsStore: (selector: (state: {

@@ -42,6 +42,9 @@ export const shellFacade = {
   showMainWindow: (): Promise<void> => bridgeCall((bridge) => bridge.showMainWindow()),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
     bridgeCall((bridge) => bridge.sendAgentNotification(payload)),
+  /** 未读角标(工单 01):同步未读对话数给壳,由壳画到任务栏 / 托盘。 */
+  syncUnreadBadgeCount: (count: number): Promise<void> =>
+    bridgeCall((bridge) => bridge.syncUnreadBadgeCount(count)),
   getLogDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getLogDirectory()),
   getAppDataDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getAppDataDirectory()),
   getUserHomeDirectory: (): Promise<string> => bridgeCall((bridge) => bridge.getUserHomeDirectory()),

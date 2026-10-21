@@ -57,6 +57,7 @@ function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
     updater,
     sendToRenderer: vi.fn(),
     browserGuests,
+    syncUnreadBadge: vi.fn(),
     ...overrides,
   };
 }
@@ -206,5 +207,33 @@ describe('shell-bridge getLocalDaemonToken 通道', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('shell-bridge 未读角标通道(工单 01)', () => {
+  beforeEach(() => {
+    ipcMainMock.handle.mockClear();
+  });
+
+  it('合法计数转给壳侧出口', async () => {
+    const deps = createDeps();
+    registerShellBridge(deps);
+
+    await getHandler('syncUnreadBadgeCount')(null, 3);
+
+    expect(deps.syncUnreadBadge).toHaveBeenCalledWith(3);
+  });
+
+  it('非法载荷一律拒绝,不画一个猜出来的角标', async () => {
+    const deps = createDeps();
+    registerShellBridge(deps);
+    const handler = getHandler('syncUnreadBadgeCount');
+
+    await expect(handler(null, -1)).rejects.toThrow('syncUnreadBadgeCount 需要非负整数');
+    await expect(handler(null, 1.5)).rejects.toThrow('syncUnreadBadgeCount 需要非负整数');
+    await expect(handler(null, '3')).rejects.toThrow('syncUnreadBadgeCount 需要非负整数');
+    await expect(handler(null, undefined)).rejects.toThrow('syncUnreadBadgeCount 需要非负整数');
+
+    expect(deps.syncUnreadBadge).not.toHaveBeenCalled();
   });
 });

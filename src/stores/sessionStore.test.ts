@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
 
+// 前台判定在 node 环境没有 document,这里用可切换的替身(默认前台,保持既有用例语义)。
+const appFocused = vi.hoisted(() => ({ value: true }));
+vi.mock('../lib/appActivity', () => ({
+  isAppFocused: () => appFocused.value,
+}));
+
 // 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
 import { useSessionStore } from './sessionStore';
 import { useSettingsStore } from './settingsStore';
@@ -566,7 +572,7 @@ describe('session store createSession', () => {
     expect(useSessionStore.getState().sessions[0].plan_mode).toBe('off');
   });
 
-  it('does not mark the active session as unread', async () => {
+  it('does not mark the active session as unread while the app is focused', async () => {
     const activeSession: Session = {
       id: 'session-active',
       title: 'Active',
@@ -585,6 +591,7 @@ describe('session store createSession', () => {
       archivedSessions: [],
       activeSessionId: activeSession.id,
       unreadSessions: new Set<string>(),
+      autoMarkedUnreadSessions: new Set<string>(),
       isLoading: false,
       isArchivedLoading: false,
       error: null,
@@ -593,6 +600,44 @@ describe('session store createSession', () => {
     useSessionStore.getState().markSessionUnread(activeSession.id);
 
     expect(useSessionStore.getState().unreadSessions.has(activeSession.id)).toBe(false);
+  });
+
+  it('marks the active session unread when the window is in the background', async () => {
+    // 工单 04:用户正开着这个会话但窗口在后台时,那一刻确实没在看 —— 该标就标。
+    const activeSession: Session = {
+      id: 'session-active',
+      title: 'Active',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+
+    useSessionStore.setState({
+      sessions: [activeSession],
+      archivedSessions: [],
+      activeSessionId: activeSession.id,
+      unreadSessions: new Set<string>(),
+      autoMarkedUnreadSessions: new Set<string>(),
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    appFocused.value = false;
+    try {
+      useSessionStore.getState().markSessionUnread(activeSession.id);
+    } finally {
+      appFocused.value = true;
+    }
+
+    expect(useSessionStore.getState().unreadSessions.has(activeSession.id)).toBe(true);
+    // 记入自动标记集合,回焦时可被清掉。
+    expect(useSessionStore.getState().autoMarkedUnreadSessions.has(activeSession.id)).toBe(true);
   });
 
   it('still marks an inactive session as unread', async () => {

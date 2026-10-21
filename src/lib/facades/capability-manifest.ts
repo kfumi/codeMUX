@@ -67,6 +67,9 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'window.manage', owner: 'shell', shellMethod: 'minimizeWindow' },
   // tray.manage:main 进程托盘,无渲染层方法面(托盘菜单/行为全在壳侧)。
   { id: 'tray.manage', owner: 'shell', shellMethod: 'tray' },
+  // notification.badge(工单 01):未读角标由壳画到任务栏 / 托盘;渲染层只同步计数,
+  // 浏览器 / 移动形态没有任务栏,据此跳过同步而不是留一个必然失败的调用。
+  { id: 'notification.badge', owner: 'shell', shellMethod: 'syncUnreadBadgeCount' },
   // updater(工单 09 终态:features/update/electronUpdaterAdapter.ts 直连壳桥更新器通道)
   { id: 'updater', owner: 'shell', shellMethod: 'updater' },
   { id: 'open.external', owner: 'shell', shellMethod: 'openExternal' },

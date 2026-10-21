@@ -134,6 +134,7 @@
 | [2026-10-10-computer-use-activity-authority-in-daemon.md](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) | 电脑控制活动权威与急停上移到 Daemon（ADR 0018 的实现基线） |
 | [2026-10-14-codex-ui-alignment.md](specs/2026-10-14-codex-ui-alignment.md) | 对齐 Codex/ChatGPT 桌面端设计体系：颜色算法派生、圆角刻度、描边式 elevation、导航栏与圆角内容面、composer 两层化 |
 | [2026-10-18-git-environment-snapshot-cache.md](specs/2026-10-18-git-environment-snapshot-cache.md) | 环境信息快照缓存：按项目缓存变更统计与当前分支，项目切换/分支操作/回合结束后异步刷新 |
+| [2026-10-21-desktop-unread-badge.md](specs/2026-10-21-desktop-unread-badge.md) | 桌面未读角标：任务栏与托盘提示点 |
 
 ### plans
 
@@ -189,6 +190,7 @@
 | [computer-use](tickets/computer-use/) | 19 | [2026-10-07](specs/2026-10-07-computer-use.md) |
 | [computer-use-activity-authority-in-daemon](tickets/computer-use-activity-authority-in-daemon/) | 5 | [2026-10-10](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) + [ADR 0018](adr/0018-computer-use-activity-authority-in-daemon.md) |
 | [daemon-boundary](tickets/daemon-boundary/) | 12 | [2026-09-07](specs/2026-09-07-daemon-boundary.md) |
+| [desktop-unread-badge](tickets/desktop-unread-badge/) | 5 | [2026-10-21](specs/2026-10-21-desktop-unread-badge.md) |
 | [electron-shell-swap](tickets/electron-shell-swap/) | 9 | [2026-09-11](specs/2026-09-11-electron-shell-swap.md) |
 | [enhance-agent-runtime-detection](tickets/enhance-agent-runtime-detection/) | 2 | [2026-07-25](specs/2026-07-25-enhance-agent-runtime-detection.md) |
 | [git-environment-snapshot-cache](tickets/git-environment-snapshot-cache/) | 2 | [2026-10-18](specs/2026-10-18-git-environment-snapshot-cache.md) |
