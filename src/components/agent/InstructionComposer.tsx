@@ -36,8 +36,9 @@ export function InstructionComposer({
   const hasToolbar = toolbar != null || toolbarEnd != null;
   return (
     // 背景与 Input 字段一致（bg-muted/80）：在弹窗（暗色下是 surface-3）里
-    // 也能与窗口背景拉开层次，同时让各处表单的指令框样式统一。
-    <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-muted/80', className)}>
+    // 也能与窗口背景拉开层次，同时让各处表单的指令框样式统一。轮廓同样走
+    // border-input —— 深色下 `--input` 已是 borderHeavy，不会与弹窗底同色。
+    <div className={cn('overflow-hidden rounded-lg border border-input bg-muted/80', className)}>
       <textarea
         id={id}
         value={value}

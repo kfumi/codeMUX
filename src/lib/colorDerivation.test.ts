@@ -355,6 +355,14 @@ describe('colorDerivation', () => {
     expect(lightnessOf(light['--muted-foreground'])).toBeLessThan(lightnessOf(light['--foreground-tertiary']));
   });
 
+  it('keeps the form-field outline off the dark dialog surface', () => {
+    // 弹窗底是 surface-3；深色下 `--border` 与它同值，表单字段若沿用
+    // `--border` 会整条隐形，所以 `--input` 必须再抬一档（borderHeavy）。
+    const dark = deriveThemeTokens(CODEX_DARK_SEEDS, true);
+    expect(dark['--input']).toBe(dark['--surface-edge']);
+    expect(lightnessOf(dark['--input'])).toBeGreaterThan(lightnessOf(dark['--surface-3']));
+  });
+
   it('emits the frozen expectation table for the Codex defaults', () => {
     // 这张表是「我们对 Codex 的理解」的基线：公式被无声改动时这里先红，
     // 提醒人去更新 research 文档，而不是让界面悄悄变样。
@@ -453,7 +461,7 @@ describe('colorDerivation', () => {
       '--glow': '216.83 92.2% 59.8%',
       '--icon-secondary': '0 0% 67.84%',
       '--icon-tertiary': '0 0% 50.59%',
-      '--input': '0 0% 13.73%',
+      '--input': '0 0% 20%',
       '--layout-divider': '0 0% 13.73%',
       '--muted': '0 0% 14.12%',
       '--muted-foreground': '0 0% 67.84%',

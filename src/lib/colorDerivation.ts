@@ -520,7 +520,9 @@ export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<st
   // diff 色是「这一行代码是新增/删除」。分开才能让用户只改 diff 的观感。
   set('--diff-added', hexToRgb(semantic.diffAdded));
   set('--diff-removed', hexToRgb(semantic.diffRemoved));
-  set('--input', hexToRgb(palette.border));
+  // 表单轮廓在深色下要走 borderHeavy：`border` 与弹窗/悬停面（surface-3）
+  // 是同一个公式算出来的同一个值，字段放在弹窗里描边会整条消失。
+  set('--input', hexToRgb(isDark ? palette.borderHeavy : palette.border));
   set('--glow', accent);
 
   // 阴影色永远是黑：alpha 由调用点叠加（Codex 的浮起靠描边 + 超大 spread 低透明度，
