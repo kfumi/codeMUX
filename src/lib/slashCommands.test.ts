@@ -14,13 +14,29 @@ describe('slash commands by agent kind', () => {
     const names = getAllCommands('codex').map((command) => command.name);
 
     expect(names).toContain('init');
+    expect(names).toContain('review');
+    expect(names).toContain('goal');
     expect(names).not.toContain('plan');
-    expect(names).not.toContain('review');
     expect(names).not.toContain('permissions');
     expect(names).not.toContain('diff');
     expect(names).not.toContain('model');
     expect(names).not.toContain('security-review');
     expect(names).not.toContain('claude-api');
+  });
+
+  it('gives OpenCode only the shared /init built-in', () => {
+    const names = getAllCommands('opencode').map((command) => command.name);
+
+    expect(names).toContain('init');
+    expect(names).not.toContain('review');
+    expect(names).not.toContain('goal');
+    expect(names).not.toContain('security-review');
+  });
+
+  it('exposes no built-in commands for pi', () => {
+    const builtins = getAllCommands('pi').filter((command) => command.category === 'builtin');
+
+    expect(builtins).toHaveLength(0);
   });
 
   it('does not include info or custom helper commands', () => {
@@ -40,6 +56,8 @@ describe('slash commands by agent kind', () => {
     const names = getAllCommands('claude_code').map((command) => command.name);
 
     expect(names).toContain('security-review');
+    expect(names).toContain('goal');
+    expect(names).not.toContain('deep-research');
     expect(names).not.toContain('claude-api');
     expect(names).not.toContain('permissions');
     expect(names).not.toContain('debug-config');

@@ -171,36 +171,40 @@ const sharedCommands: SlashCommand[] = [
   },
 ];
 
+// 各智能体的内置命令：这里只保留在 CodeMUX 里「发出去确实会生效」的命令。
+// 纯 TUI 交互类（/model、/theme、/login、/quit…）在非交互通道下无意义，故不收录。
 const claudeBuiltInCommands: SlashCommand[] = [
   { name: 'init', description: '初始化项目，生成 CLAUDE.md', alias: ['初始化'], category: 'builtin', handler: 'prompt', prompt: '/init' },
   { name: 'review', description: '审查最近的代码变更', alias: ['审查'], category: 'builtin', handler: 'prompt', prompt: '/review' },
-  { name: 'code-review', description: '代码审查', alias: [], category: 'builtin', handler: 'prompt', prompt: '/code-review' },
   { name: 'security-review', description: '安全审查', alias: ['安全'], category: 'builtin', handler: 'prompt', prompt: '/security-review' },
-//   { name: 'context', description: '查看当前上下文使用情况', alias: ['上下文'], category: 'builtin', handler: 'prompt', prompt: '/context' },
-//   { name: 'usage', description: '查看 token 用量统计', alias: ['用量'], category: 'builtin', handler: 'prompt', prompt: '/usage' },
-  { name: 'debug', description: '调试当前项目', alias: ['调试'], category: 'builtin', handler: 'prompt', prompt: '/debug' },
-  { name: 'verify', description: '验证代码正确性', alias: ['验证'], category: 'builtin', handler: 'prompt', prompt: '/verify' },
-  { name: 'deep-research', description: '深度研究', alias: ['研究'], category: 'builtin', handler: 'prompt', prompt: '/deep-research' },
-  { name: 'simplify', description: '简化代码', alias: ['精简'], category: 'builtin', handler: 'prompt', prompt: '/simplify' },
-  { name: 'batch', description: '批量处理', alias: ['批量'], category: 'builtin', handler: 'prompt', prompt: '/batch' },
-  { name: 'loop', description: '循环执行', alias: [], category: 'builtin', handler: 'prompt', prompt: '/loop' },
-  { name: 'run', description: '运行命令', alias: ['执行'], category: 'builtin', handler: 'prompt', prompt: '/run' },
-  { name: 'heapdump', description: '生成堆转储', alias: [], category: 'builtin', handler: 'prompt', prompt: '/heapdump' },
-  { name: 'insights', description: '查看洞察', alias: ['洞察'], category: 'builtin', handler: 'prompt', prompt: '/insights' },
   { name: 'goal', description: '设置目标', alias: ['目标'], category: 'builtin', handler: 'prompt', prompt: '/goal' },
-//   { name: 'team-onboarding', description: '团队入职引导', alias: ['入职'], category: 'builtin', handler: 'prompt', prompt: '/team-onboarding' },
-//   { name: 'claude-api', description: 'Claude API 相关操作', alias: [], category: 'builtin', handler: 'prompt', prompt: '/claude-api' },
-//   { name: 'fewer-permission-prompts', description: '减少权限提示', alias: ['权限'], category: 'builtin', handler: 'prompt', prompt: '/fewer-permission-prompts' },
 ];
 
 const codexBuiltInCommands: SlashCommand[] = [
   { name: 'init', description: '生成 AGENTS.md 项目指导文件', alias: ['初始化'], category: 'builtin', handler: 'prompt', prompt: codexPromptTemplates.init },
+  { name: 'review', description: '审查工作区变更', alias: ['审查'], category: 'builtin', handler: 'prompt', prompt: '/review' },
+  { name: 'goal', description: '设置目标', alias: ['目标'], category: 'builtin', handler: 'prompt', prompt: '/goal' },
 ];
+
+const opencodeBuiltInCommands: SlashCommand[] = [
+  { name: 'init', description: '生成/更新 AGENTS.md', alias: ['初始化'], category: 'builtin', handler: 'prompt', prompt: '/init' },
+];
+
+const piBuiltInCommands: SlashCommand[] = [];
 
 const customCommands: SlashCommand[] = [];
 
 function getBuiltInCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
-  return agentKind === 'codex' ? codexBuiltInCommands : claudeBuiltInCommands;
+  switch (agentKind) {
+    case 'codex':
+      return codexBuiltInCommands;
+    case 'opencode':
+      return opencodeBuiltInCommands;
+    case 'pi':
+      return piBuiltInCommands;
+    default:
+      return claudeBuiltInCommands;
+  }
 }
 
 function getCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {

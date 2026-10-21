@@ -160,26 +160,25 @@ fn build_commands(
         command("clear", "重置对话上下文", "session", "/clear"),
         command("compact", "压缩上下文", "session", "/compact"),
     ];
-    if agent_kind == AgentKind::Codex {
-        commands.push(command(
-            "init",
-            "生成 AGENTS.md 项目指导文件",
-            "builtin",
-            "/init",
-        ));
-    } else {
-        for (name, description) in [
+    // 与前端 `src/lib/slashCommands.ts` 的各家内置命令表保持一致：
+    // 只保留在非交互通道下确实会生效的命令。
+    let builtin: &[(&str, &str)] = match agent_kind {
+        AgentKind::Codex => &[
+            ("init", "生成 AGENTS.md 项目指导文件"),
+            ("review", "审查工作区变更"),
+            ("goal", "设置目标"),
+        ],
+        AgentKind::Opencode => &[("init", "生成/更新 AGENTS.md")],
+        AgentKind::Pi => &[],
+        _ => &[
             ("init", "初始化项目，生成 CLAUDE.md"),
             ("review", "审查最近的代码变更"),
-            ("code-review", "代码审查"),
             ("security-review", "安全审查"),
-            ("debug", "调试当前项目"),
-            ("verify", "验证代码正确性"),
-            ("deep-research", "深度研究"),
-            ("simplify", "简化代码"),
-        ] {
-            commands.push(command(name, description, "builtin", &format!("/{name}")));
-        }
+            ("goal", "设置目标"),
+        ],
+    };
+    for (name, description) in builtin {
+        commands.push(command(name, description, "builtin", &format!("/{name}")));
     }
 
     let mut seen: HashSet<String> = commands.iter().map(|item| item.name.clone()).collect();
