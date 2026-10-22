@@ -3,6 +3,26 @@
 
 ## Glossary
 
+### Project
+用户为持续工作而组织的一组源文件夹，加一个名称。它是文件夹集合的权威所有者；Session 从属于某个 Project，并从它继承文件夹范围。Project 不是 Session 的容器（删除 Project 才连带删除其 Session），也不是 Git 仓库的同义词——一个 Project 可以横跨多个仓库，一个仓库也可以只被 Project 引用其中一个子目录。
+_Avoid_: workspace（与 Native Session 的工作区或编辑器工作区混淆）, repo（当 Project 含多个仓库时）, 文件夹（单独使用且未指 Project 内的一个根时）
+
+### Project Root
+Project 拥有的一个源文件夹（绝对路径）。一个 Project 有零到多个 Project Root，顺序与是否为主根是 Project 的属性，不是文件夹本身的事实。它与会话的当前工作目录是两件事：Project Root 可以增加或移除，已经建立的 Session 的目录范围不随之改变。
+_Avoid_: 附加目录（当指 Project 拥有的根时）, mount, 工作区
+
+### Primary Root
+Project Root 中被指定为“默认落点”的那一个。新建 Session 时它成为会话工作目录；其余 Project Root 成为该会话的 Additional Directory。同一时刻最多一个 Project Root 是主根，且主根总是 Project Root 之一，不是额外字段。
+_Avoid_: 默认目录（未说明是根之一时）, 主工作区
+
+### Additional Directory
+某条 Session 在当前运行中，除会话工作目录以外可访问的源文件夹。它按 Project 当前的根在运行实例重建时解析得出，不是创建时冻结的快照；生成型会话（定时任务、Work Task）例外，它们在创建时冻结。它只是提示词里声明的可达路径，不是权限授权，也不是 Project Root 的别名。
+_Avoid_: 附加根（当指会话侧时）, 额外路径, 白名单
+
+### Session Working Directory
+一条 Session 固定绑定的那个目录，作为工具相对路径的默认落点与命令的初始工作目录。它是 Session 的属性，在 Session 生命周期内不因 Project 的主根变更而改变；它可能不再属于任何 Project Root。
+_Avoid_: Project 路径（当指会话落点时）, cwd（在领域语言中；代码标识符可用）, 项目目录
+
 ### Session
 CodeMUX 应用层的一条对话。它拥有稳定的会话身份和一条连续的 CodeMUX Event 时间线；切换智能体种类不创建新 Session，也不把已有气泡搬走。
 _Avoid_: thread（当指应用对话时）, conversation（与 Session 混用）, 混合模式对话
@@ -250,6 +270,12 @@ _Avoid_: 让出厂默认绕开保留表；把保留表当成平台 API 查询
 
 | Use | Avoid |
 |-----|-------|
+| Project / 项目 | workspace（指编辑器工作区或 Native Session 工作区时）；repo（当含多个仓库时） |
+| Project Root / 项目根 | 附加目录（指 Project 侧时）；mount |
+| 源文件夹（用户可见文案） | 工作目录、工作区、根目录（用户可见时） |
+| Primary Root / 主根 | 默认目录（未说明是根之一时） |
+| Additional Directory / 附加目录 | 附加根（指会话侧时）；白名单；权限授权 |
+| Session Working Directory / 会话工作目录 | Project 路径（指会话落点时）；领域语言里的 cwd |
 | Session / 会话 | 混合模式对话, thread（指应用对话时） |
 | Agent Kind / 智能体种类 | 用「智能体」兼指种类、模型与 Plan/Build |
 | Active Agent Kind / 当前智能体种类 | 创建后永久绑定的 agent_kind |
@@ -298,6 +324,35 @@ _Avoid_: 让出厂默认绕开保留表；把保留表当成平台 API 查询
 | Reserved Keybinding / 保留键位 | 出厂默认绕开保留表 |
 
 ## Notes
+
+### Project 多根目录决策（grill-with-docs，2026-10-22）
+
+- Project 持有文件夹集合（Project Root），会话自动继承；不做“每次建会话勾选”，也不做纯会话级添加。
+- 一个 Project 最多一个 Primary Root。新建会话的工作目录恒为主根；该会话的 Additional Directory 是「项目全部根减去它自己的 cwd」。
+- 会话的 Additional Directory 在每次运行实例重建时按 Project 当前 roots 解析（休眠唤醒、冷恢复、Agent Kind Switch、daemon 重启后重建 runtime 时生效），运行中的一轮不变。定时任务与 Work Task 这类生成型会话在创建时冻结。
+- Additional Directory 只是提示词声明的可达性，不是权限边界；附加目录里的 AGENTS.md / CLAUDE.md / .claude / 项目 memory 一律不读取，只有主根贡献项目配置。
+- `projects.path` 字段删除，主根只存在于 roots 表（`is_primary`）。Git 面板、worktree 创建、Git 环境快照本版只服务主根。
+- 第一版**只把根路径清单经提示词注入**，不调用任何 Agent Kind 原生的多目录能力：Claude 的 `additionalDirectories` / `--add-dir` 会连带加载附加目录的 CLAUDE.md 与 `.claude`，违背“附加目录不贡献配置”；Codex 的 `writableRoots`、OpenCode 的 `directory` 同样不使用。四种 Agent Kind 行为对齐 ZCode。
+- 功能的根归属：`@` 提及、文件树、项目 Explorer 覆盖全部根；项目 Skill 扫描 v1 只扫主根；Git 面板、worktree 创建、Git 环境快照只服务主根。
+- 根集合约束：允许同一文件夹属于多个 Project，允许父子嵌套，Project 内按解析后的绝对路径去重。
+- 移除 Project Root 不改写任何已有 Session 的工作目录与归属；被移除根下的会话继续以原目录运行，只是该路径不再出现在它的附加目录里。移除主根时，剩余根中 position 最小者自动成为新主根，只影响之后新建的会话。
+- 根路径清单在 runtime 初始化时注入 system prompt 层（Claude `systemPrompt.append`、Codex `thread/start` 的 instructions、OpenCode `Config.instructions`、pi `--append-system-prompt`），不进入对话历史。文案只写增量：不重复主目录、不出现 `# Environment` 标题，形如 `Additional directories (outside the working directory):` 加绝对路径列表，并提示对附加目录使用绝对路径。
+- 附加目录的 skills / commands / agents 在 v1 不加载，作为后续独立票；v1 只有主根贡献项目配置与项目能力。
+- 项目必须至少有 1 个根。移除最后一个根时走“删除项目”流程，并提示将被连带删除的会话数量。
+- 会话的目录范围快照存 `sessions` 上的一个 JSON 列：普通会话为 NULL（每次运行实例重建时按 Project 当前 roots 现算），生成型会话为冻结数组且不含会话工作目录。
+- 新建会话的工作目录恒为 Primary Root；`sessions.working_path` 在创建时写入，之后独立于 Project，主根变更不回溯改写已有会话。
+- 用户可见文案：项目编辑器为「项目名称」+「源文件夹」列表（每行文件夹名 + 「主要」徽标或「设为主要」+ 移除），末行「添加文件夹」，底部「删除项目」「取消」「保存」。内部术语 Project Root 不对用户暴露。文件夹显示末级目录名，悬停显示完整路径；v1 不做拖拽排序。
+- 归属判据：`project_id` 是 Session 归属的唯一事实，Session 工作目录只是执行位置。移除根不改写归属也不改写工作目录；删除项目删除其名下全部 Session，与 cwd 是否仍在根内无关（与 ZCode 一致）。
+- 存储：新增 `project_roots(project_id, root_path, position, is_primary)`，主键 `(project_id, root_path)`，主根唯一性由写入事务保证。迁移把每个项目的 `path` 灌成其主根，然后 `ALTER TABLE projects DROP COLUMN path`——不留任何可被误读的第二真相源。
+- 创建入口：原生目录选择器改为多选（`openDialog({directory:true, multiple:true})`，`string[]`），选中的第一个目录成为主根，直接建成多根项目，不强制打开编辑器；后续增删根、改主根走「编辑项目」。
+- Git 路由继续接收路径参数（worktree 会话也需要对 worktree 路径做 Git 操作），daemon 不改；前端 `resolveProjectPath` 改为返回主根。
+- `@` 提及：主根文件用相对路径，附加目录文件用绝对路径作为发送值，展示层单独显示根名徽标（与 ZCode 一致）。
+- 目录可用性：主根不可用则拒绝创建/重建会话；附加目录不可用时跳过该条并在 UI 提示，会话照常启动。
+- 会话工作目录解析只保留一个权威实现：`session_sources.cwd`（imported）→ `sessions.working_path` → 项目主根 → home。`companion/actions.rs` 里那份只读 `projects.path` 的重复实现删除，其两个调用点（首发、移动端改设置后刷新 runtime）改用权威实现——这同时修复了 worktree 会话在这条路径上拿到项目主根而非 worktree 路径的既有缺陷。
+- Additional Directory 的准确定义是「项目全部根减去**该会话自己的 cwd**」，不是减去主根。因此导入的会话（cwd 来自原生存储）或 worktree 会话的附加目录里可能出现项目主根，这是正确行为。
+- 导入会话按项目全部根匹配，且用路径段边界判断（`cwd === root || cwd` 以 `root + 分隔符` 开头，Windows 大小写不敏感），修掉 `frontend-old` 被 `frontend` 误匹配的既有缺陷。
+
+### 其它
 
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。

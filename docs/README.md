@@ -135,6 +135,7 @@
 | [2026-10-14-codex-ui-alignment.md](specs/2026-10-14-codex-ui-alignment.md) | 对齐 Codex/ChatGPT 桌面端设计体系：颜色算法派生、圆角刻度、描边式 elevation、导航栏与圆角内容面、composer 两层化 |
 | [2026-10-18-git-environment-snapshot-cache.md](specs/2026-10-18-git-environment-snapshot-cache.md) | 环境信息快照缓存：按项目缓存变更统计与当前分支，项目切换/分支操作/回合结束后异步刷新 |
 | [2026-10-21-desktop-unread-badge.md](specs/2026-10-21-desktop-unread-badge.md) | 桌面未读角标：任务栏与托盘提示点 |
+| [2026-10-22-project-multi-root.md](specs/2026-10-22-project-multi-root.md) | 项目关联多源文件夹 |
 
 ### plans
 
@@ -197,6 +198,7 @@
 | [long-session-render-scale](tickets/long-session-render-scale/) | 3 | [2026-09-18](specs/2026-09-18-long-session-render-scale.md) |
 | [pi-agent-integration](tickets/pi-agent-integration/) | 12 | [2026-09-03](specs/2026-09-03-pi-agent-integration.md) |
 | [project-scoped-agent-skills](tickets/project-scoped-agent-skills/) | 3 | [2026-08-08](specs/2026-08-08-project-scoped-agent-skills.md) |
+| [project-multi-root](tickets/project-multi-root/) | 9 | [2026-10-22](specs/2026-10-22-project-multi-root.md) |
 | [rewind-any-message](tickets/rewind-any-message/) | 3 | [2026-08-23](specs/2026-08-23-rewind-to-any-user-message.md) |
 | [turn-artifact-summary](tickets/turn-artifact-summary/) | 3 | [2026-09-30](specs/2026-09-30-turn-artifact-summary-v2.md)(取代 [2026-09-01](specs/2026-09-01-turn-artifact-summary.md)) |
 | [unified-frontend](tickets/unified-frontend/) | 4 | [2026-09-13](specs/2026-09-13-unified-frontend.md) |
@@ -216,6 +218,8 @@
 - [0017 — OpenCode 免费模型以虚拟供应商进入选择器，发送走原生 opencode provider](adr/0017-opencode-free-models-virtual-provider.md)
 - [0018 — 电脑控制「正在驱动」与急停的权威移入 daemon，壳退化为显示/输入适配器](adr/0018-computer-use-activity-authority-in-daemon.md)
 - [0019 — 电脑控制审批口径（严格/本会话/持久）与提示条 30s 空闲回收](adr/0019-computer-use-approval-modes-and-idle-reclaim.md)
+- [0020 — 项目多根目录只经提示词声明，不启用各运行时的原生多目录能力](adr/0020-multi-root-via-prompt-only.md)
+- [0021 — `projects.path` 删除，主根只存在于 `project_roots`](adr/0021-project-roots-replace-project-path.md)
 
 ### agents
 
