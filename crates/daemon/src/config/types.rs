@@ -425,6 +425,46 @@ pub struct AgentConfigs {
     pub pi: PiAgentConfig,
 }
 
+impl AgentConfigs {
+    /// 该 agent kind 的默认权限快照（来自「智能体运行时」设置），序列化成
+    /// 会话 `permission_config` 列存的那份 JSON。
+    ///
+    /// 与前端 `serializePermissionConfig` 同形：带 `kind` 判别字段，各 kind 的
+    /// 档位字段名一致。用于「新对话」之外的会话创建路径（如看板任务），
+    /// 否则它们会以空配置落库、运行时不带 `permissionConfig`，
+    /// opencode 的「自动接受权限」等设置便不生效。
+    ///
+    /// 返回 `None` 表示该 kind 没有权限快照（gemini_cli），保持空配置。
+    pub fn default_permission_config_json(&self, kind: AgentKind) -> Option<String> {
+        let value = match kind {
+            AgentKind::Opencode => serde_json::json!({
+                "kind": "opencode",
+                "autoApprovePermissions": self.opencode.permission_config.auto_approve_permissions,
+            }),
+            AgentKind::Codex => serde_json::json!({
+                "kind": "codex",
+                "workflowMode": self.codex.permission_config.workflow_mode,
+                "networkAccessEnabled": self.codex.permission_config.network_access_enabled,
+            }),
+            AgentKind::ClaudeCode => serde_json::json!({
+                "kind": "claude_code",
+                "permissionMode": self.claude_code.permission_config.permission_mode,
+            }),
+            AgentKind::Pi => serde_json::json!({
+                "kind": "pi",
+                "executionMode": self
+                    .pi
+                    .permission_config
+                    .clone()
+                    .unwrap_or_default()
+                    .execution_mode,
+            }),
+            AgentKind::GeminiCli => return None,
+        };
+        serde_json::to_string(&value).ok()
+    }
+}
+
 /// pi 默认审批档位（经临时扩展的 tool_call 拦截实现）；plan 档对 pi 不适用。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PiPermissionConfig {
@@ -713,5 +753,52 @@ mod tests {
 
         assert_eq!(config.providers[0].models, Vec::<String>::new());
         assert!(AppConfig::default().providers.is_empty());
+    }
+
+    #[test]
+    fn default_permission_config_json_mirrors_frontend_snapshot() {
+        let mut config = AppConfig::default();
+        config
+            .agent_configs
+            .opencode
+            .permission_config
+            .auto_approve_permissions = true;
+
+        let opencode: serde_json::Value = serde_json::from_str(
+            &config
+                .agent_configs
+                .default_permission_config_json(AgentKind::Opencode)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(opencode["kind"], "opencode");
+        assert_eq!(opencode["autoApprovePermissions"], true);
+
+        let claude: serde_json::Value = serde_json::from_str(
+            &config
+                .agent_configs
+                .default_permission_config_json(AgentKind::ClaudeCode)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claude["kind"], "claude_code");
+        assert_eq!(claude["permissionMode"], "default");
+
+        let pi: serde_json::Value = serde_json::from_str(
+            &config
+                .agent_configs
+                .default_permission_config_json(AgentKind::Pi)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(pi["kind"], "pi");
+        assert_eq!(pi["executionMode"], "confirm_before_edit");
+
+        assert_eq!(
+            config
+                .agent_configs
+                .default_permission_config_json(AgentKind::GeminiCli),
+            None
+        );
     }
 }

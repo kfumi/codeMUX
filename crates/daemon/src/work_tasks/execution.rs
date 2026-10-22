@@ -476,6 +476,15 @@ fn prepare_session(
     task: &WorkTask,
     worktree: Option<&WorktreeInfo>,
 ) -> Result<String, String> {
+    // 权限快照取当前「智能体运行时」设置：看板任务不在前端「新对话」路径上，
+    // 不显式带上就会以空配置落库，运行时不发 permissionConfig，opencode 的
+    // 「自动接受权限」等设置随之失效。锁 config 在锁 db 之前，避免锁序交叉。
+    let permission_config = daemon.app.config.lock().ok().and_then(|config| {
+        config
+            .agent_configs
+            .default_permission_config_json(task.agent_kind)
+    });
+
     let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
     // Work Task 可能在几天后无人值守地运行：目录集合在创建时冻结，
     // 之后项目根怎么改都不影响这次任务的写入范围。
@@ -491,7 +500,7 @@ fn prepare_session(
         task.agent_kind,
         "agent",
         &task.project_id,
-        None,
+        permission_config.as_deref(),
         None,
         task.model.as_deref(),
         directory_scope.as_deref(),
