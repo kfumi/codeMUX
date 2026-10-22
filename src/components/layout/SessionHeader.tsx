@@ -11,6 +11,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import type { AgentMessage } from '../../stores/agentStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionFlowActive } from '../../hooks/useSessionFlowActive';
+import { getPrimaryProjectRoot } from '../../types/project';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
@@ -37,6 +38,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
+  const primaryProjectRoot = getPrimaryProjectRoot(project);
   const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
   // CLI 同步要求会话完全空闲:后台子智能体流未收尾同样要拦。
   const flowActive = useSessionFlowActive(sessionId);
@@ -148,11 +150,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
               <span>{workingPath.split(/[/\\]+/).filter(Boolean).at(-1) ?? workingPath}</span>
             </TooltipHint>
           </div>
-        ) : project ? (
+        ) : primaryProjectRoot ? (
           <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
             <FolderOpen className="h-3 w-3 shrink-0 text-foreground dark:text-[hsl(var(--sidebar-accent))]" />
-            <TooltipHint content={project.path}>
-              <span>{project.path.split(/[/\\]+/).filter(Boolean).at(-1) ?? project.path}</span>
+            <TooltipHint content={primaryProjectRoot}>
+              <span>{primaryProjectRoot.split(/[/\\]+/).filter(Boolean).at(-1) ?? primaryProjectRoot}</span>
             </TooltipHint>
           </div>
         ) : null

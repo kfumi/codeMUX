@@ -35,6 +35,7 @@ import {
   buildSessionTitleFromUserContent,
 } from '../lib/sessionTitle';
 import { extractSessionWorkingPathFromEvents, isValidWorkingPath } from '../lib/sessionCwd';
+import { getPrimaryProjectRoot } from '../types/project';
 import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
@@ -132,6 +133,7 @@ export type AgentMessage =
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
   | { kind: 'native_session_rebuilt'; data: { content: string; agent_kind?: string; previous_agent_session_id?: string; agent_session_id?: string } }
   | { kind: 'permission_update_deferred'; data: { content: string; agent_kind?: string } }
+  | { kind: 'additional_directories_unavailable'; data: { content: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
@@ -3903,7 +3905,9 @@ function createSessionEventHandler(
         const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId)
           ?? useSessionStore.getState().archivedSessions.find((entry) => entry.id === sessionId);
         const projectPath = session?.project_id
-          ? useProjectStore.getState().projects.find((entry) => entry.id === session.project_id)?.path?.trim() ?? null
+          ? getPrimaryProjectRoot(
+              useProjectStore.getState().projects.find((entry) => entry.id === session.project_id),
+            )?.trim() ?? null
           : null;
         const rememberedCwd = extractSessionWorkingPathFromEvents(events);
         const existingWorkingPath = get().sessionWorkingPaths[sessionId] ?? session?.working_path ?? null;

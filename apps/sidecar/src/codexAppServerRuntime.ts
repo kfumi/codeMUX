@@ -13,6 +13,7 @@
 import type { SidecarCommand, SidecarModelLimits } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import type { PiMcpServers } from './piMcp.js';
+import { formatAdditionalDirectoriesPrompt } from './additionalDirectories.js';
 import {
   isRuntimeError,
   loadProviderRuntime,
@@ -176,6 +177,8 @@ type CodexSessionBootstrap = {
   modelLimits?: SidecarModelLimits;
   /** daemon 随会话命令下发的 MCP 服务器(落 -c mcp_servers.* 覆盖)。 */
   mcpServers?: PiMcpServers;
+  /** 项目附加目录（绝对路径）。只经 thread 初始化 instructions 注入提示词。 */
+  additionalDirectories?: string[];
 };
 
 type ActiveTurnState = {
@@ -280,6 +283,7 @@ export class CodexAppServerRuntime {
       timeouts: cmd.timeouts,
       modelLimits: cmd.modelLimits,
       mcpServers: cmd.mcpServers,
+      additionalDirectories: cmd.additionalDirectories,
     };
     this.timeouts = resolveTurnTimeouts(requestedConfig.timeouts);
 
@@ -328,6 +332,9 @@ export class CodexAppServerRuntime {
     );
 
     const permissionOptions = this.resolvePermissionOptions();
+    const additionalDirectoriesPrompt = formatAdditionalDirectoriesPrompt(
+      requestedConfig.additionalDirectories,
+    );
     const threadParams = {
       cwd,
       ...(requestedConfig.model ? { model: requestedConfig.model } : {}),
@@ -339,6 +346,9 @@ export class CodexAppServerRuntime {
         }
         : {}),
       ...(modelCatalogPath ? { config: { model_catalog_json: modelCatalogPath } } : {}),
+      // 附加目录只写进 thread 初始化 instructions（ADR 0020）：不设置
+      // writableRoots，避免把附加目录变成 Codex 的沙箱范围与项目配置来源。
+      ...(additionalDirectoriesPrompt ? { instructions: additionalDirectoriesPrompt } : {}),
     };
 
     const transport = await this.connectTransport({

@@ -12,6 +12,7 @@ import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
 import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import type { ReasoningEffort } from '../../types/session';
+import { getPrimaryProjectRoot } from '../../types/project';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import type {
@@ -93,6 +94,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
+  // Git、worktree、项目 Skill、预览树这一版只服务主根；附加根走 @ 提及与文件树。
+  const primaryProjectRoot = getPrimaryProjectRoot(project);
   const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
   const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[sessionId] ?? null);
   const workingPath = useMemo(() => {
@@ -108,7 +111,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const reasoningEffort = normalizeReasoningEffort(session?.reasoning_effort);
   const agentKind = session?.agent_kind ?? 'claude_code';
   const projectSkillEntry = useProjectSkillStore((state) => (
-    project?.path ? state.entries[projectSkillCacheKey(project.path, agentKind)] : undefined
+    primaryProjectRoot ? state.entries[projectSkillCacheKey(primaryProjectRoot, agentKind)] : undefined
   ));
   const projectSkills = projectSkillEntry?.skills ?? EMPTY_PROJECT_SKILLS;
   const usesProviderModel = isProviderAgent(agentKind);
@@ -225,13 +228,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   useEffect(() => {
     if (workingPath) {
       setProjectPath(workingPath);
-    } else if (project?.path) {
-      setProjectPath(project.path);
+    } else if (primaryProjectRoot) {
+      setProjectPath(primaryProjectRoot);
     } else {
       setProjectPath(null);
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
-  }, [workingPath, project?.path, setProjectPath]);
+  }, [workingPath, primaryProjectRoot, setProjectPath]);
 
   // 会话打开时预热项目文件树（根目录变化即重载）：消息里相对路径的链接化
   // 需要在树里精确命中文件才成立，树必须在消息渲染前就绪；@ 文件提及也复用这份数据
@@ -241,19 +244,29 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [previewProjectPath, treeRootPath, fileTreeLoading, loadFileTree]);
 
+  // 多根项目：@ 提及与文件树覆盖全部源文件夹（主根相对路径、附加根绝对路径）。
+  const projectRoots = useMemo(
+    () => (project ? project.roots.map((root) => ({ path: root.path, isPrimary: root.isPrimary })) : []),
+    [project],
+  );
+  const loadProjectRootTrees = usePreviewStore((state) => state.loadProjectRootTrees);
+  useEffect(() => {
+    void loadProjectRootTrees(projectRoots.length > 1 ? projectRoots : []);
+  }, [projectRoots, loadProjectRootTrees]);
+
   useEffect(() => {
     if (workingPath) {
       setCwd(workingPath);
-    } else if (project?.path) {
-      setCwd(project.path);
+    } else if (primaryProjectRoot) {
+      setCwd(primaryProjectRoot);
     } else {
       setCwd(getStoredAgentCwd());
     }
-  }, [sessionId, workingPath, project?.path]);
+  }, [sessionId, workingPath, primaryProjectRoot]);
 
   useEffect(() => {
-    void loadProjectSkills(project?.path, agentKind);
-  }, [agentKind, loadProjectSkills, project?.path]);
+    void loadProjectSkills(primaryProjectRoot, agentKind);
+  }, [agentKind, loadProjectSkills, primaryProjectRoot]);
 
   useEffect(() => {
     if (isRunning || isReadOnly || sessionsLoading || pendingWorkingPath || !historyReady) {
@@ -282,7 +295,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [
     sessionId,
     effectiveCwd,
-    project?.path,
+    primaryProjectRoot,
     reasoningEffort,
     session?.permission_config,
     session?.provider_id,
@@ -367,7 +380,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     isReadOnly,
     isRunning,
     modelProviders,
-    project?.path,
+    primaryProjectRoot,
     reasoningEffort,
     runtimeProvider,
     selectorModelState,
@@ -548,7 +561,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 <CodeMuxComposer
                   sessionId={sessionId}
                   agentKind={agentKind}
-                  projectPath={project?.path}
+                  projectPath={primaryProjectRoot}
                   projectSkills={projectSkills}
                   modelName={modelNameWithSuffix}
                   configuredContextWindow={configuredContextWindow}

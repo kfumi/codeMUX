@@ -16,8 +16,8 @@ const {
   toastMocks,
 } = vi.hoisted(() => {
   const projectsMock = [
-    { id: 'p1', name: '项目一', path: 'C:/repo/one', created_at: '', updated_at: '' },
-    { id: 'p2', name: '项目二', path: 'C:/repo/two', created_at: '', updated_at: '' },
+    { id: 'p1', name: '项目一', roots: [{ path: 'C:/repo/one', position: 0, isPrimary: true }], created_at: '', updated_at: '' },
+    { id: 'p2', name: '项目二', roots: [{ path: 'C:/repo/two', position: 0, isPrimary: true }], created_at: '', updated_at: '' },
   ];
   // 模拟 zustand：state 对象必须稳定（引用不变），否则 effect 依赖每次渲染都变。
   const projectState = {

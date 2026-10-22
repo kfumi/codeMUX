@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
+import { formatAdditionalDirectoriesPrompt } from './additionalDirectories.js';
 import {
   createPiEventContext,
   toCodeMuxEvents,
@@ -229,7 +230,9 @@ export class PiRuntime {
       JSON.stringify(next.modelInputModalities ?? null) ===
         JSON.stringify(this.config.modelInputModalities ?? null) &&
       JSON.stringify(next.runtimeRef ?? null) === JSON.stringify(this.config.runtimeRef ?? null) &&
-      JSON.stringify(next.mcpServers ?? null) === JSON.stringify(this.config.mcpServers ?? null)
+      JSON.stringify(next.mcpServers ?? null) === JSON.stringify(this.config.mcpServers ?? null) &&
+      JSON.stringify(next.additionalDirectories ?? null) ===
+        JSON.stringify(this.config.additionalDirectories ?? null)
     );
   }
 
@@ -1300,6 +1303,13 @@ export function buildPiLaunchArgs(config: PiSessionConfig, extensionPath?: strin
   // error diagnostic 使 RPC 进程启动即退出，所以这里只传已知稳定的 flag。
   if (config.thinkingLevel) {
     args.push('--thinking', config.thinkingLevel);
+  }
+  // 附加目录只追加系统提示（ADR 0020），不把目录加进 pi 的项目根/信任范围。
+  const additionalDirectoriesPrompt = formatAdditionalDirectoriesPrompt(
+    config.additionalDirectories,
+  );
+  if (additionalDirectoriesPrompt) {
+    args.push('--append-system-prompt', additionalDirectoriesPrompt);
   }
   const provider = config.provider?.trim();
   const model = config.model?.trim();

@@ -24,10 +24,11 @@ vi.mock('../../stores/sidePanelStore', () => ({
     selector({ openFileTab: vi.fn() }),
 }));
 
+const PROJECT_ROOT = 'D:/project/wfm/lnyd';
 const project: Project = {
   id: 'project-1',
   name: 'lnyd',
-  path: 'D:/project/wfm/lnyd',
+  roots: [{ path: PROJECT_ROOT, position: 0, isPrimary: true }],
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
 };
@@ -46,16 +47,16 @@ describe('ProjectExplorer', () => {
     });
 
     listDirectoryMock.mockImplementation(async (path, depth) => {
-      if (path === project.path && depth === 5) {
+      if (path === PROJECT_ROOT && depth === 5) {
         return [
           {
             name: 'docs',
-            path: `${project.path}/docs`,
+            path: `${PROJECT_ROOT}/docs`,
             is_dir: true,
             children: [
               {
                 name: 'superpowers',
-                path: `${project.path}/docs/superpowers`,
+                path: `${PROJECT_ROOT}/docs/superpowers`,
                 is_dir: true,
               },
             ],
@@ -63,21 +64,21 @@ describe('ProjectExplorer', () => {
         ];
       }
 
-      if (path === `${project.path}/docs/superpowers` && depth === 1) {
+      if (path === `${PROJECT_ROOT}/docs/superpowers` && depth === 1) {
         return [
           {
             name: 'specs',
-            path: `${project.path}/docs/superpowers/specs`,
+            path: `${PROJECT_ROOT}/docs/superpowers/specs`,
             is_dir: true,
           },
         ];
       }
 
-      if (path === `${project.path}/docs/superpowers/specs` && depth === 1) {
+      if (path === `${PROJECT_ROOT}/docs/superpowers/specs` && depth === 1) {
         return [
           {
             name: 'feature.md',
-            path: `${project.path}/docs/superpowers/specs/feature.md`,
+            path: `${PROJECT_ROOT}/docs/superpowers/specs/feature.md`,
             is_dir: false,
           },
         ];
@@ -106,9 +107,9 @@ describe('ProjectExplorer', () => {
 
     await waitFor(() => {
       expect(listDirectoryMock).toHaveBeenCalledWith(
-        `${project.path}/docs/superpowers`,
+        `${PROJECT_ROOT}/docs/superpowers`,
         1,
-        project.path,
+        PROJECT_ROOT,
         true,
       );
     });
@@ -119,9 +120,9 @@ describe('ProjectExplorer', () => {
 
     await waitFor(() => {
       expect(listDirectoryMock).toHaveBeenCalledWith(
-        `${project.path}/docs/superpowers/specs`,
+        `${PROJECT_ROOT}/docs/superpowers/specs`,
         1,
-        project.path,
+        PROJECT_ROOT,
         true,
       );
     });
@@ -196,5 +197,35 @@ describe('ProjectExplorer', () => {
       reference: 'docs',
       isDirectory: true,
     });
+  });
+
+  it('loads and groups every project root for a multi-root project', async () => {
+    listDirectoryMock.mockImplementation(async (path: string) => {
+      if (path === PROJECT_ROOT) {
+        return [{ name: 'docs', path: `${PROJECT_ROOT}/docs`, is_dir: false }];
+      }
+      if (path === `${PROJECT_ROOT}-backend`) {
+        return [{ name: 'api', path: `${PROJECT_ROOT}-backend/api`, is_dir: false }];
+      }
+      return [];
+    });
+    const multiRootProject: Project = {
+      ...project,
+      roots: [
+        { path: PROJECT_ROOT, position: 0, isPrimary: true },
+        { path: `${PROJECT_ROOT}-backend`, position: 1, isPrimary: false },
+      ],
+    };
+
+    render(<ProjectExplorer project={multiRootProject} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeTruthy();
+      expect(screen.getByText('api')).toBeTruthy();
+    });
+    // 每个根单独加载，主根之外的文件也进入文件树。
+    expect(listDirectoryMock).toHaveBeenCalledWith(PROJECT_ROOT, 5, PROJECT_ROOT, true);
+    expect(listDirectoryMock).toHaveBeenCalledWith(`${PROJECT_ROOT}-backend`, 5, `${PROJECT_ROOT}-backend`, true);
+    expect(screen.getByText('2 个文件夹')).toBeTruthy();
   });
 });

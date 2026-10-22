@@ -2723,4 +2723,29 @@ describe('CodexAppServerRuntime native session title', () => {
     },
     30_000,
   );
+
+  it(
+    'declares additional directories through thread instructions only',
+    async () => {
+      const { runtime, readLog, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      try {
+        await runtime.ensure(ensureCommand({
+          additionalDirectories: ['D:/work/backend', 'D:/work/shared'],
+        }));
+
+        const threadStarts = receivedRequests(readLog(), 'thread/start');
+        expect(threadStarts).toHaveLength(1);
+        const instructions = threadStarts[0]?.params?.instructions;
+        expect(typeof instructions).toBe('string');
+        expect(instructions).toContain('Additional directories (outside the working directory):');
+        expect(instructions).toContain('  - D:/work/backend');
+        expect(instructions).toContain('  - D:/work/shared');
+        // 不启用 Codex 原生多目录能力。
+        expect(JSON.stringify(threadStarts[0]?.params)).not.toContain('writableRoots');
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    30_000,
+  );
 });

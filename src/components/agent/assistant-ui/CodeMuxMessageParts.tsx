@@ -621,6 +621,10 @@ function CodeMuxDataMessagePartImpl({ name, data, sessionId, messageText }: Code
     return <PermissionUpdateDeferredSeam event={data.event} />;
   }
 
+  if (isAdditionalDirectoriesUnavailableData(data)) {
+    return <AdditionalDirectoriesUnavailableSeam event={data.event} />;
+  }
+
   if (isSessionSummaryData(data)) {
     const markdownFiles = extractReferencedMarkdownFiles(messageText ?? '');
 
@@ -726,6 +730,25 @@ function PermissionUpdateDeferredSeam({ event }: { event: Extract<AgentMessage, 
   return (
     <div className="text-center py-2 animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
       <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
+        — {event.data.content} —
+      </span>
+    </div>
+  );
+}
+
+function isAdditionalDirectoriesUnavailableData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'additional_directories_unavailable' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'additional_directories_unavailable' &&
+    isRecord(value.event) &&
+    value.event.kind === 'additional_directories_unavailable'
+  );
+}
+
+function AdditionalDirectoriesUnavailableSeam({ event }: { event: Extract<AgentMessage, { kind: 'additional_directories_unavailable' }> }) {
+  return (
+    <div className="flex items-start justify-center gap-1.5 py-2 text-center animate-in fade-in fill-mode-forwards duration-slow ease-motion-out">
+      <span className="text-ui-caption font-medium text-warning">
         — {event.data.content} —
       </span>
     </div>

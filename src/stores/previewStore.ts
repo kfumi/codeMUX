@@ -20,6 +20,14 @@ export interface FileTreeNodeData {
   children?: FileTreeNodeData[];
 }
 
+/** 项目根的完整文件树；`unavailable` 表示该目录当前不可读（已跳过）。 */
+export interface RootFileTree {
+  root: string;
+  isPrimary: boolean;
+  nodes: FileTreeNodeData[];
+  unavailable: boolean;
+}
+
 interface PreviewState {
   // 面板状态
   isOpen: boolean;
@@ -44,6 +52,9 @@ interface PreviewState {
   treeRoot: FileTreeNodeData[] | null;
   treeRootPath: string | null;
   fileTreeLoading: boolean;
+  /** 多根项目：每个源文件夹（含主根）的完整树，供 @ 提及与文件树分组展示。 */
+  rootTrees: RootFileTree[];
+  rootTreesLoading: boolean;
 
   // 项目路径
   projectPath: string | null;
@@ -62,6 +73,8 @@ interface PreviewState {
   setResizing: (resizing: boolean) => void;
   setViewMode: (mode: 'diff' | 'file') => void;
   loadFileTree: (rootPath: string) => Promise<void>;
+  /** 加载项目全部根的树；根集合变化时由会话面板调用。 */
+  loadProjectRootTrees: (roots: Array<{ path: string; isPrimary: boolean }>) => Promise<void>;
   reset: () => void;
 }
 
@@ -111,6 +124,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   treeRoot: null,
   treeRootPath: null,
   fileTreeLoading: false,
+  rootTrees: [],
+  rootTreesLoading: false,
 
   projectPath: null,
 
@@ -323,6 +338,26 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     }
   },
 
+  loadProjectRootTrees: async (roots: Array<{ path: string; isPrimary: boolean }>) => {
+    if (roots.length === 0) {
+      set({ rootTrees: [], rootTreesLoading: false });
+      return;
+    }
+    set({ rootTreesLoading: true });
+    // 主根排在最前：同名/嵌套文件按绝对路径去重时主根优先。
+    const ordered = [...roots].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
+    const trees = await Promise.all(ordered.map(async (root): Promise<RootFileTree> => {
+      try {
+        const nodes = await daemonFacade.listDirectory(root.path, 5, root.path);
+        return { root: root.path, isPrimary: root.isPrimary, nodes: convertTree(nodes), unavailable: false };
+      } catch (error) {
+        logger.error('Failed to load project root tree', { root: root.path }, serializeError(error));
+        return { root: root.path, isPrimary: root.isPrimary, nodes: [], unavailable: true };
+      }
+    }));
+    set({ rootTrees: trees, rootTreesLoading: false });
+  },
+
   reset: () =>
     set({
       isOpen: false,
@@ -334,5 +369,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       treeRoot: null,
       treeRootPath: null,
       fileTreeLoading: false,
+      rootTrees: [],
+      rootTreesLoading: false,
     }),
 }));

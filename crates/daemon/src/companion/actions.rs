@@ -30,28 +30,14 @@ pub struct CompanionSettingsUpdate {
     pub plan_mode: String,
 }
 
+/// 会话工作目录解析的对外入口：与 ensure-session 命令共用同一份权威实现。
+/// worktree 会话在「首发」与「移动端改设置后刷新 runtime」两条路径上都不会被
+/// 拉回项目主根。
 pub fn resolve_session_cwd(state: &AppState, session_id: &str) -> Result<String, String> {
-    let db = state.db.lock().map_err(|error| error.to_string())?;
-    let session = operations::get_session(&db, session_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Session not found".to_string())?;
-
-    if let Some(project_id) = session.project_id {
-        let project_path: Option<String> = db
-            .query_row(
-                "SELECT path FROM projects WHERE id = ?1",
-                [project_id.as_str()],
-                |row| row.get(0),
-            )
-            .ok();
-        if let Some(path) = project_path {
-            return Ok(path);
-        }
-    }
-
-    crate::agent::commands::home_dir()
+    let fallback = crate::agent::commands::home_dir()
         .map(|path| path.display().to_string())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::agent::commands::resolve_session_cwd(state, session_id, &fallback)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

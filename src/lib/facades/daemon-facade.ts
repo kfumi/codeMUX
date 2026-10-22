@@ -88,9 +88,9 @@ export async function listProjectsViaDaemon(): Promise<Project[]> {
   return client.listProjects() as Promise<Project[]>;
 }
 
-export async function createProjectViaDaemon(name: string, path: string): Promise<Project> {
+export async function createProjectViaDaemon(name: string, roots: string[]): Promise<Project> {
   const client = await ensureDaemonClient();
-  return client.createProject(name, path) as Promise<Project>;
+  return client.createProject(name, roots) as Promise<Project>;
 }
 
 export async function deleteProjectViaDaemon(projectId: string): Promise<void> {
@@ -101,6 +101,14 @@ export async function deleteProjectViaDaemon(projectId: string): Promise<void> {
 export async function renameProjectViaDaemon(projectId: string, name: string): Promise<void> {
   const client = await ensureDaemonClient();
   await client.renameProject(projectId, name);
+}
+
+export async function updateProjectViaDaemon(
+  projectId: string,
+  patch: { name?: string; roots?: string[]; primaryRoot?: string },
+): Promise<Project> {
+  const client = await ensureDaemonClient();
+  return client.updateProject(projectId, patch) as Promise<Project>;
 }
 
 export async function forkClaudeViaDaemon(
@@ -388,6 +396,7 @@ export const daemonFacade = {
   createProject: createProjectViaDaemon,
   deleteProject: deleteProjectViaDaemon,
   renameProject: renameProjectViaDaemon,
+  updateProject: updateProjectViaDaemon,
   isSessionTurnActive: async (sessionId: string) => {
     const state = await (await ensureDaemonClient()).getSessionRuntimeState(sessionId);
     return state.running;

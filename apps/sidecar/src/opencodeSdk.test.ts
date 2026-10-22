@@ -527,4 +527,49 @@ describe('official OpenCode SDK adapter', () => {
     options.onSseError!(new Error('late retry'));
     expect(retries).toHaveLength(1);
   });
+
+  it('loads additional directories through a temporary Config.instructions file', async () => {
+    sdkMocks.createOpencodeServer.mockClear();
+    const fs = await import('node:fs/promises');
+
+    const resources = await officialOpenCodeSdkPort.start({
+      cwd: 'D:/workspace/demo',
+      provider: 'opencode',
+      model: 'default',
+      credentialSource: 'opencode',
+      runtimeRef: sdkMocks.runtimeRef,
+      additionalDirectories: ['D:/work/backend', 'D:/work/shared'],
+    });
+
+    const call = sdkMocks.createOpencodeServer.mock.calls.at(-1)?.[0] as {
+      config?: { instructions?: string[] };
+    };
+    expect(call.config?.instructions).toHaveLength(1);
+    const instructionPath = call.config!.instructions![0];
+    const content = await fs.readFile(instructionPath, 'utf8');
+    expect(content).toContain('Additional directories (outside the working directory):');
+    expect(content).toContain('  - D:/work/backend');
+    expect(content).toContain('  - D:/work/shared');
+
+    // 临时说明文件跟随 server 生命周期清理。
+    await resources.server.close();
+    await expect(fs.access(instructionPath)).rejects.toThrow();
+  });
+
+  it('does not add an instructions file when there are no additional directories', async () => {
+    sdkMocks.createOpencodeServer.mockClear();
+
+    await officialOpenCodeSdkPort.start({
+      cwd: 'D:/workspace/demo',
+      provider: 'opencode',
+      model: 'default',
+      credentialSource: 'opencode',
+      runtimeRef: sdkMocks.runtimeRef,
+    });
+
+    const call = sdkMocks.createOpencodeServer.mock.calls.at(-1)?.[0] as {
+      config?: { instructions?: string[] };
+    };
+    expect(call.config?.instructions).toBeUndefined();
+  });
 });

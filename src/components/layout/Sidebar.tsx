@@ -55,13 +55,14 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
     try {
       const selected = await openDialog({
         directory: true,
-        multiple: false,
-        title: '选择项目文件夹',
+        multiple: true,
+        title: '选择项目文件夹（可多选）',
       });
-      if (selected) {
-        const path = selected as string;
-        const name = path.split(/[/\\]/).pop() || path;
-        await useProjectStore.getState().createProject(name, path);
+      if (selected && selected.length > 0) {
+        // 原生选择器的返回顺序即根顺序：第一个成为主根。
+        const roots = Array.isArray(selected) ? selected : [selected];
+        const name = roots[0].split(/[/\\]/).filter(Boolean).pop() || roots[0];
+        await useProjectStore.getState().createProject(name, roots);
       }
     } catch (error) {
       logger.error('Failed to add project from dialog', undefined, serializeError(error));

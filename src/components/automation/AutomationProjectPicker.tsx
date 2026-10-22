@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { Project } from '../../types/project';
+import { getProjectRootPaths } from '../../types/project';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
@@ -36,7 +37,7 @@ export function AutomationProjectPicker({
     if (!normalized) return projects;
     return projects.filter((project) =>
       project.name.toLowerCase().includes(normalized)
-      || project.path.toLowerCase().includes(normalized),
+      || getProjectRootPaths(project).some((root) => root.toLowerCase().includes(normalized)),
     );
   }, [projects, query]);
 

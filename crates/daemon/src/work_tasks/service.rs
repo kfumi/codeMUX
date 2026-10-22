@@ -167,9 +167,15 @@ mod tests {
 
     fn insert_project(conn: &Connection, id: &str) {
         conn.execute(
-            "INSERT INTO projects (id, name, path, created_at, updated_at) \
-             VALUES (?1, ?2, '/tmp/proj', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            "INSERT INTO projects (id, name, created_at, updated_at) \
+             VALUES (?1, ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             rusqlite::params![id, id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_roots (project_id, root_path, position, is_primary) \
+             VALUES (?1, '/tmp/proj', 0, 1)",
+            rusqlite::params![id],
         )
         .unwrap();
     }

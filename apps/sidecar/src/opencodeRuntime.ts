@@ -176,6 +176,8 @@ export class OpenCodeRuntime {
       || JSON.stringify(this.config.runtimeRef) !== JSON.stringify(nextConfig.runtimeRef)
       || JSON.stringify(this.config.timeouts) !== JSON.stringify(nextConfig.timeouts)
       || JSON.stringify(this.config.modelLimits) !== JSON.stringify(nextConfig.modelLimits)
+      || JSON.stringify(this.config.additionalDirectories ?? null) !==
+        JSON.stringify(nextConfig.additionalDirectories ?? null)
     ) {
       return false;
     }
@@ -650,6 +652,7 @@ export class OpenCodeRuntime {
           runtimeRef: this.config.runtimeRef,
           mcpServers: this.config.mcpServers,
           modelLimits: this.config.modelLimits,
+          additionalDirectories: this.config.additionalDirectories,
         });
       } catch (error) {
         writeLog('[opencode-task]', `SDK start FAILED error=${errorMessage(error)}`);

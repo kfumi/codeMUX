@@ -48,7 +48,7 @@ const candidate: ImportCandidate = {
 
 const props = {
   projectId: 'project-1',
-  projectPath: 'C:\\work\\project',
+  projectRoots: ['C:\\work\\project'],
   projectName: '测试项目',
   onOpenChange: vi.fn(),
 };

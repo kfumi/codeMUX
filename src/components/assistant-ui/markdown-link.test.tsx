@@ -123,7 +123,7 @@ describe('CodeMuxMarkdownLink', () => {
       projects: [{
         id: 'project-1',
         name: 'codeMUX',
-        path: 'D:/project/ai-code/codeMUX',
+        roots: [{ path: 'D:/project/ai-code/codeMUX', position: 0, isPrimary: true }],
         created_at: '2026-07-03T00:00:00.000Z',
         updated_at: '2026-07-03T00:00:00.000Z',
       }],
@@ -384,14 +384,14 @@ describe('CodeMuxMarkdownLink', () => {
         {
           id: 'project-1',
           name: 'codeMUX',
-          path: 'D:/project/ai-code/codeMUX',
+          roots: [{ path: 'D:/project/ai-code/codeMUX', position: 0, isPrimary: true }],
           created_at: '2026-07-03T00:00:00.000Z',
           updated_at: '2026-07-03T00:00:00.000Z',
         },
         {
           id: 'project-2',
           name: 'lnwlcsMicroServiceUniApp',
-          path: 'D:/workspace/lnwlcsMicroServiceUniApp',
+          roots: [{ path: 'D:/workspace/lnwlcsMicroServiceUniApp', position: 0, isPrimary: true }],
           created_at: '2026-07-03T00:00:00.000Z',
           updated_at: '2026-07-03T00:00:00.000Z',
         },

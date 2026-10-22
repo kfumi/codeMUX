@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -46,11 +46,19 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     })
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRoot {
+    pub path: String,
+    pub position: i64,
+    pub is_primary: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Project {
     pub id: String,
     pub name: String,
-    pub path: String,
+    pub roots: Vec<ProjectRoot>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -122,42 +130,289 @@ pub struct ImportedSessionSnapshot {
     pub events: Vec<Value>,
 }
 
-pub fn create_project(conn: &Connection, name: &str, path: &str) -> Result<Project> {
+/// 项目根的规范形式：去掉首尾空白与末尾分隔符。驱动器根 `/`、`C:\` 保持可读形态。
+fn normalize_project_root(path: &str) -> String {
+    let trimmed = path.trim();
+    let stripped = trimmed.trim_end_matches(['/', '\\']);
+    if stripped.is_empty() {
+        return trimmed.to_string();
+    }
+    if stripped.ends_with(':') {
+        let separator = if trimmed.contains('\\') { '\\' } else { '/' };
+        return format!("{}{}", stripped, separator);
+    }
+    stripped.to_string()
+}
+
+/// 项目内去重键：统一分隔符；Windows 下大小写不敏感。
+fn project_root_key(path: &str) -> String {
+    let unified = normalize_project_root(path).replace('\\', "/");
+    if cfg!(windows) {
+        unified.to_lowercase()
+    } else {
+        unified
+    }
+}
+
+fn normalize_project_roots(roots: &[String]) -> Result<Vec<String>> {
+    let mut normalized = Vec::with_capacity(roots.len());
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        let path = normalize_project_root(root);
+        if path.is_empty() {
+            continue;
+        }
+        if seen.insert(project_root_key(&path)) {
+            normalized.push(path);
+        }
+    }
+    if normalized.is_empty() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "项目至少需要一个源文件夹".to_string(),
+        ));
+    }
+    Ok(normalized)
+}
+
+fn write_project_roots(
+    conn: &Connection,
+    project_id: &str,
+    roots: &[String],
+    primary: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM project_roots WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    let primary_key = project_root_key(primary);
+    for (index, path) in roots.iter().enumerate() {
+        let is_primary = project_root_key(path) == primary_key;
+        conn.execute(
+            "INSERT INTO project_roots (project_id, root_path, position, is_primary) VALUES (?1, ?2, ?3, ?4)",
+            params![project_id, path, index as i64, if is_primary { 1 } else { 0 }],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn create_project(conn: &Connection, name: &str, roots: &[String]) -> Result<Project> {
+    let roots = normalize_project_roots(roots)?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
+    let primary = roots[0].clone();
 
-    conn.execute(
-        "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, name, path, now, now],
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, name, now, now],
     )?;
+    write_project_roots(&tx, &id, &roots, &primary)?;
+    tx.commit()?;
 
     Ok(Project {
         id,
         name: name.to_string(),
-        path: path.to_string(),
+        roots: roots
+            .into_iter()
+            .enumerate()
+            .map(|(position, path)| ProjectRoot {
+                is_primary: position == 0,
+                path,
+                position: position as i64,
+            })
+            .collect(),
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
-pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
+pub fn get_project_roots(conn: &Connection, project_id: &str) -> Result<Vec<ProjectRoot>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, path, created_at, updated_at FROM projects ORDER BY updated_at DESC",
+        "SELECT root_path, position, is_primary FROM project_roots WHERE project_id = ?1 ORDER BY position ASC, root_path ASC",
     )?;
-
-    let projects = stmt
-        .query_map([], |row| {
-            Ok(Project {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+    let roots = stmt
+        .query_map([project_id], |row| {
+            Ok(ProjectRoot {
+                path: row.get(0)?,
+                position: row.get(1)?,
+                is_primary: row.get::<_, i32>(2)? != 0,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
+    Ok(roots)
+}
 
-    Ok(projects)
+/// 项目主根。主根只存在于 `project_roots`，这是唯一的读取入口。
+pub fn get_primary_root(conn: &Connection, project_id: &str) -> Result<Option<String>> {
+    let primary = conn
+        .query_row(
+            "SELECT root_path FROM project_roots WHERE project_id = ?1 AND is_primary = 1 ORDER BY position ASC LIMIT 1",
+            [project_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if primary.is_some() {
+        return Ok(primary);
+    }
+    // 兜底：老数据或异常写入没有主根标记时，顺序最小者为事实主根。
+    conn.query_row(
+        "SELECT root_path FROM project_roots WHERE project_id = ?1 ORDER BY position ASC, root_path ASC LIMIT 1",
+        [project_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+}
+
+/// 生成型会话（定时任务 / Work Task）创建时冻结的附加目录：
+/// 项目当前全部根减去该会话自己的工作目录（未指定时按主根算）。
+pub fn frozen_directory_scope(
+    conn: &Connection,
+    project_id: &str,
+    working_path: Option<&str>,
+) -> Result<Option<String>> {
+    let roots = get_project_roots(conn, project_id)?;
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    let excluded_key = match working_path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => Some(project_root_key(path)),
+        None => get_primary_root(conn, project_id)?.map(|path| project_root_key(&path)),
+    };
+    let scope: Vec<String> = roots
+        .into_iter()
+        .map(|root| root.path)
+        .filter(|path| excluded_key.as_deref() != Some(project_root_key(path).as_str()))
+        .collect();
+    if scope.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(&scope)
+        .map(Some)
+        .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))
+}
+
+pub fn get_project(conn: &Connection, project_id: &str) -> Result<Option<Project>> {
+    let row = conn
+        .query_row(
+            "SELECT id, name, created_at, updated_at FROM projects WHERE id = ?1 LIMIT 1",
+            [project_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((id, name, created_at, updated_at)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(Project {
+        roots: get_project_roots(conn, &id)?,
+        id,
+        name,
+        created_at,
+        updated_at,
+    }))
+}
+
+pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, created_at, updated_at FROM projects ORDER BY updated_at DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(id, name, created_at, updated_at)| {
+            Ok(Project {
+                roots: get_project_roots(conn, &id)?,
+                id,
+                name,
+                created_at,
+                updated_at,
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProjectUpdate<'a> {
+    pub name: Option<&'a str>,
+    /// 完整的期望根集合（按顺序）。缺省表示不改根。
+    pub roots: Option<&'a [String]>,
+    pub primary_root: Option<&'a str>,
+}
+
+/// 编辑项目名称、根集合与主根。移除主根且未显式指定新主根时，顺序最小的剩余根继任。
+pub fn update_project(
+    conn: &Connection,
+    project_id: &str,
+    update: ProjectUpdate<'_>,
+) -> Result<Option<Project>> {
+    let Some(existing) = get_project(conn, project_id)? else {
+        return Ok(None);
+    };
+
+    let roots = match update.roots {
+        Some(roots) => normalize_project_roots(roots)?,
+        None => existing
+            .roots
+            .iter()
+            .map(|root| root.path.clone())
+            .collect(),
+    };
+    if roots.is_empty() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "项目至少需要一个源文件夹".to_string(),
+        ));
+    }
+
+    let requested_primary = update.primary_root.map(project_root_key);
+    let current_primary_key = existing
+        .roots
+        .iter()
+        .find(|root| root.is_primary)
+        .map(|root| project_root_key(&root.path));
+    let primary = match requested_primary {
+        Some(requested) => roots
+            .iter()
+            .find(|root| project_root_key(root) == requested)
+            .cloned()
+            .ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("主根必须是项目的源文件夹之一".to_string())
+            })?,
+        None => current_primary_key
+            .and_then(|current| {
+                roots
+                    .iter()
+                    .find(|root| project_root_key(root) == current)
+                    .cloned()
+            })
+            .unwrap_or_else(|| roots[0].clone()),
+    };
+
+    let name = update.name.unwrap_or(&existing.name);
+    let now = Utc::now().to_rfc3339();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE projects SET name = ?1, updated_at = ?2 WHERE id = ?3",
+        params![name, now, project_id],
+    )?;
+    write_project_roots(&tx, project_id, &roots, &primary)?;
+    tx.commit()?;
+
+    get_project(conn, project_id)
 }
 
 pub fn delete_project(conn: &Connection, project_id: &str) -> Result<()> {
@@ -166,17 +421,12 @@ pub fn delete_project(conn: &Connection, project_id: &str) -> Result<()> {
         "DELETE FROM sessions WHERE project_id = ?1",
         params![project_id],
     )?;
+    conn.execute(
+        "DELETE FROM project_roots WHERE project_id = ?1",
+        params![project_id],
+    )?;
     // 再删除项目本身
     conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
-    Ok(())
-}
-
-pub fn rename_project(conn: &Connection, project_id: &str, name: &str) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE projects SET name = ?1, updated_at = ?2 WHERE id = ?3",
-        params![name, now, project_id],
-    )?;
     Ok(())
 }
 
@@ -237,10 +487,12 @@ pub fn create_session_for_project_with_permissions(
     let now = Utc::now().to_rfc3339();
     let permission_config = permission_config.unwrap_or("");
     let plan_mode = plan_mode.unwrap_or("off");
+    // 会话工作目录在创建时写入主根，之后独立于项目：主根变更不回溯改写已有会话。
+    let working_path = get_primary_root(conn, project_id)?;
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', ?9, ?10)",
-        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, working_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', ?9, ?10, ?11)",
+        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, working_path, now, now],
     )?;
 
     Ok(Session {
@@ -258,7 +510,7 @@ pub fn create_session_for_project_with_permissions(
         is_read_only: false,
         is_archived: false,
         is_pinned: false,
-        working_path: None,
+        working_path,
         git_branch: None,
         created_at: now.clone(),
         updated_at: now,
@@ -276,6 +528,7 @@ pub fn create_scheduled_session_for_project(
     permission_config: Option<&str>,
     plan_mode: Option<&str>,
     model: Option<&str>,
+    directory_scope: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -283,8 +536,8 @@ pub fn create_scheduled_session_for_project(
     let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, origin, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', 'scheduled', ?9, ?9)",
-        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, origin, directory_scope, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', 'scheduled', ?9, ?10, ?10)",
+        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, directory_scope, now],
     )?;
 
     Ok(Session {
@@ -438,6 +691,8 @@ pub fn session_needs_git_branch_capture(
     Ok(existing.as_deref().map(str::trim) != Some(trimmed))
 }
 
+/// 生成型会话创建时冻结的附加目录（JSON 数组）；`None` 表示普通会话，
+/// 每次运行实例重建时按项目当前根现算。
 pub fn update_session_working_path(
     conn: &Connection,
     session_id: &str,
@@ -1881,18 +2136,21 @@ pub fn has_running_session_subagents(conn: &Connection, session_id: &str) -> Res
 mod tests {
     use super::{
         append_session_subagent_event, append_timeline_events, archive_session,
-        clear_session_timeline, create_forked_session, delete_agent_session_mapping,
-        delete_session, fetch_session_timeline, filter_new_timeline_event_indexes,
+        clear_session_timeline, create_forked_session, create_project,
+        create_session_for_project_with_permissions, delete_agent_session_mapping, delete_session,
+        fetch_session_timeline, filter_new_timeline_event_indexes, frozen_directory_scope,
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
-        get_all_sessions, get_model_distribution, get_session, get_session_events_after,
-        get_session_timeline, get_usage_heatmap, get_usage_overview, import_session_snapshot,
-        list_native_sessions_for_cleanup, normalize_session_title, refresh_auto_session_title,
-        rename_session_title, replace_session_timeline, resolve_app_session_id_for_timeline,
+        get_all_sessions, get_model_distribution, get_primary_root, get_project, get_project_roots,
+        get_session, get_session_events_after, get_session_timeline, get_usage_heatmap,
+        get_usage_overview, import_session_snapshot, list_native_sessions_for_cleanup,
+        normalize_session_title, refresh_auto_session_title, rename_session_title,
+        replace_session_timeline, resolve_app_session_id_for_timeline,
         session_needs_git_branch_capture, session_timeline_max_sequence,
         sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
-        unarchive_session, update_session_provider, update_session_reasoning_effort,
-        update_session_settings, update_session_working_path, upsert_agent_session_mapping,
-        upsert_session_subagent, GitBranchWrite, ImportedSessionSnapshot,
+        unarchive_session, update_project, update_session_provider,
+        update_session_reasoning_effort, update_session_settings, update_session_working_path,
+        upsert_agent_session_mapping, upsert_session_subagent, GitBranchWrite,
+        ImportedSessionSnapshot, ProjectUpdate,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -3522,5 +3780,227 @@ mod tests {
         assert_eq!(child.git_branch.as_deref(), Some("feature/hover"));
         // fork 落在同一个工作目录上，后续写入不该把启动分支改掉。
         assert!(!session_needs_git_branch_capture(&conn, &child.id, "D:/project/codeMUX").unwrap());
+    }
+
+    fn roots(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|path| path.to_string()).collect()
+    }
+
+    #[test]
+    fn creates_multi_root_projects_in_selection_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let project = create_project(
+            &conn,
+            "Fullstack",
+            &roots(&["D:/work/frontend", "D:/work/backend", "D:/work/shared"]),
+        )
+        .unwrap();
+
+        let roots = get_project_roots(&conn, &project.id).unwrap();
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["D:/work/frontend", "D:/work/backend", "D:/work/shared"]
+        );
+        assert_eq!(roots[0].position, 0);
+        assert!(roots[0].is_primary);
+        assert!(!roots[1].is_primary);
+        assert_eq!(
+            get_primary_root(&conn, &project.id).unwrap().as_deref(),
+            Some("D:/work/frontend")
+        );
+    }
+
+    #[test]
+    fn dedupes_project_roots_within_a_project() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let project = create_project(
+            &conn,
+            "Demo",
+            &roots(&["D:/work/app/", "D:/work/app", "D:/work/lib"]),
+        )
+        .unwrap();
+
+        let roots = get_project_roots(&conn, &project.id).unwrap();
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["D:/work/app", "D:/work/lib"]
+        );
+    }
+
+    #[test]
+    fn rejects_a_project_without_roots() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        assert!(create_project(&conn, "Empty", &[]).is_err());
+        assert!(create_project(&conn, "Blank", &roots(&["   "])).is_err());
+    }
+
+    #[test]
+    fn promotes_the_smallest_position_root_when_the_primary_is_removed() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(
+            &conn,
+            "Demo",
+            &roots(&["D:/work/a", "D:/work/b", "D:/work/c"]),
+        )
+        .unwrap();
+
+        let updated = update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                roots: Some(&roots(&["D:/work/b", "D:/work/c"])),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(updated.roots.len(), 2);
+        assert_eq!(
+            get_primary_root(&conn, &project.id).unwrap().as_deref(),
+            Some("D:/work/b")
+        );
+        assert_eq!(updated.roots[0].position, 0);
+        assert_eq!(updated.roots[1].position, 1);
+    }
+
+    #[test]
+    fn switches_the_primary_root_without_reordering() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(&conn, "Demo", &roots(&["D:/work/a", "D:/work/b"])).unwrap();
+
+        update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                primary_root: Some("D:/work/b"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let roots = get_project_roots(&conn, &project.id).unwrap();
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["D:/work/a", "D:/work/b"]
+        );
+        assert!(!roots[0].is_primary);
+        assert!(roots[1].is_primary);
+    }
+
+    #[test]
+    fn rejects_an_unknown_primary_root_and_an_empty_root_set() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(&conn, "Demo", &roots(&["D:/work/a"])).unwrap();
+
+        let unknown_primary = update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                primary_root: Some("D:/work/missing"),
+                ..Default::default()
+            },
+        );
+        assert!(unknown_primary.is_err());
+
+        let empty: Vec<String> = Vec::new();
+        let empty_roots = update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                roots: Some(&empty),
+                ..Default::default()
+            },
+        );
+        assert!(empty_roots.is_err());
+        assert_eq!(
+            get_project(&conn, &project.id)
+                .unwrap()
+                .unwrap()
+                .roots
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_new_project_session_binds_the_primary_root_and_follows_no_later_change() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(&conn, "Demo", &roots(&["D:/work/a", "D:/work/b"])).unwrap();
+
+        let session = create_session_for_project_with_permissions(
+            &conn,
+            "Chat",
+            AgentKind::ClaudeCode,
+            "chat",
+            &project.id,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(session.working_path.as_deref(), Some("D:/work/a"));
+
+        update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                primary_root: Some("D:/work/b"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_eq!(reloaded.working_path.as_deref(), Some("D:/work/a"));
+    }
+
+    #[test]
+    fn freezes_generated_session_directory_scope_without_the_working_directory() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(
+            &conn,
+            "Demo",
+            &roots(&["D:/work/a", "D:/work/b", "D:/work/c"]),
+        )
+        .unwrap();
+
+        // 普通生成型会话（cwd = 主根）：冻结其余根。
+        let scheduled = frozen_directory_scope(&conn, &project.id, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&scheduled).unwrap(),
+            vec!["D:/work/b", "D:/work/c"]
+        );
+
+        // worktree 会话的 cwd 不在根内：冻结全部根。
+        let worktree = frozen_directory_scope(&conn, &project.id, Some("D:/worktrees/feature"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&worktree).unwrap(),
+            vec!["D:/work/a", "D:/work/b", "D:/work/c"]
+        );
     }
 }

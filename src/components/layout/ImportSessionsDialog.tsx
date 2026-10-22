@@ -29,7 +29,8 @@ interface ImportSessionsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
-  projectPath: string;
+  /** 项目全部根：导入匹配按所有根做路径段边界判断。 */
+  projectRoots: string[];
   projectName: string;
   onImported?: () => void;
 }
@@ -53,7 +54,7 @@ export function ImportSessionsDialog({
   open,
   onOpenChange,
   projectId,
-  projectPath,
+  projectRoots,
   projectName,
   onImported,
 }: ImportSessionsDialogProps) {
@@ -137,8 +138,8 @@ export function ImportSessionsDialog({
   };
 
   const projectCandidates = useMemo(
-    () => candidates.filter((candidate) => isImportCandidateForProject(candidate.cwd, projectPath)),
-    [candidates, projectPath],
+    () => candidates.filter((candidate) => isImportCandidateForProject(candidate.cwd, projectRoots)),
+    [candidates, projectRoots],
   );
 
   const visibleCandidates = useMemo(

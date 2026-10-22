@@ -24,6 +24,7 @@ import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Project } from '../../types/project';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
 import { Input } from '../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { TooltipHint } from '../ui/tooltip';
@@ -73,9 +74,12 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
     if (!query) return projects;
     return projects.filter((project) =>
       project.name.toLowerCase().includes(query)
-      || project.path.toLowerCase().includes(query),
+      || getProjectRootPaths(project).some((root) => root.toLowerCase().includes(query)),
     );
   }, [projectQuery, projects]);
+
+  // Git、worktree 这一版只服务主根。
+  const draftProjectRoot = getPrimaryProjectRoot(draftProject);
 
   const filteredBranches = useMemo(() => {
     const query = branchQuery.trim().toLowerCase();
@@ -89,20 +93,20 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
   const branchPickerLabel = getBranchPickerLabel(worktreeBaseRef, repositoryState);
 
   const loadGitContext = useCallback(async () => {
-    if (!draftProject?.path) {
+    if (!draftProjectRoot) {
       setRepositoryState(null);
       setWorktrees([]);
       setGitAvailable(false);
       return;
     }
 
-    const statePath = existingWorktreePath ?? draftProject.path;
+    const statePath = existingWorktreePath ?? draftProjectRoot;
 
     setGitLoading(true);
     try {
       const [state, nextWorktrees] = await Promise.all([
         daemonFacade.git.getRepositoryState(statePath),
-        daemonFacade.git.listWorktrees(draftProject.path),
+        daemonFacade.git.listWorktrees(draftProjectRoot),
       ]);
       setRepositoryState(state);
       setWorktrees(nextWorktrees);
@@ -114,7 +118,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
     } finally {
       setGitLoading(false);
     }
-  }, [draftProject?.path, existingWorktreePath]);
+  }, [draftProjectRoot, existingWorktreePath]);
 
   useEffect(() => {
     void loadGitContext();
@@ -134,15 +138,16 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
     try {
       const selected = await openDialog({
         directory: true,
-        multiple: false,
-        title: '选择项目文件夹',
+        multiple: true,
+        title: '选择项目文件夹（可多选）',
       });
-      if (!selected) {
+      if (!selected || selected.length === 0) {
         return;
       }
-      const path = selected as string;
-      const name = path.split(/[/\\]/).pop() || path;
-      const project = await createProject(name, path);
+      // 原生选择器的返回顺序即根顺序：第一个成为主根。
+      const roots = Array.isArray(selected) ? selected : [selected];
+      const name = roots[0].split(/[/\\]/).filter(Boolean).pop() || roots[0];
+      const project = await createProject(name, roots);
       setDraftProjectId(project.id);
       setProjectOpen(false);
       setProjectQuery('');

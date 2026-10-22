@@ -119,7 +119,7 @@ describe('ChatSearchDialog', () => {
       projects: [{
         id: 'project-1',
         name: 'codeMUX',
-        path: 'D:\\project\\ai-code\\codeMUX',
+        roots: [{ path: 'D:\\project\\ai-code\\codeMUX', position: 0, isPrimary: true }],
         created_at: '2026-01-01T00:00:00.000Z',
         updated_at: '2026-01-01T00:00:00.000Z',
       }],
@@ -183,7 +183,7 @@ describe('ChatSearchDialog', () => {
       projects: [{
         id: 'project-1',
         name: 'codeMUX',
-        path: 'D:\\project\\ai-code\\codeMUX',
+        roots: [{ path: 'D:\\project\\ai-code\\codeMUX', position: 0, isPrimary: true }],
         created_at: '2026-01-01T00:00:00.000Z',
         updated_at: '2026-01-01T00:00:00.000Z',
       }],

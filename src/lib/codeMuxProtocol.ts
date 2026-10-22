@@ -449,6 +449,16 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
       },
     };
   }
+  if (event.subtype === 'additional_directories_unavailable') {
+    return {
+      kind: 'additional_directories_unavailable',
+      data: {
+        content: typeof event.content === 'string' && event.content.trim()
+          ? event.content
+          : '部分源文件夹当前不可用，已跳过。',
+      },
+    };
+  }
   return { kind: 'raw', data };
 }
 

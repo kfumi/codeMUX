@@ -28,6 +28,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { WorkTask, WorkTaskInput } from '../../types/workTask';
 import type { ReasoningEffort } from '../../types/session';
+import { getPrimaryProjectRoot } from '../../types/project';
 import type { GitRepositoryState } from '../../lib/gitTypes';
 
 interface TaskEditorDialogProps {
@@ -130,10 +131,11 @@ export function TaskEditorDialog({
       return;
     }
     const project = projects.find((entry) => entry.id === draft.projectId);
-    if (!project) return;
+    const primaryRoot = getPrimaryProjectRoot(project);
+    if (!primaryRoot) return;
     const seq = ++branchFetchSeq.current;
     setRepoStatus('loading');
-    Promise.resolve(daemonFacade.git.getRepositoryState(project.path))
+    Promise.resolve(daemonFacade.git.getRepositoryState(primaryRoot))
       .then((state) => {
         if (seq !== branchFetchSeq.current) return;
         setRepoState(state);

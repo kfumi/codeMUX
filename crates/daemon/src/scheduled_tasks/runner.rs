@@ -27,16 +27,24 @@ pub async fn fire_scheduled_task(
     let session = {
         let conn = app_state.db.lock();
         match conn {
-            Ok(conn) => operations::create_scheduled_session_for_project(
-                &conn,
-                &session_title,
-                payload.agent_kind,
-                "agent",
-                &payload.project_id,
-                Some(&payload.permission_config),
-                Some(&payload.plan_mode),
-                payload.model.as_deref(),
-            ),
+            Ok(conn) => {
+                // 生成型会话在创建时冻结目录集合，之后改项目根不影响这次运行。
+                let directory_scope =
+                    operations::frozen_directory_scope(&conn, &payload.project_id, None)
+                        .ok()
+                        .flatten();
+                operations::create_scheduled_session_for_project(
+                    &conn,
+                    &session_title,
+                    payload.agent_kind,
+                    "agent",
+                    &payload.project_id,
+                    Some(&payload.permission_config),
+                    Some(&payload.plan_mode),
+                    payload.model.as_deref(),
+                    directory_scope.as_deref(),
+                )
+            }
             Err(error) => Err(rusqlite::Error::InvalidParameterName(error.to_string())),
         }
     };

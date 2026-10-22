@@ -9,6 +9,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
+import { formatAdditionalDirectoriesPrompt } from './additionalDirectories.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
@@ -181,6 +182,8 @@ type SessionBootstrap = {
   timeouts?: TurnTimeouts;
   /** daemon 随会话命令下发的 MCP 服务器(pi 直传;claude 经 buildOptions 注入 SDK)。 */
   mcpServers?: PiMcpServers;
+  /** 项目附加目录的绝对路径；只经系统提示声明，不启用原生多目录能力。 */
+  additionalDirectories?: string[];
 };
 
 type QueryOptions = Record<string, unknown> & {
@@ -832,6 +835,7 @@ export class SessionRuntime {
       runtimeRef: cmd.runtimeRef,
       timeouts: cmd.timeouts,
       mcpServers: cmd.mcpServers,
+      additionalDirectories: cmd.additionalDirectories,
     };
   }
 
@@ -1203,7 +1207,9 @@ export class SessionRuntime {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: '',
+        // 附加目录只写进系统提示（ADR 0020）：不启用 additionalDirectories，
+        // 否则 Claude 会把附加目录当配置来源，连带加载其中的 CLAUDE.md 与 skills。
+        append: formatAdditionalDirectoriesPrompt(config.additionalDirectories),
       },
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
@@ -2147,6 +2153,18 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
 
   const ensureSession = async (cmd: EnsureSessionCommand): Promise<void> => {
     const flavor = getRuntimeFlavor(cmd.agentKind);
+    // 附加目录不可用是会话级事实：发一条可持久化的系统事件让界面提示。
+    // event_id 稳定，重建 runtime 时重复 ensure 不会刷屏。
+    if (cmd.unavailableAdditionalDirectories?.length) {
+      const unavailable = [...cmd.unavailableAdditionalDirectories].sort();
+      options.emit({
+        type: 'system_event',
+        subtype: 'additional_directories_unavailable',
+        session_id: cmd.sessionId,
+        event_id: `additional-directories-unavailable:${cmd.sessionId ?? ''}:${unavailable.join('|')}`,
+        content: `以下源文件夹当前不可用，已跳过：${unavailable.join('、')}`,
+      });
+    }
     activeAgentKind = cmd.agentKind;
     activeSessionId = cmd.sessionId;
     activeResumeOnly = cmd.resumeOnly === true;
@@ -2626,6 +2644,9 @@ function buildOpenCodeSessionConfig(cmd: EnsureSessionCommand): OpenCodeSessionC
     ...(cmd.timeouts ? { timeouts: cmd.timeouts } : {}),
     ...(cmd.modelLimits ? { modelLimits: cmd.modelLimits } : {}),
     ...(cmd.mcpServers ? { mcpServers: cmd.mcpServers } : {}),
+    ...(cmd.additionalDirectories?.length
+      ? { additionalDirectories: cmd.additionalDirectories }
+      : {}),
   };
 }
 
@@ -2724,6 +2745,9 @@ function buildPiSessionConfig(cmd: EnsureSessionCommand): PiSessionConfig {
     // pi >= 0.99 原生 MCP：daemon 下发的 mcpServers 经 PiRuntime 同步进托管目录的
     // mcp.json（用户级配置，无需项目信任；canReuse 比对触发变更后进程重建）。
     ...(cmd.mcpServers ? { mcpServers: cmd.mcpServers } : {}),
+    ...(cmd.additionalDirectories?.length
+      ? { additionalDirectories: cmd.additionalDirectories }
+      : {}),
   };
 }
 

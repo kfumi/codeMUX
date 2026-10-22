@@ -168,7 +168,7 @@ describe('NewSessionPanel', () => {
     pendingCtl.value = false;
     useProjectStore.setState({
       projects: [
-        { id: 'project-1', name: 'codeMUX', path: 'D:/project/ai-code/codeMUX', created_at: '', updated_at: '' },
+        { id: 'project-1', name: 'codeMUX', roots: [{ path: 'D:/project/ai-code/codeMUX', position: 0, isPrimary: true }], created_at: '', updated_at: '' },
       ],
     });
     usePreviewStore.setState({

@@ -5,6 +5,7 @@ import type { StreamdownProps } from 'streamdown';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/stores/projectStore';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '@/types/project';
 import { usePreviewStore, type FileTreeNodeData } from '@/stores/previewStore';
 import { useSidePanelStore } from '@/stores/sidePanelStore';
 import { TooltipHint } from '@/components/ui/tooltip';
@@ -313,19 +314,20 @@ function getReactText(value: ReactNode): string {
 export function resolveLocalMarkdownBasePath(filePath: string): string | undefined {
   const { projects, activeProjectId } = useProjectStore.getState();
   const normalizedFilePath = normalizePathForCompare(filePath);
-  const matchingProject = projects
-    .filter((project) => {
-      const normalizedProjectPath = normalizePathForCompare(project.path).replace(/\/$/, '');
-      return normalizedFilePath === normalizedProjectPath || normalizedFilePath.startsWith(`${normalizedProjectPath}/`);
+  const matchingRoots = projects
+    .flatMap((project) => getProjectRootPaths(project))
+    .filter((root) => {
+      const normalizedRoot = normalizePathForCompare(root).replace(/\/$/, '');
+      return normalizedFilePath === normalizedRoot || normalizedFilePath.startsWith(`${normalizedRoot}/`);
     })
-    .sort((left, right) => right.path.length - left.path.length)[0];
+    .sort((left, right) => right.length - left.length);
 
-  if (matchingProject) {
-    return matchingProject.path;
+  if (matchingRoots[0]) {
+    return matchingRoots[0];
   }
 
   if (!isAbsoluteLocalPath(filePath)) {
-    return projects.find((project) => project.id === activeProjectId)?.path;
+    return getPrimaryProjectRoot(projects.find((project) => project.id === activeProjectId)) ?? undefined;
   }
 
   // 会话工作目录可能不是注册项目（如 agent 的 working_path 指向项目外目录），
@@ -631,15 +633,17 @@ function normalizeRelativePathSegments(value: string): string {
 
 function getActiveProjectPath(): string | null {
   const { projects, activeProjectId } = useProjectStore.getState();
-  return projects.find((project) => project.id === activeProjectId)?.path ?? null;
+  return getPrimaryProjectRoot(projects.find((project) => project.id === activeProjectId));
 }
 
 function isPathInsideRegisteredProject(filePath: string): boolean {
   const normalizedFilePath = normalizePathForCompare(filePath).replace(/\/+$/, '');
-  return useProjectStore.getState().projects.some((project) => {
-    const normalizedProjectPath = normalizePathForCompare(project.path).replace(/\/+$/, '');
-    return normalizedFilePath === normalizedProjectPath || normalizedFilePath.startsWith(`${normalizedProjectPath}/`);
-  });
+  return useProjectStore.getState().projects.some((project) =>
+    getProjectRootPaths(project).some((root) => {
+      const normalizedRoot = normalizePathForCompare(root).replace(/\/+$/, '');
+      return normalizedFilePath === normalizedRoot || normalizedFilePath.startsWith(`${normalizedRoot}/`);
+    }),
+  );
 }
 
 function isKnownProjectFilePath(filePath: string): boolean {

@@ -430,7 +430,7 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
         .route("/projects", get(list_projects).post(create_project))
         .route(
             "/projects/{project_id}",
-            patch(rename_project).delete(delete_project),
+            patch(update_project).delete(delete_project),
         )
         .route("/bootstrap", get(bootstrap))
         .route("/permissions/respond", post(permission_respond))
@@ -1065,7 +1065,11 @@ async fn list_projects(
 #[serde(rename_all = "camelCase")]
 struct CreateProjectRequest {
     name: String,
-    path: String,
+    /// 源文件夹数组，第一个为主根。旧客户端只发单个 `path`，仍按一根项目接受。
+    #[serde(default)]
+    roots: Option<Vec<String>>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 async fn create_project(
@@ -1075,38 +1079,60 @@ async fn create_project(
     Json(body): Json<CreateProjectRequest>,
 ) -> Result<Json<operations::Project>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
+    let roots = match (body.roots, body.path) {
+        (Some(roots), _) => roots,
+        (None, Some(path)) => vec![path],
+        (None, None) => {
+            return Err(ApiError::bad_request(
+                "项目至少需要一个源文件夹".to_string(),
+            ));
+        }
+    };
     let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let project = operations::create_project(&db, &body.name, &body.path)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let project = operations::create_project(&db, &body.name, &roots)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(project))
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RenameProjectRequest {
-    name: String,
+struct UpdateProjectRequest {
+    name: Option<String>,
+    /// 完整的期望根集合（按顺序）；缺省表示不改根。
+    roots: Option<Vec<String>>,
+    primary_root: Option<String>,
 }
 
-async fn rename_project(
+/// 编辑项目：改名、增删根、切换主根。返回更新后的项目，便于客户端直接替换缓存。
+async fn update_project(
     State(ctx): State<ServerContext>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(project_id): Path<String>,
-    Json(body): Json<RenameProjectRequest>,
-) -> Result<StatusCode, ApiError> {
+    Json(body): Json<UpdateProjectRequest>,
+) -> Result<Json<operations::Project>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let app_state = ctx.daemon.app.clone();
     let db = app_state
         .db
         .lock()
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    operations::rename_project(&db, &project_id, &body.name)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+    let updated = operations::update_project(
+        &db,
+        &project_id,
+        operations::ProjectUpdate {
+            name: body.name.as_deref(),
+            roots: body.roots.as_deref(),
+            primary_root: body.primary_root.as_deref(),
+        },
+    )
+    .map_err(|error| ApiError::bad_request(error.to_string()))?
+    .ok_or_else(|| ApiError::not_found("Project not found"))?;
+    Ok(Json(updated))
 }
 
 async fn delete_project(

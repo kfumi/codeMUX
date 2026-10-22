@@ -58,7 +58,7 @@ import { shellFacade } from '../../../lib/facades/shell-facade';
 import { useHostCapabilities } from '../../../hooks/useHostCapabilities';
 import { useBrowserElementStore } from '../../../stores/browserElementStore';
 import { BrowserElementPills } from '../../browser/BrowserElementPills';
-import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
+import { usePreviewStore, type FileTreeNodeData, type RootFileTree } from '../../../stores/previewStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
 import type { AgentKind } from '../../../types/session';
@@ -162,7 +162,14 @@ const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
 const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)|(^|\s)(\[[^\]]+\]\([^)]+\))/g;
 const logger = createLogger('CodeMuxComposer');
 
-type FileEntry = { name: string; relativePath: string; isDir: boolean };
+type FileEntry = {
+  name: string;
+  /** 插入文本里的路径：主根相对路径，附加根绝对路径。 */
+  relativePath: string;
+  isDir: boolean;
+  /** 多根项目里该文件所属的源文件夹名（候选列表用于消歧）。 */
+  rootName?: string;
+};
 
 type PendingProposedPlan = {
   key: string;
@@ -181,6 +188,36 @@ function flattenFileTree(nodes: FileTreeNodeData[], prefix = ''): FileEntry[] {
     }
   }
   return result;
+}
+
+/** 多根项目：主根文件用相对路径、附加目录文件用绝对路径，按绝对路径去重（主根优先）。 */
+function flattenProjectRootTrees(rootTrees: RootFileTree[]): FileEntry[] {
+  const ordered = [...rootTrees].sort(
+    (left, right) => Number(right.isPrimary) - Number(left.isPrimary),
+  );
+  const result: FileEntry[] = [];
+  const seen = new Set<string>();
+  for (const tree of ordered) {
+    if (tree.unavailable) continue;
+    const rootName = tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root;
+    for (const entry of flattenFileTree(tree.nodes)) {
+      const absolutePath = joinAbsolutePath(tree.root, entry.relativePath);
+      const key = normalizeReferencePath(absolutePath).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({
+        ...entry,
+        relativePath: tree.isPrimary ? entry.relativePath : absolutePath,
+        rootName,
+      });
+    }
+  }
+  return result;
+}
+
+function joinAbsolutePath(root: string, relativePath: string): string {
+  const separator = root.includes('\\') ? '\\' : '/';
+  return `${root.replace(/[/\\]+$/, '')}${separator}${relativePath.replace(/^[/\\]+/, '')}`;
 }
 
 function matchFileName(query: string, fileName: string): boolean {
@@ -265,11 +302,16 @@ tokenUsage,
   );
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
+  const rootTrees = usePreviewStore((state) => state.rootTrees);
   // Flatten the file tree once per tree change instead of every render.
-  const allFileEntries = useMemo(
-    () => (projectPath && treeRoot ? flattenFileTree(treeRoot) : []),
-    [projectPath, treeRoot],
-  );
+  // 多根项目用全部根的树；单根项目沿用主树，行为不变。
+  const allFileEntries = useMemo(() => {
+    if (!projectPath) return [];
+    if (rootTrees.length > 1) {
+      return flattenProjectRootTrees(rootTrees);
+    }
+    return treeRoot ? flattenFileTree(treeRoot) : [];
+  }, [projectPath, rootTrees, treeRoot]);
 
   const [manualTrigger, setManualTrigger] = useState<'/' | '@' | null>(null);
   const [suppressedTrigger, setSuppressedTrigger] = useState<ActiveTrigger | null>(null);
@@ -1458,7 +1500,7 @@ function toFileTriggerItem(file: FileEntry): Unstable_TriggerItem {
     id: file.relativePath,
     type: file.isDir ? 'directory' : 'file',
     label: file.name,
-    description: file.relativePath,
+    description: file.rootName ? `${file.rootName} · ${file.relativePath}` : file.relativePath,
   };
 }
 

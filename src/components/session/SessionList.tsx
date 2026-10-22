@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, MessageSquarePlus, Plus } from 'lucide-react';
 
 import type { Project } from '../../types/project';
+import { getProjectRootPaths } from '../../types/project';
 import { getDaemonStartupError, initDaemonClient } from '../../lib/daemon-bootstrap';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
@@ -385,7 +386,7 @@ export function SessionList({
           open
           onOpenChange={handleImportDialogOpenChange}
           projectId={importProject.id}
-          projectPath={importProject.path}
+          projectRoots={getProjectRootPaths(importProject)}
           projectName={importProject.name}
         />
       )}

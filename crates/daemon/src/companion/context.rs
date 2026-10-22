@@ -44,19 +44,17 @@ pub async fn build_composer_context(
     state: &AppState,
     session_id: &str,
 ) -> Result<ComposerContext, String> {
-    let (agent_kind, project_path, global_skills) = {
+    let (agent_kind, project_roots, global_skills) = {
         let db = state.db.lock().map_err(|error| error.to_string())?;
         let session = operations::get_session(&db, session_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "会话不存在".to_string())?;
-        let project_path = session.project_id.and_then(|project_id| {
-            db.query_row(
-                "SELECT path FROM projects WHERE id = ?1",
-                [project_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-        });
+        let project_roots = session
+            .project_id
+            .map(|project_id| operations::get_project_roots(&db, &project_id))
+            .transpose()
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
         let global_skills = crate::skills::db::list_skills(&db)
             .unwrap_or_default()
             .into_iter()
@@ -69,7 +67,7 @@ pub async fn build_composer_context(
             })
             .map(|skill| (skill.name, skill.description, skill.disk_path))
             .collect::<Vec<_>>();
-        (session.agent_kind, project_path, global_skills)
+        (session.agent_kind, project_roots, global_skills)
     };
 
     let token_usage = match crate::agent::commands::load_latest_token_usage_for_session(
@@ -89,7 +87,11 @@ pub async fn build_composer_context(
         }
     };
 
-    let Some(project_path) = project_path else {
+    let Some(primary_root) = project_roots
+        .iter()
+        .find(|root| root.is_primary)
+        .map(|root| root.path.clone())
+    else {
         return Ok(ComposerContext {
             files: Vec::new(),
             commands: build_commands(agent_kind, Vec::new(), global_skills),
@@ -98,11 +100,33 @@ pub async fn build_composer_context(
     };
 
     tokio::task::spawn_blocking(move || {
-        let root = PathBuf::from(&project_path);
+        let primary = PathBuf::from(&primary_root);
         let mut files = Vec::new();
-        collect_files(&root, &root, 0, &mut files);
+        let mut seen = HashSet::new();
+        for root in &project_roots {
+            let root_path = PathBuf::from(&root.path);
+            if !root_path.is_dir() {
+                // 附加目录不可用时跳过该条；主根不可用由会话启动路径拒绝。
+                continue;
+            }
+            let mut root_files = Vec::new();
+            collect_files(&root_path, &root_path, 0, &mut root_files);
+            for mut file in root_files {
+                // 主根文件用相对路径；附加目录用绝对路径，避免被解析到错误的工作目录。
+                if !root.is_primary {
+                    file.path = root_path
+                        .join(&file.path)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                }
+                if seen.insert(file.path.clone()) {
+                    files.push(file);
+                }
+            }
+        }
         files.sort_by(|left, right| left.path.cmp(&right.path));
-        let skills = crate::skills::project::resolve_project_skills(&root, agent_kind);
+        files.truncate(MAX_FILES);
+        let skills = crate::skills::project::resolve_project_skills(&primary, agent_kind);
         Ok(ComposerContext {
             files,
             commands: build_commands(agent_kind, skills, global_skills),

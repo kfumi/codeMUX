@@ -1,6 +1,7 @@
 import type { Config } from '@opencode-ai/sdk';
 import type { PiMcpServers } from './piMcp.js';
 import * as path from 'node:path';
+import { formatAdditionalDirectoriesPrompt } from './additionalDirectories.js';
 import { prepareOpenCodeExecutable } from './opencodeExecutable.js';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
@@ -110,6 +111,8 @@ export interface OpenCodeSdkStartInput {
     maxOutputTokens?: number;
     inputModalities?: string[];
   };
+  /** 项目附加目录（绝对路径）。写成临时说明文件，经 `Config.instructions` 注入。 */
+  additionalDirectories?: string[];
 }
 
 export function normalizeOpenCodeModelReference(model: string): { provider: string; model: string } {
@@ -147,6 +150,8 @@ export interface OpenCodeServerConfigInput {
     maxOutputTokens?: number;
     inputModalities?: string[];
   };
+  /** 附加目录说明文件的绝对路径（start 时写入临时文件）。 */
+  instructionFiles?: string[];
 }
 
 /** CodeMUX MCP spec → opencode `mcp` 段(local stdio server)。 */
@@ -170,6 +175,10 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
   const sessionMcp = input.mcpServers && Object.keys(input.mcpServers).length > 0
     ? toOpenCodeMcpConfig(input.mcpServers)
     : undefined;
+  const instructionFiles = input.instructionFiles?.filter((file) => file.trim().length > 0) ?? [];
+  const mergedInstructions = instructionFiles.length > 0
+    ? { instructions: [...(input.existingConfig?.instructions ?? []), ...instructionFiles] }
+    : {};
   if (input.provider === 'opencode') {
     const { provider: existingProviders, ...rest } = input.existingConfig ?? {};
     const opencodeProvider = existingProviders?.opencode;
@@ -178,6 +187,7 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
       ...(opencodeProvider ? { provider: { opencode: opencodeProvider } } : {}),
       model: `opencode/${input.model}`,
       ...(sessionMcp ? { mcp: { ...((rest as { mcp?: Record<string, unknown> }).mcp ?? {}), ...sessionMcp } } : {}),
+      ...mergedInstructions,
     };
   }
 
@@ -215,6 +225,7 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
     ...(sessionMcp
       ? { mcp: { ...(input.existingConfig?.mcp ?? {}), ...sessionMcp } }
       : {}),
+    ...mergedInstructions,
   };
 }
 
@@ -463,7 +474,7 @@ function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, serverStartTimeoutMs = DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits }) {
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, serverStartTimeoutMs = DEFAULT_OPENCODE_SERVER_START_TIMEOUT_MS, runtimeRef, mcpServers, modelLimits, additionalDirectories }) {
     const perfStartedAt = Date.now();
     const runtimeLoaded = loadRuntime(runtimeRef);
     const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
@@ -478,6 +489,12 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     process.stderr.write(`[opencode-task] [perf] opencode sdk modules loaded elapsed_ms=${Date.now() - perfStartedAt}\n`);
 
     const existingConfig = await readNativeOpenCodeConfig();
+    // OpenCode 只接受 instructions 文件路径，所以把附加目录清单写成临时文件，
+    // 由 Config.instructions 加载；不设置 directory / 项目根，避免附加目录
+    // 变成 OpenCode 的项目配置来源（ADR 0020）。
+    const instructionsFile = await writeAdditionalDirectoriesInstructionFile(
+      additionalDirectories,
+    );
     const serverConfig = buildOpenCodeServerConfig({
       provider,
       model,
@@ -487,14 +504,32 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
       existingConfig,
       mcpServers,
       modelLimits,
+      ...(instructionsFile ? { instructionFiles: [instructionsFile.filePath] } : {}),
     });
     const serverBootStartedAt = Date.now();
-    const server = await createOpencodeServer({
-      hostname: '127.0.0.1',
-      port: 0,
-      config: serverConfig,
-      timeout: serverStartTimeoutMs,
-    });
+    let server: Awaited<ReturnType<typeof createOpencodeServer>>;
+    try {
+      server = await createOpencodeServer({
+        hostname: '127.0.0.1',
+        port: 0,
+        config: serverConfig,
+        timeout: serverStartTimeoutMs,
+      });
+    } catch (error) {
+      await instructionsFile?.cleanup().catch(() => {});
+      throw error;
+    }
+    if (instructionsFile) {
+      // 临时说明文件跟随 server 生命周期：close 时一并删除。
+      const originalClose = server.close.bind(server);
+      server.close = async () => {
+        try {
+          await originalClose();
+        } finally {
+          await instructionsFile.cleanup().catch(() => {});
+        }
+      };
+    }
     process.stderr.write(`[opencode-task] [perf] opencode serve booted elapsed_ms=${Date.now() - serverBootStartedAt}\n`);
     try {
       const client = createOpencodeClient({
@@ -782,6 +817,37 @@ async function readNativeOpenCodeConfig(): Promise<Config | undefined> {
   } catch {
     return undefined;
   }
+}
+
+type InstructionFileHandle = {
+  filePath: string;
+  cleanup: () => Promise<void>;
+};
+
+/** 附加目录清单 → 临时说明文件（OpenCode 的 `Config.instructions` 只接收文件路径）。 */
+async function writeAdditionalDirectoriesInstructionFile(
+  directories: string[] | undefined,
+): Promise<InstructionFileHandle | null> {
+  const prompt = formatAdditionalDirectoriesPrompt(directories);
+  if (!prompt) {
+    return null;
+  }
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codemux-instructions-'));
+  const filePath = path.join(directory, 'additional-directories.md');
+  try {
+    await fs.writeFile(filePath, `${prompt}\n`, 'utf8');
+  } catch (error) {
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+  return {
+    filePath,
+    cleanup: async () => {
+      await fs.rm(directory, { recursive: true, force: true });
+    },
+  };
 }
 
 export function mapOpenCodeImages(payload?: AgentInputPayload): OpenCodeImageInput[] {

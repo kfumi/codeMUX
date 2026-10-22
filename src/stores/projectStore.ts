@@ -35,9 +35,14 @@ interface ProjectState {
   error: string | null;
   collapsedProjects: Set<string>;
   fetchProjects: () => Promise<void>;
-  createProject: (name: string, path: string) => Promise<Project>;
+  createProject: (name: string, roots: string[]) => Promise<Project>;
   deleteProject: (projectId: string) => Promise<void>;
   renameProject: (projectId: string, name: string) => Promise<void>;
+  /** 编辑项目：改名、增删根、切换主根。返回更新后的项目。 */
+  updateProject: (
+    projectId: string,
+    patch: { name?: string; roots?: string[]; primaryRoot?: string },
+  ) => Promise<Project>;
   setActiveProject: (projectId: string | null) => void;
   toggleProjectExpanded: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
@@ -84,10 +89,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
       set({ error: String(error), isLoading: false, hasLoadedOnce: true });
     }
   },
-  createProject: async (name: string, path: string) => {
+  createProject: async (name: string, roots: string[]) => {
     set({ isLoading: true, error: null });
     try {
-      const project = await daemonFacade.createProject(name, path);
+      const project = await daemonFacade.createProject(name, roots);
       // Remove from collapsed list if somehow present (new projects should be expanded)
       set((state) => {
         const newCollapsed = new Set(state.collapsedProjects);
@@ -145,6 +150,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+  updateProject: async (
+    projectId: string,
+    patch: { name?: string; roots?: string[]; primaryRoot?: string },
+  ) => {
+    const project = await daemonFacade.updateProject(projectId, patch);
+    set((state) => ({
+      projects: state.projects.map((entry) => (entry.id === projectId ? project : entry)),
+    }));
+    return project;
   },
   setActiveProject: (projectId: string | null) => {
     set({ activeProjectId: projectId });

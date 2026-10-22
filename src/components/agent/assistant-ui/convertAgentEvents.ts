@@ -9,7 +9,7 @@ import { extractToolResultMedia } from './toolResultMedia';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'native_session_rebuilt' | 'permission_update_deferred' | 'stream_status' | 'session_summary'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'additional_directories_unavailable' | 'api_retry' | 'compact' | 'error' | 'native_session_rebuilt' | 'permission_update_deferred' | 'stream_status' | 'session_summary'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -50,7 +50,7 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['api_retry', 'compact', 'error', 'native_session_rebuilt', 'permission_update_deferred', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['additional_directories_unavailable', 'api_retry', 'compact', 'error', 'native_session_rebuilt', 'permission_update_deferred', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],

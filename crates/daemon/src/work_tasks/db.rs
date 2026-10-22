@@ -385,13 +385,9 @@ pub fn new_task_id() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// 任务所属项目的主根。Git / worktree 相关能力这一版只服务主根。
 pub fn get_project_path(conn: &Connection, project_id: &str) -> Result<Option<String>> {
-    let mut stmt = conn.prepare("SELECT path FROM projects WHERE id = ?1")?;
-    let mut rows = stmt.query_map(params![project_id], |row| row.get::<_, String>(0))?;
-    match rows.next() {
-        Some(row) => Ok(Some(row?)),
-        None => Ok(None),
-    }
+    crate::db::operations::get_primary_root(conn, project_id)
 }
 
 /// 按 session_id 找活跃任务（preparing/running/awaiting_input）。

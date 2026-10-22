@@ -9,6 +9,7 @@ import { daemonFacade } from './facades/daemon-facade';
 import { shellFacade } from './facades/shell-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
+import { getPrimaryProjectRoot } from '../types/project';
 import type { Session } from '../types/session';
 
 export const DEFAULT_AGENT_CWD = '.';
@@ -77,7 +78,7 @@ function getBoundProjectPath(
   if (!session.project_id) {
     return null;
   }
-  return projects.find((entry) => entry.id === session.project_id)?.path?.trim() ?? null;
+  return getPrimaryProjectRoot(projects.find((entry) => entry.id === session.project_id));
 }
 
 function isDistinctWorkingPath(
@@ -107,8 +108,9 @@ export function resolveSessionCwd(
 
   if (draftProjectId) {
     const project = projects.find((entry) => entry.id === draftProjectId);
-    if (project?.path) {
-      return project.path;
+    const primaryRoot = getPrimaryProjectRoot(project);
+    if (primaryRoot) {
+      return primaryRoot;
     }
   }
 
@@ -127,7 +129,7 @@ export function resolveDraftProjectPath(
   if (!draftProjectId) {
     return null;
   }
-  return projects.find((entry) => entry.id === draftProjectId)?.path ?? null;
+  return getPrimaryProjectRoot(projects.find((entry) => entry.id === draftProjectId));
 }
 
 export function extractSessionWorkingPathFromEvents(events: AgentMessage[]): string | null {
@@ -219,13 +221,15 @@ export async function resolveDraftSessionCwd(
   }
 
   const project = projects.find((entry) => entry.id === draftProjectId);
-  if (!project?.path) {
+  const primaryRoot = getPrimaryProjectRoot(project);
+  if (!primaryRoot) {
     return fallbackCwd;
   }
 
-  const repositoryState = await daemonFacade.git.getRepositoryState(project.path);
+  // worktree 这一版只从主根切出。
+  const repositoryState = await daemonFacade.git.getRepositoryState(primaryRoot);
   const baseRef = resolveWorktreeBaseRef(draftWorkspace.baseRef, repositoryState);
   const branchName = deriveWorktreeBranchName();
-  const created = await daemonFacade.git.createWorktree(project.path, branchName, baseRef);
+  const created = await daemonFacade.git.createWorktree(primaryRoot, branchName, baseRef);
   return created.path;
 }

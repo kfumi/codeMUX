@@ -45,7 +45,12 @@ const mocks = vi.hoisted(() => {
     },
   };
 
-  let projectState: { projects: Array<{ id: string; path: string }> } = { projects: [] };
+  let projectState: {
+    projects: Array<{
+      id: string;
+      roots: Array<{ path: string; position: number; isPrimary: boolean }>;
+    }>;
+  } = { projects: [] };
   const projectStore = {
     getState: () => projectState,
     setProjects: (projects: typeof projectState.projects) => {
@@ -88,7 +93,9 @@ describe('gitEnvironmentSync', () => {
     mocks.agentStore.clearListeners();
     mocks.agentStore.resetRunning();
     mocks.sessionStore.setSessions([{ id: 's1', project_id: 'p1' }]);
-    mocks.projectStore.setProjects([{ id: 'p1', path: 'D:/app' }]);
+    mocks.projectStore.setProjects([
+      { id: 'p1', roots: [{ path: 'D:/app', position: 0, isPrimary: true }] },
+    ]);
   });
 
   it('解析会话所属项目路径；未知会话或项目返回 null', () => {

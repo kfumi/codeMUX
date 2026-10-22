@@ -34,7 +34,7 @@ describe('DraftWorkspaceToolbar', () => {
       projects: [{
         id: 'project-1',
         name: 'codeMUX',
-        path: 'D:/project/codeMUX',
+        roots: [{ path: 'D:/project/codeMUX', position: 0, isPrimary: true }],
         created_at: '2026-01-01',
         updated_at: '2026-01-01',
       }],

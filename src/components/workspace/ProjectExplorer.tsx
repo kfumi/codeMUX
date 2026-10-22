@@ -8,6 +8,7 @@ import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/n
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
+import { getProjectRootPaths } from '../../types/project';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { TooltipHint } from '../ui/tooltip';
@@ -179,10 +180,11 @@ function TreeNode({
 }
 
 export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
-  const [nodes, setNodes] = useState<FileTreeNode[]>([]);
+  const roots = useMemo(() => getProjectRootPaths(project), [project]);
+  const isMultiRoot = roots.length > 1;
+  const [rootStates, setRootStates] = useState<Array<{ root: string; nodes: FileTreeNode[]; error: string | null }>>([]);
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const openFileTab = useSidePanelStore((state) => state.openFileTab);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const isDraftOpen = useNewSessionStore((state) => state.isDraftOpen);
@@ -190,29 +192,43 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
 
   const loadTree = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
-    try {
-      const nextNodes = await daemonFacade.listDirectory(project.path, 5, project.path, true);
-      setNodes(nextNodes);
-    } catch (loadError) {
-      setNodes([]);
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [project.path]);
+    // 每个根单独加载：一个附加目录不可用不应拖垮整棵树。
+    const states = await Promise.all(roots.map(async (root) => {
+      try {
+        const nodes = await daemonFacade.listDirectory(root, 5, root, true);
+        return { root, nodes, error: null };
+      } catch (loadError) {
+        return {
+          root,
+          nodes: [],
+          error: loadError instanceof Error ? loadError.message : String(loadError),
+        };
+      }
+    }));
+    setRootStates(states);
+    setIsLoading(false);
+  }, [roots]);
 
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
 
-  const visibleNodes = useMemo(() => filterTree(nodes, query), [nodes, query]);
+  const filteredRoots = useMemo(
+    () => rootStates.map((state) => ({ ...state, nodes: filterTree(state.nodes, query) })),
+    [rootStates, query],
+  );
+  const totalNodes = useMemo(
+    () => rootStates.reduce((total, state) => total + state.nodes.length, 0),
+    [rootStates],
+  );
+  const hasVisibleNodes = filteredRoots.some((state) => state.nodes.length > 0);
+  const allFailed = rootStates.length > 0 && rootStates.every((state) => state.error);
 
   const handleOpenFile = useCallback(
-    (path: string) => {
-      void openFileTab(project.path, path);
+    (rootPath: string, path: string) => {
+      void openFileTab(rootPath, path);
     },
-    [openFileTab, project.path],
+    [openFileTab],
   );
 
   return (
@@ -255,7 +271,10 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
 
       <div className="flex items-center gap-2 px-3 py-2 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
         <span className="truncate font-medium">{project.name}</span>
-        <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/70">{nodes.length}</span>
+        {isMultiRoot ? (
+          <span className="shrink-0 text-ui-micro text-[hsl(var(--sidebar-fg))]/60">{roots.length} 个文件夹</span>
+        ) : null}
+        <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/70">{totalNodes}</span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">
@@ -264,11 +283,11 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
             正在加载文件树
           </div>
-        ) : error ? (
+        ) : allFailed ? (
           <div className="flex flex-col items-center gap-2 px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
             <FileWarning className="h-5 w-5 text-[hsl(var(--destructive-vivid))]/75" />
             <span>文件树加载失败</span>
-            <span className="break-all text-ui-micro text-[hsl(var(--sidebar-fg))]/70">{error}</span>
+            <span className="break-all text-ui-micro text-[hsl(var(--sidebar-fg))]/70">{rootStates[0]?.error}</span>
             <button
               type="button"
               onClick={() => void loadTree()}
@@ -277,27 +296,51 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
               重试
             </button>
           </div>
-        ) : visibleNodes.length === 0 ? (
+        ) : !hasVisibleNodes ? (
           <div className="px-5 py-8 text-center text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
             {query ? '没有匹配的文件' : '项目中没有可显示的文件'}
           </div>
         ) : (
-          visibleNodes.map((node) => (
-            <TreeNode
-              key={node.path}
-              node={node}
-              level={0}
-              query={query}
-              projectPath={project.path}
-              sessionId={composerSessionId}
-              onOpenFile={handleOpenFile}
-            />
+          filteredRoots.map((state) => (
+            <div key={state.root}>
+              {isMultiRoot ? (
+                <TooltipHint content={state.root}>
+                  <div className="mt-1 flex items-center gap-1.5 px-2 py-1 text-ui-micro font-medium text-[hsl(var(--sidebar-fg))]/75">
+                    <Folder className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{state.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? state.root}</span>
+                    {state.error ? (
+                      <span className="ml-auto shrink-0 text-[hsl(var(--destructive))]/75">不可用</span>
+                    ) : null}
+                  </div>
+                </TooltipHint>
+              ) : null}
+              {state.error ? (
+                <div className="px-2 py-1 text-ui-micro text-[hsl(var(--destructive))]/75" style={{ paddingLeft: isMultiRoot ? 24 : 10 }}>
+                  {state.error}
+                </div>
+              ) : (
+                state.nodes.map((node) => (
+                  <TreeNode
+                    key={node.path}
+                    node={node}
+                    level={isMultiRoot ? 1 : 0}
+                    query={query}
+                    projectPath={state.root}
+                    sessionId={composerSessionId}
+                    onOpenFile={(path) => handleOpenFile(state.root, path)}
+                  />
+                ))
+              )}
+            </div>
           ))
         )}
       </div>
 
-      <div className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/70" title={project.path}>
-        {project.path}
+      <div
+        className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/70"
+        title={roots.join('\n')}
+      >
+        {roots.join(' · ')}
       </div>
     </div>
   );

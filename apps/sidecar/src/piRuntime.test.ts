@@ -708,6 +708,26 @@ describe('PiRuntime', () => {
     }
   });
 
+  it('appends additional directories to the system prompt without widening project trust', () => {
+    const args = buildPiLaunchArgs(buildConfig({
+      additionalDirectories: ['D:/work/backend', 'D:/work/shared'],
+    }));
+
+    const promptIndex = args.indexOf('--append-system-prompt');
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    const prompt = args[promptIndex + 1];
+    expect(prompt).toContain('Additional directories (outside the working directory):');
+    expect(prompt).toContain('  - D:/work/backend');
+    expect(prompt).toContain('  - D:/work/shared');
+    expect(args).not.toContain('--add-dir');
+    expect(args).not.toContain('--approve');
+  });
+
+  it('omits the additional-directory prompt when there are no additional directories', () => {
+    const args = buildPiLaunchArgs(buildConfig());
+    expect(args).not.toContain('--append-system-prompt');
+  });
+
   it('normalizes anthropic baseUrl before pi appends /v1/messages', () => {
     expect(normalizePiAnthropicBaseUrl('https://developer.amd.com.cn/radeon/api/v1'))
       .toBe('https://developer.amd.com.cn/radeon/api');

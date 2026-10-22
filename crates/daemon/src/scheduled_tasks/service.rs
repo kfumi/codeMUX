@@ -241,7 +241,8 @@ mod tests {
     #[test]
     fn tick_fires_runner_with_saved_permission_snapshot() {
         let conn = test_conn();
-        let project = operations::create_project(&conn, "demo", "/tmp/demo").unwrap();
+        let project =
+            operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let upsert = sample_upsert(&project.id);
         let task = db::create_task(&conn, &upsert).unwrap();
 
@@ -261,7 +262,8 @@ mod tests {
     #[test]
     fn tick_does_not_fire_before_next_run_at() {
         let conn = test_conn();
-        let project = operations::create_project(&conn, "demo", "/tmp/demo").unwrap();
+        let project =
+            operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let task = db::create_task(&conn, &sample_upsert(&project.id)).unwrap();
         let mut runner = MockRunner::new(TaskRunnerResult::Started {
             session_id: "session-1".to_string(),
@@ -277,7 +279,8 @@ mod tests {
     #[test]
     fn overlap_skips_second_fire() {
         let conn = test_conn();
-        let project = operations::create_project(&conn, "demo", "/tmp/demo").unwrap();
+        let project =
+            operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let task = db::create_task(&conn, &sample_upsert(&project.id)).unwrap();
         let mut runner = MockRunner::new(TaskRunnerResult::Started {
             session_id: "session-1".to_string(),
@@ -302,7 +305,8 @@ mod tests {
     #[test]
     fn custom_permission_snapshot_is_passed_to_runner() {
         let conn = test_conn();
-        let project = operations::create_project(&conn, "demo", "/tmp/demo").unwrap();
+        let project =
+            operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let mut upsert = sample_upsert(&project.id);
         upsert.permission_config =
             r#"{"kind":"claude_code","permissionMode":"acceptEdits"}"#.to_string();
@@ -323,7 +327,8 @@ mod tests {
     #[test]
     fn reconcile_completes_run_when_timeline_already_finished() {
         let mut conn = test_conn();
-        let project = operations::create_project(&conn, "demo", "/tmp/demo").unwrap();
+        let project =
+            operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let task = db::create_task(&conn, &sample_upsert(&project.id)).unwrap();
         let session = operations::create_scheduled_session_for_project(
             &conn,
@@ -331,6 +336,7 @@ mod tests {
             crate::config::types::AgentKind::ClaudeCode,
             "agent",
             &project.id,
+            None,
             None,
             None,
             None,

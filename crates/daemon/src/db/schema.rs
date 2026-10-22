@@ -26,9 +26,17 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            path TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_roots (
+            project_id TEXT NOT NULL,
+            root_path TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (project_id, root_path),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS sessions (
@@ -461,6 +469,27 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .is_ok();
     if !has_git_branch {
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN git_branch TEXT", []);
+    }
+
+    // Migration: directory_scope — 生成型会话（定时任务 / Work Task）创建时冻结的
+    // 附加目录数组（JSON）。NULL 表示普通会话，每次运行实例重建时按项目当前根现算。
+    let has_directory_scope: bool = conn
+        .prepare("SELECT directory_scope FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_directory_scope {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN directory_scope TEXT", []);
+    }
+
+    // Migration: projects.path → project_roots。主根只保留在 roots 表里，
+    // 单一路径列必须删掉——两个真相源迟早会在某个读点破掉。
+    let has_project_path: bool = conn.prepare("SELECT path FROM projects LIMIT 0").is_ok();
+    if has_project_path {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO project_roots (project_id, root_path, position, is_primary)
+             SELECT id, path, 0, 1 FROM projects
+             WHERE path IS NOT NULL AND trim(path) <> '';
+             ALTER TABLE projects DROP COLUMN path;",
+        )?;
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
@@ -1041,5 +1070,52 @@ mod tests {
         assert_eq!(other_apps.0, 0);
         assert_eq!(other_apps.1, 0);
         assert_eq!(other_apps.2, 0);
+    }
+
+    #[test]
+    fn migrates_project_path_into_the_primary_root_and_drops_the_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 老库：项目只有单一路径列。
+        conn.execute_batch(
+            "CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO projects VALUES ('p1', 'Demo', '/tmp/demo', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO projects VALUES ('p2', 'Empty', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let roots: Vec<(String, i64, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT root_path, position, is_primary FROM project_roots ORDER BY project_id, position")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(roots, vec![("/tmp/demo".to_string(), 0, 1)]);
+        // 单一路径列必须消失：不能再有第二真相源。
+        assert!(conn.prepare("SELECT path FROM projects LIMIT 0").is_err());
+    }
+
+    #[test]
+    fn fresh_database_has_project_roots_and_session_directory_scope() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        assert!(conn.prepare("SELECT path FROM projects LIMIT 0").is_err());
+        assert!(conn
+            .prepare("SELECT root_path FROM project_roots LIMIT 0")
+            .is_ok());
+        assert!(conn
+            .prepare("SELECT directory_scope FROM sessions LIMIT 0")
+            .is_ok());
     }
 }

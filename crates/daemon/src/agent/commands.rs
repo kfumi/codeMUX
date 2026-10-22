@@ -23,7 +23,7 @@ pub use super::session_lifecycle::{
 };
 
 pub(crate) use super::session_lifecycle::{
-    home_dir, load_latest_token_usage_for_session, reject_read_only_session,
+    home_dir, load_latest_token_usage_for_session, reject_read_only_session, resolve_session_cwd,
     send_command_to_session,
 };
 

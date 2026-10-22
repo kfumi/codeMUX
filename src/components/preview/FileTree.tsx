@@ -60,6 +60,8 @@ function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; on
 
 export function FileTree() {
   const treeRoot = usePreviewStore((s) => s.treeRoot);
+  const rootTrees = usePreviewStore((s) => s.rootTrees);
+  const rootTreesLoading = usePreviewStore((s) => s.rootTreesLoading);
   const fileTreeLoading = usePreviewStore((s) => s.fileTreeLoading);
   const openFile = usePreviewStore((s) => s.openFile);
 
@@ -70,11 +72,43 @@ export function FileTree() {
     [openFile]
   );
 
-  if (fileTreeLoading) {
+  const isMultiRoot = rootTrees.length > 1;
+
+  if ((isMultiRoot && rootTreesLoading) || (!isMultiRoot && fileTreeLoading)) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground/40 text-xs p-4 text-center gap-1.5">
         <Loader2 className="h-3 w-3 animate-spin" />
         加载中
+      </div>
+    );
+  }
+
+  if (isMultiRoot) {
+    const hasAnyNode = rootTrees.some((tree) => !tree.unavailable && tree.nodes.length > 0);
+    if (!hasAnyNode) {
+      return (
+        <div className="flex items-center justify-center h-full text-muted-foreground/40 text-xs p-4 text-center">
+          暂无文件<br />请先选择项目
+        </div>
+      );
+    }
+    return (
+      <div className="h-full overflow-auto py-1">
+        {rootTrees.map((tree) => (
+          <div key={tree.root}>
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-muted-foreground"
+              title={tree.root}
+            >
+              <Folder className="h-3 w-3 shrink-0" />
+              <span className="truncate">{tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root}</span>
+              {tree.unavailable ? <span className="ml-auto shrink-0 text-destructive">不可用</span> : null}
+            </div>
+            {tree.nodes.map((node) => (
+              <TreeNode key={node.path} node={node} onFileClick={handleFileClick} level={1} />
+            ))}
+          </div>
+        ))}
       </div>
     );
   }

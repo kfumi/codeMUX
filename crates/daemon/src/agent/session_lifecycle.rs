@@ -1122,26 +1122,31 @@ async fn handle_agent_session_mapping_event(
     Ok(persisted)
 }
 
-fn resolve_session_cwd(
+/// 会话工作目录解析的唯一权威实现。
+///
+/// 优先级：imported 会话取原生存储的 cwd → `sessions.working_path` → 项目主根 →
+/// 调用方给的兜底目录（通常是 home）。落回主根时目录必须存在：主根不可用就拒绝
+/// 启动会话，避免在一个没有落点的目录里开工。
+pub(crate) fn resolve_session_cwd(
     state: &crate::AppState,
     session_id: &str,
-    cwd: &str,
+    fallback: &str,
 ) -> Result<String, String> {
-    let (working_path, origin, imported_cwd) = {
-        let db = state.db.lock().unwrap();
-        db.query_row(
-            "SELECT s.working_path, s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let (working_path, origin, imported_cwd, project_id) = db
+        .query_row(
+            "SELECT s.working_path, s.origin, ss.cwd, s.project_id FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
             [session_id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             },
         )
-        .map_err(|error| format!("无法读取会话工作目录: {}", error))?
-    };
+        .map_err(|error| format!("无法读取会话工作目录: {}", error))?;
 
     if origin == "imported" {
         if let Some(imported_cwd) = imported_cwd.filter(|value| !value.trim().is_empty()) {
@@ -1153,7 +1158,82 @@ fn resolve_session_cwd(
         return Ok(working_path);
     }
 
-    Ok(cwd.to_string())
+    if let Some(project_id) = project_id {
+        if let Some(primary_root) = operations::get_primary_root(&db, &project_id)
+            .map_err(|error| format!("无法读取项目主根: {}", error))?
+        {
+            if !Path::new(&primary_root).is_dir() {
+                return Err(format!("项目主根目录不可用: {}", primary_root));
+            }
+            return Ok(primary_root);
+        }
+    }
+
+    Ok(fallback.to_string())
+}
+
+/// 该会话当前可访问的附加目录，以及因目录不存在被跳过的条目。
+///
+/// 普通会话按项目当前根现算（全部根 − 会话自己的工作目录）；生成型会话
+/// （定时任务 / Work Task）直接使用创建时冻结的 `directory_scope`。
+pub(crate) fn resolve_additional_directories(
+    state: &crate::AppState,
+    session_id: &str,
+    cwd: &str,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let (project_id, directory_scope) = db
+        .query_row(
+            "SELECT project_id, directory_scope FROM sessions WHERE id = ?1 LIMIT 1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .map_err(|error| format!("无法读取会话目录范围: {}", error))?;
+
+    let candidates: Vec<String> = match directory_scope.filter(|value| !value.trim().is_empty()) {
+        Some(scope) => serde_json::from_str::<Vec<String>>(&scope)
+            .map_err(|error| format!("会话目录范围格式错误: {}", error))?,
+        None => match project_id {
+            Some(project_id) => operations::get_project_roots(&db, &project_id)
+                .map_err(|error| format!("无法读取项目根: {}", error))?
+                .into_iter()
+                .map(|root| root.path)
+                .collect(),
+            None => Vec::new(),
+        },
+    };
+
+    let cwd_key = directory_scope_key(cwd);
+    let mut additional = Vec::new();
+    let mut unavailable = Vec::new();
+    let mut seen = HashSet::new();
+    for path in candidates {
+        let key = directory_scope_key(&path);
+        if key.is_empty() || key == cwd_key || !seen.insert(key) {
+            continue;
+        }
+        if Path::new(&path).is_dir() {
+            additional.push(path);
+        } else {
+            unavailable.push(path);
+        }
+    }
+    Ok((additional, unavailable))
+}
+
+fn directory_scope_key(path: &str) -> String {
+    let unified = path.trim().replace('\\', "/");
+    let unified = unified.trim_end_matches('/');
+    if cfg!(windows) {
+        unified.to_lowercase()
+    } else {
+        unified.to_string()
+    }
 }
 
 fn resolve_skill_cwd(
@@ -1234,6 +1314,24 @@ pub(crate) fn build_ensure_session_command(
     };
     if session_origin == "imported" {
         cmd["resumeOnly"] = serde_json::Value::Bool(true);
+    }
+
+    // 附加目录只经提示词声明，不启用任何原生多目录能力（ADR 0020）。
+    // 不可用的目录跳过并记录；会话照常启动，主根不可用的拒绝在 cwd 解析里。
+    let (additional_directories, unavailable_directories) =
+        resolve_additional_directories(state, session_id, &cwd)?;
+    if !additional_directories.is_empty() {
+        cmd["additionalDirectories"] = serde_json::json!(additional_directories);
+    }
+    if !unavailable_directories.is_empty() {
+        warn!(
+            target: "agent",
+            "Skipping unavailable additional directories session_id={} dirs={:?}",
+            session_id,
+            unavailable_directories
+        );
+        // sidecar 收到后发一条系统事件（已持久化去重），界面据此提示。
+        cmd["unavailableAdditionalDirectories"] = serde_json::json!(unavailable_directories);
     }
 
     if agent_kind == "opencode" || agent_kind == "pi" {
@@ -1338,12 +1436,25 @@ pub(crate) fn build_ensure_session_command(
     };
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         if parsed_agent_kind == AgentKind::ClaudeCode {
-            let project_root = cmd
-                .get("cwd")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(&cwd);
+            // 项目 Skill 扫描只服务主根：附加目录不贡献项目配置（ADR 0020）。
+            let project_root = {
+                let db = state.db.lock().unwrap();
+                db.query_row(
+                    "SELECT project_id FROM sessions WHERE id = ?1 LIMIT 1",
+                    [session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+                .and_then(|project_id| {
+                    operations::get_primary_root(&db, &project_id)
+                        .ok()
+                        .flatten()
+                })
+            }
+            .unwrap_or_else(|| cwd.clone());
             let project_skills = crate::skills::project::cached_project_skills(
-                std::path::Path::new(project_root),
+                std::path::Path::new(&project_root),
                 parsed_agent_kind,
             )
             .unwrap_or_default();
@@ -1923,7 +2034,8 @@ mod tests {
         load_latest_token_usage_for_agent_session, mapping_generation_is_current,
         mcp_tooling_applies_to, parse_agent_session_mapping_event, parse_agent_session_title_event,
         persist_agent_session_mapping_event, resolve_active_runtime_config,
-        resolve_agent_session_info, session_lifecycle_lock, AgentState,
+        resolve_additional_directories, resolve_agent_session_info, resolve_session_cwd,
+        session_lifecycle_lock, AgentState,
     };
     use crate::config::types::AgentKind;
 
@@ -3552,5 +3664,271 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    // --- 项目多根：会话目录解析 -------------------------------------------
+
+    fn empty_state() -> crate::AppState {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        }
+    }
+
+    fn make_dirs(root: &std::path::Path, names: &[&str]) -> Vec<String> {
+        names
+            .iter()
+            .map(|name| {
+                let path = root.join(name);
+                std::fs::create_dir_all(&path).unwrap();
+                path.to_string_lossy().into_owned()
+            })
+            .collect()
+    }
+
+    fn create_project_session(state: &crate::AppState, roots: &[String]) -> String {
+        let db = state.db.lock().unwrap();
+        let project = crate::db::operations::create_project(&db, "demo", roots).unwrap();
+        crate::db::operations::create_session_for_project_with_permissions(
+            &db,
+            "Chat",
+            AgentKind::ClaudeCode,
+            "chat",
+            &project.id,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn resolves_the_primary_root_when_a_session_has_no_working_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "backend"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots);
+        {
+            let db = state.db.lock().unwrap();
+            // 模拟老数据：没有写入 working_path。
+            db.execute(
+                "UPDATE sessions SET working_path = NULL WHERE id = ?1",
+                [session_id.as_str()],
+            )
+            .unwrap();
+        }
+
+        let resolved = resolve_session_cwd(&state, &session_id, "/fallback").unwrap();
+        assert_eq!(resolved, roots[0]);
+    }
+
+    #[test]
+    fn prefers_the_session_working_path_over_the_primary_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "worktree"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots);
+        {
+            let db = state.db.lock().unwrap();
+            crate::db::operations::update_session_working_path(
+                &db,
+                &session_id,
+                &roots[1],
+                crate::db::operations::GitBranchWrite::Keep,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            resolve_session_cwd(&state, &session_id, "/fallback").unwrap(),
+            roots[1]
+        );
+    }
+
+    #[test]
+    fn prefers_the_imported_native_cwd_over_every_other_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "imported"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots);
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "UPDATE sessions SET origin = 'imported' WHERE id = ?1",
+                [session_id.as_str()],
+            )
+            .unwrap();
+            crate::db::operations::update_session_working_path(
+                &db,
+                &session_id,
+                &roots[0],
+                crate::db::operations::GitBranchWrite::Keep,
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO session_sources (app_session_id, agent_kind, agent_session_id, source_locator, source_fingerprint, cwd, snapshot_version, imported_at)
+                 VALUES (?1, 'claude_code', 'native-1', 'locator', 'fingerprint', ?2, 1, '2026-01-01T00:00:00Z')",
+                rusqlite::params![session_id, roots[1]],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            resolve_session_cwd(&state, &session_id, "/fallback").unwrap(),
+            roots[1]
+        );
+    }
+
+    #[test]
+    fn refuses_to_start_when_the_primary_root_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp
+            .path()
+            .join("moved-away")
+            .to_string_lossy()
+            .into_owned();
+        let state = empty_state();
+        let session_id = create_project_session(&state, std::slice::from_ref(&missing));
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "UPDATE sessions SET working_path = NULL WHERE id = ?1",
+                [session_id.as_str()],
+            )
+            .unwrap();
+        }
+
+        let error = resolve_session_cwd(&state, &session_id, "/fallback").unwrap_err();
+        assert!(error.contains("主根目录不可用"), "{error}");
+    }
+
+    #[test]
+    fn falls_back_for_sessions_without_a_project() {
+        let state = empty_state();
+        let session_id = {
+            let db = state.db.lock().unwrap();
+            crate::db::operations::create_session_with_mode_and_permissions(
+                &db,
+                "Chat",
+                AgentKind::ClaudeCode,
+                "chat",
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .id
+        };
+
+        assert_eq!(
+            resolve_session_cwd(&state, &session_id, "/fallback").unwrap(),
+            "/fallback"
+        );
+    }
+
+    #[test]
+    fn additional_directories_are_all_roots_except_the_session_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "backend", "shared"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots);
+
+        let (additional, unavailable) =
+            resolve_additional_directories(&state, &session_id, &roots[0]).unwrap();
+
+        assert_eq!(additional, vec![roots[1].clone(), roots[2].clone()]);
+        assert!(unavailable.is_empty());
+    }
+
+    #[test]
+    fn skips_unavailable_additional_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut roots = make_dirs(temp.path(), &["frontend", "backend"]);
+        let missing = temp.path().join("gone").to_string_lossy().into_owned();
+        let state = empty_state();
+        {
+            let db = state.db.lock().unwrap();
+            let project = crate::db::operations::create_project(&db, "demo", &roots).unwrap();
+            roots.push(missing.clone());
+            crate::db::operations::update_project(
+                &db,
+                &project.id,
+                crate::db::operations::ProjectUpdate {
+                    roots: Some(&roots),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            crate::db::operations::create_session_for_project_with_permissions(
+                &db,
+                "Chat",
+                AgentKind::ClaudeCode,
+                "chat",
+                &project.id,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let session_id = {
+            let db = state.db.lock().unwrap();
+            crate::db::operations::get_all_sessions(&db).unwrap()[0]
+                .id
+                .clone()
+        };
+
+        let (additional, unavailable) =
+            resolve_additional_directories(&state, &session_id, &roots[0]).unwrap();
+
+        assert_eq!(additional, vec![roots[1].clone()]);
+        assert_eq!(unavailable, vec![missing]);
+    }
+
+    #[test]
+    fn generated_sessions_use_their_frozen_directory_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "backend", "shared"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots);
+        {
+            let db = state.db.lock().unwrap();
+            // 冻结时后端与 shared 都在；之后项目根改成只剩 backend。
+            db.execute(
+                "UPDATE sessions SET directory_scope = ?1 WHERE id = ?2",
+                rusqlite::params![
+                    serde_json::json!([roots[1], roots[2]]).to_string(),
+                    session_id
+                ],
+            )
+            .unwrap();
+            let project_id: String = db
+                .query_row(
+                    "SELECT project_id FROM sessions WHERE id = ?1",
+                    [session_id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            crate::db::operations::update_project(
+                &db,
+                &project_id,
+                crate::db::operations::ProjectUpdate {
+                    roots: Some(&[roots[0].clone(), roots[1].clone()]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let (additional, unavailable) =
+            resolve_additional_directories(&state, &session_id, &roots[0]).unwrap();
+
+        assert_eq!(additional, vec![roots[1].clone(), roots[2].clone()]);
+        assert!(unavailable.is_empty());
     }
 }

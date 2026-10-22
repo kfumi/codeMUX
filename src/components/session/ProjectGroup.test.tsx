@@ -25,7 +25,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: 'project-1',
     name: 'Demo Project',
-    path: 'D:/work/demo',
+    roots: [{ path: 'D:/work/demo', position: 0, isPrimary: true }],
     created_at: '',
     updated_at: '',
     ...overrides,

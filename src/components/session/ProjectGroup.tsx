@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { shellFacade } from '../../lib/facades/shell-facade';
-import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, Layers, MessageSquarePlus, MoreHorizontal, Pencil, Settings2, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
-import { Project } from '../../types/project';
+import { Project, getPrimaryProjectRoot } from '../../types/project';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSessionStore } from '../../stores/sessionStore';
 import { SessionItem } from './SessionItem';
+import { ProjectEditorDialog } from './ProjectEditorDialog';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -53,6 +55,11 @@ export function ProjectGroup({
 }: ProjectGroupProps) {
   const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
   const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
+  const projectSessionCount = useSessionStore((state) =>
+    [...state.sessions, ...state.archivedSessions]
+      .filter((session) => session.project_id === project.id)
+      .length,
+  );
   // 窄屏抽屉没有 hover:项目行操作按钮(更多/文件树/新建对话)常显,否则触屏上
   // 根本点不到;桌面保持 hover 展开不变。资源管理器入口按宿主能力隐藏。
   const isNarrow = useIsNarrowViewport();
@@ -61,6 +68,7 @@ export function ProjectGroup({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_VISIBLE_PROJECT_SESSIONS);
   const visibleSessions = sessions.slice(0, visibleSessionLimit);
   const hasHiddenSessions = visibleSessionLimit < sessions.length;
@@ -124,6 +132,19 @@ export function ProjectGroup({
         ) : (
           <span className="flex-1 truncate text-sm font-medium">{project.name}</span>
         )}
+        {project.roots.length > 1 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex shrink-0 items-center gap-0.5 rounded-xs bg-[hsl(var(--sidebar-muted))] px-1 py-0.5 text-ui-micro text-[hsl(var(--sidebar-fg))]/70">
+                <Layers className="h-2.5 w-2.5" />
+                {project.roots.length}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <p>{project.roots.length} 个源文件夹</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         <div
           className={cn(
             'flex items-center gap-0.5 transition-opacity duration-normal',
@@ -149,10 +170,21 @@ export function ProjectGroup({
               >
                 导入外部会话
               </DropdownMenuItem>
+              <DropdownMenuItem
+                icon={<Settings2 className="h-3.5 w-3.5" />}
+                onSelect={() => setEditorOpen(true)}
+              >
+                编辑项目
+              </DropdownMenuItem>
               {canOpenExplorer ? (
                 <DropdownMenuItem
                   icon={<FolderOpen className="h-3.5 w-3.5" />}
-                  onClick={() => shellFacade.openInExplorer(project.path)}
+                  onClick={() => {
+                    const primaryRoot = getPrimaryProjectRoot(project);
+                    if (primaryRoot) {
+                      shellFacade.openInExplorer(primaryRoot);
+                    }
+                  }}
                 >
                   在资源管理器中打开
                 </DropdownMenuItem>
@@ -244,11 +276,17 @@ export function ProjectGroup({
         </div>
       )}
 
+      <ProjectEditorDialog
+        project={project}
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+      />
+
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="移除项目"
-        description={`确定要移除“${project.name}”吗？项目下的对话不会被删除。`}
+        description={`确定要移除“${project.name}”吗？其名下 ${projectSessionCount} 条会话会被一并删除。`}
         confirmLabel="移除"
         variant="destructive"
         onConfirm={() => onDeleteProject(project.id)}

@@ -36,9 +36,14 @@ interface DaemonClientCore {
   listSessions(): Promise<unknown[]>;
   listArchivedSessions(): Promise<unknown[]>;
   listProjects(): Promise<unknown[]>;
-  createProject(name: string, path: string): Promise<unknown>;
+  createProject(name: string, roots: string[]): Promise<unknown>;
   deleteProject(projectId: string): Promise<void>;
   renameProject(projectId: string, name: string): Promise<void>;
+  /** 编辑项目：改名、增删根、切换主根。返回更新后的项目。 */
+  updateProject(
+    projectId: string,
+    patch: { name?: string; roots?: string[]; primaryRoot?: string },
+  ): Promise<unknown>;
   getBootstrap(): Promise<unknown>;
   getTimeline(
     sessionId: string,
@@ -296,10 +301,10 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
     listSessions: () => daemonFetch(config, '/api/sessions'),
     listArchivedSessions: () => daemonFetch(config, '/api/sessions/archived'),
     listProjects: () => daemonFetch(config, '/api/projects'),
-    createProject: (name, path) =>
+    createProject: (name, roots) =>
       daemonFetch(config, '/api/projects', {
         method: 'POST',
-        body: JSON.stringify({ name, path }),
+        body: JSON.stringify({ name, roots }),
       }),
     deleteProject: async (projectId) => {
       await daemonFetch(config, `/api/projects/${projectId}`, { method: 'DELETE' });
@@ -310,6 +315,11 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         body: JSON.stringify({ name }),
       });
     },
+    updateProject: (projectId, patch) =>
+      daemonFetch(config, `/api/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
     getBootstrap: () => daemonFetch(config, '/api/bootstrap'),
     getTimeline: (sessionId, query = {}) => {
       const params = new URLSearchParams();

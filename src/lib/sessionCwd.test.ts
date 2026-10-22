@@ -7,7 +7,7 @@ const projects: Project[] = [
   {
     id: 'project-1',
     name: 'codeMUX',
-    path: 'D:/project/ai-code/codeMUX',
+    roots: [{ path: 'D:/project/ai-code/codeMUX', position: 0, isPrimary: true }],
     created_at: '',
     updated_at: '',
   },
@@ -210,7 +210,7 @@ const worktreeProjects: Project[] = [
   {
     id: 'project-1',
     name: 'codeMUX',
-    path: 'D:/project/codeMUX',
+    roots: [{ path: 'D:/project/codeMUX', position: 0, isPrimary: true }],
     created_at: '',
     updated_at: '',
   },

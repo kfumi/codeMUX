@@ -273,7 +273,7 @@ describe('CodeMuxComposer', () => {
     captureDesktopScreenMock.mockReset();
     hostCapabilitiesState.capture = false;
     useAgentStore.setState({ events: {}, forceStopped: {}, pendingComposerRestore: {} });
-    usePreviewStore.setState({ treeRoot: null });
+    usePreviewStore.setState({ treeRoot: null, rootTrees: [] });
     registerSkillCommands([]);
     cleanup();
   });
@@ -688,6 +688,87 @@ describe('CodeMuxComposer', () => {
 
     expect(editorSetTextMock).toHaveBeenCalledWith('[App.tsx](App.tsx) ');
     expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
+  });
+
+  it('inserts an absolute path for a file under an additional root and shows its root name', () => {
+    composerText = '@Service';
+    usePreviewStore.setState({
+      rootTrees: [
+        {
+          root: 'D:/work/frontend',
+          isPrimary: true,
+          unavailable: false,
+          nodes: [{
+            name: 'src',
+            path: 'D:/work/frontend/src',
+            isDir: true,
+            children: [{ name: 'App.tsx', path: 'D:/work/frontend/src/App.tsx', isDir: false }],
+          }],
+        },
+        {
+          root: 'D:/work/backend',
+          isPrimary: false,
+          unavailable: false,
+          nodes: [{
+            name: 'src',
+            path: 'D:/work/backend/src',
+            isDir: true,
+            children: [{ name: 'Service.java', path: 'D:/work/backend/src/Service.java', isDir: false }],
+          }],
+        },
+      ],
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" projectPath="D:/work/frontend" />);
+
+    const item = document.querySelector('[data-file-id="D:\\\\work\\\\backend\\\\src\\\\Service.java"], [data-file-id="D:/work/backend/src/Service.java"]');
+    expect(item).toBeTruthy();
+    // 候选里带根名，同名文件可分辨。
+    expect(item?.textContent).toContain('backend');
+    fireEvent.click(item as Element);
+
+    expect(editorSetTextMock).toHaveBeenCalledWith(
+      '[Service.java](D:/work/backend/src/Service.java) ',
+    );
+  });
+
+  it('keeps the primary root file relative in a multi-root project', () => {
+    composerText = '@App';
+    usePreviewStore.setState({
+      rootTrees: [
+        {
+          root: 'D:/work/frontend',
+          isPrimary: true,
+          unavailable: false,
+          nodes: [{
+            name: 'src',
+            path: 'D:/work/frontend/src',
+            isDir: true,
+            children: [{ name: 'App.tsx', path: 'D:/work/frontend/src/App.tsx', isDir: false }],
+          }],
+        },
+        {
+          root: 'D:/work/backend',
+          isPrimary: false,
+          unavailable: false,
+          nodes: [{
+            name: 'src',
+            path: 'D:/work/backend/src',
+            isDir: true,
+            children: [{ name: 'App.java', path: 'D:/work/backend/src/App.java', isDir: false }],
+          }],
+        },
+      ],
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" projectPath="D:/work/frontend" />);
+
+    const items = Array.from(document.querySelectorAll('[data-file-id]'));
+    const primary = items.find((item) => item.textContent?.includes('App.tsx'));
+    expect(primary).toBeTruthy();
+    fireEvent.click(primary as Element);
+
+    expect(editorSetTextMock).toHaveBeenCalledWith('[App.tsx](src/App.tsx) ');
   });
 
   it('moves the highlight with arrow keys and marks it as the current row', () => {
