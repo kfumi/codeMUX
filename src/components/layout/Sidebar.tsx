@@ -1,18 +1,15 @@
 import { MessageSquarePlus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { openDialog } from '../../lib/desktopDialogs';
-import { createLogger, serializeError } from '../../lib/logger';
 import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
 import { useChatSearchStore } from '../../stores/chatSearchStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { Project } from '../../types/project';
+import { ProjectCreateDialog } from '../session/ProjectCreateDialog';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
 import { ProjectExplorer } from '../workspace/ProjectExplorer';
-
-const logger = createLogger('Sidebar');
 
 interface SidebarProps {
   onNewSession: () => void;
@@ -41,6 +38,7 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
   const newSessionAria = useShortcutAriaKeyshortcuts('newSession');
   const searchAria = useShortcutAriaKeyshortcuts('openSearch');
   const [explorerProject, setExplorerProject] = useState<Project | null>(null);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   useEffect(() => {
     fetchProjects();
@@ -51,22 +49,8 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
     void useWorkTaskStore.getState().fetchTasks();
   }, []);
 
-  const handleAddProject = async () => {
-    try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: true,
-        title: '选择源文件夹（可多选）',
-      });
-      if (selected && selected.length > 0) {
-        // 原生选择器的返回顺序即根顺序：第一个成为主根。
-        const roots = Array.isArray(selected) ? selected : [selected];
-        const name = roots[0].split(/[/\\]/).filter(Boolean).pop() || roots[0];
-        await useProjectStore.getState().createProject(name, roots);
-      }
-    } catch (error) {
-      logger.error('Failed to add project from dialog', undefined, serializeError(error));
-    }
+  const handleAddProject = () => {
+    setCreateProjectOpen(true);
   };
 
   if (explorerProject) {
@@ -128,6 +112,7 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
         onOpenChange={setChatSearchOpen}
         onSelectSession={onSelectSession}
       />
+      <ProjectCreateDialog open={createProjectOpen} onOpenChange={setCreateProjectOpen} />
     </div>
   );
 }

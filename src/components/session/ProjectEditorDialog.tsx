@@ -19,43 +19,18 @@ import {
 import { Input } from '../ui/input';
 import { TooltipHint } from '../ui/tooltip';
 import { ConfirmDialog } from '../ui/confirm-dialog';
+import {
+  appendPickedRoots,
+  disambiguatedRootNames,
+  projectRootName as rootName,
+  removeRootKeepingPrimary,
+  type EditableProjectRoot,
+} from './projectRoots';
 
 interface ProjectEditorDialogProps {
   project: Project | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-interface EditableRoot {
-  path: string;
-  isPrimary: boolean;
-}
-
-function normalizeRootPath(path: string): string {
-  const stripped = path.trim().replace(/[/\\]+$/, '');
-  return stripped.toLowerCase();
-}
-
-function rootName(path: string): string {
-  return path.split(/[/\\]+/).filter(Boolean).at(-1) ?? path;
-}
-
-/** 同一项目里出现同名文件夹时，用上一级目录名消歧。 */
-function disambiguatedNames(roots: EditableRoot[]): string[] {
-  const names = roots.map((root) => rootName(root.path));
-  const counts = new Map<string, number>();
-  for (const name of names) {
-    counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  return roots.map((root, index) => {
-    const name = names[index];
-    if ((counts.get(name) ?? 0) < 2) {
-      return name;
-    }
-    const segments = root.path.split(/[/\\]+/).filter(Boolean);
-    const parent = segments.at(-2);
-    return parent ? `${parent}/${name}` : name;
-  });
 }
 
 function pathKey(path: string | null | undefined): string {
@@ -97,7 +72,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
   const updateProject = useProjectStore((state) => state.updateProject);
   const deleteProject = useProjectStore((state) => state.deleteProject);
   const [name, setName] = useState('');
-  const [roots, setRoots] = useState<EditableRoot[]>([]);
+  const [roots, setRoots] = useState<EditableProjectRoot[]>([]);
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -120,7 +95,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
     setNotice(null);
   }, [open, project]);
 
-  const names = useMemo(() => disambiguatedNames(roots), [roots]);
+  const names = useMemo(() => disambiguatedRootNames(roots), [roots]);
 
   if (!project) {
     return null;
@@ -136,12 +111,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
       setDeleteOpen(true);
       return;
     }
-    const remaining = roots.filter((root) => root.path !== path);
-    if (!remaining.some((root) => root.isPrimary)) {
-      // 移除主根后，顺序最小的剩余根自动继任。
-      remaining[0] = { ...remaining[0], isPrimary: true };
-    }
-    setRoots(remaining);
+    setRoots((current) => removeRootKeepingPrimary(current, path));
     const affected = sessionsUnderRoot(project, path);
     setNotice(
       affected > 0
@@ -161,18 +131,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
         return;
       }
       const picked = Array.isArray(selected) ? selected : [selected];
-      setRoots((current) => {
-        const existing = new Set(current.map((root) => normalizeRootPath(root.path)));
-        const appended = [...current];
-        for (const path of picked) {
-          if (existing.has(normalizeRootPath(path))) {
-            continue;
-          }
-          existing.add(normalizeRootPath(path));
-          appended.push({ path, isPrimary: false });
-        }
-        return appended;
-      });
+      setRoots((current) => appendPickedRoots(current, picked));
       setNotice(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

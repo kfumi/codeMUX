@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { shellFacade } from '../../lib/facades/shell-facade';
-import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, Layers, MessageSquarePlus, MoreHorizontal, Pencil, Settings2, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, Folders, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
 import { Project, getPrimaryProjectRoot } from '../../types/project';
@@ -14,6 +14,7 @@ import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { FoldersOpenIcon } from '../ui/folders-open-icon';
 import { cn } from '../../lib/utils';
 
 const INITIAL_VISIBLE_PROJECT_SESSIONS = 5;
@@ -34,7 +35,6 @@ interface ProjectGroupProps {
   onOpenProjectFiles: (project: Project) => void;
   onOpenImportSessions: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
-  onRenameProject: (projectId: string, newName: string) => void;
 }
 
 export function ProjectGroup({
@@ -51,7 +51,6 @@ export function ProjectGroup({
   onOpenProjectFiles,
   onOpenImportSessions,
   onDeleteProject,
-  onRenameProject,
 }: ProjectGroupProps) {
   const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
   const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
@@ -65,8 +64,6 @@ export function ProjectGroup({
   const isNarrow = useIsNarrowViewport();
   const canOpenExplorer = useHostCapabilities().has('shell.explorer');
   const expanded = !collapsedProjects.has(project.id);
-  const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(project.name);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_VISIBLE_PROJECT_SESSIONS);
@@ -74,13 +71,11 @@ export function ProjectGroup({
   const hasHiddenSessions = visibleSessionLimit < sessions.length;
   const canCollapseSessions = sessions.length > INITIAL_VISIBLE_PROJECT_SESSIONS
     && visibleSessionLimit > INITIAL_VISIBLE_PROJECT_SESSIONS;
-
-  const handleRename = () => {
-    if (renameValue.trim() && renameValue !== project.name) {
-      onRenameProject(project.id, renameValue.trim());
-    }
-    setRenaming(false);
-  };
+  // 多根项目用叠放的文件夹图标区分；展开时换成打开版，单根同样切到 FolderOpen。
+  const projectIconClass = cn(
+    'h-3.5 w-3.5 shrink-0 transition-colors duration-normal',
+    isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
+  );
 
   const handleExpandSessions = () => {
     setVisibleSessionLimit((current) => {
@@ -104,7 +99,7 @@ export function ProjectGroup({
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
         )}
-        onClick={() => !renaming && toggleProjectExpanded(project.id)}
+        onClick={() => toggleProjectExpanded(project.id)}
       >
         <ChevronRight
           className={cn(
@@ -112,38 +107,18 @@ export function ProjectGroup({
             expanded && 'rotate-90',
           )}
         />
-        <Folder className={cn(
-          'h-3.5 w-3.5 shrink-0 transition-colors duration-normal',
-          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
-        )} />
-        {renaming ? (
-          <input
-            autoFocus
-            value={renameValue}
-            onChange={(event) => setRenameValue(event.target.value)}
-            onBlur={handleRename}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') handleRename();
-              if (event.key === 'Escape') setRenaming(false);
-            }}
-            className="flex-1 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-ui-title text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
-            onClick={(event) => event.stopPropagation()}
-          />
-        ) : (
-          <span className="flex-1 truncate text-sm font-medium">{project.name}</span>
-        )}
         {project.roots.length > 1 ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="flex shrink-0 items-center gap-0.5 rounded-xs bg-[hsl(var(--sidebar-muted))] px-1 py-0.5 text-ui-micro text-[hsl(var(--sidebar-fg))]/70">
-                <Layers className="h-2.5 w-2.5" />
-                {project.roots.length}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p>{project.roots.length} 个源文件夹</p>
-            </TooltipContent>
-          </Tooltip>
+          expanded
+            ? <FoldersOpenIcon className={projectIconClass} />
+            : <Folders className={projectIconClass} />
+        ) : (
+          expanded
+            ? <FolderOpen className={projectIconClass} />
+            : <Folder className={projectIconClass} />
+        )}
+        <span className="flex-1 truncate text-sm font-medium">{project.name}</span>
+        {project.roots.length > 1 ? (
+          <span className="sr-only">{project.roots.length} 个源文件夹</span>
         ) : null}
         <div
           className={cn(
@@ -171,7 +146,7 @@ export function ProjectGroup({
                 导入外部会话
               </DropdownMenuItem>
               <DropdownMenuItem
-                icon={<Settings2 className="h-3.5 w-3.5" />}
+                icon={<Pencil className="h-3.5 w-3.5" />}
                 onSelect={() => setEditorOpen(true)}
               >
                 编辑项目
@@ -189,15 +164,6 @@ export function ProjectGroup({
                   在资源管理器中打开
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuItem
-                icon={<Pencil className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  setRenameValue(project.name);
-                  setRenaming(true);
-                }}
-              >
-                重命名项目
-              </DropdownMenuItem>
               <DropdownMenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
                 danger
@@ -234,7 +200,17 @@ export function ProjectGroup({
         </div>
       </div>
       {expanded && (
-        <div className="ml-2.5 mt-1 space-y-1 border-l border-[hsl(var(--sidebar-border))]/45 pl-1.5">
+        <div
+          className={cn(
+            'ml-2.5 mt-1 space-y-1 pl-1.5',
+            sessions.length > 0 && 'border-l border-[hsl(var(--sidebar-border))]/45',
+          )}
+        >
+          {sessions.length === 0 ? (
+            <p className="px-2.5 py-1 text-ui-compact text-[hsl(var(--sidebar-fg))]/64">
+              暂无对话
+            </p>
+          ) : null}
           {visibleSessions.map((session) => (
             <SessionItem
               key={session.id}

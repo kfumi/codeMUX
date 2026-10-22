@@ -46,7 +46,6 @@ describe('ProjectGroup', () => {
     onOpenProjectFiles: vi.fn(),
     onOpenImportSessions: vi.fn(),
     onDeleteProject: vi.fn(),
-    onRenameProject: vi.fn(),
   };
 
   beforeEach(() => {
@@ -117,5 +116,69 @@ describe('ProjectGroup', () => {
 
     openClusterMenu();
     await waitFor(() => expect(screen.getByText('在资源管理器中打开')).toBeTruthy());
+  });
+
+  it('renames through the project editor instead of a separate menu action', async () => {
+    renderProjectGroup();
+
+    openClusterMenu();
+    await waitFor(() => expect(screen.getByText('编辑项目')).toBeTruthy());
+    expect(screen.queryByText('重命名项目')).toBeNull();
+    const editItem = screen.getByText('编辑项目').closest('[role="menuitem"]');
+    expect(editItem?.querySelector('.lucide-pencil')).toBeTruthy();
+  });
+
+  it('uses the open multi-folder icon for an expanded multi-root project without a count badge', () => {
+    const { container } = renderProjectGroup(makeProject({
+      roots: [
+        { path: 'D:/work/demo', position: 0, isPrimary: true },
+        { path: 'D:/work/other', position: 1, isPrimary: false },
+      ],
+    }));
+
+    expect(container.querySelector('[data-icon="folders-open"]')).toBeTruthy();
+    expect(container.querySelector('.lucide-layers')).toBeNull();
+    expect(screen.getByText('2 个源文件夹')).toBeTruthy();
+  });
+
+  it('uses the closed multi-folder icon for a collapsed multi-root project', () => {
+    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
+    const { container } = renderProjectGroup(makeProject({
+      roots: [
+        { path: 'D:/work/demo', position: 0, isPrimary: true },
+        { path: 'D:/work/other', position: 1, isPrimary: false },
+      ],
+    }));
+
+    expect(container.querySelector('.lucide-folders')).toBeTruthy();
+    expect(container.querySelector('[data-icon="folders-open"]')).toBeNull();
+  });
+
+  it('uses the open folder icon for an expanded single-root project', () => {
+    const { container } = renderProjectGroup();
+
+    expect(container.querySelector('.lucide-folder-open')).toBeTruthy();
+    expect(container.querySelector('.lucide-folders')).toBeNull();
+  });
+
+  it('uses the closed folder icon for a collapsed single-root project', () => {
+    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
+    const { container } = renderProjectGroup();
+
+    expect(container.querySelector('.lucide-folder')).toBeTruthy();
+    expect(container.querySelector('.lucide-folder-open')).toBeNull();
+  });
+
+  it('shows an empty placeholder under an expanded project with no sessions', () => {
+    renderProjectGroup();
+
+    expect(screen.getByText('暂无对话')).toBeTruthy();
+  });
+
+  it('hides the empty placeholder when the project is collapsed', () => {
+    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
+    renderProjectGroup();
+
+    expect(screen.queryByText('暂无对话')).toBeNull();
   });
 });

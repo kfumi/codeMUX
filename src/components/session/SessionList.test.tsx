@@ -8,6 +8,7 @@ import type { Session } from '../../types/session';
 import { TooltipProvider } from '../ui/tooltip';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { SessionList } from './SessionList';
 // 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
 import { daemonFacade } from '../../lib/facades/daemon-facade';
@@ -98,6 +99,7 @@ describe('SessionList', () => {
   const realFetchProjects = useProjectStore.getState().fetchProjects;
 
   beforeEach(() => {
+    useDaemonConnectionStore.setState({ hostForm: 'browser' });
     getDaemonStartupErrorMock.mockReturnValue(null);
     vi.mocked(daemonFacade.listSessions).mockImplementation(() => Promise.resolve([]));
     vi.mocked(daemonFacade.listArchivedSessions).mockImplementation(() => Promise.resolve([]));
@@ -244,6 +246,25 @@ describe('SessionList', () => {
 
     expect(screen.getByText('codeMUX')).toBeTruthy();
     expect(screen.getByText('Project Session')).toBeTruthy();
+  });
+
+  it('reveals the add-project action only on hover or keyboard focus', () => {
+    useDaemonConnectionStore.setState({ hostForm: 'desktop' });
+    useProjectStore.setState({
+      projects: [makeProject({ id: 'project-1', name: 'codeMUX' })],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    const addButton = screen.getByRole('button', { name: '添加项目' });
+    const actions = addButton.parentElement;
+    expect(actions?.className).toContain('opacity-0');
+    expect(actions?.className).toContain('group-hover:opacity-100');
+    expect(actions?.className).toContain('group-focus-within:opacity-100');
   });
 
   it('lazily expands project session history in fixed increments', () => {

@@ -107,7 +107,19 @@ function SectionHeader({
           )}
         />
       </button>
-      {actions}
+      {actions ? (
+        <div
+          className={cn(
+            'shrink-0 transition-opacity duration-fast',
+            // 分区操作按钮跟展开箭头一致：宽屏悬停（或键盘聚焦）才出现，窄屏触摸常显。
+            isNarrow
+              ? 'opacity-100'
+              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
+          )}
+        >
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -140,7 +152,6 @@ export function SessionList({
     hasLoadedOnce: projectsLoaded,
     fetchProjects,
     deleteProject,
-    renameProject,
   } = useProjectStore();
   const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
@@ -288,6 +299,7 @@ export function SessionList({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
+                    aria-label="添加项目"
                     className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
                     onClick={onAddProject}
                   >
@@ -317,7 +329,6 @@ export function SessionList({
               onOpenProjectFiles={onOpenProjectFiles}
               onOpenImportSessions={handleOpenImportSessions}
               onDeleteProject={deleteProject}
-              onRenameProject={renameProject}
             />
           ))}
         </div>
