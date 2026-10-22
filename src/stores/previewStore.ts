@@ -344,7 +344,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       return;
     }
     set({ rootTreesLoading: true });
-    // 主根排在最前：同名/嵌套文件按绝对路径去重时主根优先。
+    // 主根排在最前，附加根按项目顺序；候选去重在 composer 里按绝对路径进行。
     const ordered = [...roots].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
     const trees = await Promise.all(ordered.map(async (root): Promise<RootFileTree> => {
       try {

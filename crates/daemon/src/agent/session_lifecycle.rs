@@ -1155,6 +1155,11 @@ pub(crate) fn resolve_session_cwd(
     }
 
     if let Some(working_path) = working_path.filter(|value| !value.trim().is_empty()) {
+        // 主根在创建时写进 working_path；目录被移走后必须拒绝重建，
+        // 否则会把一个不存在的 cwd 交给 sidecar 换一个含糊的 spawn 错误。
+        if !Path::new(&working_path).is_dir() {
+            return Err(format!("会话工作目录不可用: {}", working_path));
+        }
         return Ok(working_path);
     }
 
@@ -1236,12 +1241,30 @@ fn directory_scope_key(path: &str) -> String {
     }
 }
 
+/// 项目 Skill 的扫描目录恒为主根：附加目录与 worktree cwd 都不贡献项目配置，
+/// 预热与 ensure 必须用同一个键，否则缓存永远命中不了。
 fn resolve_skill_cwd(
     state: &crate::AppState,
     session_id: &str,
     cwd: &str,
 ) -> Result<String, String> {
-    resolve_session_cwd(state, session_id, cwd)
+    let resolved = resolve_session_cwd(state, session_id, cwd)?;
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let project_id: Option<String> = db
+        .query_row(
+            "SELECT project_id FROM sessions WHERE id = ?1 LIMIT 1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("无法读取会话所属项目: {}", error))?;
+    if let Some(project_id) = project_id {
+        if let Some(primary_root) = operations::get_primary_root(&db, &project_id)
+            .map_err(|error| format!("无法读取项目主根: {}", error))?
+        {
+            return Ok(primary_root);
+        }
+    }
+    Ok(resolved)
 }
 
 async fn preload_project_skills(project_root: String, agent_kind: &str) -> Result<(), String> {
@@ -2035,7 +2058,7 @@ mod tests {
         mcp_tooling_applies_to, parse_agent_session_mapping_event, parse_agent_session_title_event,
         persist_agent_session_mapping_event, resolve_active_runtime_config,
         resolve_additional_directories, resolve_agent_session_info, resolve_session_cwd,
-        session_lifecycle_lock, AgentState,
+        resolve_skill_cwd, session_lifecycle_lock, AgentState,
     };
     use crate::config::types::AgentKind;
 
@@ -3930,5 +3953,29 @@ mod tests {
 
         assert_eq!(additional, vec![roots[1].clone(), roots[2].clone()]);
         assert!(unavailable.is_empty());
+    }
+
+    #[test]
+    fn project_skill_scan_uses_the_primary_root_for_worktree_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = make_dirs(temp.path(), &["frontend", "worktree"]);
+        let state = empty_state();
+        let session_id = create_project_session(&state, &roots[0..1]);
+        {
+            let db = state.db.lock().unwrap();
+            crate::db::operations::update_session_working_path(
+                &db,
+                &session_id,
+                &roots[1],
+                crate::db::operations::GitBranchWrite::Keep,
+            )
+            .unwrap();
+        }
+
+        // 预热与 ensure 读同一个键：项目 Skill 只扫主根，不扫 worktree cwd。
+        assert_eq!(
+            resolve_skill_cwd(&state, &session_id, "/fallback").unwrap(),
+            roots[0]
+        );
     }
 }

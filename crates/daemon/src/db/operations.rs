@@ -265,6 +265,9 @@ pub fn get_primary_root(conn: &Connection, project_id: &str) -> Result<Option<St
 
 /// 生成型会话（定时任务 / Work Task）创建时冻结的附加目录：
 /// 项目当前全部根减去该会话自己的工作目录（未指定时按主根算）。
+///
+/// 空集合也要写成 `"[]"`：`NULL` 的语义是「普通会话，运行时现算」，
+/// 冻结成空集的生成型会话必须保持空集，不能因为项目后来加根而漂移。
 pub fn frozen_directory_scope(
     conn: &Connection,
     project_id: &str,
@@ -283,9 +286,6 @@ pub fn frozen_directory_scope(
         .map(|root| root.path)
         .filter(|path| excluded_key.as_deref() != Some(project_root_key(path).as_str()))
         .collect();
-    if scope.is_empty() {
-        return Ok(None);
-    }
     serde_json::to_string(&scope)
         .map(Some)
         .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))
@@ -534,10 +534,12 @@ pub fn create_scheduled_session_for_project(
     let now = Utc::now().to_rfc3339();
     let permission_config = permission_config.unwrap_or("");
     let plan_mode = plan_mode.unwrap_or("off");
+    // 生成型会话也在创建时绑定主根：之后改主根不回溯改写后台任务的落点。
+    let working_path = get_primary_root(conn, project_id)?;
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, origin, directory_scope, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', 'scheduled', ?9, ?10, ?10)",
-        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, directory_scope, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, working_path, origin, directory_scope, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', ?9, 'scheduled', ?10, ?11, ?11)",
+        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, working_path, directory_scope, now],
     )?;
 
     Ok(Session {
@@ -555,7 +557,7 @@ pub fn create_scheduled_session_for_project(
         is_read_only: false,
         is_archived: false,
         is_pinned: false,
-        working_path: None,
+        working_path,
         git_branch: None,
         created_at: now.clone(),
         updated_at: now,
@@ -4002,5 +4004,49 @@ mod tests {
             serde_json::from_str::<Vec<String>>(&worktree).unwrap(),
             vec!["D:/work/a", "D:/work/b", "D:/work/c"]
         );
+
+        // 单根项目冻结出空集：必须写 "[]"，不能退化成 NULL（普通会话的语义）。
+        let single = create_project(&conn, "Single", &roots(&["D:/only"])).unwrap();
+        let empty = frozen_directory_scope(&conn, &single.id, None)
+            .unwrap()
+            .expect("empty frozen scope must not collapse to NULL");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&empty).unwrap(),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn generated_sessions_bind_the_primary_root_at_creation() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(&conn, "Demo", &roots(&["D:/work/a", "D:/work/b"])).unwrap();
+
+        let session = super::create_scheduled_session_for_project(
+            &conn,
+            "Nightly",
+            AgentKind::Codex,
+            "agent",
+            &project.id,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(session.working_path.as_deref(), Some("D:/work/a"));
+
+        update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                primary_root: Some("D:/work/b"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_eq!(reloaded.working_path.as_deref(), Some("D:/work/a"));
     }
 }

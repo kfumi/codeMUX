@@ -139,7 +139,7 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
       const selected = await openDialog({
         directory: true,
         multiple: true,
-        title: '选择项目文件夹（可多选）',
+        title: '选择源文件夹（可多选）',
       });
       if (!selected || selected.length === 0) {
         return;

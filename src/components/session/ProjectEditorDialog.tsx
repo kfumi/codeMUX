@@ -281,14 +281,16 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
                     </Button>
                   </div>
                 ))}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
                   onClick={() => void handleAddFolders()}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui-compact text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                 >
                   <Plus className="h-3.5 w-3.5 shrink-0" />
                   添加文件夹
-                </button>
+                </Button>
               </div>
               {notice ? (
                 <p className="text-ui-micro leading-snug text-muted-foreground">{notice}</p>
@@ -296,7 +298,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 gap-2 border-t border-border/40 bg-muted/30 px-6 py-4">
+          <DialogFooter className="shrink-0 gap-2 border-t border-border/40 bg-[hsl(var(--surface-2))] px-6 py-4">
             <Button
               variant="ghost"
               size="sm"

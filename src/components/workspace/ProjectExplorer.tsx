@@ -8,7 +8,7 @@ import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/n
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
-import { getProjectRootPaths } from '../../types/project';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { TooltipHint } from '../ui/tooltip';
@@ -42,6 +42,7 @@ function TreeNode({
   query,
   projectPath,
   sessionId,
+  insertAbsolutePath,
   onOpenFile,
 }: {
   node: FileTreeNode;
@@ -49,6 +50,7 @@ function TreeNode({
   query: string;
   projectPath: string;
   sessionId: string | null;
+  insertAbsolutePath: boolean;
   onOpenFile: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(level === 0 && Boolean(query));
@@ -140,6 +142,7 @@ function TreeNode({
           projectPath={projectPath}
           isDirectory={isDirectory}
           sessionId={sessionId}
+          insertAbsolutePath={insertAbsolutePath}
           onOpen={handleClick}
         />
       </ContextMenu>
@@ -169,6 +172,7 @@ function TreeNode({
                 query={query}
                 projectPath={projectPath}
                 sessionId={sessionId}
+                insertAbsolutePath={insertAbsolutePath}
                 onOpenFile={onOpenFile}
               />
             ))
@@ -181,6 +185,7 @@ function TreeNode({
 
 export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
   const roots = useMemo(() => getProjectRootPaths(project), [project]);
+  const primaryRoot = useMemo(() => getPrimaryProjectRoot(project), [project]);
   const isMultiRoot = roots.length > 1;
   const [rootStates, setRootStates] = useState<Array<{ root: string; nodes: FileTreeNode[]; error: string | null }>>([]);
   const [query, setQuery] = useState('');
@@ -272,7 +277,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
       <div className="flex items-center gap-2 px-3 py-2 text-ui-caption text-[hsl(var(--sidebar-fg))]/70">
         <span className="truncate font-medium">{project.name}</span>
         {isMultiRoot ? (
-          <span className="shrink-0 text-ui-micro text-[hsl(var(--sidebar-fg))]/60">{roots.length} 个文件夹</span>
+          <span className="shrink-0 text-ui-micro text-[hsl(var(--sidebar-fg))]">{roots.length} 个源文件夹</span>
         ) : null}
         <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/70">{totalNodes}</span>
       </div>
@@ -305,17 +310,17 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
             <div key={state.root}>
               {isMultiRoot ? (
                 <TooltipHint content={state.root}>
-                  <div className="mt-1 flex items-center gap-1.5 px-2 py-1 text-ui-micro font-medium text-[hsl(var(--sidebar-fg))]/75">
+                  <div className="mt-1 flex items-center gap-1.5 px-2 py-1 text-ui-micro font-medium text-[hsl(var(--sidebar-fg))]">
                     <Folder className="h-3 w-3 shrink-0" />
                     <span className="truncate">{state.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? state.root}</span>
                     {state.error ? (
-                      <span className="ml-auto shrink-0 text-[hsl(var(--destructive))]/75">不可用</span>
+                      <span className="ml-auto shrink-0 text-[hsl(var(--destructive))]">不可用</span>
                     ) : null}
                   </div>
                 </TooltipHint>
               ) : null}
               {state.error ? (
-                <div className="px-2 py-1 text-ui-micro text-[hsl(var(--destructive))]/75" style={{ paddingLeft: isMultiRoot ? 24 : 10 }}>
+                <div className="px-2 py-1 text-ui-micro text-[hsl(var(--destructive))]" style={{ paddingLeft: isMultiRoot ? 24 : 10 }}>
                   {state.error}
                 </div>
               ) : (
@@ -327,6 +332,8 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
                     query={query}
                     projectPath={state.root}
                     sessionId={composerSessionId}
+                    // 附加目录的引用用绝对路径；主根保持相对路径。
+                    insertAbsolutePath={state.root !== primaryRoot}
                     onOpenFile={(path) => handleOpenFile(state.root, path)}
                   />
                 ))

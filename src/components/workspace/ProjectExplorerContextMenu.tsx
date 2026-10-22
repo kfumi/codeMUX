@@ -22,6 +22,8 @@ interface ProjectExplorerContextMenuProps {
   projectPath: string;
   isDirectory: boolean;
   sessionId: string | null;
+  /** 附加目录里的文件必须以绝对路径插入，否则会被解析到会话工作目录下。 */
+  insertAbsolutePath?: boolean;
   onOpen: () => void;
 }
 
@@ -55,6 +57,7 @@ export function ProjectExplorerContextMenu({
   projectPath,
   isDirectory,
   sessionId,
+  insertAbsolutePath = false,
   onOpen,
 }: ProjectExplorerContextMenuProps) {
   const requestComposerReferenceInsert = useAgentStore((state) => state.requestComposerReferenceInsert);
@@ -63,13 +66,14 @@ export function ProjectExplorerContextMenu({
   const canOpenWithTarget = capabilities.has('open.project-path');
   const canOpenExplorer = capabilities.has('shell.explorer');
   const relativePath = getProjectRelativePath(path, projectPath);
+  const referencePath = insertAbsolutePath ? path : relativePath;
 
   const handleAddToChat = () => {
     if (!sessionId) {
       toast.error('请先打开一个对话');
       return;
     }
-    requestComposerReferenceInsert(sessionId, relativePath, isDirectory);
+    requestComposerReferenceInsert(sessionId, referencePath, isDirectory);
     toast.success('已添加到聊天');
   };
 

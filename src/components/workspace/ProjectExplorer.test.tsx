@@ -226,6 +226,15 @@ describe('ProjectExplorer', () => {
     // 每个根单独加载，主根之外的文件也进入文件树。
     expect(listDirectoryMock).toHaveBeenCalledWith(PROJECT_ROOT, 5, PROJECT_ROOT, true);
     expect(listDirectoryMock).toHaveBeenCalledWith(`${PROJECT_ROOT}-backend`, 5, `${PROJECT_ROOT}-backend`, true);
-    expect(screen.getByText('2 个文件夹')).toBeTruthy();
+    expect(screen.getByText('2 个源文件夹')).toBeTruthy();
+
+    // 附加目录的「添加到聊天」必须用绝对路径：相对路径会被解析到会话工作目录。
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    fireEvent.contextMenu(screen.getByText('api'));
+    fireEvent.click(screen.getByText('添加到聊天'));
+    expect(useAgentStore.getState().pendingComposerReferenceInsert['session-1']).toEqual({
+      reference: `${PROJECT_ROOT}-backend/api`,
+      isDirectory: false,
+    });
   });
 });

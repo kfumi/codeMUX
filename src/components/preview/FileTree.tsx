@@ -4,6 +4,7 @@ import { usePreviewStore, type FileTreeNodeData } from '../../stores/previewStor
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
+import { TooltipHint } from '../ui/tooltip';
 
 function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; onFileClick: (path: string) => void; level: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -96,14 +97,13 @@ export function FileTree() {
       <div className="h-full overflow-auto py-1">
         {rootTrees.map((tree) => (
           <div key={tree.root}>
-            <div
-              className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-muted-foreground"
-              title={tree.root}
-            >
-              <Folder className="h-3 w-3 shrink-0" />
-              <span className="truncate">{tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root}</span>
-              {tree.unavailable ? <span className="ml-auto shrink-0 text-destructive">不可用</span> : null}
-            </div>
+            <TooltipHint content={tree.root}>
+              <div className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-muted-foreground">
+                <Folder className="h-3 w-3 shrink-0" />
+                <span className="truncate">{tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root}</span>
+                {tree.unavailable ? <span className="ml-auto shrink-0 text-destructive">不可用</span> : null}
+              </div>
+            </TooltipHint>
             {tree.nodes.map((node) => (
               <TreeNode key={node.path} node={node} onFileClick={handleFileClick} level={1} />
             ))}
