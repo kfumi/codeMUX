@@ -595,6 +595,21 @@ export class SessionRuntime {
       throw new Error('Claude SDK not loaded; cannot fork session');
     }
 
+    // Non-destructive SDK fork: a pure transcript copy, it never starts a model
+    // turn. The legacy path below opens a query with an empty prompt, which the
+    // CLI may treat as a real user turn and answer — that stray assistant
+    // message then lands in the child transcript and shows up on CLI sync.
+    const sdkForkSession = this.claudeSdk.forkSession;
+    if (typeof sdkForkSession === 'function') {
+      const fork = await sdkForkSession(sourceSessionId);
+      const forkedSessionId = fork?.sessionId;
+      if (!forkedSessionId) {
+        throw new Error('Claude SDK forkSession response did not include a session id');
+      }
+      process.stderr.write(`[sidecar] Forked Claude session ${sourceSessionId} -> ${forkedSessionId}\n`);
+      return forkedSessionId;
+    }
+
     const forkQuery = this.claudeSdk.query({
       // An empty prompt opens the SDK session without creating a user turn.
       prompt: '',

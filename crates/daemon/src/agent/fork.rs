@@ -651,6 +651,30 @@ pub async fn fork_pi_session_impl(
     .map_err(|error| error.to_string())
 }
 
+/// Fork 只建立会话壳；这里立刻用子会话的原生 transcript 回填 timeline，
+/// 否则子会话 timeline 为空，前端首次打开就是空白对话（首次打开不会自动 resync）。
+/// 回填失败不阻断 fork —— 会话已创建，用户仍可手动「从 CLI 同步」。
+async fn reload_forked_session_timeline(
+    daemon: &crate::daemon::DaemonState,
+    child: &operations::Session,
+) {
+    if let Err(error) = super::history_import::reload_session_timeline_from_native(
+        daemon.app.clone(),
+        &daemon.companion,
+        &child.id,
+        child.agent_kind,
+    )
+    .await
+    {
+        log::warn!(
+            target: "agent",
+            "Failed to load forked session timeline app_session_id={}: {}",
+            child.id,
+            error
+        );
+    }
+}
+
 pub async fn fork_claude_session_for_companion(
     daemon: &crate::daemon::DaemonState,
     session_id: String,
@@ -658,7 +682,7 @@ pub async fn fork_claude_session_for_companion(
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_claude_session_impl(
+    let child = fork_claude_session_impl(
         daemon.app.clone(),
         daemon.agent.clone(),
         session_id,
@@ -666,7 +690,9 @@ pub async fn fork_claude_session_for_companion(
         fork_provider_message_id,
         title,
     )
-    .await
+    .await?;
+    reload_forked_session_timeline(daemon, &child).await;
+    Ok(child)
 }
 
 pub async fn fork_codex_session_for_companion(
@@ -678,7 +704,7 @@ pub async fn fork_codex_session_for_companion(
     fork_provider_turn_ordinal: Option<usize>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_codex_session_impl(
+    let child = fork_codex_session_impl(
         daemon.app.clone(),
         daemon.agent.clone(),
         session_id,
@@ -688,7 +714,9 @@ pub async fn fork_codex_session_for_companion(
         fork_provider_turn_ordinal,
         title,
     )
-    .await
+    .await?;
+    reload_forked_session_timeline(daemon, &child).await;
+    Ok(child)
 }
 
 pub async fn fork_opencode_session_for_companion(
@@ -698,7 +726,7 @@ pub async fn fork_opencode_session_for_companion(
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_opencode_session_impl(
+    let child = fork_opencode_session_impl(
         daemon.app.clone(),
         daemon.agent.clone(),
         session_id,
@@ -706,7 +734,9 @@ pub async fn fork_opencode_session_for_companion(
         fork_provider_message_id,
         title,
     )
-    .await
+    .await?;
+    reload_forked_session_timeline(daemon, &child).await;
+    Ok(child)
 }
 
 pub async fn fork_pi_session_for_companion(
@@ -716,7 +746,7 @@ pub async fn fork_pi_session_for_companion(
     fork_provider_message_id: Option<String>,
     title: Option<String>,
 ) -> Result<operations::Session, String> {
-    fork_pi_session_impl(
+    let child = fork_pi_session_impl(
         daemon.app.clone(),
         daemon.agent.clone(),
         session_id,
@@ -724,7 +754,9 @@ pub async fn fork_pi_session_for_companion(
         fork_provider_message_id,
         title,
     )
-    .await
+    .await?;
+    reload_forked_session_timeline(daemon, &child).await;
+    Ok(child)
 }
 
 #[cfg(test)]

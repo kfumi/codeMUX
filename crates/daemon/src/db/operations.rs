@@ -655,8 +655,9 @@ pub fn create_forked_session(
         "INSERT INTO sessions (
             id, title, agent_kind, provider_id, model, reasoning_effort, mode,
             permission_config, plan_mode, project_id, origin, is_read_only,
-            is_archived, is_pinned, working_path, git_branch, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?12, ?13, ?13)",
+            is_archived, is_pinned, title_locked, working_path, git_branch,
+            created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, 1, ?11, ?12, ?13, ?13)",
         params![
             child_id,
             title,
@@ -2496,6 +2497,20 @@ mod tests {
         assert_eq!(lineage.0, "parent");
         assert_eq!(lineage.1, "assistant-event-1");
         assert_eq!(lineage.2, "provider-message-1");
+        // 分支标题在创建时就锁定，原生标题刷新不得抹掉「分支 ·」前缀。
+        let title_locked: i64 = conn
+            .query_row(
+                "SELECT title_locked FROM sessions WHERE id = ?1",
+                [&child.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title_locked, 1);
+        assert!(!refresh_auto_session_title(&conn, &child.id, "Native Title").unwrap());
+        assert_eq!(
+            get_session(&conn, &child.id).unwrap().unwrap().title,
+            "Parent · 分支"
+        );
     }
 
     #[test]
