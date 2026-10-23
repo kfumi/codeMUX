@@ -379,3 +379,201 @@ describe('side panel store', () => {
     });
   });
 });
+
+describe('side panel full view conversation surface', () => {
+  beforeEach(() => {
+    useSidePanelStore.getState().reset();
+    useBrowserStore.getState().reset();
+    useNavigationStore.getState().reset();
+    fileApiMock.readFile.mockReset();
+    fileApiMock.writeFile.mockReset();
+    browserApiMock.show.mockReset();
+    browserApiMock.hide.mockReset();
+    browserApiMock.show.mockResolvedValue(undefined);
+    browserApiMock.hide.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { innerWidth: 1024 });
+  });
+
+  /** 进入完整视图（面板开 + 展开）并打开一个审查标签的公共前奏;重复调用幂等。 */
+  function enterFullViewWithReviewTab() {
+    const store = useSidePanelStore.getState();
+    store.openReviewTab('D:/project/app');
+    const reviewTabId = useSidePanelStore.getState().activeTabId!;
+    if (!useSidePanelStore.getState().isExpanded) store.toggleExpanded();
+    return { store, reviewTabId };
+  }
+
+  it('activates the conversation surface in full view without touching activeTabId', () => {
+    const { store, reviewTabId } = enterFullViewWithReviewTab();
+
+    // 进入完整视图本身不切 surface:当前面板标签保持激活。
+    expect(useSidePanelStore.getState().conversationActive).toBe(false);
+
+    store.activateConversationTab();
+    const state = useSidePanelStore.getState();
+    expect(state.conversationActive).toBe(true);
+    expect(state.activeTabId).toBe(reviewTabId);
+  });
+
+  it('ignores conversation activation outside full view', () => {
+    const store = useSidePanelStore.getState();
+    store.openReviewTab('D:/project/app');
+
+    store.activateConversationTab();
+    expect(useSidePanelStore.getState().conversationActive).toBe(false);
+  });
+
+  it('switches back to the panel surface when a panel tab is activated or opened', async () => {
+    fileApiMock.readFile.mockResolvedValue('');
+
+    const openers = [
+      (store: ReturnType<typeof useSidePanelStore.getState>) => store.openReviewTab('D:/project/app'),
+      (store: ReturnType<typeof useSidePanelStore.getState>) => store.openTerminalTab('D:/project/app'),
+      (store: ReturnType<typeof useSidePanelStore.getState>) => void store.openBrowserTab(),
+      (store: ReturnType<typeof useSidePanelStore.getState>) => store.openPlanTab('docs/plan.md', '# P'),
+      (store: ReturnType<typeof useSidePanelStore.getState>) => store.openDiffTab('a.ts', '1', '2'),
+      (store: ReturnType<typeof useSidePanelStore.getState>) =>
+        store.openSubagentTab('session-a', 'sub-1', '子智能体'),
+      (store: ReturnType<typeof useSidePanelStore.getState>) =>
+        void store.openFileTab('D:/project/app', 'src/main.ts'),
+    ];
+
+    for (const open of openers) {
+      const { store, reviewTabId } = enterFullViewWithReviewTab();
+      store.activateConversationTab();
+      expect(useSidePanelStore.getState().conversationActive).toBe(true);
+
+      // 激活已打开的面板标签(与打开新标签同一条切换规则)。
+      store.setActiveTab(reviewTabId);
+      expect(useSidePanelStore.getState().conversationActive).toBe(false);
+      expect(useSidePanelStore.getState().activeTabId).toBe(reviewTabId);
+
+      store.activateConversationTab();
+      open(store);
+      expect(useSidePanelStore.getState().conversationActive).toBe(false);
+    }
+
+    // openFileTab 命中已存在标签时也切回面板 surface。
+    const { store } = enterFullViewWithReviewTab();
+    store.activateConversationTab();
+    await store.openFileTab('D:/project/app', 'src/main.ts');
+    expect(useSidePanelStore.getState().conversationActive).toBe(false);
+  });
+
+  it('keeps the panel open and lands on the conversation tab when the last panel tab is closed in full view', () => {
+    const { store, reviewTabId } = enterFullViewWithReviewTab();
+    store.activateConversationTab();
+
+    store.closeTab(reviewTabId);
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      tabs: [],
+      activeTabId: null,
+      isOpen: true,
+      isExpanded: true,
+      conversationActive: true,
+    });
+  });
+
+  it('stays on the conversation surface when a background panel tab is closed', () => {
+    const { store, reviewTabId } = enterFullViewWithReviewTab();
+    store.openTerminalTab('D:/project/app');
+    store.activateConversationTab();
+    const terminalTabId = useSidePanelStore.getState().activeTabId!;
+
+    // 关掉的是后台的激活面板标签:留在对话 surface,激活权按既有规则交给邻居。
+    store.closeTab(terminalTabId);
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      conversationActive: true,
+      activeTabId: reviewTabId,
+      isOpen: true,
+      isExpanded: true,
+    });
+  });
+
+  it('still collapses the panel when the last tab is closed outside full view', () => {
+    const store = useSidePanelStore.getState();
+    store.openReviewTab('D:/project/app');
+    const reviewTabId = useSidePanelStore.getState().activeTabId!;
+    store.activateConversationTab();
+
+    store.closeTab(reviewTabId);
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      tabs: [],
+      isOpen: false,
+      isExpanded: false,
+      conversationActive: false,
+    });
+  });
+
+  it('resets the conversation surface on every exit path of full view', () => {
+    // 收起面板。
+    const { store } = enterFullViewWithReviewTab();
+    store.activateConversationTab();
+    store.closePanel();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: false,
+      isExpanded: false,
+      conversationActive: false,
+    });
+
+    // 恢复面宽。
+    useSidePanelStore.getState().reset();
+    const again = enterFullViewWithReviewTab();
+    again.store.activateConversationTab();
+    again.store.toggleExpanded();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      isExpanded: false,
+      conversationActive: false,
+    });
+
+    // 关闭所有标签。
+    useSidePanelStore.getState().reset();
+    const third = enterFullViewWithReviewTab();
+    third.store.activateConversationTab();
+    third.store.closeAllTabs();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: false,
+      isExpanded: false,
+      conversationActive: false,
+    });
+  });
+
+  it('preserves the conversation surface across scope switches', () => {
+    useSidePanelStore.getState().setScope('session-a');
+    const { store, reviewTabId } = enterFullViewWithReviewTab();
+    store.activateConversationTab();
+
+    store.setScope('session-b');
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isExpanded: false,
+      conversationActive: false,
+    });
+
+    store.setScope('session-a');
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      isExpanded: true,
+      conversationActive: true,
+      activeTabId: reviewTabId,
+    });
+  });
+
+  it('restores the conversation surface with the scope snapshot during navigation', () => {
+    useSidePanelStore.getState().setScope('session-a');
+    const { store } = enterFullViewWithReviewTab();
+    store.activateConversationTab();
+    store.setScope('session-b');
+
+    store.restoreNavigation({ scopeId: 'session-a', isOpen: true, activeTabId: null });
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      isExpanded: true,
+      conversationActive: true,
+    });
+  });
+});

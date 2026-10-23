@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
+import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, MessageCircle, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
@@ -6,6 +6,7 @@ import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { cn } from '../../lib/utils';
+import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { applyBrowserVisibility, hideAllBrowserHosts } from '../../lib/browserVisibility';
 import { TooltipHint } from '../ui/tooltip';
@@ -30,6 +31,9 @@ interface SidePanelProps {
   isVisible?: boolean;
 }
 
+/** tab 栏里两种标签(面板标签 / 固定对话标签)共用的 chip 外形。 */
+const SIDE_PANEL_TAB_CHIP_CLASS = 'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-fast';
+
 export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelProps) {
   // 工单 02:宿主能力清单决定壳独占入口(内置浏览器)是否可见。
   const capabilities = useHostCapabilities();
@@ -38,6 +42,8 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const isNarrow = useIsNarrowViewport();
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const isExpanded = useSidePanelStore((state) => state.isExpanded);
+  const conversationActive = useSidePanelStore((state) => state.conversationActive);
+  const activateConversationTab = useSidePanelStore((state) => state.activateConversationTab);
   // 面板只有在「宿主可用且已打开」时才占位。窄屏与展开预览两种形态都是绝对定位
   // 覆盖内容区 —— 但覆盖的前提仍是打开:此前只看窄屏就占满,于是窄屏上关掉面板
   // 也收不起来(空态盖住会话,「收起面板」按了没反应)。
@@ -100,15 +106,27 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs]);
 
+  // 完整视图 = 展开预览占满内容区。scope 即会话 id(App 传入活动会话),能查到会话
+  // 标题才渲染固定「对话」标签;草稿态与 home scope 不渲染。
+  const sessionTitle = useSessionStore(
+    (state) => state.sessions.find((entry) => entry.id === scopeId)?.title.trim() || null,
+  );
+  const isFullView = isShown && isExpanded && Boolean(sessionTitle);
+  const conversationSurface = isFullView && conversationActive;
+
   useEffect(() => {
     if (!isVisible) {
       void hideAllBrowserHosts();
       return;
     }
     const panelOpen = isOpen;
-    const activeBrowserTabId = panelOpen && activeTab?.kind === 'browser' ? activeTab.id : null;
+    // 对话 surface 激活期间面板标签全部视为未激活,原生浏览器视图必须隐藏,
+    // 否则原生层会盖在(工单 02 的)对话宿主上面。
+    const activeBrowserTabId = panelOpen && !conversationSurface && activeTab?.kind === 'browser'
+      ? activeTab.id
+      : null;
     void applyBrowserVisibility(activeBrowserTabId);
-  }, [activeTab?.id, activeTab?.kind, isOpen, isVisible]);
+  }, [activeTab?.id, activeTab?.kind, conversationSurface, isOpen, isVisible]);
   const terminalTabs = useMemo(() => {
     const allTabs = [
       ...tabs,
@@ -185,6 +203,13 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
     window.addEventListener('blur', onUp);
   }, [panelWidth, setPanelWidth, setResizing]);
 
+  // 对话 surface 激活时,面板标签(终端/浏览器/普通内容)一律按未激活处理:
+  // 原生浏览器视图因此隐藏,后台面板标签不再显示高亮。
+  const isPanelTabActive = useCallback(
+    (tabId: string) => isVisible && isOpen && !conversationSurface && activeTab?.id === tabId,
+    [activeTab?.id, conversationSurface, isOpen, isVisible],
+  );
+
   return (
     <aside
       ref={panelRef}
@@ -233,11 +258,18 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
           </TooltipHint>
 
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {isFullView && sessionTitle ? (
+              <ConversationTabButton
+                title={sessionTitle}
+                active={conversationSurface}
+                onClick={activateConversationTab}
+              />
+            ) : null}
             {tabs.map((tab) => (
               <TabButton
                 key={tab.id}
                 tab={tab}
-                active={tab.id === activeTabId}
+                active={isPanelTabActive(tab.id)}
                 onClick={() => setActiveTab(tab.id)}
                 onClose={() => closeTab(tab.id)}
                 onCloseOther={() => closeOtherTabs(tab.id)}
@@ -307,7 +339,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
 
         <div className="relative min-h-0 flex-1">
           {terminalTabs.map((tab) => {
-            const isActive = isVisible && isOpen && activeTab?.id === tab.id;
+            const isActive = isPanelTabActive(tab.id);
             return (
               <div
                 key={tab.id}
@@ -327,7 +359,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
             );
           })}
           {browserTabs.map((tab) => {
-            const isActive = isVisible && isOpen && activeTab?.id === tab.id;
+            const isActive = isPanelTabActive(tab.id);
             return (
               <div
                 key={tab.id}
@@ -346,31 +378,37 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
             );
           })}
           {activeTab ? (
-            activeTab.kind === 'review' ? (
-              <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
-            ) : activeTab.kind === 'diff' ? (
-              <div key={activeTab.id} className="h-full overflow-auto">
-                <DiffView
-                  oldContent={activeTab.diffOldContent ?? ''}
-                  newContent={activeTab.diffNewContent ?? ''}
-                  filePath={activeTab.diffFilePath}
+            // 对话 surface 激活时面板内容保持挂载但让位:不与「对话」标签抢显示,
+            // 内容区由完整视图的对话宿主(后续工单)接管。
+            <div
+              className={cn('absolute inset-0', conversationSurface && 'pointer-events-none invisible')}
+            >
+              {activeTab.kind === 'review' ? (
+                <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
+              ) : activeTab.kind === 'diff' ? (
+                <div key={activeTab.id} className="h-full overflow-auto">
+                  <DiffView
+                    oldContent={activeTab.diffOldContent ?? ''}
+                    newContent={activeTab.diffNewContent ?? ''}
+                    filePath={activeTab.diffFilePath}
+                  />
+                </div>
+              ) : activeTab.kind === 'plan' ? (
+                <PlanPreviewPanel
+                  key={activeTab.id}
+                  planFilePath={activeTab.planFilePath}
+                  planContent={activeTab.planContent}
                 />
-              </div>
-            ) : activeTab.kind === 'plan' ? (
-              <PlanPreviewPanel
-                key={activeTab.id}
-                planFilePath={activeTab.planFilePath}
-                planContent={activeTab.planContent}
-              />
-            ) : activeTab.kind === 'file' ? (
-              <FileEditorPanel key={activeTab.id} tab={activeTab} />
-            ) : activeTab.kind === 'subagent' ? (
-              <SubagentPreviewPanel
-                key={activeTab.id}
-                sessionId={activeTab.subagentSessionId ?? activeTab.subagentId ?? ''}
-                subagentId={activeTab.subagentId ?? ''}
-              />
-            ) : null
+              ) : activeTab.kind === 'file' ? (
+                <FileEditorPanel key={activeTab.id} tab={activeTab} />
+              ) : activeTab.kind === 'subagent' ? (
+                <SubagentPreviewPanel
+                  key={activeTab.id}
+                  sessionId={activeTab.subagentSessionId ?? activeTab.subagentId ?? ''}
+                  subagentId={activeTab.subagentId ?? ''}
+                />
+              ) : null}
+            </div>
           ) : (
             <SidePanelEmpty
               projectPath={projectPath}
@@ -426,7 +464,7 @@ function TabButton({
       <ContextMenuTrigger asChild>
         <button
           className={cn(
-            'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
+            SIDE_PANEL_TAB_CHIP_CLASS,
             active
               ? 'border-border bg-[hsl(var(--surface-1))] text-foreground'
               : 'border-transparent text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
@@ -465,6 +503,36 @@ function TabButton({
         <ContextMenuItem onClick={onCloseAll}>关闭所有标签</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+/** 完整视图下固定在 tab 栏第一位的「对话」标签:主对话本体,不可关闭、不参与右键菜单。 */
+function ConversationTabButton({
+  title,
+  active,
+  onClick,
+}: {
+  title: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="side-panel-conversation-tab"
+      data-active={active ? 'true' : 'false'}
+      aria-label={`对话 ${title}`}
+      className={cn(
+        SIDE_PANEL_TAB_CHIP_CLASS,
+        active
+          ? 'border-border bg-[hsl(var(--surface-1))] text-foreground'
+          : 'border-transparent text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
+      )}
+      onClick={onClick}
+    >
+      <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{title}</span>
+    </button>
   );
 }
 

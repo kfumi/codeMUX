@@ -35,6 +35,11 @@ export interface SidePanelTab {
 interface SidePanelSnapshot {
   isOpen: boolean;
   isExpanded: boolean;
+  /**
+   * 完整视图（展开预览）下「对话」标签是否为激活 surface。仅在 `isOpen && isExpanded`
+   * 时有意义；所有打开/激活面板标签的动作都会切回面板 surface（false）。
+   */
+  conversationActive: boolean;
   panelWidth: number;
   tabs: SidePanelTab[];
   activeTabId: string | null;
@@ -45,6 +50,7 @@ interface SidePanelState {
   scopes: Record<string, SidePanelSnapshot>;
   isOpen: boolean;
   isExpanded: boolean;
+  conversationActive: boolean;
   panelWidth: number;
   isResizing: boolean;
   tabs: SidePanelTab[];
@@ -62,6 +68,8 @@ interface SidePanelState {
   saveFileTab: (tabId: string) => Promise<void>;
   closePanel: () => void;
   toggleExpanded: () => void;
+  /** 激活完整视图下的「对话」标签 surface；不动 activeTabId,切回面板标签时恢复原选中。 */
+  activateConversationTab: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
@@ -88,6 +96,7 @@ function defaultSnapshot(): SidePanelSnapshot {
   return {
     isOpen: false,
     isExpanded: false,
+    conversationActive: false,
     panelWidth: PANEL_WIDTH_DEFAULT,
     tabs: [],
     activeTabId: null,
@@ -98,6 +107,7 @@ function snapshotFromState(state: SidePanelState): SidePanelSnapshot {
   return {
     isOpen: state.isOpen,
     isExpanded: state.isExpanded,
+    conversationActive: state.conversationActive,
     panelWidth: state.panelWidth,
     tabs: state.tabs,
     activeTabId: state.activeTabId,
@@ -211,6 +221,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   scopes: {},
   isOpen: false,
   isExpanded: false,
+  conversationActive: false,
   panelWidth: PANEL_WIDTH_DEFAULT,
   isResizing: false,
   tabs: [],
@@ -245,6 +256,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const id = tabId(get().activeScopeId, 'review', projectPath);
     set((state) => ({
       isOpen: true,
+      conversationActive: false,
       tabs: state.tabs.some((tab) => tab.id === id) ? state.tabs : [...state.tabs, createTab(state.activeScopeId, 'review', projectPath)],
       activeTabId: id,
     }));
@@ -257,6 +269,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       const tab = existingTab ?? createTerminalTab(state.activeScopeId, projectPath);
       return {
         isOpen: true,
+        conversationActive: false,
         tabs: existingTab ? state.tabs : [...state.tabs, tab],
         activeTabId: tab.id,
       };
@@ -268,6 +281,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const tab = createBrowserTab(get().activeScopeId, initialUrl);
     set((state) => ({
       isOpen: true,
+      conversationActive: false,
       tabs: [...state.tabs, tab],
       activeTabId: tab.id,
     }));
@@ -279,6 +293,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const id = tabId(get().activeScopeId, 'plan', planFilePath);
     set((state) => ({
       isOpen: true,
+      conversationActive: false,
       tabs: state.tabs.some((tab) => tab.id === id)
         ? state.tabs.map((tab) => (tab.id === id ? { ...tab, planContent } : tab))
         : [...state.tabs, createPlanTab(state.activeScopeId, planFilePath, planContent)],
@@ -291,6 +306,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const id = tabId(get().activeScopeId, 'diff', filePath);
     set((state) => ({
       isOpen: true,
+      conversationActive: false,
       tabs: state.tabs.some((tab) => tab.id === id)
         ? state.tabs.map((tab) => (tab.id === id ? { ...tab, diffOldContent: oldContent, diffNewContent: newContent } : tab))
         : [...state.tabs, createDiffTab(state.activeScopeId, filePath, oldContent, newContent)],
@@ -320,12 +336,14 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           scopes,
           activeScopeId: scopeId,
           isOpen: true,
+          conversationActive: false,
           activeTabId: id,
           isResizing: false,
         };
       }
       return {
         isOpen: true,
+        conversationActive: false,
         tabs: state.tabs.some((tab) => tab.id === id)
           ? state.tabs.map((tab) => (tab.id === id ? { ...tab, title, subagentStatus: status } : tab))
           : [...state.tabs, createSubagentTab(scopeId, subagentId, title, status)],
@@ -340,7 +358,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const existingTab = get().tabs.find((tab) => tab.id === id);
 
     if (existingTab) {
-      set({ isOpen: true, activeTabId: id });
+      set({ isOpen: true, conversationActive: false, activeTabId: id });
       recordNavigation(get());
       return;
     }
@@ -348,6 +366,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const tab = createFileTab(get().activeScopeId, projectPath, filePath);
     set((state) => ({
       isOpen: true,
+      conversationActive: false,
       tabs: [...state.tabs, tab],
       activeTabId: id,
     }));
@@ -443,16 +462,25 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   },
 
   closePanel: () => {
-    set({ isOpen: false, isExpanded: false });
+    set({ isOpen: false, isExpanded: false, conversationActive: false });
     void useBrowserStore.getState().hideAllBrowserHosts();
     recordNavigation(get());
   },
 
-  toggleExpanded: () => set((state) => ({ isExpanded: !state.isExpanded })),
+  // 进入或退出完整视图都不延续对话 surface:进入保持当前面板标签激活,退出连 surface 一起复位。
+  toggleExpanded: () => set({ conversationActive: false, isExpanded: !get().isExpanded }),
+
+  activateConversationTab: () => {
+    const state = get();
+    // surface 只在完整视图里有意义;面板标签的选中保持原样,切回时恢复。
+    if (!state.isOpen || !state.isExpanded || state.conversationActive) return;
+    set({ conversationActive: true });
+    recordNavigation(get());
+  },
 
   setActiveTab: (tabId: string) => {
     if (get().tabs.some((tab) => tab.id === tabId)) {
-      set({ isOpen: true, activeTabId: tabId });
+      set({ isOpen: true, conversationActive: false, activeTabId: tabId });
       recordNavigation(get());
     }
   },
@@ -471,8 +499,14 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           : null;
 
     if (tabs.length === 0) {
-      set({ tabs, activeTabId, isOpen: false, isExpanded: false });
-      void useBrowserStore.getState().hideAllBrowserHosts();
+      // 完整视图下有固定「对话」标签兜底:关掉最后一个面板标签不收起面板,落到对话标签;
+      // 普通视图维持「关最后一个标签即收起面板」的现状。
+      if (state.isExpanded) {
+        set({ tabs, activeTabId: null, isOpen: true, conversationActive: true });
+      } else {
+        set({ tabs, activeTabId, isOpen: false, isExpanded: false, conversationActive: false });
+        void useBrowserStore.getState().hideAllBrowserHosts();
+      }
     } else {
       set({ tabs, activeTabId, isOpen: true });
     }
@@ -497,6 +531,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       activeTabId: null,
       isOpen: false,
       isExpanded: false,
+      conversationActive: false,
     });
     void useBrowserStore.getState().hideAllBrowserHosts();
     recordNavigation(get());
@@ -579,6 +614,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     scopes: {},
     isOpen: false,
     isExpanded: false,
+    conversationActive: false,
     panelWidth: PANEL_WIDTH_DEFAULT,
     isResizing: false,
     tabs: [],

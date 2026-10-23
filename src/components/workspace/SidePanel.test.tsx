@@ -4,9 +4,11 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const terminalPanelMock = vi.hoisted(() => vi.fn(() => <div data-testid="terminal-panel" />));
+const browserPanelMock = vi.hoisted(() => vi.fn(() => null));
 const sidePanelState = vi.hoisted(() => ({
   isOpen: true,
   isExpanded: false,
+  conversationActive: false,
   panelWidth: 520,
   isResizing: false,
   tabs: [{
@@ -20,6 +22,7 @@ const sidePanelState = vi.hoisted(() => ({
     'session-b': {
       isOpen: true,
       isExpanded: false,
+      conversationActive: false,
       panelWidth: 520,
       tabs: [{
         id: 'session-b:terminal:D:/project/app',
@@ -40,10 +43,15 @@ const sidePanelState = vi.hoisted(() => ({
   closeAllTabs: vi.fn(),
   closePanel: vi.fn(),
   toggleExpanded: vi.fn(),
+  activateConversationTab: vi.fn(),
   openReviewTab: vi.fn(),
   openTerminalTab: vi.fn(),
   openBrowserTab: vi.fn(),
   setScope: vi.fn(),
+}));
+
+const sessionStoreState = vi.hoisted(() => ({
+  sessions: [{ id: 'session-a', title: '重构侧面板' }],
 }));
 
 vi.mock('../../lib/layoutPreferences', () => ({
@@ -60,12 +68,16 @@ vi.mock('../../stores/sidePanelStore', () => ({
   useSidePanelStore: (selector: (state: typeof sidePanelState) => unknown) => selector(sidePanelState),
 }));
 
+vi.mock('../../stores/sessionStore', () => ({
+  useSessionStore: (selector: (state: typeof sessionStoreState) => unknown) => selector(sessionStoreState),
+}));
+
 vi.mock('./terminal/TerminalPanel', () => ({
   TerminalPanel: (props: { terminalId?: string }) => terminalPanelMock(props),
 }));
 
 vi.mock('../browser/BrowserPanel', () => ({
-  BrowserPanel: () => null,
+  BrowserPanel: (props: { isActive?: boolean }) => browserPanelMock(props),
 }));
 
 vi.mock('./plan/PlanPreviewPanel', () => ({
@@ -89,6 +101,7 @@ vi.mock('../ui/tooltip', () => ({
 }));
 
 import { SidePanel } from './SidePanel';
+import { applyBrowserVisibility } from '../../lib/browserVisibility';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 
 /** jsdom 默认没有 matchMedia,窄屏判定会退化为按 innerWidth 比较(与实现一致)。 */
@@ -106,7 +119,71 @@ describe('SidePanel', () => {
     cleanup();
     vi.clearAllMocks();
     sidePanelState.isResizing = false;
+    sidePanelState.isExpanded = false;
+    sidePanelState.conversationActive = false;
     setViewportWidth(1024);
+  });
+
+  it('完整视图下渲染固定「对话」标签:第一位、不可关闭、点击激活对话 surface', () => {
+    sidePanelState.isExpanded = true;
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    const conversationTab = screen.getByTestId('side-panel-conversation-tab');
+    expect(conversationTab.textContent).toContain('重构侧面板');
+    // 固定第一位:它是 tab 滚动容器的第一个子元素,排在终端标签之前。
+    expect((conversationTab.parentElement as HTMLElement).firstElementChild).toBe(conversationTab);
+    expect(screen.getByRole('button', { name: '关闭标签页 终端' })).toBeTruthy();
+    // 面板标签的关闭 X 是 role=button 的嵌套控件;对话标签内没有,自身即可点击。
+    expect(conversationTab.querySelector('[role="button"]')).toBeNull();
+
+    fireEvent.click(conversationTab);
+    expect(sidePanelState.activateConversationTab).toHaveBeenCalledTimes(1);
+    expect(sidePanelState.setActiveTab).not.toHaveBeenCalled();
+  });
+
+  it('非完整视图不渲染对话标签', () => {
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(screen.queryByTestId('side-panel-conversation-tab')).toBeNull();
+  });
+
+  it('scope 没有对应会话时不渲染对话标签(草稿态/首页)', () => {
+    sidePanelState.isExpanded = true;
+    render(<SidePanel projectPath="D:/project/app" scopeId="home" />);
+
+    expect(screen.queryByTestId('side-panel-conversation-tab')).toBeNull();
+  });
+
+  it('对话 surface 激活时终端/浏览器标签视为未激活,原生浏览器视图隐藏', () => {
+    const previousTabs = sidePanelState.tabs;
+    const previousActiveTabId = sidePanelState.activeTabId;
+    sidePanelState.tabs = [
+      ...sidePanelState.tabs,
+      { id: 'session-a:browser:1', kind: 'browser' as const, title: '新标签页' },
+    ];
+    sidePanelState.activeTabId = 'session-a:browser:1';
+    sidePanelState.isExpanded = true;
+    sidePanelState.conversationActive = true;
+
+    try {
+      render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+      expect(screen.getByTestId('side-panel-conversation-tab').dataset.active).toBe('true');
+      // 对话 surface 激活时,activeTabId 指向的后台面板标签按未激活渲染,不与对话标签双重高亮。
+      const browserTabButton = screen.getByText('新标签页').closest('button');
+      expect(browserTabButton?.className).toContain('border-transparent');
+      expect(terminalPanelMock).toHaveBeenCalledWith(
+        expect.objectContaining({ terminalId: 'terminal-a', isActive: false }),
+      );
+      expect(browserPanelMock).toHaveBeenCalledWith(
+        expect.objectContaining({ isActive: false }),
+      );
+      expect(applyBrowserVisibility).toHaveBeenCalledWith(null);
+    } finally {
+      sidePanelState.tabs = previousTabs;
+      sidePanelState.activeTabId = previousActiveTabId;
+      sidePanelState.conversationActive = false;
+    }
   });
 
   it('passes the persisted terminal id to the active terminal panel', () => {
@@ -217,6 +294,7 @@ describe('SidePanel 占位', () => {
     vi.clearAllMocks();
     sidePanelState.isOpen = true;
     sidePanelState.isExpanded = false;
+    sidePanelState.conversationActive = false;
     setViewportWidth(1024);
   });
 
