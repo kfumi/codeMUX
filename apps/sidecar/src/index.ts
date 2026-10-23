@@ -380,6 +380,13 @@ export class SessionRuntime {
   private warmQuery: WarmQuery | null = null;
   private warmPromise: Promise<WarmQuery | null> | null = null;
   private turnActive = false;
+  /**
+   * Per-turn compaction flags. They must live on the runtime, not be captured as
+   * `consumeQuery` parameters: `consumeQuery` loops across turns on a reused
+   * persistent query, so a captured value would describe the *first* turn only.
+   */
+  private turnManualCompact = false;
+  private compactingPlaceholderShown = false;
   private turnEventNormalizer: TurnEventNormalizer | null = null;
   private turnArtifactAggregator: TurnArtifactAggregator | null = null;
   /**
@@ -523,8 +530,10 @@ export class SessionRuntime {
       this.finishPendingContinuation('new_prompt', 'completed');
       this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
       this.turnArtifactAggregator = new TurnArtifactAggregator(this.config.cwd);
+      this.armTurnCompaction(prompt, inputPayload);
       writeLog('[claude-task]', `sendInput START (stream reuse) model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
       if (this.promptStream.push(prompt, inputPayload)) {
+        this.emitManualCompactPlaceholder();
         return;
       }
       // Stream is dead; fall through to a fresh query.
@@ -542,6 +551,7 @@ export class SessionRuntime {
     this.finishPendingContinuation('new_prompt', 'completed');
     this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
     this.turnArtifactAggregator = new TurnArtifactAggregator(this.config.cwd);
+    this.armTurnCompaction(prompt, inputPayload);
 
     writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
 
@@ -1044,10 +1054,7 @@ export class SessionRuntime {
       idleTimeoutMs: this.timeouts.idle_timeout_ms,
     });
 
-    const manualCompact = isManualCompactPrompt(prompt, inputPayload);
-    if (manualCompact && this.config.sessionId) {
-      emit(buildClaudeCompactBoundaryEvent(this.config.sessionId, 'compacting', { trigger: 'manual' }));
-    }
+    this.emitManualCompactPlaceholder();
 
     this.lastQueryStartedAt = Date.now();
     void this.consumeQuery(
@@ -1056,8 +1063,32 @@ export class SessionRuntime {
       prompt,
       inputPayload,
       includeImages,
-      manualCompact,
     );
+  }
+
+  /**
+   * Arm the per-turn compaction flags. Called for every new prompt (both the
+   * fresh-query and the stream-reuse path) before the turn starts, so a stale
+   * flag can never leak into the next turn on a reused persistent query.
+   */
+  private armTurnCompaction(prompt: string, inputPayload?: AgentInputPayload): void {
+    this.turnManualCompact = isManualCompactPrompt(prompt, inputPayload);
+    // The auto placeholder is emitted by consumeQuery when `status: compacting`
+    // arrives; the manual one is emitted below once the prompt is actually
+    // dispatched (see emitManualCompactPlaceholder).
+    this.compactingPlaceholderShown = false;
+  }
+
+  /**
+   * Emit the manual `/compact` "compacting" placeholder exactly once per turn.
+   * Both dispatch paths call this: the stream-reuse path pushes straight into
+   * the open query, so it never reaches startPersistentQuery.
+   */
+  private emitManualCompactPlaceholder(): void {
+    if (!this.turnManualCompact || this.compactingPlaceholderShown) return;
+    if (!this.config?.sessionId) return;
+    emit(buildClaudeCompactBoundaryEvent(this.config.sessionId, 'compacting', { trigger: 'manual' }));
+    this.compactingPlaceholderShown = true;
   }
 
   private closeQueryHandle(reason: string): void {
@@ -1497,11 +1528,9 @@ export class SessionRuntime {
     prompt?: string,
     inputPayload?: AgentInputPayload,
     includeImages = true,
-    compactingPlaceholderEmitted = false,
   ): Promise<void> {
     let msgCount = 0;
     let sawResult = false;
-    let compactingPlaceholderShown = compactingPlaceholderEmitted;
 
     const iterator = queryHandle[Symbol.asyncIterator]();
 
@@ -1551,13 +1580,13 @@ export class SessionRuntime {
 
         if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
           this.turnIdleGuard?.suspend();
-          if (!compactingPlaceholderShown && appSessionId) {
+          if (!this.compactingPlaceholderShown && appSessionId) {
             const preTokens = readClaudeCompactPreTokens(msg);
             emit(buildClaudeCompactBoundaryEvent(appSessionId, 'compacting', {
               trigger: 'auto',
               ...(preTokens !== undefined ? { pre_tokens: preTokens } : {}),
             }));
-            compactingPlaceholderShown = true;
+            this.compactingPlaceholderShown = true;
           }
         }
         if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
@@ -1699,11 +1728,23 @@ export class SessionRuntime {
           this.emitSubagentEvents(this.subagents.cancelRunningForegroundTasks());
           this.scheduleQueryIdleClose();
         } else if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-          sawResult = true;
-          writeLog('[claude-task]', 'sendInput COMPLETE (compact)');
           this.turnIdleGuard?.resume();
-          this.finishTurn();
-          this.scheduleQueryIdleClose();
+          if (this.turnManualCompact && this.turnActive) {
+            // 手动 `/compact` 是独立一轮，边界就是终态。必须走正常收尾路径发出
+            // `turn_finished`：daemon 的回合状态机只认 `turn_finished`/`error`
+            // （`companion/events.rs`），而 `finishTurn()` 单发的
+            // `sidecar_query_done` 不在域事件白名单里会被丢弃，回合就永远
+            // 「正在执行」。
+            sawResult = true;
+            writeLog('[claude-task]', 'sendInput COMPLETE (compact, manual)');
+            this.emitTurnOutcome({ outcome: 'completed' });
+            this.finishTurn();
+            this.scheduleQueryIdleClose();
+          } else {
+            // 自动压缩发生在正常回合中途：边界只是过程帧，回合要继续等到真正的
+            // `result`。这里不能结束回合，否则后续 result 会被吞掉。
+            writeLog('[claude-task]', 'compact_boundary mid-turn; awaiting result');
+          }
         }
       }
       if (this.queryHandle === queryHandle) {
@@ -1910,6 +1951,8 @@ export class SessionRuntime {
     this.turnIdleGuard = undefined;
     emit({ type: 'sidecar_query_done' });
     this.turnEventNormalizer = null;
+    this.turnManualCompact = false;
+    this.compactingPlaceholderShown = false;
   }
 
   /**

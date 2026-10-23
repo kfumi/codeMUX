@@ -414,6 +414,100 @@ describe('SessionRuntime subagent query lifecycle', () => {
     runtime.shutdown();
   });
 
+  it('emits turn_finished when a manual /compact boundary completes', async () => {
+    await runtime.sendInput('/compact');
+    await flush();
+    expect(query.prompts).toHaveLength(1);
+
+    query.pushMessage({
+      type: 'system',
+      subtype: 'compact_boundary',
+      uuid: 'compact-1',
+      compact_metadata: { trigger: 'manual', pre_tokens: 272_500, post_tokens: 1_000 },
+    });
+    await flush();
+
+    // The compact divider itself is emitted...
+    const boundaries = harness.emitted.filter(
+      (event) => event.type === 'system_event' && event.subtype === 'compact_boundary',
+    ) as Array<{ compact_metadata?: { status?: string } }>;
+    expect(boundaries.some((event) => event.compact_metadata?.status === 'completed')).toBe(true);
+
+    // ...and the turn must close with turn_finished, which is the only terminal
+    // event the daemon's turn state machine honours. Without it the session
+    // stays "running" forever after a manual compaction.
+    const finishes = harness.emitted.filter((event) => event.type === 'turn_finished') as Array<{ outcome?: string }>;
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0]?.outcome).toBe('completed');
+    expect((runtime as unknown as { turnActive: boolean }).turnActive).toBe(false);
+
+    // A result that trails the boundary must not produce a second boundary.
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'compacted' });
+    await flush();
+    expect(harness.emitted.filter((event) => event.type === 'turn_finished')).toHaveLength(1);
+
+    runtime.shutdown();
+  });
+
+  it('closes a manual /compact turn on a reused persistent query too', async () => {
+    await runtime.sendInput('first prompt');
+    await flush();
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'done' });
+    await flush();
+    const emittedAfterFirstTurn = harness.emitted.length;
+
+    // Same query handle is reused: this skips startPersistentQuery entirely.
+    await runtime.sendInput('/compact');
+    await flush();
+    expect(query.prompts).toHaveLength(2);
+
+    const placeholders = harness.emitted.slice(emittedAfterFirstTurn).filter(
+      (event) => event.type === 'system_event' && event.subtype === 'compact_boundary',
+    ) as Array<{ compact_metadata?: { status?: string; trigger?: string } }>;
+    expect(placeholders.some((event) => event.compact_metadata?.status === 'compacting')).toBe(true);
+
+    query.pushMessage({
+      type: 'system',
+      subtype: 'compact_boundary',
+      uuid: 'compact-reuse',
+      compact_metadata: { trigger: 'manual', pre_tokens: 100_000, post_tokens: 2_000 },
+    });
+    await flush();
+
+    const finishes = harness.emitted.slice(emittedAfterFirstTurn).filter((event) => event.type === 'turn_finished');
+    expect(finishes).toHaveLength(1);
+    expect((runtime as unknown as { turnActive: boolean }).turnActive).toBe(false);
+
+    runtime.shutdown();
+  });
+
+  it('does not end an auto compaction turn at the boundary; waits for result', async () => {
+    await runtime.sendInput('long task');
+    await flush();
+
+    // Auto compaction: status frame, then the boundary lands mid-turn.
+    query.pushMessage({ type: 'system', subtype: 'status', status: 'compacting' });
+    query.pushMessage({
+      type: 'system',
+      subtype: 'compact_boundary',
+      uuid: 'compact-auto',
+      compact_metadata: { trigger: 'auto', pre_tokens: 200_000 },
+    });
+    await flush();
+
+    // The turn is still active and no terminal event has been emitted yet.
+    expect((runtime as unknown as { turnActive: boolean }).turnActive).toBe(true);
+    expect(harness.emitted.filter((event) => event.type === 'turn_finished')).toHaveLength(0);
+
+    // The real result closes the turn exactly once.
+    query.pushMessage({ type: 'result', subtype: 'success', is_error: false, result: 'done' });
+    await flush();
+    const finishes = harness.emitted.filter((event) => event.type === 'turn_finished');
+    expect(finishes).toHaveLength(1);
+
+    runtime.shutdown();
+  });
+
   it('pins CLI model-alias env vars to the session model for gateway sessions', async () => {
     runtime = new SessionRuntime();
     await ensure({ model: 'glm-5.3-flash', baseUrl: 'https://gateway.example/anthropic', apiKey: 'k' });
