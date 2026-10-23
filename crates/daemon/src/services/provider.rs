@@ -575,6 +575,41 @@ pub async fn fetch_opencode_free_models_for_companion() -> Result<Vec<ModelInfo>
     Ok(models)
 }
 
+/// Join models.dev's context/token limits onto fetched model rows.
+///
+/// Free-model sessions have no ModelProvider record to carry a window, so the
+/// send-box ring reads the catalog's answer straight off these rows instead of
+/// issuing a separate lookup per session. Advisory (ADR 0015): ids the catalog
+/// does not list keep their limits undeclared — never a guessed denominator.
+pub async fn apply_catalog_limits(
+    mut models: Vec<ModelInfo>,
+    provider: Option<&str>,
+    roots: &crate::paths::PathRoots,
+) -> Vec<ModelInfo> {
+    let ids: Vec<String> = models.iter().map(|model| model.id.clone()).collect();
+    let capabilities =
+        crate::services::model_catalog::capabilities_for_ids(roots, provider, &ids).await;
+    join_catalog_limits(&mut models, &capabilities);
+    models
+}
+
+fn join_catalog_limits(
+    models: &mut [ModelInfo],
+    capabilities: &std::collections::BTreeMap<
+        String,
+        crate::services::model_catalog::CatalogCapabilities,
+    >,
+) {
+    for model in models.iter_mut() {
+        let Some(entry) = capabilities.get(&model.id) else {
+            continue;
+        };
+        model.context_window = entry.context_window;
+        model.max_input_tokens = entry.max_input_tokens;
+        model.max_output_tokens = entry.max_output_tokens;
+    }
+}
+
 /// Known compatibility suffixes to strip when building candidate URLs.
 const COMPAT_SUFFIXES: &[&str] = &["/anthropic", "/claudecode", "/coding", "/v1"];
 
@@ -813,6 +848,48 @@ mod tests {
         let urls = build_model_urls("https://open.bigmodel.cn/api/paas/v4");
         assert!(urls.contains(&"https://open.bigmodel.cn/api/paas/v4/models".to_string()));
         assert!(urls.contains(&"https://open.bigmodel.cn/api/paas/v4/v1/models".to_string()));
+    }
+
+    #[test]
+    fn catalog_limits_join_fills_hits_and_leaves_misses_undeclared() {
+        let mut models = vec![
+            ModelInfo {
+                id: "glm-5-free".to_string(),
+                owned_by: "opencode".to_string(),
+                name: None,
+                input_modalities: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
+            },
+            ModelInfo {
+                id: "jev-1.13-free".to_string(),
+                owned_by: "opencode".to_string(),
+                name: None,
+                input_modalities: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
+            },
+        ];
+        let mut capabilities = std::collections::BTreeMap::new();
+        capabilities.insert(
+            "glm-5-free".to_string(),
+            crate::services::model_catalog::CatalogCapabilities {
+                input_modalities: vec!["text".to_string()],
+                context_window: Some(204_800),
+                max_input_tokens: Some(180_000),
+                max_output_tokens: Some(131_072),
+            },
+        );
+        super::join_catalog_limits(&mut models, &capabilities);
+        assert_eq!(models[0].context_window, Some(204_800));
+        assert_eq!(models[0].max_input_tokens, Some(180_000));
+        assert_eq!(models[0].max_output_tokens, Some(131_072));
+        // Modalities are not joined here: the free route only needs the limits.
+        assert_eq!(models[0].input_modalities, None);
+        // A catalog miss keeps the row undeclared — never a guessed window.
+        assert_eq!(models[1].context_window, None);
     }
 
     #[test]

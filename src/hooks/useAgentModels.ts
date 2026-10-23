@@ -20,6 +20,11 @@ export interface ModelOption {
   description?: string;
   efforts?: boolean;
   source?: 'provider' | 'catalog' | 'config' | 'builtin';
+  /**
+   * models.dev 的上下文窗口，仅免费模型条目携带（daemon 免费目录接口 join，
+   * ADR 0015 建议值）。供应商模型条目不带 —— 它们的窗口走 provider 配置。
+   */
+  contextWindow?: number | null;
 }
 
 /**
@@ -38,19 +43,26 @@ export function isOpenCodeFreeProviderId(providerId: string | null | undefined):
 interface OpenCodeFreeModelRow {
   id: string;
   name: string | null;
+  /** daemon join 的 models.dev 窗口；目录没有就是 null（不猜，ADR 0015）。 */
+  contextWindow: number | null;
 }
 
 interface OpenCodeFreeModelPayloadRow {
   id?: unknown;
   name?: unknown;
+  context_window?: unknown;
 }
 
-const FREE_MODELS_CACHE_TTL_MS = 60_000;
-let freeModelsCache: { at: number; rows: OpenCodeFreeModelRow[] } | null = null;
+/**
+ * 免费目录缓存（模块级）：成功即缓存到应用退出，由 App 启动预热填充——
+ * 免费列表每次应用生命周期只拉一次，进会话/切换会话不再等远程。失败不
+ * 缓存，下次挂载按 pending 门槛重试。
+ */
+let freeModelsCache: OpenCodeFreeModelRow[] | null = null;
 
-/** 免费目录缓存是否新鲜：新鲜时新建面板首屏就能解析配置默认值，无需等待网络。 */
-export function hasFreshOpenCodeFreeModelsCache(): boolean {
-  return !!freeModelsCache && Date.now() - freeModelsCache.at < FREE_MODELS_CACHE_TTL_MS;
+/** 免费目录是否已有缓存：有缓存时新建面板首屏就能解析配置默认值，无需等待网络。 */
+function hasOpenCodeFreeModelsCache(): boolean {
+  return !!freeModelsCache;
 }
 let freeModelsInFlight: Promise<OpenCodeFreeModelRow[]> | null = null;
 
@@ -62,13 +74,13 @@ export function resetOpenCodeFreeModelsCacheForTests(): void {
 
 /**
  * 拉取 Zen 免费模型目录（daemon `/providers/opencode-free-models`）。
- * 模块级短缓存 + 在途去重：选择器在新建面板、自动化编辑器、会话 composer
- * 三处各挂一个实例，避免重复打 daemon。失败不缓存，下次挂载重试。
+ * 成功即入模块级缓存（用到应用退出）；在途去重：选择器在新建面板、自动化
+ * 编辑器、会话 composer 三处各挂一个实例，避免重复打 daemon。失败不缓存，
+ * 下次挂载重试。
  */
 function fetchOpenCodeFreeModelRows(): Promise<OpenCodeFreeModelRow[]> {
-  const now = Date.now();
-  if (freeModelsCache && now - freeModelsCache.at < FREE_MODELS_CACHE_TTL_MS) {
-    return Promise.resolve(freeModelsCache.rows);
+  if (freeModelsCache) {
+    return Promise.resolve(freeModelsCache);
   }
   if (!freeModelsInFlight) {
     freeModelsInFlight = daemonFacade
@@ -82,8 +94,11 @@ function fetchOpenCodeFreeModelRows(): Promise<OpenCodeFreeModelRow[]> {
           .map((row) => ({
             id: (row.id as string).trim(),
             name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : null,
+            contextWindow: typeof row.context_window === 'number' && row.context_window > 0
+              ? row.context_window
+              : null,
           }));
-        freeModelsCache = { at: now, rows };
+        freeModelsCache = rows;
         return rows;
       })
       .finally(() => {
@@ -91,6 +106,15 @@ function fetchOpenCodeFreeModelRows(): Promise<OpenCodeFreeModelRow[]> {
       });
   }
   return freeModelsInFlight;
+}
+
+/**
+ * App 启动预热：提前把免费目录拉进模块缓存，进会话时选择器首屏即有免费
+ * 分组、免费会话不闪供应商模型。成败都不阻塞启动——失败不缓存，进入
+ * opencode 会话时按 pending 门槛重试。
+ */
+export function prefetchOpenCodeFreeModels(): void {
+  void fetchOpenCodeFreeModelRows().catch(() => {});
 }
 
 function providersFingerprint(providers: ModelProvider[]): string {
@@ -176,7 +200,53 @@ function toOpenCodeFreeModelOption(row: OpenCodeFreeModelRow): ModelOption {
     // 免费目录不带 reasoning 档位声明，保守不提供档位选择。
     efforts: false,
     source: 'catalog',
+    contextWindow: row.contextWindow,
   };
+}
+
+/**
+ * 免费模型会话的上下文窗口（来自免费目录行的 models.dev join）。
+ *
+ * 与 `useCatalogContextWindow` 同源（都是 daemon 的 models.dev 快照），
+ * 互为兜底：目录按 key 查询的 miss 会被永久缓存，而免费目录行自带 join
+ * 好的窗口 —— 两条路径的缓存时点不同，任何一条先拿到真值环就能显示。
+ * 免费目录本身缓存到应用退出，所以运行中途 daemon 目录从 bundled 回落
+ * 恢复后，已 miss 的模型要重启应用才能拿到窗口。查不到仍为 null。
+ */
+export function useOpenCodeFreeContextWindow(
+  agentKind: AgentKind,
+  model: string | null | undefined,
+): number | null {
+  const options = useOpenCodeFreeModelOptions(agentKind);
+  const id = (model ?? '').trim();
+  return useMemo(() => {
+    if (agentKind !== 'opencode' || !id) return null;
+    return options.find((option) => option.modelId === id)?.contextWindow ?? null;
+  }, [agentKind, id, options]);
+}
+
+/**
+ * opencode 免费目录是否仍在途（启动预热未完成，或上次失败后的挂载重试中）。
+ * 仅 opencode 智能体会等待，其余恒为 false。
+ */
+export function useOpenCodeFreeModelsPending(agentKind: AgentKind): boolean {
+  const [pending, setPending] = useState(
+    () => agentKind === 'opencode' && !hasOpenCodeFreeModelsCache(),
+  );
+  useEffect(() => {
+    if (agentKind !== 'opencode' || hasOpenCodeFreeModelsCache()) {
+      setPending(false);
+      return;
+    }
+    let cancelled = false;
+    setPending(true);
+    fetchOpenCodeFreeModelRows().then(
+      () => { if (!cancelled) setPending(false); },
+      () => { if (!cancelled) setPending(false); },
+    );
+    return () => { cancelled = true; };
+  }, [agentKind]);
+  return pending;
 }
 
 /** Collect usable provider models for an agent, grouped by provider. */
@@ -196,22 +266,7 @@ export function useAgentModels(
   // preferredModel 只是兜底（models[0]），调用方据此把发送门槛挂起，等目录回来再按配置默认值展示/发送。
   // 与 useOpenCodeFreeModelOptions 共用模块级在途去重，不会多发一次网络请求；isLoading 保持 false，
   // 避免其他调用方（自动化编辑器等）的转圈逻辑被误触。
-  const [freePending, setFreePending] = useState(
-    () => agentKind === 'opencode' && !hasFreshOpenCodeFreeModelsCache(),
-  );
-  useEffect(() => {
-    if (agentKind !== 'opencode' || hasFreshOpenCodeFreeModelsCache()) {
-      setFreePending(false);
-      return;
-    }
-    let cancelled = false;
-    setFreePending(true);
-    fetchOpenCodeFreeModelRows().then(
-      () => { if (!cancelled) setFreePending(false); },
-      () => { if (!cancelled) setFreePending(false); },
-    );
-    return () => { cancelled = true; };
-  }, [agentKind]);
+  const freePending = useOpenCodeFreeModelsPending(agentKind);
   // Display names come from the models.dev index, which arrives after the first
   // render; without this the list would keep its prettified names.
   useModelDisplayNames();

@@ -241,6 +241,17 @@ async fn fetch_opencode_free_models_route(
     let models = crate::services::provider::fetch_opencode_free_models_for_companion()
         .await
         .map_err(ApiError::bad_request)?;
+    // Join models.dev's context/token limits onto the rows (scoped to the
+    // `opencode` provider, same advisory rule as the fetch-models route). Free
+    // sessions have no ModelProvider record to carry a window, so the send-box
+    // ring reads it straight off these rows; ids the catalog lacks stay
+    // undeclared (ADR 0015 — never a guessed denominator).
+    let models = crate::services::provider::apply_catalog_limits(
+        models,
+        Some("opencode"),
+        &ctx.daemon.roots,
+    )
+    .await;
     Ok(Json(serde_json::json!(models)))
 }
 

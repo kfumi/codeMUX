@@ -9,6 +9,7 @@ import { navTargetForView, type NavRailTarget } from './components/layout/NavRai
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
+import { prefetchOpenCodeFreeModels } from './hooks/useAgentModels';
 import { useUnreadBadge } from './hooks/useUnreadBadge';
 import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -131,6 +132,11 @@ function App() {
   useAgentNotifications();
   useUnreadBadge();
   useModelDisplayNames();
+  // 启动预热免费模型目录：进 opencode 会话时选择器首屏即有免费分组，
+  // 免费会话不闪供应商模型。成败都不阻塞启动（见 prefetch 实现）。
+  useEffect(() => {
+    prefetchOpenCodeFreeModels();
+  }, []);
 
   useEffect(() => {
     if (activeView !== 'automation') return;

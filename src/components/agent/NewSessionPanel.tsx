@@ -100,13 +100,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const isFreeSelection = selectedAgentKind === 'opencode'
     && isOpenCodeFreeProviderId(effectiveProviderId);
   // 免费模型没有 ModelProvider 记录，窗口只能从目录取；查不到就不显示分母。
+  // 免费目录行自带 join 好的窗口，作为目录查询 miss 时的兜底（两层同源）。
   const freeCatalogContextWindow = useCatalogContextWindow(
     isFreeSelection ? effectiveModel : null,
     'opencode',
   );
   const configuredContextWindow = selectedAgentKind === 'codex' || selectedAgentKind === 'opencode' || selectedAgentKind === 'pi'
     ? (isFreeSelection
-      ? freeCatalogContextWindow
+      ? (freeCatalogContextWindow ?? preferredModel?.contextWindow ?? null)
       : getProfileModelContextWindow(
         modelProviders.find((provider) => provider.id === effectiveProviderId) ?? null,
         effectiveModel,

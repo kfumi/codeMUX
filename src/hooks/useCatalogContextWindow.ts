@@ -56,8 +56,10 @@ export function useCatalogContextWindow(
 }
 
 /**
- * 命中与落空都缓存：目录在一个 app 生命周期内不会变，重复的 `found: false`
- * 没必要再打一次 daemon。**异常不缓存**，下次挂载重试。
+ * 命中与落空都缓存：重复查询没有意义，落空（`found: false`）在本次应用
+ * 运行内也视为终态 —— daemon 的 models.dev 快照中途从 bundled 回落恢复
+ * 时，已 miss 的模型要到重启应用后才能拿到窗口（免费目录行的窗口是另一
+ * 条兜底路径，见 useAgentModels）。**异常不缓存**，下次挂载重试。
  */
 const contextWindowCache = new Map<string, number | null>();
 const contextWindowInFlight = new Map<string, Promise<number | null>>();

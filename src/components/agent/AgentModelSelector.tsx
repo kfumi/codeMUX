@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAui } from '@assistant-ui/react';
+import { Loader2 } from 'lucide-react';
 
 import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
@@ -9,6 +10,8 @@ import { getProviderModel } from '@/lib/modelProviders';
 import { coerceToOptions, effortOptionsForModel } from '@/lib/reasoningEffort';
 import { registerThoughtLevelCycle } from '@/lib/shortcuts/thoughtLevelCycle';
 import {
+  OPENCODE_FREE_GROUP,
+  OPENCODE_FREE_PROVIDER_ID,
   decodeModelSelectorValue,
   encodeModelSelectorValue,
   useAgentModels,
@@ -84,11 +87,27 @@ export function AgentModelSelector({
 }: AgentModelSelectorProps) {
   const useEffortSlider = effortControl === 'slider';
   const api = useAui();
-  const { models, isLoading } = useAgentModels(agentKind, providers, activeProviderId);
+  const { models, isLoading, freePending } = useAgentModels(agentKind, providers, activeProviderId);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
 
+  // 免费目录在途时会话绑定的免费模型还不在列表里：垫一个「模型加载中」占位
+  // 条目，而不是回落到第一个供应商模型 —— 那会让会话看起来绑错了模型，目录
+  // 回来后又跳走。目录加载失败时占位随 pending 一起消失，回落维持原行为。
+  // 只放进 Root 的 models 供 Value 解析，不进下拉列表（无可选项）。
+  const pendingFreeModelId = useMemo(() => {
+    if (!freePending || !value.trim()) return null;
+    if (activeProviderId
+      && models.some((model) => model.id === encodeModelSelectorValue(activeProviderId, value))) {
+      return null;
+    }
+    if (models.some((model) => model.modelId === value)) return null;
+    return value;
+  }, [activeProviderId, freePending, models, value]);
+  const pendingFreeOptionId = pendingFreeModelId
+    ? encodeModelSelectorValue(OPENCODE_FREE_PROVIDER_ID, pendingFreeModelId)
+    : null;
+
   const selectorValue = useMemo(() => {
-    if (!models.length) return '';
     if (activeProviderId && value) {
       const exact = encodeModelSelectorValue(activeProviderId, value);
       if (models.some((model) => model.id === exact)) return exact;
@@ -97,8 +116,9 @@ export function AgentModelSelector({
       const byModel = models.find((model) => model.modelId === value);
       if (byModel) return byModel.id;
     }
+    if (pendingFreeOptionId) return pendingFreeOptionId;
     return models[0]?.id ?? '';
-  }, [activeProviderId, models, value]);
+  }, [activeProviderId, models, value, pendingFreeOptionId]);
 
   const effectiveModelId =
     models.find((model) => model.id === selectorValue)?.modelId || value || models[0]?.modelId || '';
@@ -169,36 +189,50 @@ export function AgentModelSelector({
     }
   }, [models, providerFilter]);
 
-  const modelOptions: ModelOption[] = useMemo(
-    () =>
-      models.map((model) => ({
-        id: model.id,
-        name: formatModelDisplayName({
-          model: model.name,
-          agentKind,
-        }),
-        group: model.group,
-        description: model.description,
-        // The resolved ladder, not the raw `efforts` flag. ModelSelector derives
-        // the levels it offers *and* resolves the current level against them, so
-        // handing it the flag would make it drop the level entirely for free
-        // catalog models (`efforts: false`) and render the control at the bottom
-        // of the ladder instead of where the session actually is.
-        efforts: effortOptionsForModel(
-          getProviderModel(providers, model.providerId, model.modelId),
-        ),
-        keywords: [model.group, model.modelId, model.name, model.providerId],
+  const modelOptions: ModelOption[] = useMemo(() => {
+    const options = models.map((model) => ({
+      id: model.id,
+      name: formatModelDisplayName({
+        model: model.name,
+        agentKind,
+      }),
+      group: model.group,
+      description: model.description,
+      // The resolved ladder, not the raw `efforts` flag. ModelSelector derives
+      // the levels it offers *and* resolves the current level against them, so
+      // handing it the flag would make it drop the level entirely for free
+      // catalog models (`efforts: false`) and render the control at the bottom
+      // of the ladder instead of where the session actually is.
+      efforts: effortOptionsForModel(
+        getProviderModel(providers, model.providerId, model.modelId),
+      ),
+      keywords: [model.group, model.modelId, model.name, model.providerId],
+      icon: (
+        <ProviderBrandIcon
+          templateId={model.providerTemplateId}
+          name={model.group}
+          className="h-5 w-5"
+          size={14}
+        />
+      ),
+    }));
+    if (pendingFreeOptionId && pendingFreeModelId) {
+      options.unshift({
+        id: pendingFreeOptionId,
+        // trigger 直接显示加载态：不看下拉也要能感知「正在等目录」，而不是
+        // 静默显示一个模型名。模型 id 放进 description/keywords 保留线索。
+        name: '模型加载中…',
+        group: OPENCODE_FREE_GROUP,
+        description: pendingFreeModelId,
+        efforts: effortOptionsForModel(null),
+        keywords: [pendingFreeModelId],
         icon: (
-          <ProviderBrandIcon
-            templateId={model.providerTemplateId}
-            name={model.group}
-            className="h-5 w-5"
-            size={14}
-          />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
         ),
-      })),
-    [agentKind, models, providers],
-  );
+      });
+    }
+    return options;
+  }, [agentKind, models, providers, pendingFreeOptionId, pendingFreeModelId]);
 
   const providerFilters: ProviderFilter[] = useMemo(() => {
     const seen = new Map<string, ProviderFilter>();

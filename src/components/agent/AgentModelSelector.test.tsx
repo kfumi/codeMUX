@@ -14,6 +14,8 @@ vi.mock('@assistant-ui/react', () => ({
 
 vi.mock('../../hooks/useAgentModels', () => ({
   useAgentModels: vi.fn(),
+  OPENCODE_FREE_PROVIDER_ID: 'opencode-free',
+  OPENCODE_FREE_GROUP: 'OpenCode 免费模型',
   encodeModelSelectorValue: (providerId: string, modelId: string) => `${providerId}::${modelId}`,
   decodeModelSelectorValue: (value: string) => {
     const separator = value.indexOf('::');
@@ -31,15 +33,19 @@ vi.mock('@/components/model-selector', () => ({
     Root: ({
       children,
       models,
+      value,
       onValueChange,
     }: {
       children: React.ReactNode;
-      models: { id: string; group?: string; efforts?: unknown }[];
+      models: { id: string; name?: string; group?: string; efforts?: unknown }[];
+      value?: string;
       onValueChange?: (value: string) => void;
     }) => (
       <div
         data-testid="selector-root"
         data-models={models.map((model) => model.id).join(',')}
+        data-names={models.map((model) => model.name).join(',')}
+        data-value={value ?? ''}
         data-groups={[...new Set(models.map((model) => model.group).filter(Boolean))].join(',')}
         // What the host hands ModelSelector as each model's levels. It resolves
         // the current level against these, so the raw `efforts` flag is not
@@ -348,6 +354,81 @@ describe('AgentModelSelector', () => {
     // provider-2 declares the full ladder, so 极高 must be present even though
     // provider-1's copy of the same model id declares none.
     expect(screen.getByRole('option', { name: '极高' })).toBeTruthy();
+  });
+
+  it('holds the session model as a pending placeholder instead of snapping to the first model', () => {
+    // 免费目录在途：会话绑定的免费模型还不在列表里。此时绝不能把选择器
+    // 吸附到第一个供应商模型 —— 那就是重载会话时「先闪一个错的模型」的
+    // 根源 —— 而是垫一个占位条目，等目录回来再切换成真条目。
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false, freePending: true });
+
+    render(
+      <AgentModelSelector
+        agentKind="opencode"
+        providers={sampleProviders}
+        activeProviderId={null}
+        value="glm-5-free"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    const root = screen.getByTestId('selector-root');
+    expect(root.getAttribute('data-value')).toBe('opencode-free::glm-5-free');
+    // 占位只进 Root 的 models（供 Value 解析显示），不进下拉列表；trigger
+    // 显示的是明确的加载态，而不是静默的模型名。
+    expect(root.getAttribute('data-models')).toBe(
+      'opencode-free::glm-5-free,provider-1::gpt-5,provider-2::snapshot-only-model',
+    );
+    expect(root.getAttribute('data-names')).toBe('模型加载中…,GPT-5,Snapshot');
+    expect(root.getAttribute('data-groups')).toBe('OpenCode 免费模型,深度求索,OpenAI');
+  });
+
+  it('shows the loading placeholder even when no provider models exist yet', () => {
+    // 只用免费模型、没配任何供应商的会话：列表为空也该看到加载态，而不是
+    // 一个空白的「选择模型」。
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: [], isLoading: false, freePending: true });
+
+    render(
+      <AgentModelSelector
+        agentKind="opencode"
+        providers={[]}
+        activeProviderId={null}
+        value="glm-5-free"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    const root = screen.getByTestId('selector-root');
+    expect(root.getAttribute('data-value')).toBe('opencode-free::glm-5-free');
+    expect(root.getAttribute('data-models')).toBe('opencode-free::glm-5-free');
+    expect(root.getAttribute('data-names')).toBe('模型加载中…');
+  });
+
+  it('keeps the placeholder out when the value already matches a listed model', () => {
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false, freePending: true });
+
+    render(
+      <AgentModelSelector
+        agentKind="opencode"
+        providers={sampleProviders}
+        activeProviderId="provider-1"
+        value="gpt-5"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    const root = screen.getByTestId('selector-root');
+    expect(root.getAttribute('data-value')).toBe('provider-1::gpt-5');
+    expect(root.getAttribute('data-models')).toBe('provider-1::gpt-5,provider-2::snapshot-only-model');
   });
 
   // The slider is opt-in. Every host except the conversation composer must keep

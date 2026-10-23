@@ -9,7 +9,11 @@ import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
-import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
+import {
+  isOpenCodeFreeProviderId,
+  useOpenCodeFreeContextWindow,
+  useOpenCodeFreeModelsPending,
+} from '../../hooks/useAgentModels';
 import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import type { ReasoningEffort } from '../../types/session';
 import { getPrimaryProjectRoot } from '../../types/project';
@@ -130,16 +134,27 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   // 发送由 daemon 落到 opencode 原生 provider(ADR 0017),只需有模型即可发送。
   const isFreeModelSession = agentKind === 'opencode'
     && isOpenCodeFreeProviderId(session?.provider_id);
+  // 免费目录在途（启动预热未完成）时挂起免费会话的发送：选择器此刻只能
+  // 显示占位条目，放开发送容易让人对着错误的模型列表发消息。仅免费会话
+  // 等待 —— 绑定供应商模型的会话不缺任何信息；失败也放行（目录重试是
+  // 挂载驱动，不能把会话永久锁死）。
+  const freeModelsPending = useOpenCodeFreeModelsPending(agentKind);
   const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
   // 免费会话没有 ModelProvider 记录可读，上下文只能从目录取；取不到就是取不到，
   // 不退回 200k —— 那会让 1M 的模型看起来随时溢出（ADR 0015、ADR 0017）。
+  // 目录查询与免费目录行（自带 join 好的窗口）互为兜底：两层同源、缓存时点
+  // 不同，任何一层先拿到真值环就能显示；都 miss 才隐藏（不猜分母）。
   const freeCatalogContextWindow = useCatalogContextWindow(
     isFreeModelSession ? model : null,
     'opencode',
   );
+  const freeListContextWindow = useOpenCodeFreeContextWindow(
+    agentKind,
+    isFreeModelSession ? model : null,
+  );
   const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode' || agentKind === 'pi'
     ? (isFreeModelSession
-      ? freeCatalogContextWindow
+      ? (freeCatalogContextWindow ?? freeListContextWindow)
       : getProfileModelContextWindow(runtimeProvider, model))
     : null;
   const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
@@ -551,7 +566,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         projectSkills={projectSkills}
         onSend={handleSend}
         onCommand={handleCommand}
-        sendDisabled={!hasUsableProvider || isReadOnly}
+        sendDisabled={!hasUsableProvider || isReadOnly || (isFreeModelSession && freeModelsPending)}
       >
         <Profiler id="AgentThread" onRender={handleProfilerRender}>
           <CodeMuxThread

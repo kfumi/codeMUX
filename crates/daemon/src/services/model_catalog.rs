@@ -25,6 +25,12 @@ const CATALOG_URL: &str = "https://models.dev/api.json";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 /// The catalog changes a few times a month at most; a day-old snapshot is fine.
 const SNAPSHOT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// The bundled snapshot is only a fallback for when models.dev is unreachable.
+/// It ships frozen at build time, so pinning it for a full day after a single
+/// network blip would serve a catalog that lacks recently added models for a
+/// day; a short TTL means the daemon retries the network within minutes and
+/// converges back onto live data as soon as the upstream recovers.
+const BUNDLED_SNAPSHOT_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Thinking levels assumed when the catalog says a model reasons but publishes
 /// no per-level detail. Same fallback PI-Desktop uses
@@ -245,8 +251,16 @@ fn parse_catalog(document: &serde_json::Value, source: &'static str) -> Snapshot
     }
 }
 
+fn snapshot_ttl(source: &str) -> Duration {
+    if source == "remote" {
+        SNAPSHOT_TTL
+    } else {
+        BUNDLED_SNAPSHOT_TTL
+    }
+}
+
 fn snapshot_is_fresh(snapshot: &Snapshot) -> bool {
-    snapshot.loaded_at.elapsed() < SNAPSHOT_TTL
+    snapshot.loaded_at.elapsed() < snapshot_ttl(snapshot.source)
 }
 
 /// Read the snapshot shipped with the app.
@@ -625,6 +639,33 @@ mod tests {
         let snapshot = fixture_snapshot();
         assert!(lookup_in(&snapshot, Some("anthropic"), "my-proxy/internal-7").is_none());
         assert!(lookup_in(&snapshot, None, "  ").is_none());
+    }
+
+    fn aged_snapshot(source: &'static str, age: Duration) -> Snapshot {
+        let mut snapshot = parse_catalog(&serde_json::from_str(FIXTURE).unwrap(), source);
+        snapshot.loaded_at = Instant::now() - age;
+        snapshot
+    }
+
+    #[test]
+    fn bundled_snapshot_expires_quickly_but_remote_lasts_a_day() {
+        // The bundled fallback exists only because the network failed; letting
+        // it ride the full-day TTL would pin the stale packaged catalog — which
+        // lacks recently added models — long after models.dev recovered. It
+        // expires within minutes so the next lookup retries the network.
+        let past_bundled_ttl = BUNDLED_SNAPSHOT_TTL + Duration::from_secs(1);
+        assert!(!snapshot_is_fresh(&aged_snapshot(
+            "bundled",
+            past_bundled_ttl
+        )));
+        assert!(snapshot_is_fresh(&aged_snapshot(
+            "remote",
+            past_bundled_ttl
+        )));
+        assert!(snapshot_is_fresh(&aged_snapshot(
+            "bundled",
+            Duration::from_secs(60)
+        )));
     }
 
     #[test]
