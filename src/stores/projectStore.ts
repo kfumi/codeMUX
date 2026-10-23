@@ -46,6 +46,8 @@ interface ProjectState {
   setActiveProject: (projectId: string | null) => void;
   toggleProjectExpanded: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
+  /** 侧边栏「项目」分区头部：一次展开或收起全部项目。 */
+  setAllProjectsExpanded: (expanded: boolean) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -75,6 +77,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
       } else {
         newCollapsed.add(projectId);
       }
+      saveCollapsedProjects(newCollapsed);
+      return { collapsedProjects: newCollapsed };
+    });
+  },
+  setAllProjectsExpanded: (expanded: boolean) => {
+    set((state) => {
+      // 展开时清空整张表:不在当前列表里的历史 id 也不该继续占用。
+      const newCollapsed = expanded
+        ? new Set<string>()
+        : new Set(state.projects.map((project) => project.id));
       saveCollapsedProjects(newCollapsed);
       return { collapsedProjects: newCollapsed };
     });

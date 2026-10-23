@@ -64,6 +64,29 @@ describe('project store first load', () => {
   });
 });
 
+describe('project store expand/collapse all', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      projects: [projectFixture(), projectFixture({ id: 'p2', name: 'Mobile' })],
+      collapsedProjects: new Set(['p1']),
+    });
+  });
+
+  it('collapses every project at once', () => {
+    useProjectStore.getState().setAllProjectsExpanded(false);
+
+    expect(useProjectStore.getState().collapsedProjects).toEqual(new Set(['p1', 'p2']));
+  });
+
+  it('expands every project at once, including stale collapsed ids', () => {
+    useProjectStore.setState({ collapsedProjects: new Set(['p1', 'removed-project']) });
+
+    useProjectStore.getState().setAllProjectsExpanded(true);
+
+    expect(useProjectStore.getState().collapsedProjects.size).toBe(0);
+  });
+});
+
 describe('project store multi-root mutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();

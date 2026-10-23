@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronRight, MessageSquarePlus, Plus } from 'lucide-react';
+import { ChevronRight, ListChevronsDownUp, ListChevronsUpDown, MessageSquarePlus, Plus } from 'lucide-react';
 
 import type { Project } from '../../types/project';
 import { getProjectRootPaths } from '../../types/project';
@@ -110,7 +110,7 @@ function SectionHeader({
       {actions ? (
         <div
           className={cn(
-            'shrink-0 transition-opacity duration-fast',
+            'flex shrink-0 items-center gap-0.5 transition-opacity duration-fast',
             // 分区操作按钮跟展开箭头一致：宽屏悬停（或键盘聚焦）才出现，窄屏触摸常显。
             isNarrow
               ? 'opacity-100'
@@ -149,9 +149,11 @@ export function SessionList({
   const {
     projects,
     activeProjectId,
+    collapsedProjects,
     hasLoadedOnce: projectsLoaded,
     fetchProjects,
     deleteProject,
+    setAllProjectsExpanded,
   } = useProjectStore();
   const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
@@ -204,6 +206,20 @@ export function SessionList({
       return next;
     });
   }, []);
+
+  // 「展开全部项目」在还有项目收起时出现；全部展开后按钮翻成「收起全部项目」。
+  const allProjectsExpanded = projects.every((project) => !collapsedProjects.has(project.id));
+  const allProjectsToggleLabel = allProjectsExpanded ? '收起全部项目' : '展开全部项目';
+
+  const toggleAllProjectsExpanded = useCallback(() => {
+    const nextExpanded = !allProjectsExpanded;
+    setAllProjectsExpanded(nextExpanded);
+    // 分区本身收着时，展开全部项目若只改组状态用户什么也看不到。
+    if (nextExpanded && !projectsExpanded) {
+      setProjectsExpanded(true);
+      saveSectionExpanded(PROJECTS_SECTION_KEY, true);
+    }
+  }, [allProjectsExpanded, projectsExpanded, setAllProjectsExpanded]);
 
   const togglePinnedExpanded = useCallback(() => {
     setPinnedExpanded((current) => {
@@ -294,21 +310,40 @@ export function SessionList({
             expanded={projectsExpanded}
             toggleLabel="toggle-projects-section"
             onToggle={toggleProjectsExpanded}
-            actions={canPickDirectory ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="添加项目"
-                    className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
-                    onClick={onAddProject}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right"><p>添加项目</p></TooltipContent>
-              </Tooltip>
-            ) : null}
+            actions={(
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={allProjectsToggleLabel}
+                      className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                      onClick={toggleAllProjectsExpanded}
+                    >
+                      {allProjectsExpanded
+                        ? <ListChevronsDownUp className="h-3.5 w-3.5" />
+                        : <ListChevronsUpDown className="h-3.5 w-3.5" />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right"><p>{allProjectsToggleLabel}</p></TooltipContent>
+                </Tooltip>
+                {canPickDirectory ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="添加项目"
+                        className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                        onClick={onAddProject}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right"><p>添加项目</p></TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </>
+            )}
           />
 
           {projectsExpanded && projects.map((project) => (

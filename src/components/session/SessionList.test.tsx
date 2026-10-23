@@ -248,6 +248,98 @@ describe('SessionList', () => {
     expect(screen.getByText('Project Session')).toBeTruthy();
   });
 
+  it('expands and collapses every project from the projects section header', () => {
+    useProjectStore.setState({
+      projects: [
+        makeProject({ id: 'project-1', name: 'codeMUX' }),
+        makeProject({ id: 'project-2', name: 'fumi-git' }),
+      ],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set(['project-1', 'project-2']),
+    });
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: 'session-codemux', title: 'CodeMUX Session', project_id: 'project-1' }),
+        makeSession({ id: 'session-fumi', title: 'Fumi Session', project_id: 'project-2' }),
+      ],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    // 项目行仍在，只是组内会话收起；有任一项目收起时按钮就是「展开全部项目」。
+    expect(screen.getByText('codeMUX')).toBeTruthy();
+    expect(screen.queryByText('CodeMUX Session')).toBeNull();
+    expect(screen.queryByText('Fumi Session')).toBeNull();
+    // 展开态与收起态各用对应的官方图标：朝外=展开，朝内=收起。
+    expect(
+      screen.getByRole('button', { name: '展开全部项目' }).querySelector('.lucide-list-chevrons-up-down'),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开全部项目' }));
+
+    expect(screen.getByText('CodeMUX Session')).toBeTruthy();
+    expect(screen.getByText('Fumi Session')).toBeTruthy();
+    expect(useProjectStore.getState().collapsedProjects.size).toBe(0);
+    expect(screen.getByRole('button', { name: '收起全部项目' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '收起全部项目' }).querySelector('.lucide-list-chevrons-down-up'),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '收起全部项目' }));
+
+    expect(screen.queryByText('CodeMUX Session')).toBeNull();
+    expect(screen.queryByText('Fumi Session')).toBeNull();
+    expect(useProjectStore.getState().collapsedProjects).toEqual(new Set(['project-1', 'project-2']));
+    expect(screen.getByRole('button', { name: '展开全部项目' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '展开全部项目' }).querySelector('.lucide-list-chevrons-up-down'),
+    ).toBeTruthy();
+  });
+
+  it('offers expand-all while only some projects are collapsed', () => {
+    useProjectStore.setState({
+      projects: [
+        makeProject({ id: 'project-1', name: 'codeMUX' }),
+        makeProject({ id: 'project-2', name: 'fumi-git' }),
+      ],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set(['project-2']),
+    });
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: 'session-codemux', title: 'CodeMUX Session', project_id: 'project-1' }),
+        makeSession({ id: 'session-fumi', title: 'Fumi Session', project_id: 'project-2' }),
+      ],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    expect(screen.getByText('CodeMUX Session')).toBeTruthy();
+    expect(screen.queryByText('Fumi Session')).toBeNull();
+    expect(screen.getByRole('button', { name: '展开全部项目' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开全部项目' }));
+
+    expect(screen.getByText('Fumi Session')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '收起全部项目' })).toBeTruthy();
+  });
+
   it('reveals the add-project action only on hover or keyboard focus', () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     useProjectStore.setState({
