@@ -40,9 +40,9 @@ function command(id: string) {
 }
 
 describe('命令目录', () => {
-  it('收录 10 条命令且 id 唯一', () => {
-    expect(SHORTCUT_COMMANDS).toHaveLength(10);
-    expect(new Set(SHORTCUT_COMMANDS.map((entry) => entry.id)).size).toBe(10);
+  it('收录 13 条命令且 id 唯一', () => {
+    expect(SHORTCUT_COMMANDS).toHaveLength(13);
+    expect(new Set(SHORTCUT_COMMANDS.map((entry) => entry.id)).size).toBe(13);
   });
 
   it('分组都在已知分组内，且每条命令都有标签与说明', () => {
@@ -154,6 +154,21 @@ describe('keybindingMatchesEvent', () => {
   it('未加 Shift 的 Equal 绑定仍能命中物理 Equal 键产出的 +', () => {
     const event = keyEvent({ key: '+', code: 'Equal', ctrlKey: true, shiftKey: true });
     expect(keybindingMatchesEvent('Mod+Equal', event, WIN)).toBe(true);
+  });
+
+  it('放大界面同时接受 Ctrl+= 与 Ctrl+Shift+=（物理 Equal 键）', () => {
+    const binding = resolveKeybinding(command('zoomIn'), undefined, WIN);
+    expect(binding).toBe('Mod+Equal');
+    expect(
+      keybindingMatchesEvent(binding, keyEvent({ key: '=', code: 'Equal', ctrlKey: true }), WIN),
+    ).toBe(true);
+    expect(
+      keybindingMatchesEvent(
+        binding,
+        keyEvent({ key: '+', code: 'Equal', ctrlKey: true, shiftKey: true }),
+        WIN,
+      ),
+    ).toBe(true);
   });
 });
 

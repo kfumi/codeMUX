@@ -70,6 +70,13 @@ function webContentsOf(window: BrowserWindow | null): WebContents | null {
   return window.webContents ?? null;
 }
 
+/**
+ * 页面缩放的上下限。1 个 zoom level = 1.2 倍;Chromium 的页面缩放范围是
+ * 25%–500%,对应的 level 约为 −7.6–8.8,这里取整后收在 [−7, 8]。
+ */
+const MIN_APP_ZOOM_LEVEL = -7;
+const MAX_APP_ZOOM_LEVEL = 8;
+
 /** 与 Rust LogFileInfo 同形:{name, path, size, modified:"YYYY-MM-DD HH:MM:SS"},按修改时间倒序。 */
 function listLogFiles(logDir: string): Array<{ name: string; path: string; size: number; modified: string }> {
   if (!existsSync(logDir)) {
@@ -363,6 +370,27 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   });
   handle('windowIsMaximized', () => {
     return deps.getMainWindow()?.isMaximized() ?? false;
+  });
+
+  // --- 界面缩放(渲染层可配置快捷键 zoomIn/zoomOut/resetZoom 的执行面) ------
+  // 走 webContents 的页面缩放(与浏览器 Ctrl+= / Ctrl+- / Ctrl+0 同一语义),
+  // 而不是 CSS zoom:后者改的是布局盒子,且碰不到焦点所在的 <webview>。
+  handle('adjustAppZoom', (payload: unknown) => {
+    const { delta } = (payload ?? {}) as { delta?: unknown };
+    if (typeof delta !== 'number' || !Number.isFinite(delta)) {
+      throw new Error('adjustAppZoom 需要数值 delta');
+    }
+    const contents = webContentsOf(deps.getMainWindow());
+    if (!contents) return null;
+    const next = Math.min(
+      MAX_APP_ZOOM_LEVEL,
+      Math.max(MIN_APP_ZOOM_LEVEL, contents.getZoomLevel() + delta),
+    );
+    contents.setZoomLevel(next);
+    return next;
+  });
+  handle('resetAppZoom', () => {
+    webContentsOf(deps.getMainWindow())?.setZoomLevel(0);
   });
 
   // --- 系统字体清单(工单 09:接替 get_system_fonts 壳命令) ------------------

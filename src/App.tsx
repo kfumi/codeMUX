@@ -22,6 +22,7 @@ import { ensureDraftSessionWorkingPath, getStoredAgentCwd, isValidWorkingPath, r
 import { registerSkillCommands } from './lib/slashCommands';
 import { focusActiveComposer } from './lib/shortcuts/composerFocus';
 import { cycleActiveThoughtLevel } from './lib/shortcuts/thoughtLevelCycle';
+import { resetAppZoom, zoomInApp, zoomOutApp } from './lib/shortcuts/appZoom';
 import { serializePermissionConfig } from './lib/agentPermissions';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { resolveProjectPath } from './lib/projectPath';
@@ -388,6 +389,15 @@ function App() {
       },
       cycleThoughtLevel: () => {
         cycleActiveThoughtLevel();
+      },
+      zoomIn: () => {
+        void zoomInApp();
+      },
+      zoomOut: () => {
+        void zoomOutApp();
+      },
+      resetZoom: () => {
+        void resetAppZoom();
       },
     });
   }, [activeView, handleBack, handleForward, handleNewSession, handleOpenSettings, isNarrowViewport]);

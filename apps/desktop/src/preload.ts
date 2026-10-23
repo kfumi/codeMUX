@@ -92,6 +92,10 @@ const bridge = {
   closeWindow: () => invoke<void>('windowClose'),
   isWindowMaximized: () => invoke<boolean>('windowIsMaximized'),
 
+  // 界面缩放:渲染层快捷键(可配置)经壳侧 webContents 执行页面缩放。
+  adjustAppZoom: (delta: number) => invoke<number | null>('adjustAppZoom', { delta }),
+  resetAppZoom: () => invoke<void>('resetAppZoom'),
+
   // 文件/目录对话框(工单 06;options 形状对齐 @tauri-apps/plugin-dialog,
   // 取消/关闭返回 null,multiple 为 string[])
   showDialogOpen: (options?: unknown) => invoke('showDialogOpen', options ?? {}),

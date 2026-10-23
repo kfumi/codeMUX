@@ -452,6 +452,42 @@ function createMainWindow(): BrowserWindow {
   return window;
 }
 
+/**
+ * 应用菜单:重建一份**去掉 View → Zoom In/Out/Actual Size** 的默认菜单。
+ *
+ * 原因(工单:界面缩放快捷键):
+ * - Electron 默认菜单给这三项注册了 `CommandOrControl+Plus` / `CommandOrControl+-`
+ *   / `CommandOrControl+0`。在 Windows 上 `+` 必须按 Shift,所以默认的 Zoom In
+ *   在 `Ctrl+=`(以及不少键盘布局下的 `Ctrl++`)上根本不命中;
+ * - 这三条现在由渲染层可配置快捷键接管(`keyboardShortcuts.ts` → `appZoom.ts`
+ *   → `adjustAppZoom`),若默认菜单还在,一次按键会同时触发菜单角色和渲染层命令,
+ *   缩放步进翻倍。
+ *
+ * 其余默认项(reload / fullscreen / 编辑角色 / 窗口角色)照旧保留;frameless
+ * 窗口在 Windows 上看不到菜单栏,它们仍以 accelerator 形式生效。
+ */
+function installApplicationMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin'
+      ? [{ role: 'appMenu' } as Electron.MenuItemConstructorOptions]
+      : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createTray(onQuit: () => void): void {
   const iconPath = resolveTrayIcon();
   if (!iconPath) {
@@ -593,6 +629,8 @@ if (!gotLock) {
 
   void app.whenReady().then(() => {
     registerAppProtocol();
+    // 先换掉默认菜单:默认的缩放加速键由渲染层可配置快捷键接管,保留会双触发。
+    installApplicationMenu();
     // Browser Host(工单 07):guest 弹窗兜底(webContents 创建即注册,先于主窗口)。
     const guests = createBrowserGuestTracker({ sendToRenderer });
     browserGuests = guests;

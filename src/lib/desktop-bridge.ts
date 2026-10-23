@@ -214,6 +214,11 @@ export interface CodemuxDesktopBridge {
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
 
+  // 界面缩放(快捷键 zoomIn/zoomOut/resetZoom 的执行面;浏览器宿主没有壳桥)
+  /** 按 zoom level 步进调整当前窗口;返回调整后的 level,主窗口不在时为 null。 */
+  adjustAppZoom(delta: number): Promise<number | null>;
+  resetAppZoom(): Promise<void>;
+
   // 文件/目录对话框(工单 06;返回形状对齐原 Tauri plugin-dialog 契约)
   showDialogOpen(options?: DesktopOpenDialogOptions): Promise<string | string[] | null>;
   showDialogSave(options?: DesktopSaveDialogOptions): Promise<string | null>;
