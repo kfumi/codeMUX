@@ -163,6 +163,8 @@ mod tests {
                 reasoning_effort: task.reasoning_effort.clone(),
                 permission_config: task.permission_config.clone(),
                 plan_mode: task.plan_mode.clone(),
+                directory_scope: task.directory_scope.clone(),
+                working_path: task.working_path.clone(),
             };
 
             match runner.run(payload) {
@@ -236,6 +238,42 @@ mod tests {
             timezone: local_timezone_label(),
             enabled: true,
         }
+    }
+
+    #[test]
+    fn task_creation_freezes_all_project_roots() {
+        let conn = test_conn();
+        let project = operations::create_project(
+            &conn,
+            "demo",
+            &["/tmp/a".to_string(), "/tmp/b".to_string()],
+        )
+        .unwrap();
+        let task = db::create_task(&conn, &sample_upsert(&project.id)).unwrap();
+        let scope: Vec<String> =
+            serde_json::from_str(task.directory_scope.as_deref().unwrap()).unwrap();
+        assert_eq!(scope, vec!["/tmp/a", "/tmp/b"]);
+        assert_eq!(task.working_path.as_deref(), Some("/tmp/a"));
+
+        // 创建后改主根/根集合，两个冻结值都不跟随漂移。
+        conn.execute(
+            "UPDATE project_roots SET is_primary = 0 WHERE project_id = ?1",
+            rusqlite::params![project.id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE project_roots SET is_primary = 1 WHERE project_id = ?1 AND root_path = ?2",
+            rusqlite::params![project.id, "/tmp/b"],
+        )
+        .unwrap();
+        conn.execute(
+            "DELETE FROM project_roots WHERE project_id = ?1 AND root_path = ?2",
+            rusqlite::params![project.id, "/tmp/b"],
+        )
+        .unwrap();
+        let reloaded = db::get_task(&conn, &task.id).unwrap().unwrap();
+        assert_eq!(reloaded.directory_scope, task.directory_scope);
+        assert_eq!(reloaded.working_path.as_deref(), Some("/tmp/a"));
     }
 
     #[test]
@@ -330,12 +368,13 @@ mod tests {
         let project =
             operations::create_project(&conn, "demo", &["/tmp/demo".to_string()]).unwrap();
         let task = db::create_task(&conn, &sample_upsert(&project.id)).unwrap();
-        let session = operations::create_scheduled_session_for_project(
+        let session = operations::create_generated_session_for_project(
             &conn,
             "demo run",
             crate::config::types::AgentKind::ClaudeCode,
             "agent",
             &project.id,
+            None,
             None,
             None,
             None,

@@ -56,6 +56,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const config = useSettingsStore((s) => s.config);
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
   const { setProjectPath } = usePreviewStore();
+  const loadProjectRootTrees = usePreviewStore((state) => state.loadProjectRootTrees);
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
@@ -125,6 +126,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
   );
+  const draftProjectRoots = useMemo(
+    () => draftProject
+      ? [...draftProject.roots]
+        .sort((left, right) => left.position - right.position)
+        .map((root) => ({ path: root.path, isPrimary: root.isPrimary }))
+      : [],
+    [draftProject],
+  );
   const draftProjectPath = useMemo(
     () => resolveDraftProjectPath(projects, draftProjectId, draftWorkspace),
     [draftProjectId, draftWorkspace, projects],
@@ -149,9 +158,15 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       setProjectPath(draftProjectPath);
     } else {
       setProjectPath(null);
-      usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
+      usePreviewStore.setState({ treeRoot: null, treeRootPath: null, rootTrees: [] });
     }
   }, [draftProjectPath, setProjectPath]);
+
+  // 草稿态与会话态共用同一份根树缓存：切项目时必须重载，单根项目要清掉上
+  // 一个多根项目留下的 rootTrees，否则 @ 候选会跨项目串味。
+  useEffect(() => {
+    void loadProjectRootTrees(draftProjectRoots.length > 1 ? draftProjectRoots : []);
+  }, [draftProjectRoots, loadProjectRootTrees]);
 
   useEffect(() => {
     void loadProjectSkills(draftProjectPath, selectedAgentKind);

@@ -173,9 +173,11 @@ describe('NewSessionPanel', () => {
     });
     usePreviewStore.setState({
       loadFileTree: vi.fn(),
+      loadProjectRootTrees: vi.fn(),
       setProjectPath: vi.fn(),
       treeRoot: null,
       treeRootPath: null,
+      rootTrees: [],
     });
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
@@ -223,6 +225,30 @@ describe('NewSessionPanel', () => {
     expect(screen.getByText('我们应该做什么？')).toBeTruthy();
     expect(screen.getByText('Mock Composer')).toBeTruthy();
     expect(composerProps.some((entry) => entry.sessionId === 'new-session-draft')).toBe(true);
+  });
+
+  it('loads every root of the draft project so @ mentions cannot leak from another project', () => {
+    useProjectStore.setState({
+      projects: [{
+        id: 'project-2',
+        name: 'multi-root',
+        roots: [
+          { path: 'D:/work/alpha', position: 0, isPrimary: true },
+          { path: 'D:/work/beta', position: 1, isPrimary: false },
+        ],
+        created_at: '',
+        updated_at: '',
+      }],
+    });
+    useNewSessionStore.setState({ draftProjectId: 'project-2', isDraftOpen: true });
+
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    expect(vi.mocked(usePreviewStore.getState().loadProjectRootTrees))
+      .toHaveBeenCalledWith([
+        { path: 'D:/work/alpha', isPrimary: true },
+        { path: 'D:/work/beta', isPrimary: false },
+      ]);
   });
 
   it('opens clean: no setup checklist and no starter prompts (Codex 首页)', () => {

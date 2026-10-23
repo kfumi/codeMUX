@@ -6,6 +6,7 @@ import { openDialog } from '../../lib/desktopDialogs';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
+import type { Session } from '../../types/session';
 import { getPrimaryProjectRoot } from '../../types/project';
 import { Button } from '../ui/button';
 import {
@@ -46,9 +47,8 @@ function isPathInside(root: string, candidate: string): boolean {
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`);
 }
 
-function projectSessionCount(projectId: string): number {
-  const state = useSessionStore.getState();
-  return [...state.sessions, ...state.archivedSessions]
+function projectSessionCount(projectId: string, sessions: readonly Session[]): number {
+  return sessions
     .filter((session) => session.project_id === projectId)
     .length;
 }
@@ -57,10 +57,13 @@ function projectSessionCount(projectId: string): number {
  * 移除一个根会影响多少条会话：工作目录落在该根下的会话。
  * 会话工作目录缺失（老数据）时按项目主根估算。
  */
-function sessionsUnderRoot(project: Project, root: string): number {
-  const state = useSessionStore.getState();
+function sessionsUnderRoot(
+  project: Project,
+  root: string,
+  sessions: readonly Session[],
+): number {
   const fallback = getPrimaryProjectRoot(project);
-  return [...state.sessions, ...state.archivedSessions].filter((session) => {
+  return sessions.filter((session) => {
     if (session.project_id !== project.id) {
       return false;
     }
@@ -77,6 +80,12 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const sessions = useSessionStore((state) => state.sessions);
+  const archivedSessions = useSessionStore((state) => state.archivedSessions);
+  const allSessions = useMemo(
+    () => [...sessions, ...archivedSessions],
+    [sessions, archivedSessions],
+  );
 
   useEffect(() => {
     if (!open || !project) {
@@ -112,7 +121,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
       return;
     }
     setRoots((current) => removeRootKeepingPrimary(current, path));
-    const affected = sessionsUnderRoot(project, path);
+    const affected = sessionsUnderRoot(project, path, allSessions);
     setNotice(
       affected > 0
         ? `已移除「${rootName(path)}」。${affected} 条会话的工作目录不变，仍会在原目录继续运行。`
@@ -177,7 +186,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
     }
   };
 
-  const totalSessions = projectSessionCount(project.id);
+  const totalSessions = projectSessionCount(project.id, allSessions);
 
   return (
     <>

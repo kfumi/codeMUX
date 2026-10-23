@@ -383,10 +383,13 @@ async fn prepare_worktree(
     }
     let project_path = {
         let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
-        db::get_project_path(&conn, &task.project_id)
+        db::ensure_working_path(&conn, task)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "项目不存在".to_string())?
+            .ok_or_else(|| "任务没有可用的工作目录".to_string())?
     };
+    if !std::path::Path::new(&project_path).is_dir() {
+        return Err(format!("任务的工作目录不可用: {project_path}"));
+    }
     let project_path = PathBuf::from(project_path);
     let task_id = task.id.clone();
     let task_base = task.base_branch.clone();
@@ -447,10 +450,13 @@ async fn prepare_branch_checkout(daemon: &DaemonState, task: &WorkTask) -> Resul
     };
     let project_path = {
         let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
-        db::get_project_path(&conn, &task.project_id)
+        db::ensure_working_path(&conn, task)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "项目不存在".to_string())?
+            .ok_or_else(|| "任务没有可用的工作目录".to_string())?
     };
+    if !std::path::Path::new(&project_path).is_dir() {
+        return Err(format!("任务的工作目录不可用: {project_path}"));
+    }
     let project_path = PathBuf::from(project_path);
     let checkout_base = base.clone();
     tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -486,15 +492,29 @@ fn prepare_session(
     });
 
     let conn = daemon.app.db.lock().map_err(|e| e.to_string())?;
-    // Work Task 可能在几天后无人值守地运行：目录集合在创建时冻结，
-    // 之后项目根怎么改都不影响这次任务的写入范围。
-    let directory_scope = operations::frozen_directory_scope(
-        &conn,
-        &task.project_id,
-        worktree.map(|worktree| worktree.path.as_str()),
-    )
-    .map_err(|e| e.to_string())?;
-    let session = operations::create_scheduled_session_for_project(
+    // Work Task 可能在几天后无人值守地运行：目录集合在任务创建时冻结，
+    // 这里只按本次会话的实际 cwd 去掉重复项。旧任务首次运行时补冻结并落库。
+    let mut frozen_roots = task.directory_scope.clone();
+    if frozen_roots.is_none() {
+        frozen_roots =
+            operations::frozen_root_scope(&conn, &task.project_id).map_err(|e| e.to_string())?;
+        if let Some(scope) = frozen_roots.as_deref() {
+            db::set_directory_scope(&conn, &task.id, scope).map_err(|e| e.to_string())?;
+        }
+    }
+    let frozen_working_path = db::ensure_working_path(&conn, task)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "任务没有可用的工作目录".to_string())?;
+    if !std::path::Path::new(&frozen_working_path).is_dir() {
+        return Err(format!("任务的工作目录不可用: {frozen_working_path}"));
+    }
+    let actual_cwd = match worktree {
+        Some(worktree) => worktree.path.as_str(),
+        None => frozen_working_path.as_str(),
+    };
+    let directory_scope =
+        operations::directory_scope_excluding(frozen_roots.as_deref(), Some(actual_cwd));
+    let session = operations::create_generated_session_for_project(
         &conn,
         &task.title,
         task.agent_kind,
@@ -503,6 +523,7 @@ fn prepare_session(
         permission_config.as_deref(),
         None,
         task.model.as_deref(),
+        Some(frozen_working_path.as_str()),
         directory_scope.as_deref(),
     )
     .map_err(|e| e.to_string())?;
@@ -740,7 +761,7 @@ pub fn handle_session_event_conn(
                     let Some(settled) = settled else {
                         return Ok(EventOutcome::default());
                     };
-                    let project_path = db::get_project_path(conn, &settled.project_id)
+                    let project_path = db::ensure_working_path(conn, &settled)
                         .map_err(|e| e.to_string())?
                         .unwrap_or_default();
                     let diff = settled
@@ -1089,9 +1110,9 @@ pub async fn merge_work_task(
             .base_branch
             .clone()
             .ok_or_else(|| "任务没有基准分支，无法合并".to_string())?;
-        let project_path = db::get_project_path(&conn, &task.project_id)
+        let project_path = db::ensure_working_path(&conn, &task)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "项目不存在".to_string())?;
+            .ok_or_else(|| "任务没有可用的工作目录".to_string())?;
         (project_path, base, work, task.title.clone())
     };
 
@@ -1148,7 +1169,7 @@ pub async fn merge_work_task(
                 )?
             };
             // 清理 worktree 与 work 分支（失败不影响 done，仅记事件）
-            cleanup_after_merge(daemon, task_id, &task.project_id);
+            cleanup_after_merge(daemon, task_id);
             claim_and_launch(daemon, &task.project_id);
             Ok(task)
         }
@@ -1233,7 +1254,7 @@ pub fn merge_gate_conn(conn: &mut Connection, task_id: &str) -> Result<WorkTask,
     )
 }
 
-fn cleanup_after_merge(daemon: &DaemonState, task_id: &str, project_id: &str) {
+fn cleanup_after_merge(daemon: &DaemonState, task_id: &str) {
     let (project_path, worktree_path, work_branch) = {
         let Ok(conn) = daemon.app.db.lock() else {
             return;
@@ -1241,11 +1262,8 @@ fn cleanup_after_merge(daemon: &DaemonState, task_id: &str, project_id: &str) {
         let Some(task) = db::get_task(&conn, task_id).ok().flatten() else {
             return;
         };
-        match (
-            db::get_project_path(&conn, project_id).ok().flatten(),
-            task.worktree_path,
-            task.work_branch,
-        ) {
+        let project_path = db::ensure_working_path(&conn, &task).ok().flatten();
+        match (project_path, task.worktree_path, task.work_branch) {
             (Some(path), Some(worktree), Some(branch)) => (path, worktree, branch),
             _ => return,
         }
@@ -1420,6 +1438,45 @@ mod tests {
             use_worktree: false,
             base_branch: None,
         }
+    }
+
+    #[test]
+    fn created_work_task_freezes_project_roots() {
+        let conn = test_conn();
+        insert_project(&conn, "p1");
+        conn.execute(
+            "INSERT INTO project_roots (project_id, root_path, position, is_primary) \
+             VALUES ('p1', '/tmp/extra', 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        let task = super::super::service::create_work_task(&conn, &input("p1")).unwrap();
+        let scope: Vec<String> =
+            serde_json::from_str(task.directory_scope.as_deref().unwrap()).unwrap();
+        assert_eq!(scope, vec!["/tmp/proj", "/tmp/extra"]);
+        assert_eq!(task.working_path.as_deref(), Some("/tmp/proj"));
+
+        // 任务创建后改主根/根集合，两个冻结值都不跟随漂移。
+        conn.execute(
+            "UPDATE project_roots SET is_primary = 0 WHERE project_id = 'p1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE project_roots SET is_primary = 1 \
+             WHERE project_id = 'p1' AND root_path = '/tmp/extra'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "DELETE FROM project_roots WHERE project_id = 'p1' AND root_path = '/tmp/extra'",
+            [],
+        )
+        .unwrap();
+        let reloaded = db::get_task(&conn, &task.id).unwrap().unwrap();
+        assert_eq!(reloaded.directory_scope, task.directory_scope);
+        assert_eq!(reloaded.working_path.as_deref(), Some("/tmp/proj"));
     }
 
     fn task_at_status(
@@ -1878,12 +1935,13 @@ mod tests {
         let mut conn = test_conn();
         insert_project(&conn, "p1");
         // 时间线行有 sessions 外键：先建真实会话，再让任务挂到该 session 上
-        let session = crate::db::operations::create_scheduled_session_for_project(
+        let session = crate::db::operations::create_generated_session_for_project(
             &conn,
             "登录页任务",
             crate::config::types::AgentKind::Codex,
             "agent",
             "p1",
+            None,
             None,
             None,
             None,

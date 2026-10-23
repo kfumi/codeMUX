@@ -157,6 +157,12 @@ pub struct WorkTask {
     pub settled_at: Option<String>,
     pub finished_at: Option<String>,
     pub base_sha: Option<String>,
+    /// 任务创建时冻结的项目根全集；NULL 表示旧任务尚未冻结。
+    #[serde(default, skip_serializing)]
+    pub directory_scope: Option<String>,
+    /// 任务创建时冻结的主根；NULL 表示旧任务尚未冻结。
+    #[serde(default, skip_serializing)]
+    pub working_path: Option<String>,
 }
 
 /// 创建任务的输入（camelCase 反序列化，service 层校验后落到 db 层）。

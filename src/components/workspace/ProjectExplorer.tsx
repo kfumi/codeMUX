@@ -314,13 +314,13 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
                     <Folder className="h-3 w-3 shrink-0" />
                     <span className="truncate">{state.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? state.root}</span>
                     {state.error ? (
-                      <span className="ml-auto shrink-0 text-[hsl(var(--destructive))]">不可用</span>
+                      <span className="ml-auto shrink-0 text-destructive">不可用</span>
                     ) : null}
                   </div>
                 </TooltipHint>
               ) : null}
               {state.error ? (
-                <div className="px-2 py-1 text-ui-micro text-[hsl(var(--destructive))]" style={{ paddingLeft: isMultiRoot ? 24 : 10 }}>
+                <div className="px-2 py-1 text-ui-micro text-destructive" style={{ paddingLeft: isMultiRoot ? 24 : 10 }}>
                   {state.error}
                 </div>
               ) : (
@@ -343,12 +343,11 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
         )}
       </div>
 
-      <div
-        className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/70"
-        title={roots.join('\n')}
-      >
-        {roots.join(' · ')}
-      </div>
+      <TooltipHint content={roots.join('\n')}>
+        <div className="shrink-0 truncate border-t border-[hsl(var(--sidebar-border))]/35 px-3 py-2 text-ui-micro text-[hsl(var(--sidebar-fg))]/70">
+          {roots.join(' · ')}
+        </div>
+      </TooltipHint>
     </div>
   );
 }

@@ -92,21 +92,12 @@ export function ProjectCreateDialog({ open, onOpenChange }: ProjectCreateDialogP
     syncDefaultName(next);
   };
 
-  // 创建接口以第一个根为主根，所以切换主根时直接把它移到第一位，
-  // 保证对话框里看到的顺序与创建后的根顺序一致。
+  // 切换主根只改标记，不重排用户刚选好的顺序；创建接口通过 primaryRoot 接收它。
   const handleSetPrimary = (path: string) => {
-    const chosen = roots.find((root) => root.path === path);
-    if (!chosen) {
-      return;
-    }
-    const next = [
-      { ...chosen, isPrimary: true },
-      ...roots
-        .filter((root) => root.path !== path)
-        .map((root) => ({ ...root, isPrimary: false })),
-    ];
-    setRoots(next);
-    syncDefaultName(next);
+    setRoots((current) => current.map((root) => ({
+      ...root,
+      isPrimary: root.path === path,
+    })));
   };
 
   const handleCreate = async () => {
@@ -119,9 +110,14 @@ export function ProjectCreateDialog({ open, onOpenChange }: ProjectCreateDialogP
       toast.error('请至少选择一个源文件夹');
       return;
     }
+    const primary = roots.find((root) => root.isPrimary) ?? roots[0];
     setCreating(true);
     try {
-      await createProject(trimmedName, roots.map((root) => root.path));
+      await createProject(
+        trimmedName,
+        roots.map((root) => root.path),
+        primary.path,
+      );
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -136,7 +132,7 @@ export function ProjectCreateDialog({ open, onOpenChange }: ProjectCreateDialogP
         <DialogHeader className="px-6 pb-3 pt-6">
           <DialogTitle className="text-base leading-tight">创建项目</DialogTitle>
           <DialogDescription className="text-ui-compact leading-relaxed text-muted-foreground">
-            第一个文件夹是主根，新会话在它下面运行；其余文件夹同样可读写。
+            第一个文件夹默认是主根，可点「设为主要」调整；新会话在它下面运行，其余文件夹同样可读写。
           </DialogDescription>
         </DialogHeader>
 

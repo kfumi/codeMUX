@@ -3,10 +3,11 @@ import { useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { Project } from '../../types/project';
-import { getProjectRootPaths } from '../../types/project';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { TooltipHint } from '../ui/tooltip';
 
 interface AutomationProjectPickerProps {
   projects: Project[];
@@ -41,7 +42,8 @@ export function AutomationProjectPicker({
     );
   }, [projects, query]);
 
-  return (
+  const selectedRoot = selected ? getPrimaryProjectRoot(selected) : null;
+  const picker = (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
@@ -74,6 +76,7 @@ export function AutomationProjectPicker({
           ) : (
             filtered.map((project) => {
               const isSelected = project.id === value;
+              const root = getPrimaryProjectRoot(project);
               return (
                 <button
                   key={project.id}
@@ -89,7 +92,14 @@ export function AutomationProjectPicker({
                   }}
                 >
                   <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{project.name}</span>
+                    {root ? (
+                      <span className="block truncate text-ui-micro text-muted-foreground">
+                        {root}
+                      </span>
+                    ) : null}
+                  </span>
                   {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
                 </button>
               );
@@ -98,5 +108,20 @@ export function AutomationProjectPicker({
         </div>
       </PopoverContent>
     </Popover>
+  );
+
+  if (!fullWidth) {
+    return picker;
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {picker}
+      {selectedRoot ? (
+        <TooltipHint content={selectedRoot}>
+          <p className="truncate text-ui-micro text-muted-foreground">{selectedRoot}</p>
+        </TooltipHint>
+      ) : null}
+    </div>
   );
 }

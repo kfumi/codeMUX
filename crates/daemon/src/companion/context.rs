@@ -101,31 +101,7 @@ pub async fn build_composer_context(
 
     tokio::task::spawn_blocking(move || {
         let primary = PathBuf::from(&primary_root);
-        let mut files = Vec::new();
-        let mut seen = HashSet::new();
-        for root in &project_roots {
-            let root_path = PathBuf::from(&root.path);
-            if !root_path.is_dir() {
-                // 附加目录不可用时跳过该条；主根不可用由会话启动路径拒绝。
-                continue;
-            }
-            let mut root_files = Vec::new();
-            collect_files(&root_path, &root_path, 0, &mut root_files);
-            for mut file in root_files {
-                // 主根文件用相对路径；附加目录用绝对路径，避免被解析到错误的工作目录。
-                if !root.is_primary {
-                    file.path = root_path
-                        .join(&file.path)
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                }
-                if seen.insert(file.path.clone()) {
-                    files.push(file);
-                }
-            }
-        }
-        files.sort_by(|left, right| left.path.cmp(&right.path));
-        files.truncate(MAX_FILES);
+        let files = collect_project_files(&project_roots);
         let skills = crate::skills::project::resolve_project_skills(&primary, agent_kind);
         Ok(ComposerContext {
             files,
@@ -135,6 +111,42 @@ pub async fn build_composer_context(
     })
     .await
     .map_err(|error| format!("加载编辑器上下文失败: {}", error))?
+}
+
+/// 收集全部项目根的文件，按绝对路径去重并让主根优先。
+///
+/// 相对路径用于主根、绝对路径用于附加目录；去重键必须统一成绝对路径，
+/// 否则父目录与子目录同时作为根时，同一个文件会以两种形态各出现一次。
+fn collect_project_files(project_roots: &[operations::ProjectRoot]) -> Vec<ComposerFile> {
+    let mut ordered: Vec<&operations::ProjectRoot> = project_roots.iter().collect();
+    ordered.sort_by_key(|root| !root.is_primary);
+
+    let mut files = Vec::new();
+    let mut seen = HashSet::new();
+    for root in ordered {
+        let root_path = PathBuf::from(&root.path);
+        if !root_path.is_dir() {
+            // 附加目录不可用时跳过该条；主根不可用由会话启动路径拒绝。
+            continue;
+        }
+        let mut root_files = Vec::new();
+        collect_files(&root_path, &root_path, 0, &mut root_files);
+        for mut file in root_files {
+            let absolute = root_path.join(&file.path);
+            let key = operations::project_root_key(&absolute.to_string_lossy().replace('\\', "/"));
+            if !seen.insert(key) {
+                continue;
+            }
+            // 主根文件用相对路径；附加目录用绝对路径，避免被解析到错误的工作目录。
+            if !root.is_primary {
+                file.path = absolute.to_string_lossy().replace('\\', "/");
+            }
+            files.push(file);
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files.truncate(MAX_FILES);
+    files
 }
 
 fn collect_files(root: &Path, current: &Path, depth: usize, files: &mut Vec<ComposerFile>) {
@@ -256,7 +268,8 @@ fn command(name: &str, description: &str, category: &'static str, prompt: &str) 
 
 #[cfg(test)]
 mod tests {
-    use super::collect_files;
+    use super::{collect_files, collect_project_files, ComposerFile};
+    use crate::db::operations;
     use std::fs;
 
     #[test]
@@ -272,5 +285,53 @@ mod tests {
 
         assert!(files.iter().any(|file| file.path == "src/app.ts"));
         assert!(!files.iter().any(|file| file.path.contains("node_modules")));
+    }
+
+    #[test]
+    fn dedupes_nested_roots_by_absolute_path_with_primary_first() {
+        let root = tempfile::tempdir().unwrap();
+        let shared = root.path().join("packages").join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join("index.ts"), "export {}").unwrap();
+
+        let parent = operations::ProjectRoot {
+            path: root.path().to_string_lossy().to_string(),
+            position: 0,
+            is_primary: true,
+        };
+        let child = operations::ProjectRoot {
+            path: shared.to_string_lossy().to_string(),
+            position: 1,
+            is_primary: false,
+        };
+
+        // 父目录是主根：同一文件只保留主根的相对路径。
+        let files = collect_project_files(&[parent.clone(), child.clone()]);
+        let matched: Vec<&ComposerFile> = files
+            .iter()
+            .filter(|file| file.path.ends_with("index.ts"))
+            .collect();
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].path, "packages/shared/index.ts");
+
+        // 子目录是主根：保留子目录的相对路径，父目录的绝对路径副本被去重。
+        let files = collect_project_files(&[
+            operations::ProjectRoot {
+                path: child.path,
+                position: 1,
+                is_primary: true,
+            },
+            operations::ProjectRoot {
+                path: parent.path,
+                position: 0,
+                is_primary: false,
+            },
+        ]);
+        let matched: Vec<&ComposerFile> = files
+            .iter()
+            .filter(|file| file.path.ends_with("index.ts"))
+            .collect();
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].path, "index.ts");
     }
 }

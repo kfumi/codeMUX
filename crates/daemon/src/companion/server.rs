@@ -1065,11 +1065,15 @@ async fn list_projects(
 #[serde(rename_all = "camelCase")]
 struct CreateProjectRequest {
     name: String,
-    /// 源文件夹数组，第一个为主根。旧客户端只发单个 `path`，仍按一根项目接受。
+    /// 源文件夹数组，顺序即添加顺序；未指定 `primaryRoot` 时第一个为主根。
+    /// 旧客户端只发单个 `path`，仍按一根项目接受。
     #[serde(default)]
     roots: Option<Vec<String>>,
     #[serde(default)]
     path: Option<String>,
+    /// 显式主根；必须是 `roots` 之一。
+    #[serde(default)]
+    primary_root: Option<String>,
 }
 
 async fn create_project(
@@ -1079,7 +1083,13 @@ async fn create_project(
     Json(body): Json<CreateProjectRequest>,
 ) -> Result<Json<operations::Project>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
-    let roots = match (body.roots, body.path) {
+    let CreateProjectRequest {
+        name,
+        roots,
+        path,
+        primary_root,
+    } = body;
+    let roots = match (roots, path) {
         (Some(roots), _) => roots,
         (None, Some(path)) => vec![path],
         (None, None) => {
@@ -1093,8 +1103,13 @@ async fn create_project(
         .db
         .lock()
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let project = operations::create_project(&db, &body.name, &roots)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let project = match primary_root.as_deref() {
+        Some(primary_root) => {
+            operations::create_project_with_primary(&db, &name, &roots, Some(primary_root))
+        }
+        None => operations::create_project(&db, &name, &roots),
+    }
+    .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(project))
 }
 

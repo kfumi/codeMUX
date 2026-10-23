@@ -36,7 +36,7 @@ interface DaemonClientCore {
   listSessions(): Promise<unknown[]>;
   listArchivedSessions(): Promise<unknown[]>;
   listProjects(): Promise<unknown[]>;
-  createProject(name: string, roots: string[]): Promise<unknown>;
+  createProject(name: string, roots: string[], primaryRoot?: string): Promise<unknown>;
   deleteProject(projectId: string): Promise<void>;
   renameProject(projectId: string, name: string): Promise<void>;
   /** 编辑项目：改名、增删根、切换主根。返回更新后的项目。 */
@@ -301,10 +301,10 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
     listSessions: () => daemonFetch(config, '/api/sessions'),
     listArchivedSessions: () => daemonFetch(config, '/api/sessions/archived'),
     listProjects: () => daemonFetch(config, '/api/projects'),
-    createProject: (name, roots) =>
+    createProject: (name, roots, primaryRoot) =>
       daemonFetch(config, '/api/projects', {
         method: 'POST',
-        body: JSON.stringify({ name, roots }),
+        body: JSON.stringify({ name, roots, primaryRoot }),
       }),
     deleteProject: async (projectId) => {
       await daemonFetch(config, `/api/projects/${projectId}`, { method: 'DELETE' });

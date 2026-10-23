@@ -16,7 +16,7 @@ Project Root 中被指定为“默认落点”的那一个。新建 Session 时�
 _Avoid_: 默认目录（未说明是根之一时）, 主工作区
 
 ### Additional Directory
-某条 Session 在当前运行中，除会话工作目录以外可访问的源文件夹。它按 Project 当前的根在运行实例重建时解析得出，不是创建时冻结的快照；生成型会话（定时任务、Work Task）例外，它们在创建时冻结。它只是提示词里声明的可达路径，不是权限授权，也不是 Project Root 的别名。
+某条 Session 在当前运行中，除会话工作目录以外可访问的源文件夹。普通会话按 Project 当前的根在运行实例重建时解析得出，不是创建时冻结的快照；生成型会话（定时任务、Work Task）在任务创建时冻结根集合与主根，之后不再读取项目当前根。它只是提示词里声明的可达路径，不是权限授权，也不是 Project Root 的别名。
 _Avoid_: 附加根（当指会话侧时）, 额外路径, 白名单
 
 ### Session Working Directory
@@ -328,28 +328,28 @@ _Avoid_: 让出厂默认绕开保留表；把保留表当成平台 API 查询
 ### Project 多根目录决策（grill-with-docs，2026-10-22）
 
 - Project 持有文件夹集合（Project Root），会话自动继承；不做“每次建会话勾选”，也不做纯会话级添加。
-- 一个 Project 最多一个 Primary Root。新建会话的工作目录恒为主根；该会话的 Additional Directory 是「项目全部根减去它自己的 cwd」。
-- 会话的 Additional Directory 在每次运行实例重建时按 Project 当前 roots 解析（休眠唤醒、冷恢复、Agent Kind Switch、daemon 重启后重建 runtime 时生效），运行中的一轮不变。定时任务与 Work Task 这类生成型会话在创建时冻结。
+- 一个 Project 最多一个 Primary Root。普通新建会话的工作目录恒为当前主根；生成型任务使用任务创建时冻结的主根。会话的 Additional Directory 是「（当前或冻结的）全部根减去它自己的 cwd」。
+- 普通会话的 Additional Directory 在每次运行实例重建时按 Project 当前 roots 解析（休眠唤醒、冷恢复、Agent Kind Switch、daemon 重启后重建 runtime 时生效），运行中的一轮不变。定时任务与 Work Task 这类生成型会话在任务创建时冻结根集合与主根；旧任务首次运行补冻结。
 - Additional Directory 只是提示词声明的可达性，不是权限边界；附加目录里的 AGENTS.md / CLAUDE.md / .claude / 项目 memory 一律不读取，只有主根贡献项目配置。
-- `projects.path` 字段删除，主根只存在于 roots 表（`is_primary`）。Git 面板、worktree 创建、Git 环境快照本版只服务主根。
+- `projects.path` 字段删除，主根只存在于 roots 表（`is_primary`）。Git 面板、worktree 创建、Git 环境快照本版只服务主根（生成型任务用冻结主根）。
 - 第一版**只把根路径清单经提示词注入**，不调用任何 Agent Kind 原生的多目录能力：Claude 的 `additionalDirectories` / `--add-dir` 会连带加载附加目录的 CLAUDE.md 与 `.claude`，违背“附加目录不贡献配置”；Codex 的 `writableRoots`、OpenCode 的 `directory` 同样不使用。四种 Agent Kind 行为对齐 ZCode。
-- 功能的根归属：`@` 提及、文件树、项目 Explorer 覆盖全部根；项目 Skill 扫描 v1 只扫主根；Git 面板、worktree 创建、Git 环境快照只服务主根。
+- 功能的根归属：`@` 提及、文件树、项目 Explorer 覆盖全部根；项目 Skill 扫描 v1 只扫主根；Git 面板、worktree 创建、Git 环境快照只服务主根（生成型任务用冻结主根）。
 - 根集合约束：允许同一文件夹属于多个 Project，允许父子嵌套，Project 内按解析后的绝对路径去重。
-- 移除 Project Root 不改写任何已有 Session 的工作目录与归属；被移除根下的会话继续以原目录运行，只是该路径不再出现在它的附加目录里。移除主根时，剩余根中 position 最小者自动成为新主根，只影响之后新建的会话。
+- 移除 Project Root 不改写任何已有 Session 的工作目录与归属；普通会话的附加目录不再包含被移除路径，生成型任务仍使用冻结集合（若目录仍存在）。移除主根时，剩余根中 position 最小者自动成为新主根，只影响之后新建的普通会话与之后创建的任务。
 - 根路径清单在 runtime 初始化时注入 system prompt 层（Claude `systemPrompt.append`、Codex `thread/start` 的 instructions、OpenCode `Config.instructions`、pi `--append-system-prompt`），不进入对话历史。文案只写增量：不重复主目录、不出现 `# Environment` 标题，形如 `Additional directories (outside the working directory):` 加绝对路径列表，并提示对附加目录使用绝对路径。
 - 附加目录的 skills / commands / agents 在 v1 不加载，作为后续独立票；v1 只有主根贡献项目配置与项目能力。
 - 项目必须至少有 1 个根。移除最后一个根时走“删除项目”流程，并提示将被连带删除的会话数量。
-- 会话的目录范围快照存 `sessions` 上的一个 JSON 列：普通会话为 NULL（每次运行实例重建时按 Project 当前 roots 现算），生成型会话为冻结数组且不含会话工作目录。
-- 新建会话的工作目录恒为 Primary Root；`sessions.working_path` 在创建时写入，之后独立于 Project，主根变更不回溯改写已有会话。
+- 会话的目录范围快照存 `sessions.directory_scope`：普通会话为 NULL（每次运行实例重建时按 Project 当前 roots 现算），生成型会话为冻结根集合减去冻结主根后的附加目录数组，不含会话工作目录。任务级另存冻结根集合 `directory_scope` 与冻结主根 `working_path`。
+- 普通新建会话的工作目录恒为 Primary Root；生成型任务使用任务创建时冻结的主根。`sessions.working_path` 在创建时写入，之后独立于 Project，主根变更不回溯改写已有会话。
 - 用户可见文案：项目编辑器为「项目名称」+「源文件夹」列表（每行文件夹名 + 「主要」徽标或「设为主要」+ 移除），末行「添加文件夹」，底部「删除项目」「取消」「保存」。内部术语 Project Root 不对用户暴露。文件夹显示末级目录名，悬停显示完整路径；v1 不做拖拽排序。
 - 归属判据：`project_id` 是 Session 归属的唯一事实，Session 工作目录只是执行位置。移除根不改写归属也不改写工作目录；删除项目删除其名下全部 Session，与 cwd 是否仍在根内无关（与 ZCode 一致）。
 - 存储：新增 `project_roots(project_id, root_path, position, is_primary)`，主键 `(project_id, root_path)`，主根唯一性由写入事务保证。迁移把每个项目的 `path` 灌成其主根，然后 `ALTER TABLE projects DROP COLUMN path`——不留任何可被误读的第二真相源。
-- 创建入口：原生目录选择器改为多选（`openDialog({directory:true, multiple:true})`，`string[]`），选中的第一个目录成为主根，直接建成多根项目，不强制打开编辑器；后续增删根、改主根走「编辑项目」。
+- 创建入口：原生目录选择器改为多选（`openDialog({directory:true, multiple:true})`，`string[]`），选中后在创建对话框里确认名称与根顺序；第一个目录默认是主根，可用「设为主要」调整（只改标记、不重排顺序），确认后建成多根项目；后续增删根、改主根走「编辑项目」。
 - Git 路由继续接收路径参数（worktree 会话也需要对 worktree 路径做 Git 操作），daemon 不改；前端 `resolveProjectPath` 改为返回主根。
 - `@` 提及：主根文件用相对路径，附加目录文件用绝对路径作为发送值，展示层单独显示根名徽标（与 ZCode 一致）。
 - 目录可用性：主根不可用则拒绝创建/重建会话；附加目录不可用时跳过该条并在 UI 提示，会话照常启动。
-- 会话工作目录解析只保留一个权威实现：`session_sources.cwd`（imported）→ `sessions.working_path` → 项目主根 → home。`companion/actions.rs` 里那份只读 `projects.path` 的重复实现删除，其两个调用点（首发、移动端改设置后刷新 runtime）改用权威实现——这同时修复了 worktree 会话在这条路径上拿到项目主根而非 worktree 路径的既有缺陷。
-- Additional Directory 的准确定义是「项目全部根减去**该会话自己的 cwd**」，不是减去主根。因此导入的会话（cwd 来自原生存储）或 worktree 会话的附加目录里可能出现项目主根，这是正确行为。
+- 会话工作目录解析只保留一个权威实现：`session_sources.cwd`（imported）→ `sessions.working_path`（普通会话取当前主根；生成型会话取任务创建时冻结的主根）→ 项目主根 → home。`companion/actions.rs` 里那份只读 `projects.path` 的重复实现删除，其两个调用点（首发、移动端改设置后刷新 runtime）改用权威实现——这同时修复了 worktree 会话在这条路径上拿到项目主根而非 worktree 路径的既有缺陷。
+- Additional Directory 的准确定义是「项目全部根减去**该会话自己的 cwd**」，不是减去主根；生成型会话用任务创建时冻结的根集合与冻结主根。因此导入的会话（cwd 来自原生存储）或 worktree 会话的附加目录里可能出现项目主根，这是正确行为。
 - 导入会话按项目全部根匹配，且用路径段边界判断（`cwd === root || cwd` 以 `root + 分隔符` 开头，Windows 大小写不敏感），修掉 `frontend-old` 被 `frontend` 误匹配的既有缺陷。
 
 ### 其它
