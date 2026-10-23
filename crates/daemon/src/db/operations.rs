@@ -145,7 +145,7 @@ fn normalize_project_root(path: &str) -> String {
 }
 
 /// 项目内去重键：统一分隔符；Windows 下大小写不敏感。
-fn project_root_key(path: &str) -> String {
+pub(crate) fn project_root_key(path: &str) -> String {
     let unified = normalize_project_root(path).replace('\\', "/");
     if cfg!(windows) {
         unified.to_lowercase()
@@ -196,10 +196,34 @@ fn write_project_roots(
 }
 
 pub fn create_project(conn: &Connection, name: &str, roots: &[String]) -> Result<Project> {
+    create_project_with_primary(conn, name, roots, None)
+}
+
+/// 创建项目；`primary_root` 显式指定主根时保持 `roots` 的添加顺序不变。
+/// 未指定时沿用旧契约：第一个根为主根。
+pub fn create_project_with_primary(
+    conn: &Connection,
+    name: &str,
+    roots: &[String],
+    primary_root: Option<&str>,
+) -> Result<Project> {
     let roots = normalize_project_roots(roots)?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let primary = roots[0].clone();
+    let primary = match primary_root.map(normalize_project_root) {
+        Some(requested) => {
+            let requested_key = project_root_key(&requested);
+            roots
+                .iter()
+                .find(|path| project_root_key(path) == requested_key)
+                .cloned()
+                .ok_or_else(|| {
+                    rusqlite::Error::InvalidParameterName("主根必须是项目根之一".to_string())
+                })?
+        }
+        None => roots[0].clone(),
+    };
+    let primary_key = project_root_key(&primary);
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -216,7 +240,7 @@ pub fn create_project(conn: &Connection, name: &str, roots: &[String]) -> Result
             .into_iter()
             .enumerate()
             .map(|(position, path)| ProjectRoot {
-                is_primary: position == 0,
+                is_primary: project_root_key(&path) == primary_key,
                 path,
                 position: position as i64,
             })
@@ -263,32 +287,63 @@ pub fn get_primary_root(conn: &Connection, project_id: &str) -> Result<Option<St
     .optional()
 }
 
+/// 生成型任务创建时冻结的项目根全集（JSON 数组）。
+///
+/// 任务行保存全集、会话创建时再减去实际 cwd：这样任务创建后主根变化、
+/// 或 worktree 回退到主根时，附加目录仍与本次会话的落点一致。
+pub fn frozen_root_scope(conn: &Connection, project_id: &str) -> Result<Option<String>> {
+    let roots = get_project_roots(conn, project_id)?;
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    let scope: Vec<String> = roots.into_iter().map(|root| root.path).collect();
+    serde_json::to_string(&scope)
+        .map(Some)
+        .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))
+}
+
+/// 从冻结的根全集里去掉会话实际工作目录；工作目录不在根内时原样保留。
+pub fn directory_scope_excluding(
+    scope: Option<&str>,
+    working_path: Option<&str>,
+) -> Option<String> {
+    let scope = scope?;
+    let Ok(roots) = serde_json::from_str::<Vec<String>>(scope) else {
+        return Some(scope.to_string());
+    };
+    let excluded_key = working_path
+        .filter(|value| !value.trim().is_empty())
+        .map(project_root_key);
+    let filtered: Vec<String> = roots
+        .into_iter()
+        .filter(|path| {
+            let key = project_root_key(path);
+            excluded_key.as_deref() != Some(key.as_str())
+        })
+        .collect();
+    serde_json::to_string(&filtered).ok()
+}
+
 /// 生成型会话（定时任务 / Work Task）创建时冻结的附加目录：
 /// 项目当前全部根减去该会话自己的工作目录（未指定时按主根算）。
 ///
 /// 空集合也要写成 `"[]"`：`NULL` 的语义是「普通会话，运行时现算」，
 /// 冻结成空集的生成型会话必须保持空集，不能因为项目后来加根而漂移。
+#[cfg(test)]
 pub fn frozen_directory_scope(
     conn: &Connection,
     project_id: &str,
     working_path: Option<&str>,
 ) -> Result<Option<String>> {
-    let roots = get_project_roots(conn, project_id)?;
-    if roots.is_empty() {
-        return Ok(None);
-    }
-    let excluded_key = match working_path.filter(|value| !value.trim().is_empty()) {
-        Some(path) => Some(project_root_key(path)),
-        None => get_primary_root(conn, project_id)?.map(|path| project_root_key(&path)),
+    let roots = frozen_root_scope(conn, project_id)?;
+    let working_path = match working_path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => Some(path.to_string()),
+        None => get_primary_root(conn, project_id)?,
     };
-    let scope: Vec<String> = roots
-        .into_iter()
-        .map(|root| root.path)
-        .filter(|path| excluded_key.as_deref() != Some(project_root_key(path).as_str()))
-        .collect();
-    serde_json::to_string(&scope)
-        .map(Some)
-        .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))
+    Ok(directory_scope_excluding(
+        roots.as_deref(),
+        working_path.as_deref(),
+    ))
 }
 
 pub fn get_project(conn: &Connection, project_id: &str) -> Result<Option<Project>> {
@@ -518,8 +573,10 @@ pub fn create_session_for_project_with_permissions(
     })
 }
 
+/// 生成型会话：`working_path` 由任务创建时冻结的主根传入。
+/// None 表示调用方仍按项目当前主根解析（旧调用方与兼容路径）。
 #[allow(clippy::too_many_arguments)]
-pub fn create_scheduled_session_for_project(
+pub fn create_generated_session_for_project(
     conn: &Connection,
     title: &str,
     agent_kind: AgentKind,
@@ -528,14 +585,18 @@ pub fn create_scheduled_session_for_project(
     permission_config: Option<&str>,
     plan_mode: Option<&str>,
     model: Option<&str>,
+    working_path: Option<&str>,
     directory_scope: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let permission_config = permission_config.unwrap_or("");
     let plan_mode = plan_mode.unwrap_or("off");
-    // 生成型会话也在创建时绑定主根：之后改主根不回溯改写后台任务的落点。
-    let working_path = get_primary_root(conn, project_id)?;
+    // 生成型会话绑定任务创建时冻结的主根；旧调用方回落到项目当前主根。
+    let working_path = match working_path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => Some(path.to_string()),
+        None => get_primary_root(conn, project_id)?,
+    };
 
     conn.execute(
         "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, working_path, origin, directory_scope, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', ?9, 'scheduled', ?10, ?11, ?11)",
@@ -2138,7 +2199,7 @@ pub fn has_running_session_subagents(conn: &Connection, session_id: &str) -> Res
 mod tests {
     use super::{
         append_session_subagent_event, append_timeline_events, archive_session,
-        clear_session_timeline, create_forked_session, create_project,
+        clear_session_timeline, create_forked_session, create_project, create_project_with_primary,
         create_session_for_project_with_permissions, delete_agent_session_mapping, delete_session,
         fetch_session_timeline, filter_new_timeline_event_indexes, frozen_directory_scope,
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
@@ -3849,6 +3910,45 @@ mod tests {
     }
 
     #[test]
+    fn create_project_keeps_root_order_when_primary_is_explicit() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let paths = roots(&["D:/work/a", "D:/work/b", "D:/work/c"]);
+
+        let project =
+            create_project_with_primary(&conn, "Demo", &paths, Some("D:/work/b")).unwrap();
+        assert_eq!(
+            project
+                .roots
+                .iter()
+                .map(|root| root.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["D:/work/a", "D:/work/b", "D:/work/c"]
+        );
+        assert_eq!(
+            project
+                .roots
+                .iter()
+                .map(|root| root.is_primary)
+                .collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
+
+        let stored = get_project(&conn, &project.id).unwrap().unwrap();
+        assert_eq!(
+            stored
+                .roots
+                .iter()
+                .map(|root| root.is_primary)
+                .collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
+
+        // 主根不在集合内时拒绝，而不是悄悄退回第一个。
+        assert!(create_project_with_primary(&conn, "Bad", &paths, Some("D:/work/z")).is_err());
+    }
+
+    #[test]
     fn promotes_the_smallest_position_root_when_the_primary_is_removed() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();
@@ -4022,12 +4122,13 @@ mod tests {
         initialize_database(&conn).unwrap();
         let project = create_project(&conn, "Demo", &roots(&["D:/work/a", "D:/work/b"])).unwrap();
 
-        let session = super::create_scheduled_session_for_project(
+        let session = super::create_generated_session_for_project(
             &conn,
             "Nightly",
             AgentKind::Codex,
             "agent",
             &project.id,
+            None,
             None,
             None,
             None,
@@ -4048,5 +4149,40 @@ mod tests {
 
         let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
         assert_eq!(reloaded.working_path.as_deref(), Some("D:/work/a"));
+    }
+
+    #[test]
+    fn generated_session_can_bind_a_frozen_working_path() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let project = create_project(&conn, "Demo", &roots(&["D:/work/a", "D:/work/b"])).unwrap();
+
+        let session = super::create_generated_session_for_project(
+            &conn,
+            "Nightly",
+            AgentKind::Codex,
+            "agent",
+            &project.id,
+            None,
+            None,
+            None,
+            Some("D:/work/b"),
+            Some(r#"["D:/work/a"]"#),
+        )
+        .unwrap();
+        assert_eq!(session.working_path.as_deref(), Some("D:/work/b"));
+
+        // 冻结路径独立于项目当前主根：之后改主根不回溯。
+        update_project(
+            &conn,
+            &project.id,
+            ProjectUpdate {
+                primary_root: Some("D:/work/a"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_eq!(reloaded.working_path.as_deref(), Some("D:/work/b"));
     }
 }

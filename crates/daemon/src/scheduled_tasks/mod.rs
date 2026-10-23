@@ -146,6 +146,8 @@ pub async fn tick_async(daemon: &crate::daemon::DaemonState, now: chrono::DateTi
                     reasoning_effort: task.reasoning_effort.clone(),
                     permission_config: task.permission_config.clone(),
                     plan_mode: task.plan_mode.clone(),
+                    directory_scope: task.directory_scope.clone(),
+                    working_path: task.working_path.clone(),
                 },
             ));
         }
@@ -254,6 +256,8 @@ pub async fn run_task_now(
             reasoning_effort: task.reasoning_effort.clone(),
             permission_config: task.permission_config.clone(),
             plan_mode: task.plan_mode.clone(),
+            directory_scope: task.directory_scope.clone(),
+            working_path: task.working_path.clone(),
         };
 
         (run.id, payload)

@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, Result};
 use uuid::Uuid;
 
 use crate::config::types::AgentKind;
+use crate::db::operations;
 
 use super::types::{
     CompletionKind, FailureReason, WorkTask, WorkTaskEvent, WorkTaskInput, WorkTaskPatch,
@@ -17,7 +18,7 @@ const TASK_SELECT: &str = "id, project_id, title, instruction, agent_kind, provi
      use_worktree, base_branch, worktree_path, work_branch, status, failure_reason, last_error, \
      run_seq, sort_order, session_id, result_summary, files_changed, additions, deletions, \
      merge_commit, completion_kind, archived_at, created_at, updated_at, started_at, settled_at, \
-     finished_at, base_sha";
+     finished_at, base_sha, directory_scope, working_path";
 
 const EVENT_SELECT: &str = "id, task_id, kind, detail, created_at";
 
@@ -67,6 +68,8 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkTask> {
         settled_at: row.get(27)?,
         finished_at: row.get(28)?,
         base_sha: row.get(29)?,
+        directory_scope: row.get(30)?,
+        working_path: row.get(31)?,
     })
 }
 
@@ -96,11 +99,14 @@ pub fn insert_task(
     sort_order: i64,
 ) -> Result<()> {
     let now = now_str();
+    // 目录集合与主根在任务创建时冻结；worktree 是否启用只影响运行时会话的实际 cwd。
+    let directory_scope = operations::frozen_root_scope(conn, &input.project_id)?;
+    let working_path = operations::get_primary_root(conn, &input.project_id)?;
     conn.execute(
         "INSERT INTO work_tasks (
             id, project_id, title, instruction, agent_kind, provider_id, model,
-            use_worktree, base_branch, status, sort_order, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'todo', ?10, ?11, ?11)",
+            use_worktree, base_branch, status, sort_order, created_at, updated_at, directory_scope, working_path
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'todo', ?10, ?11, ?11, ?12, ?13)",
         params![
             id,
             input.project_id,
@@ -113,9 +119,41 @@ pub fn insert_task(
             input.base_branch,
             sort_order,
             now,
+            directory_scope,
+            working_path,
         ],
     )?;
     Ok(())
+}
+
+/// 旧任务首次运行时补写冻结集合；之后不再随项目根变化。
+pub fn set_directory_scope(conn: &Connection, task_id: &str, scope: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE work_tasks SET directory_scope = ?2 WHERE id = ?1",
+        params![task_id, scope],
+    )?;
+    Ok(())
+}
+
+/// 旧任务首次运行时补写冻结主根；之后不再随项目主根变化。
+pub fn set_working_path(conn: &Connection, task_id: &str, path: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE work_tasks SET working_path = ?2 WHERE id = ?1",
+        params![task_id, path],
+    )?;
+    Ok(())
+}
+
+/// 任务创建时冻结的主根；旧任务首次读取时从当前项目主根补写。
+pub fn ensure_working_path(conn: &Connection, task: &WorkTask) -> Result<Option<String>> {
+    if let Some(path) = &task.working_path {
+        return Ok(Some(path.clone()));
+    }
+    let path = operations::get_primary_root(conn, &task.project_id)?;
+    if let Some(path) = path.as_deref() {
+        set_working_path(conn, &task.id, path)?;
+    }
+    Ok(path)
 }
 
 pub fn next_sort_order(conn: &Connection, project_id: &str) -> Result<i64> {
@@ -385,13 +423,7 @@ pub fn new_task_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// 任务所属项目的主根。Git / worktree 相关能力这一版只服务主根。
-pub fn get_project_path(conn: &Connection, project_id: &str) -> Result<Option<String>> {
-    crate::db::operations::get_primary_root(conn, project_id)
-}
-
-/// 按 session_id 找活跃任务（preparing/running/awaiting_input）。
-/// session_id 相等即 generation 守卫：任务行只由启动方写入一次。
+/// 按 session_id 找活跃任务（preparing/running/awaiting_input）。/// session_id 相等即 generation 守卫：任务行只由启动方写入一次。
 pub fn find_live_task_by_session(conn: &Connection, session_id: &str) -> Result<Option<WorkTask>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_SELECT} FROM work_tasks \

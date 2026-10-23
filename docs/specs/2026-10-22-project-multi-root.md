@@ -25,7 +25,7 @@
 - 主根变更、增删根都不改写已有 Session 的工作目录——历史对话保持原样。
 - 附加目录只贡献「可访问的文件」，**不贡献项目配置**：附加目录里的 `AGENTS.md`、`CLAUDE.md`、`.claude/`、项目 memory 一律不读取，避免给项目加一个后端目录后，会话突然多出一套后端规则。
 - 侧栏的 `@` 文件提及、文件树、项目浏览覆盖全部根；Git 面板、worktree、Git 环境快照只服务主根。
-- 定时任务与 Work Task 在创建时冻结目录集合，之后改项目不影响后台任务的写入范围。
+- 定时任务与 Work Task 在创建时冻结目录集合与主根，之后改项目不影响后台任务的写入范围。
 
 ## User Stories
 
@@ -86,7 +86,9 @@
 - 新增 `project_roots(project_id, root_path, position, is_primary)`，主键 `(project_id, root_path)`，主键天然实现项目内按绝对路径去重。
 - 主根唯一性由写入事务保证（先清 `is_primary`，再设一个），不使用部分唯一索引。
 - `projects.path` 迁移后**删除**：迁移先把每个项目的 `path` 写成其主根（`position=0, is_primary=1`），再 `ALTER TABLE projects DROP COLUMN path`。保留冗余列会制造两个真相源。
-- `sessions` 新增 `directory_scope`（JSON 数组，可空）：普通会话为 `NULL`（每次运行实例重建时现算）；生成型会话（定时任务、Work Task）为创建时冻结的数组，不含工作目录。
+- `sessions` 新增 `directory_scope`（JSON 数组，可空）：普通会话为 `NULL`（每次运行实例重建时现算）；生成型会话为最终附加目录数组，不含会话工作目录。
+- `scheduled_tasks` / `work_tasks` 新增 `directory_scope`（任务创建时冻结的**全部项目根**）与 `working_path`（任务创建时冻结的主根）。运行建会话时用冻结主根作为 `sessions.working_path`，再用冻结根集合减去它得到 `sessions.directory_scope`。
+- 旧任务（升级前创建）两列为 `NULL`：首次运行时按当时的项目根/主根补冻结并落库，之后不再漂移。
 - 项目必须至少有 1 个根。
 
 ### 解析规则
@@ -95,8 +97,8 @@
 
 ```
 imported 会话 → session_sources.cwd
-否则         → sessions.working_path
-否则         → 项目主根
+否则         → sessions.working_path（生成型会话为任务创建时冻结的主根）
+否则         → 项目主根（仅普通会话）
 否则         → home
 ```
 
@@ -104,10 +106,10 @@ imported 会话 → session_sources.cwd
 
 ```
 普通会话（directory_scope 为 NULL） → 项目当前根 − 会话 cwd
-生成型会话（directory_scope 非空）  → 直接使用该数组
+生成型会话（directory_scope 非空）  → 直接使用该数组（冻结根集合 − 冻结 cwd）
 ```
 
-生效时机：**每次运行实例重建时**解析（休眠唤醒、冷恢复、Agent Kind Switch、daemon 重启）。运行中的一轮不变。
+生效时机：普通会话在**每次运行实例重建时**解析（休眠唤醒、冷恢复、Agent Kind Switch、daemon 重启）；生成型会话直接使用任务创建时冻结的主根与根集合，不重新读取项目当前根。运行中的一轮不变。
 
 ### 注入
 
@@ -128,7 +130,7 @@ Use absolute paths when reading or editing files in these directories.
 ### 接口契约
 
 - `Project` 的对外形状从 `{ id, name, path, created_at, updated_at }` 变为 `{ id, name, roots: ProjectRoot[], created_at, updated_at }`，其中 `ProjectRoot = { path, position, isPrimary }`。
-- 创建项目的请求体从 `{ name, path }` 变为 `{ name, roots: string[] }`（第一个为主根）。重命名不变。新增一个编辑接口，接收 `{ name?, roots?, primaryRoot? }`。
+- 创建项目的请求体从 `{ name, path }` 变为 `{ name, roots: string[], primaryRoot? }`：`roots` 顺序即添加顺序，`primaryRoot` 必须是 `roots` 之一，缺省时第一个为主根。重命名不变。新增一个编辑接口，接收 `{ name?, roots?, primaryRoot? }`。
 - 前端所有「项目目录」读取点改为「主根」：Git 面板的路径参数、文件树、`@` 提及、导入匹配、Git 环境快照缓存键。
 - daemon 的 Git 路由**继续接收路径参数**，不改成 projectId——worktree 会话需要对 worktree 路径做 Git 操作。
 - `@` 提及：主根文件用相对路径作为发送值；附加目录文件用绝对路径；展示层单独显示根名徽标。
@@ -154,7 +156,7 @@ Use absolute paths when reading or editing files in these directories.
 - 移除主根：剩余根中 `position` 最小者自动继任。
 - 移除最后一个根：切到「删除项目」流程并提示将被连带删除的会话数。
 - 移除非最后根：不改写任何会话，提示有多少条会话继续在原目录运行。
-- 创建入口：原生目录选择器改为多选，选中的第一个目录成为主根，直接建成多根项目，不强制打开编辑器。
+- 创建入口：原生目录选择器改为多选；选中后在创建对话框里确认项目名称与根顺序，第一个目录默认是主根，可用「设为主要」调整，确认后建成多根项目。
 
 ### 根范围归属
 
@@ -177,7 +179,7 @@ Use absolute paths when reading or editing files in these directories.
 **四层接缝，均为既有接缝，不新建：**
 
 1. **daemon 内存 SQLite**（复用 `db/schema.rs` 已有的 `Connection::open_in_memory()` 迁移测试形态）：迁移把旧 `path` 搬进 roots 并删列；`project_roots` 增删改；项目内去重；主根唯一；移除主根后 `position` 最小者继任；移除最后根的行为。
-2. **会话目录解析纯函数**（复用 `agent/session_lifecycle.rs` 已有的测试模块形态）：工作目录优先级（imported → working_path → 主根 → home）；附加目录 = 全部根 − cwd；生成型会话使用冻结数组；主根不可用与附加目录不可用的区分。
+2. **会话目录解析纯函数**（复用 `agent/session_lifecycle.rs` 已有的测试模块形态）：工作目录优先级（imported → working_path → 主根 → home）；附加目录 = 全部根 − cwd；生成型会话使用冻结的根集合与冻结主根；冻结主根不可用时运行失败；主根不可用与附加目录不可用的区分。
 3. **sidecar 运行时配置**（复用 `codexAppServerRuntime.test.ts` / `opencodeSdk.test.ts` / `index.test.ts` 已有的「构造命令 → 断言发出参数」形态）：四种智能体各自把附加目录写进正确的字段；空数组时不输出该段；附加目录存在时不会启用任何原生多目录参数。
 4. **前端 store 与组件**（复用 `projectStore.test.ts` 的 facade mock 形态、组件测试的 Testing Library 形态）：创建请求体形状；编辑器增删根与切换主根；移除最后根走删除流程；`@` 提及的主根相对路径与附加目录绝对路径；导入匹配的边界判断。
 
@@ -204,13 +206,13 @@ Use absolute paths when reading or editing files in these directories.
 
 | 用例 | 断言 |
 |---|---|
-| 多选目录建项目 | 一次选 3 个目录，建成 3 根项目，第一个为主根；重启后仍在 |
+| 多选目录建项目 | 一次选 3 个目录，建成 3 根项目，第一个默认主根、可用「设为主要」调整；重启后仍在 |
 | 新建会话 | cwd = 主根；提示词包含另外 2 个根的绝对路径 |
-| 改主根 | 已有会话 cwd 不变；新会话 cwd = 新主根 |
+| 改主根 | 已有会话 cwd 不变；新普通会话 cwd = 新主根；已创建的生成型任务仍用冻结主根与根集合 |
 | 移除非主根 | 已有会话不变；该路径从附加目录消失；UI 提示会话数 |
 | 移除主根 | `position` 最小者继任；已有会话 cwd 不变 |
 | 移除最后一个根 | 走删除流程并提示会话数；确认后项目与会话消失 |
 | 附加目录不可用 | 会话照常启动并提示；主根不可用则拒绝 |
 | 四种智能体 | 附加目录路径出现在各自 system prompt；附加目录的 `CLAUDE.md` 未被加载 |
 | 导入会话 | 按全部根匹配；`frontend-old` 不被 `frontend` 误匹配；cwd 用原生存储路径 |
-| 定时任务 | 创建时冻结目录；之后改项目根不影响它 |
+| 定时任务 / Work Task | 创建时冻结目录集合与主根；之后改项目根/主根不影响它；冻结主根不可用时本次运行失败 |

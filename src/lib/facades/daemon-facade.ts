@@ -88,9 +88,13 @@ export async function listProjectsViaDaemon(): Promise<Project[]> {
   return client.listProjects() as Promise<Project[]>;
 }
 
-export async function createProjectViaDaemon(name: string, roots: string[]): Promise<Project> {
+export async function createProjectViaDaemon(
+  name: string,
+  roots: string[],
+  primaryRoot?: string,
+): Promise<Project> {
   const client = await ensureDaemonClient();
-  return client.createProject(name, roots) as Promise<Project>;
+  return client.createProject(name, roots, primaryRoot) as Promise<Project>;
 }
 
 export async function deleteProjectViaDaemon(projectId: string): Promise<void> {

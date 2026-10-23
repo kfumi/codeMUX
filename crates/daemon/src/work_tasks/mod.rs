@@ -4,7 +4,7 @@ mod git_ops;
 mod service;
 mod types;
 
-pub use db::{get_project_path, get_task, list_events, list_tasks, new_task_id, StatusExtras};
+pub use db::{ensure_working_path, get_task, list_events, list_tasks, new_task_id, StatusExtras};
 pub use service::{
     archive_work_task, create_work_task, delete_work_task, reorder_work_tasks, set_status_cas,
     update_work_task,

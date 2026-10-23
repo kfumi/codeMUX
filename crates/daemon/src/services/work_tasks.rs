@@ -5,7 +5,7 @@ use log::warn;
 
 use crate::work_tasks::{
     archive_work_task, cleanup_worktree_and_branch, create_work_task, delete_work_task,
-    get_project_path, get_task as db_get_task, list_events as db_list_events,
+    ensure_working_path, get_task as db_get_task, list_events as db_list_events,
     list_tasks as db_list_tasks, reorder_work_tasks, update_work_task, WorkTask, WorkTaskEvent,
     WorkTaskInput, WorkTaskPatch,
 };
@@ -64,9 +64,7 @@ pub fn delete_work_task_impl(state: &AppState, task_id: String) -> Result<(), St
             ));
         }
         let project_path = match &task.worktree_path {
-            Some(_) => {
-                get_project_path(&conn, &task.project_id).map_err(|error| error.to_string())?
-            }
+            Some(_) => ensure_working_path(&conn, &task).map_err(|error| error.to_string())?,
             None => None,
         };
         (project_path, task.worktree_path, task.work_branch)

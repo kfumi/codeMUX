@@ -68,7 +68,11 @@ describe('ProjectCreateDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
 
     await waitFor(() => {
-      expect(createProjectMock).toHaveBeenCalledWith('alpha', ['D:/work/alpha', 'D:/work/beta']);
+      expect(createProjectMock).toHaveBeenCalledWith(
+        'alpha',
+        ['D:/work/alpha', 'D:/work/beta'],
+        'D:/work/alpha',
+      );
     });
   });
 
@@ -86,13 +90,17 @@ describe('ProjectCreateDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
 
     await waitFor(() => {
-      expect(createProjectMock).toHaveBeenCalledWith('我的项目', ['D:/work/alpha']);
+      expect(createProjectMock).toHaveBeenCalledWith(
+        '我的项目',
+        ['D:/work/alpha'],
+        'D:/work/alpha',
+      );
     });
   });
 
-  it('moves the chosen folder to the front when marking it primary', async () => {
+  it('marks the chosen folder as primary without reordering the picked folders', async () => {
     openDialogMock.mockResolvedValue(['D:/work/alpha', 'D:/work/beta']);
-    createProjectMock.mockResolvedValue(projectFixture('beta', ['D:/work/beta', 'D:/work/alpha']));
+    createProjectMock.mockResolvedValue(projectFixture('alpha', ['D:/work/alpha', 'D:/work/beta']));
 
     render(<ProjectCreateDialog open onOpenChange={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
@@ -100,15 +108,22 @@ describe('ProjectCreateDialog', () => {
 
     fireEvent.click(screen.getByText('设为主要'));
 
+    // 顺序保持选择顺序，只把「主要」标记移到 beta；名称保持第一个目录的默认值。
     const rows = screen.getAllByLabelText(/^移除 /);
-    expect(rows[0]?.closest('div')?.textContent).toContain('beta');
-    expect(rows[0]?.closest('div')?.textContent).toContain('主要');
-    expect((screen.getByPlaceholderText('新项目') as HTMLInputElement).value).toBe('beta');
+    expect(rows[0]?.getAttribute('aria-label')).toBe('移除 alpha');
+    expect(rows[1]?.getAttribute('aria-label')).toBe('移除 beta');
+    expect(screen.getByText('设为主要').closest('div')?.textContent).toContain('alpha');
+    expect(screen.getByText('主要', { exact: true }).closest('div')?.textContent).toContain('beta');
+    expect((screen.getByPlaceholderText('新项目') as HTMLInputElement).value).toBe('alpha');
 
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
 
     await waitFor(() => {
-      expect(createProjectMock).toHaveBeenCalledWith('beta', ['D:/work/beta', 'D:/work/alpha']);
+      expect(createProjectMock).toHaveBeenCalledWith(
+        'alpha',
+        ['D:/work/alpha', 'D:/work/beta'],
+        'D:/work/beta',
+      );
     });
   });
 
@@ -128,7 +143,7 @@ describe('ProjectCreateDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
 
     await waitFor(() => {
-      expect(createProjectMock).toHaveBeenCalledWith('beta', ['D:/work/beta']);
+      expect(createProjectMock).toHaveBeenCalledWith('beta', ['D:/work/beta'], 'D:/work/beta');
     });
   });
 

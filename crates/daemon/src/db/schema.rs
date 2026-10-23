@@ -195,6 +195,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             next_run_at TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            directory_scope TEXT,
+            working_path TEXT,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
         );
 
@@ -246,6 +248,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             settled_at TEXT,
             finished_at TEXT,
             base_sha TEXT,
+            directory_scope TEXT,
+            working_path TEXT,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
@@ -293,6 +297,41 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             "ALTER TABLE scheduled_tasks ADD COLUMN weekly_weekdays TEXT",
             [],
         );
+    }
+
+    // Migration: 生成型任务的目录集合与主根在任务创建时冻结（旧任务首次运行时补写）。
+    let has_scheduled_task_directory_scope: bool = conn
+        .prepare("SELECT directory_scope FROM scheduled_tasks LIMIT 0")
+        .is_ok();
+    if !has_scheduled_task_directory_scope {
+        let _ = conn.execute(
+            "ALTER TABLE scheduled_tasks ADD COLUMN directory_scope TEXT",
+            [],
+        );
+    }
+
+    let has_scheduled_task_working_path: bool = conn
+        .prepare("SELECT working_path FROM scheduled_tasks LIMIT 0")
+        .is_ok();
+    if !has_scheduled_task_working_path {
+        let _ = conn.execute(
+            "ALTER TABLE scheduled_tasks ADD COLUMN working_path TEXT",
+            [],
+        );
+    }
+
+    let has_work_task_directory_scope: bool = conn
+        .prepare("SELECT directory_scope FROM work_tasks LIMIT 0")
+        .is_ok();
+    if !has_work_task_directory_scope {
+        let _ = conn.execute("ALTER TABLE work_tasks ADD COLUMN directory_scope TEXT", []);
+    }
+
+    let has_work_task_working_path: bool = conn
+        .prepare("SELECT working_path FROM work_tasks LIMIT 0")
+        .is_ok();
+    if !has_work_task_working_path {
+        let _ = conn.execute("ALTER TABLE work_tasks ADD COLUMN working_path TEXT", []);
     }
 
     // Migration: 03 票在审计表上补 tool/actor/decision（旧库缺列时补齐）。

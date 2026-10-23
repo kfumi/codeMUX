@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, Result};
 use uuid::Uuid;
 
 use crate::config::types::AgentKind;
+use crate::db::operations;
 
 use super::schedule::compute_next_run_at;
 use super::types::{
@@ -12,7 +13,7 @@ use super::types::{
     TaskRunStatus,
 };
 
-const TASK_SELECT: &str = "id, title, instruction, project_id, agent_kind, provider_id, model, reasoning_effort, permission_config, plan_mode, schedule_kind, schedule_time, weekly_weekday, monthly_day, timezone, delivery, enabled, last_run_at, next_run_at, created_at, updated_at, weekly_weekdays";
+const TASK_SELECT: &str = "id, title, instruction, project_id, agent_kind, provider_id, model, reasoning_effort, permission_config, plan_mode, schedule_kind, schedule_time, weekly_weekday, monthly_day, timezone, delivery, enabled, last_run_at, next_run_at, created_at, updated_at, weekly_weekdays, directory_scope, working_path";
 
 const RUN_SELECT: &str =
     "id, task_id, session_id, scheduled_for, started_at, finished_at, status, skip_reason, error";
@@ -63,6 +64,8 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
         updated_at: row.get(20)?,
         weekly_weekdays: decode_weekly_weekdays(row.get(21)?),
         run_count: 0,
+        directory_scope: row.get(22)?,
+        working_path: row.get(23)?,
     })
 }
 
@@ -153,13 +156,16 @@ pub fn create_task(conn: &Connection, upsert: &ScheduledTaskUpsert) -> Result<Sc
     let now_str = now.to_rfc3339();
     let next_str = next_run_at.to_rfc3339();
     let weekly_weekdays_json = encode_weekly_weekdays(&upsert.weekly_weekdays);
+    // 目录集合与主根在任务创建时冻结；之后项目怎么改都不影响已有任务。
+    let directory_scope = operations::frozen_root_scope(conn, &upsert.project_id)?;
+    let working_path = operations::get_primary_root(conn, &upsert.project_id)?;
 
     conn.execute(
         "INSERT INTO scheduled_tasks (
             id, title, instruction, project_id, agent_kind, provider_id, model, reasoning_effort,
             permission_config, plan_mode, schedule_kind, schedule_time, weekly_weekday, monthly_day,
-            timezone, delivery, enabled, last_run_at, next_run_at, created_at, updated_at, weekly_weekdays
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 'new_session', ?16, NULL, ?17, ?18, ?18, ?19)",
+            timezone, delivery, enabled, last_run_at, next_run_at, created_at, updated_at, weekly_weekdays, directory_scope, working_path
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 'new_session', ?16, NULL, ?17, ?18, ?18, ?19, ?20, ?21)",
         params![
             id,
             upsert.title,
@@ -180,10 +186,30 @@ pub fn create_task(conn: &Connection, upsert: &ScheduledTaskUpsert) -> Result<Sc
             next_str,
             now_str,
             weekly_weekdays_json,
+            directory_scope,
+            working_path,
         ],
     )?;
 
     get_task(conn, &id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+/// 旧任务首次运行时补写冻结集合；之后不再随项目根变化。
+pub fn set_directory_scope(conn: &Connection, task_id: &str, scope: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE scheduled_tasks SET directory_scope = ?2 WHERE id = ?1",
+        params![task_id, scope],
+    )?;
+    Ok(())
+}
+
+/// 旧任务首次运行时补写冻结主根；之后不再随项目主根变化。
+pub fn set_working_path(conn: &Connection, task_id: &str, path: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE scheduled_tasks SET working_path = ?2 WHERE id = ?1",
+        params![task_id, path],
+    )?;
+    Ok(())
 }
 
 pub fn update_task(
@@ -191,10 +217,7 @@ pub fn update_task(
     task_id: &str,
     upsert: &ScheduledTaskUpsert,
 ) -> Result<ScheduledTask> {
-    let existing = get_task(conn, task_id)?;
-    if existing.is_none() {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
-    }
+    let existing = get_task(conn, task_id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     let now = Utc::now();
     let next_run_at = compute_next_run_at(
         upsert.schedule_kind,
@@ -207,13 +230,23 @@ pub fn update_task(
     let now_str = now.to_rfc3339();
     let next_str = next_run_at.to_rfc3339();
     let weekly_weekdays_json = encode_weekly_weekdays(&upsert.weekly_weekdays);
+    // 换绑项目视为重新创建绑定：重新冻结目录集合与主根；只改其他字段时保持原冻结。
+    let (directory_scope, working_path) = if existing.project_id != upsert.project_id {
+        (
+            operations::frozen_root_scope(conn, &upsert.project_id)?,
+            operations::get_primary_root(conn, &upsert.project_id)?,
+        )
+    } else {
+        (existing.directory_scope, existing.working_path)
+    };
 
     conn.execute(
         "UPDATE scheduled_tasks SET
             title = ?2, instruction = ?3, project_id = ?4, agent_kind = ?5, provider_id = ?6,
             model = ?7, reasoning_effort = ?8, permission_config = ?9, plan_mode = ?10,
             schedule_kind = ?11, schedule_time = ?12, weekly_weekday = ?13, monthly_day = ?14,
-            timezone = ?15, enabled = ?16, next_run_at = ?17, updated_at = ?18, weekly_weekdays = ?19
+            timezone = ?15, enabled = ?16, next_run_at = ?17, updated_at = ?18, weekly_weekdays = ?19,
+            directory_scope = ?20, working_path = ?21
          WHERE id = ?1",
         params![
             task_id,
@@ -235,6 +268,8 @@ pub fn update_task(
             next_str,
             now_str,
             weekly_weekdays_json,
+            directory_scope,
+            working_path,
         ],
     )?;
 

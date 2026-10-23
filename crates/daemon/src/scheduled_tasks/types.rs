@@ -127,6 +127,12 @@ pub struct ScheduledTask {
     pub created_at: String,
     pub updated_at: String,
     pub run_count: u32,
+    /// 任务创建时冻结的项目根全集；NULL 表示旧任务尚未冻结。
+    #[serde(default, skip_serializing)]
+    pub directory_scope: Option<String>,
+    /// 任务创建时冻结的主根；NULL 表示旧任务尚未冻结。
+    #[serde(default, skip_serializing)]
+    pub working_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,6 +181,10 @@ pub struct TaskRunPayload {
     pub reasoning_effort: Option<String>,
     pub permission_config: String,
     pub plan_mode: String,
+    /// 任务创建时冻结的项目根全集；None 时运行器补冻结并落库。
+    pub directory_scope: Option<String>,
+    /// 任务创建时冻结的主根；None 时运行器补冻结并落库。
+    pub working_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
