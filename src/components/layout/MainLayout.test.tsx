@@ -542,4 +542,27 @@ describe('MainLayout', () => {
     const host = document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
     expect(host.dataset.conversationFullViewHost).toBe('idle');
   });
+
+  it('窄屏下对话 surface 不浮起,宿主保持普通布局(spec story 20)', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    sidePanelStoreState.isExpanded = true;
+    sidePanelStoreState.conversationActive = true;
+
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const contentSlotRef = sidePanelProps.at(-1)?.contentSlotRef as
+      | ((element: HTMLDivElement | null) => void)
+      | undefined;
+    act(() => contentSlotRef?.(document.createElement('div')));
+
+    // 宽屏进入完整视图后缩到窄屏:面板本就全宽覆盖内容区,宿主不得 fixed 浮起,
+    // 否则对话层与全宽面板互相叠盖且「恢复面宽」入口在窄屏隐藏、无法退出。
+    const host = document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
+    expect(host.dataset.conversationFullViewHost).toBe('idle');
+    expect(host.className).not.toContain('fixed');
+  });
 });

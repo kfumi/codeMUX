@@ -154,6 +154,20 @@ describe('SidePanel', () => {
     expect(screen.queryByTestId('side-panel-conversation-tab')).toBeNull();
   });
 
+  it('窄屏不出现对话标签,对话 surface 让位回激活的面板标签(spec story 20)', () => {
+    setViewportWidth(390);
+    // 宽屏进入完整视图并激活对话标签后把窗口缩到窄屏:面板本就全宽覆盖,
+    // 对话标签消失、surface 回落,激活的终端标签恢复显示,不会困在对话层里。
+    sidePanelState.isExpanded = true;
+    sidePanelState.conversationActive = true;
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(screen.queryByTestId('side-panel-conversation-tab')).toBeNull();
+    expect(terminalPanelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalId: 'terminal-a', isActive: true }),
+    );
+  });
+
   it('对话 surface 激活时终端/浏览器标签视为未激活,原生浏览器视图隐藏', () => {
     const previousTabs = sidePanelState.tabs;
     const previousActiveTabId = sidePanelState.activeTabId;

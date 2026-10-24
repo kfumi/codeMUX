@@ -109,11 +109,12 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs]);
 
   // 完整视图 = 展开预览占满内容区。scope 即会话 id(App 传入活动会话),能查到会话
-  // 标题才渲染固定「对话」标签;草稿态与 home scope 不渲染。
+  // 标题才渲染固定「对话」标签;草稿态与 home scope 不渲染。窄屏不出现(spec story 20):
+  // 宽屏进入完整视图后缩到窄屏,面板本就全宽覆盖,对话标签随之消失、surface 回落面板。
   const sessionTitle = useSessionStore(
     (state) => state.sessions.find((entry) => entry.id === scopeId)?.title.trim() || null,
   );
-  const isFullView = isShown && isExpanded && Boolean(sessionTitle);
+  const isFullView = isShown && isExpanded && !isNarrow && Boolean(sessionTitle);
   const conversationSurface = isFullView && conversationActive;
 
   useEffect(() => {
