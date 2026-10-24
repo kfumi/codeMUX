@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Electron-33-47848f?logo=electron" alt="Electron 33">
@@ -111,7 +111,7 @@
 
 ### 自定义快捷键
 
-- 内置 9 条命令（后退 / 前进、新建会话、打开设置、搜索、折叠侧边栏 / 侧面板、停止生成、聚焦输入框）
+- 内置 13 条命令（后退 / 前进、新建会话、打开设置、搜索、折叠侧边栏 / 侧面板、放大 / 缩小 / 恢复界面缩放、切换思考级别、停止生成、聚焦输入框）
 - 点键位即进入录制，拒绝无修饰键与系统保留键位，并检测键位冲突
 - 支持单项禁用、单项恢复默认与一键恢复全部默认
 - 键位按物理键匹配，与键盘布局无关；绑定存于 daemon 配置，所有客户端一致
@@ -138,7 +138,7 @@
 
 - MCP 支持 `stdio`、`http`、`sse`
 - 支持 JSON 编辑、配置向导、探测、从本机工具导入
-- 内置 `codemux-control` MCP 承载浏览器与桌面两类工具（共 24 个），随「设置 → 浏览器控制」「电脑控制」两个开关增减，设置页直接显示当前可用工具数
+- 内置 `codemux-control` MCP 承载浏览器与桌面两类工具（共 27 个），随「设置 → 浏览器控制」「电脑控制」两个开关增减，设置页直接显示当前可用工具数
 - 每个 MCP 可单独启用到 Claude Code / Codex / OpenCode / pi
 - Skills 以 `~/.codemux/skills/` 为单一数据源，Windows 下按 symlink → junction → copy 回退链处理
 - Skills 支持内置同步、预览、启用 / 禁用、卸载
@@ -201,7 +201,7 @@
 
 ### 工作任务看板
 
-![待办任务看板](public/demo/worktask.png)
+![工单看板](public/demo/worktask.png)
 
 ### 定时任务
 
@@ -362,9 +362,9 @@ Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink �
 
 进入项目会话后，可在右侧 Side Panel 打开：
 
-- `审查`：查看并操作 Git 改动、切换分支、提交并推送
-- `创建 Pull Request`：选择 base 分支，生成或编辑标题/正文，推送当前分支并创建 GitHub、GitLab 或 Gitee PR
+- `审查`：查看并操作 Git 改动、切换分支、提交并推送，并可发起创建 Pull Request（GitHub / GitLab / Gitee）
 - `终端`：在项目根目录打开内置终端
+- `浏览器`：内嵌沙箱浏览器，可手动浏览，也可授权 Agent 接管操作网页
 
 创建 Pull Request 的使用要求：
 
@@ -386,7 +386,7 @@ Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink �
 
 ### 7. 派发工作任务
 
-在侧边栏的「待办任务」中新建任务，选择项目、Agent 与模型并写下指令即可启动。任务由 daemon 按项目配额排队，在隔离的 git worktree 分支里创建真实会话执行；完成后任务进入「等你处理」，可查看 Diff 统计并选择合并、标记完成或重新开始。
+在侧边栏的「工单」中新建任务，选择项目、Agent 与模型并写下指令即可启动。任务由 daemon 按项目配额排队，在隔离的 git worktree 分支里创建真实会话执行；完成后任务进入「等你处理」，可查看 Diff 统计并选择合并、标记完成或重新开始。
 
 ### 8. 配置定时任务
 
@@ -395,7 +395,7 @@ Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink �
 ### 9. 改键与外观
 
 - 「设置 → 快捷键」：点键位进入录制，可重绑、禁用或恢复默认
-- 「设置 → 外观」：主题、强调色、界面字体与字号、代码字号、圆角风格、幕布宽度
+- 「设置 → 外观」：主题、强调色、界面字体与字号、代码字号、圆角风格、幕布宽度、对比度
 
 ### 10. 从手机或另一台电脑继续
 
