@@ -78,6 +78,7 @@
 | [2026-10-11-codex-imported-session-rebuild-loop.md](research/2026-10-11-codex-imported-session-rebuild-loop.md) | 导入的 Codex 会话「原生会话已重建」死循环与「未找到任务路径」根因排查（实测证据链、代码链路、处置与遗留） |
 | [2026-10-11-github-pages-landing-page.md](research/2026-10-11-github-pages-landing-page.md) | GitHub Pages 用于 CodeMUX 项目落地页的可行性调研 |
 | [2026-10-14-codex-desktop-ui-design-system.md](research/2026-10-14-codex-desktop-ui-design-system.md) | Codex/ChatGPT 桌面端 UI 设计体系逆向：主题引擎算法、色彩/圆角/间距/阴影/动效刻度与 CodeMUX 对齐建议 |
+| [2026-10-24-computer-use-driver-session-idle.md](research/2026-10-24-computer-use-driver-session-idle.md) | 电脑控制后半程「失效」根因排查：cua-driver 隐式会话闲置超时、isError 审计失真与 call_driver 自愈修复 |
 
 ### specs
 

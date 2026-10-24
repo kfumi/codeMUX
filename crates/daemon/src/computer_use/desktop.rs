@@ -1090,14 +1090,13 @@ pub(crate) async fn execute(
     // 闸门:输入动作一次一放行(除非人在本回合给过限时授权),敏感场景逐次确认。
     gate(ctx, session_id, tool, op, args, facts.title.as_str()).await?;
 
-    let driver = &ctx.daemon.companion.inner.driver;
     finish_call(
         ctx,
         session_id,
         tool,
         op,
         args,
-        driver.call_tool(driver_tool, payload).await,
+        call_driver(ctx, session_id, driver_tool, payload).await,
     )
 }
 
@@ -1113,7 +1112,12 @@ fn finish_call(
 ) -> Result<Value, String> {
     match result {
         Ok(payload) => {
-            audit_row(ctx, op, tool, session_id, true, None);
+            // 驱动把工具失败装在 isError 回包里(不是 JSON-RPC 错误):审计按失败
+            // 记,回包仍原样带给模型。
+            match driver_error_text(&payload) {
+                Some(reason) => audit_row(ctx, op, tool, session_id, false, Some(&reason)),
+                None => audit_row(ctx, op, tool, session_id, true, None),
+            }
             Ok(with_receipt(payload, &receipt_line(tool, args, true)))
         }
         Err(error) => {
@@ -1147,6 +1151,88 @@ async fn ensure_ready(ctx: &ServerContext) -> Result<(), String> {
         .await
         .map(|_| ())
         .map_err(|error| format!("驱动启动失败: {error}"))
+}
+
+/// 驱动回包是否是「会话已结束」:cua-driver 的隐式传输会话有闲置上限,超时即
+/// 结束(遥测 end_reason=idle_timeout),此后会话态工具(`get_window_state`、
+/// elementIndex 寻址的动作)一律回这个错,而**普通动作永不复活**(驱动文档:
+/// only `start_session` revives an ended name)。2026-10-24 会话 ses_e9410f57
+/// 后半程「电脑控制失效」的根因就在这。
+///
+/// 判据先认 `structuredContent.code == session_ended`,再拿 0.30.1 实测的错误
+/// 文本兜底 —— 新版驱动改 code 名时文本还能接住;两道判据都以 isError 为前提,
+/// 成功回包里出现同样文字不算。
+fn session_ended(payload: &Value) -> bool {
+    if payload.get("isError").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let code = payload
+        .get("structuredContent")
+        .and_then(|state| state.get("code"))
+        .and_then(Value::as_str);
+    if code == Some("session_ended") {
+        return true;
+    }
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| text.contains("this session has ended"))
+            })
+        })
+}
+
+/// 驱动 isError 回包里的第一段说明文本(审计记失败原因用;没说明就占位一句)。
+///
+/// 驱动把工具失败装在 MCP isError 回包里而不是 JSON-RPC 错误里,审计此前
+/// 只认 JSON-RPC 错误,把失败的观测一律记成了 ok=1 —— 取证会看走眼。
+fn driver_error_text(payload: &Value) -> Option<String> {
+    if payload.get("isError").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let text = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items
+                .iter()
+                .find_map(|item| item.get("text").and_then(Value::as_str))
+        })
+        .unwrap_or("驱动回包置了 isError 但没有说明原因");
+    Some(text.to_string())
+}
+
+/// 驱动调用 + 会话自愈:命中「会话已结束」就无参 `start_session` 复活(幂等)
+/// 并原样重试一次;模型与用户无感。
+///
+/// 复活与重试都不再过闸门 —— 闸门在这次调用的入口已经放行,步数也只该记一次。
+/// 复活本身失败不吞错:重试会把同样的失败再带回给模型,与不复活等价。自愈动作
+/// 落一笔审计(op=desktop-revive-session,tool 记触发它的驱动工具名),取证时
+/// 能看到它何时踢过。
+async fn call_driver(
+    ctx: &ServerContext,
+    session_id: Option<&str>,
+    name: &str,
+    arguments: Value,
+) -> Result<Value, String> {
+    let driver = &ctx.daemon.companion.inner.driver;
+    let first = driver.call_tool(name, arguments.clone()).await?;
+    if !session_ended(&first) {
+        return Ok(first);
+    }
+    let revived = driver.call_tool("start_session", json!({})).await;
+    audit_row(
+        ctx,
+        "desktop-revive-session",
+        name,
+        session_id,
+        revived.is_ok(),
+        revived.as_ref().err().map(String::as_str),
+    );
+    driver.call_tool(name, arguments).await
 }
 
 /// 宿主家族身份裁决需要的两条事实:目标 exe 路径、外壳 exe 路径。
@@ -1367,7 +1453,10 @@ async fn read_apps(
             payload["hiddenProtected"] = json!(hidden);
         }
     }
-    audit_row(ctx, op, tool, session_id, true, None);
+    match driver_error_text(&payload) {
+        Some(reason) => audit_row(ctx, op, tool, session_id, false, Some(&reason)),
+        None => audit_row(ctx, op, tool, session_id, true, None),
+    }
     Ok(with_receipt(payload, "回执:应用清单是只读观测。"))
 }
 
@@ -1415,7 +1504,7 @@ async fn paste(
         tool,
         op,
         args,
-        driver.call_tool(driver_tool, payload).await,
+        call_driver(ctx, session_id, driver_tool, payload).await,
     )
 }
 
@@ -1440,23 +1529,23 @@ async fn read_elements(
         "computer_elements 缺少必填参数 windowId(必须属于该 processId)".to_string()
     })?;
     gate(ctx, session_id, tool, op, args, "").await?;
-    let driver = &ctx.daemon.companion.inner.driver;
-    let mut payload = driver
-        .call_tool(
-            "get_window_state",
-            json!({
-                "pid": target.pid,
-                "window_id": window_id,
-                "include_accessibility_tree": true,
-                "include_screenshot": bool_or(args, "includeScreenshot", true),
-                "query": string(args, "query"),
-                "max_elements": number(args, "maxElements").unwrap_or(400),
-                "max_depth": number(args, "maxDepth").unwrap_or(20),
-                "max_image_dimension": number(args, "maxImageDimension").unwrap_or(1280),
-            }),
-        )
-        .await
-        .map_err(|error| format!("取窗口状态失败: {error}"))?;
+    let mut payload = call_driver(
+        ctx,
+        session_id,
+        "get_window_state",
+        json!({
+            "pid": target.pid,
+            "window_id": window_id,
+            "include_accessibility_tree": true,
+            "include_screenshot": bool_or(args, "includeScreenshot", true),
+            "query": string(args, "query"),
+            "max_elements": number(args, "maxElements").unwrap_or(400),
+            "max_depth": number(args, "maxDepth").unwrap_or(20),
+            "max_image_dimension": number(args, "maxImageDimension").unwrap_or(1280),
+        }),
+    )
+    .await
+    .map_err(|error| format!("取窗口状态失败: {error}"))?;
 
     let mut redacted = 0;
     let mut read_value_result = Value::Null;
@@ -1481,7 +1570,10 @@ async fn read_elements(
     }
     // 模型可见的树文本一律由我们自己渲染(见 replace_driver_tree_text)。
     replace_driver_tree_text(&mut payload);
-    audit_row(ctx, op, tool, session_id, true, None);
+    match driver_error_text(&payload) {
+        Some(reason) => audit_row(ctx, op, tool, session_id, false, Some(&reason)),
+        None => audit_row(ctx, op, tool, session_id, true, None),
+    }
     // snapshotId 只存在于驱动的 structuredContent 里:结果整形会把 structuredContent
     // 整个丢掉,所以在这里把它写进模型看得见的回执 —— 带 elementIndex 的动作必须
     // 原样带回它,否则驱动判「bare element_index is not accepted」。
@@ -1519,27 +1611,27 @@ async fn wait(
             .unwrap_or(WAIT_DEFAULT_INTERVAL_MS)
             .clamp(100, 5000),
     );
-    let driver = &ctx.daemon.companion.inner.driver;
     let deadline = Instant::now() + timeout;
     let started = Instant::now();
     let mut observations = 0u32;
     let mut reason = "predicate_unsatisfied";
     loop {
         observations += 1;
-        let state = driver
-            .call_tool(
-                "get_window_state",
-                json!({
-                    "pid": target.pid,
-                    "window_id": window_id,
-                    "include_accessibility_tree": true,
-                    "include_screenshot": false,
-                    "max_elements": WAIT_TREE_MAX_ELEMENTS,
-                    "max_depth": WAIT_TREE_MAX_DEPTH,
-                }),
-            )
-            .await
-            .map_err(|error| format!("等待期间的观测失败: {error}"))?;
+        let state = call_driver(
+            ctx,
+            session_id,
+            "get_window_state",
+            json!({
+                "pid": target.pid,
+                "window_id": window_id,
+                "include_accessibility_tree": true,
+                "include_screenshot": false,
+                "max_elements": WAIT_TREE_MAX_ELEMENTS,
+                "max_depth": WAIT_TREE_MAX_DEPTH,
+            }),
+        )
+        .await
+        .map_err(|error| format!("等待期间的观测失败: {error}"))?;
         let structured = state
             .get("structuredContent")
             .cloned()
@@ -1690,6 +1782,56 @@ mod tests {
 
     fn args(value: Value) -> Map<String, Value> {
         value.as_object().cloned().unwrap_or_default()
+    }
+
+    // ---- 会话自愈判据 ----
+
+    /// 0.30.1 实测的驱动错误回包形状:content 文本 + isError(+ 可能有 code)。
+    fn driver_error(code: Option<&str>, text: &str) -> Value {
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "structuredContent": code.map(|code| json!({ "code": code })),
+            "isError": true,
+        })
+    }
+
+    #[test]
+    fn session_ended_matches_code_first_and_text_fallback() {
+        assert!(session_ended(&driver_error(
+            Some("session_ended"),
+            "this session has ended; call start_session explicitly to reuse its label"
+        )));
+        // code 缺失时靠 0.30.1 实测的错误文本兜底。
+        assert!(session_ended(&driver_error(
+            None,
+            "this session has ended; call start_session explicitly to reuse its label"
+        )));
+        // 别的驱动错误不触发自愈。
+        assert!(!session_ended(&driver_error(
+            Some("window_not_found"),
+            "windowId=23791422 不属于进程 37472"
+        )));
+        // 成功回包里出现同样文字也不算(两道判据都以 isError 为前提)。
+        assert!(!session_ended(&json!({
+            "content": [{ "type": "text", "text": "this session has ended 出现在成功说明里" }],
+        })));
+    }
+
+    #[test]
+    fn driver_error_text_reads_the_first_content_text() {
+        assert_eq!(
+            driver_error_text(&driver_error(None, "取窗口失败")).as_deref(),
+            Some("取窗口失败")
+        );
+        assert_eq!(
+            driver_error_text(&json!({ "content": [] })),
+            None,
+            "没有 isError 就不是失败"
+        );
+        assert_eq!(
+            driver_error_text(&json!({ "content": [], "isError": true })).as_deref(),
+            Some("驱动回包置了 isError 但没有说明原因")
+        );
     }
 
     // ---- 参数翻译 ----

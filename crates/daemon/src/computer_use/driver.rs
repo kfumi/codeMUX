@@ -11,7 +11,7 @@
 //! 本模块的协议解析是纯函数;真正拉起子进程的部分由集成测试用真实二进制覆盖
 //! (`tests/computer_use_driver.rs`)。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -131,6 +131,10 @@ struct DriverProcess {
 #[derive(Default)]
 pub struct DriverStub {
     responses: StdMutex<HashMap<String, Value>>,
+    /// 顺序回包:同名调用先出队,出空后回落到 [`DriverStub::respond`] 的固定回包。
+    /// 会话自愈这类「第一次失败、复活后成功」的契约,前后两次同名调用要拿到不同
+    /// 回包,固定表做不到。
+    sequenced: StdMutex<HashMap<String, VecDeque<Value>>>,
     calls: StdMutex<Vec<(String, Value)>>,
 }
 
@@ -141,6 +145,14 @@ impl DriverStub {
             .lock()
             .expect("stub lock")
             .insert(tool.to_string(), payload);
+    }
+
+    /// 预置某个驱动工具的一串顺序回包:逐次出队,出空后回落到固定回包。
+    pub fn respond_seq(&self, tool: &str, payloads: Vec<Value>) {
+        self.sequenced
+            .lock()
+            .expect("stub lock")
+            .insert(tool.to_string(), payloads.into());
     }
 
     /// 预置「驱动报错」:等价于驱动回一个 `isError` 回包。
@@ -170,6 +182,15 @@ impl DriverStub {
             .lock()
             .expect("stub lock")
             .push((name.to_string(), arguments));
+        if let Some(payload) = self
+            .sequenced
+            .lock()
+            .expect("stub lock")
+            .get_mut(name)
+            .and_then(|queue| queue.pop_front())
+        {
+            return Ok(payload);
+        }
         let responses = self.responses.lock().expect("stub lock");
         match responses.get(name) {
             Some(payload) => Ok(payload.clone()),

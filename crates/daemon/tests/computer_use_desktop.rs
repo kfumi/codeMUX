@@ -481,3 +481,97 @@ async fn a_malformed_action_never_reaches_the_driver() {
     );
     stop(&fixture).await;
 }
+
+/// 会话自愈(2026-10-24 根因回归,会话 ses_e9410f57):cua-driver 的隐式传输会话
+/// 闲置超时结束后,会话态工具回 isError「this session has ended」;daemon 要无参
+/// `start_session` 复活并原样重试一次,模型无感。
+#[tokio::test]
+async fn a_dead_driver_session_is_revived_and_the_call_retried_once() {
+    let (fixture, stub) = stub_fixture().await;
+    let mut ws = connect_control(fixture.port, &fixture.token).await;
+    stub.respond_seq(
+        "get_window_state",
+        vec![
+            // 第一次:会话已结束(0.30.1 实测的回包形状)。
+            serde_json::json!({
+                "content": [{ "type": "text", "text": "this session has ended; call start_session explicitly to reuse its label" }],
+                "isError": true,
+            }),
+            // 复活后的重试:正常回包,带新快照 id。
+            serde_json::json!({
+                "content": [{ "type": "text", "text": "✅ 窗口状态" }],
+                "structuredContent": { "elements": [], "snapshot_id": "snap-2" },
+            }),
+        ],
+    );
+    stub.respond(
+        "start_session",
+        serde_json::json!({ "content": [{ "type": "text", "text": "✅ session" }] }),
+    );
+    let (status, body) = run_tool(
+        &mut ws,
+        &fixture,
+        "computer_elements",
+        serde_json::json!({ "processId": 37472, "windowId": 23791422 }),
+    )
+    .await;
+    assert_eq!(status, 200, "复活后应成功: {body:?}");
+    let calls = stub.calls();
+    let names: Vec<&str> = calls.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["get_window_state", "start_session", "get_window_state"],
+        "顺序必须是「失败 → 复活 → 重试」: {calls:?}"
+    );
+    // 重试原样带回参数,不是换一份。
+    assert_eq!(
+        calls[2].1,
+        serde_json::json!({
+            "pid": 37472,
+            "window_id": 23791422,
+            "include_accessibility_tree": true,
+            "include_screenshot": true,
+            "query": serde_json::Value::Null,
+            "max_elements": 400,
+            "max_depth": 20,
+            "max_image_dimension": 1280,
+        }),
+        "重试参数与第一次一致: {calls:?}"
+    );
+    let text = body["payload"]["content"]
+        .as_array()
+        .and_then(|items| items.first())
+        .and_then(|item| item["text"].as_str())
+        .unwrap_or_default();
+    assert!(
+        text.contains("snapshotId=snap-2"),
+        "新快照 id 要进回执: {text}"
+    );
+    stop(&fixture).await;
+}
+
+/// 别的驱动错误不触发自愈:一次调用就是一次调用,不偷偷 start_session。
+#[tokio::test]
+async fn an_ordinary_driver_error_does_not_revive_the_session() {
+    let (fixture, stub) = stub_fixture().await;
+    let mut ws = connect_control(fixture.port, &fixture.token).await;
+    stub.respond(
+        "get_window_state",
+        serde_json::json!({
+            "content": [{ "type": "text", "text": "windowId=23791422 不属于进程 37472" }],
+            "isError": true,
+        }),
+    );
+    let (status, body) = run_tool(
+        &mut ws,
+        &fixture,
+        "computer_elements",
+        serde_json::json!({ "processId": 37472, "windowId": 23791422 }),
+    )
+    .await;
+    assert_eq!(status, 200, "驱动错误按工具错误带回,不是 HTTP 错: {body:?}");
+    let calls = stub.calls();
+    assert_eq!(calls.len(), 1, "不该有复活调用: {calls:?}");
+    assert_eq!(calls[0].0, "get_window_state");
+    stop(&fixture).await;
+}
