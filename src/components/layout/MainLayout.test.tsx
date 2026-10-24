@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ReactNode } from 'react';
 
@@ -12,8 +12,22 @@ import { useShellLayoutStore } from '../../stores/shellLayoutStore';
 import { useSummaryPanelStore } from '../../stores/summaryPanelStore';
 
 const titleBarProps: Record<string, unknown>[] = [];
+const sidePanelProps: Record<string, unknown>[] = [];
 
 const windowState = vi.hoisted(() => ({ maximized: false }));
+
+const sidePanelStoreState = vi.hoisted(() => ({
+  isOpen: true,
+  isExpanded: false,
+  conversationActive: false,
+}));
+
+vi.mock('../../stores/sidePanelStore', () => ({
+  useSidePanelStore: (selector: (state: typeof sidePanelStoreState) => unknown) =>
+    selector(sidePanelStoreState),
+  selectConversationSurfaceActive: (state: typeof sidePanelStoreState) =>
+    state.isOpen && state.isExpanded && state.conversationActive,
+}));
 
 vi.mock('../../hooks/useWindowMaximized', () => ({
   useWindowMaximized: () => windowState.maximized,
@@ -47,9 +61,10 @@ vi.mock('./NarrowNavFooter', () => ({
 }));
 
 vi.mock('../workspace/SidePanel', () => ({
-  SidePanel: ({ isVisible }: { isVisible?: boolean }) => (
-    <div data-testid="side-panel" data-visible={String(isVisible)} />
-  ),
+  SidePanel: (props: Record<string, unknown>) => {
+    sidePanelProps.push(props);
+    return <div data-testid="side-panel" data-visible={String(props.isVisible)} />;
+  },
 }));
 
 // 摘要面板的内联面浮在对话列里；这里只关心它挂没挂上、对话列让没让位，
@@ -69,6 +84,11 @@ describe('MainLayout', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    // jsdom 没有 ResizeObserver:完整视图对话宿主按它跟随 slot 尺寸(AgentPanel 同款 stub)。
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 820 });
     // 默认代表「桌面壳 + 窗口化」:内容面浮起成立的那一种形态,其余形态各自覆盖。
@@ -80,10 +100,15 @@ describe('MainLayout', () => {
     // 否则永远停在 overlay（面板挂标题栏浮层）。
     useSummaryPanelStore.getState().reset();
     windowState.maximized = false;
+    sidePanelStoreState.isOpen = true;
+    sidePanelStoreState.isExpanded = false;
+    sidePanelStoreState.conversationActive = false;
   });
 
   afterEach(() => {
     titleBarProps.length = 0;
+    sidePanelProps.length = 0;
+    vi.unstubAllGlobals();
     cleanup();
   });
 
@@ -437,5 +462,57 @@ describe('MainLayout', () => {
     );
 
     expect(document.querySelector('[data-testid="side-panel"]')?.getAttribute('data-visible')).toBe('false');
+  });
+
+  it('完整视图对话 surface:拿到 slot 后宿主浮起,退出后回落为普通布局', () => {
+    sidePanelStoreState.isExpanded = true;
+    sidePanelStoreState.conversationActive = true;
+    // 每次都渲染新元素:同一个元素引用会让 React bail out,收不到 store 变化。
+    const tree = () => (
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div data-testid="conversation-content">content</div>
+      </MainLayout>
+    );
+    const { rerender } = render(tree());
+
+    // SidePanel 的内容区(slot)元素没到之前,宿主保持普通布局,对话仍在对话列里。
+    const host = () => document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
+    expect(host().dataset.conversationFullViewHost).toBe('idle');
+    expect(host().contains(document.querySelector('[data-testid="conversation-content"]'))).toBe(true);
+
+    // SidePanel 经 contentSlotRef 把 slot 元素交给布局层 —— 宿主随即浮起盖住 slot。
+    const contentSlotRef = sidePanelProps.at(-1)?.contentSlotRef as
+      | ((element: HTMLDivElement | null) => void)
+      | undefined;
+    expect(typeof contentSlotRef).toBe('function');
+    act(() => contentSlotRef?.(document.createElement('div')));
+    expect(host().dataset.conversationFullViewHost).toBe('active');
+    expect(host().className).toContain('fixed');
+
+    // 退出对话 surface(切回面板标签)后回落,对话内容不重挂载。
+    sidePanelStoreState.conversationActive = false;
+    rerender(tree());
+    expect(host().dataset.conversationFullViewHost).toBe('idle');
+    expect(host().className).not.toContain('fixed');
+    expect(host().contains(document.querySelector('[data-testid="conversation-content"]'))).toBe(true);
+  });
+
+  it('面板不可见时(设置页等视图)对话 surface 不浮起', () => {
+    sidePanelStoreState.isExpanded = true;
+    sidePanelStoreState.conversationActive = true;
+
+    render(
+      <MainLayout sidePanelAvailable={false} sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const contentSlotRef = sidePanelProps.at(-1)?.contentSlotRef as
+      | ((element: HTMLDivElement | null) => void)
+      | undefined;
+    act(() => contentSlotRef?.(document.createElement('div')));
+
+    const host = document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
+    expect(host.dataset.conversationFullViewHost).toBe('idle');
   });
 });

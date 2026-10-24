@@ -92,6 +92,10 @@ const DEFAULT_SCOPE_ID = 'global';
 let terminalTabSequence = 0;
 let browserTabSequence = 0;
 
+/** 完整视图对话 surface 是否激活(只读派生);消费方再自行叠加可见性等宿主条件。 */
+export const selectConversationSurfaceActive = (state: SidePanelState): boolean =>
+  state.isOpen && state.isExpanded && state.conversationActive;
+
 function defaultSnapshot(): SidePanelSnapshot {
   return {
     isOpen: false,

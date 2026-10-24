@@ -10,11 +10,13 @@ import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useSho
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useShellLayoutStore } from '../../stores/shellLayoutStore';
+import { useSidePanelStore, selectConversationSurfaceActive } from '../../stores/sidePanelStore';
 import { summaryPanelViewOf, useSummaryPanelStore } from '../../stores/summaryPanelStore';
 import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { SummaryPanelSurface } from '../workspace/review/SummaryPanelSurface';
 import { TooltipHint } from '../ui/tooltip';
+import { ConversationFullViewHost } from './ConversationFullViewHost';
 import { NavRail, type NavRailTarget } from './NavRail';
 import { NarrowNavFooter } from './NarrowNavFooter';
 import { NarrowNavSwitcher } from './NarrowNavSwitcher';
@@ -183,6 +185,13 @@ export function MainLayout({
     }),
     [summaryAvailableWidth, summaryContentWidth, summaryPanelWidth, summaryIsPinned, summaryIsPopoverOpen],
   );
+
+  // 完整视图（工单 side-panel-full-view/02）：SidePanel 把内容区（tab 栏下方的
+  // slot）元素经回调 ref 交上来；对话 surface 激活时对话列由宿主层 fixed 盖住 slot,
+  // 对话 DOM 不移动不重挂载。普通视图下宿主是透明的一层 flex 容器。
+  const [sidePanelSlotElement, setSidePanelSlotElement] = useState<HTMLDivElement | null>(null);
+  const conversationSurfaceActive = sidePanelAvailable
+    && useSidePanelStore(selectConversationSurfaceActive);
 
   const sidebarToggleButton = sidebar != null ? (
     <TooltipHint content={sidebarVisible ? `收起侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}` : `展开侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}`}>
@@ -378,13 +387,19 @@ export function MainLayout({
                   )}
                   style={{ '--summary-content-shift': `${summaryView.contentShift}px` } as CSSProperties}
                 >
-                  {children}
-                  <SummaryPanelSurface projectPath={projectOpenPath} todos={todos} />
+                  <ConversationFullViewHost
+                    active={conversationSurfaceActive}
+                    slotElement={sidePanelSlotElement}
+                  >
+                    {children}
+                    <SummaryPanelSurface projectPath={projectOpenPath} todos={todos} />
+                  </ConversationFullViewHost>
                 </div>
                 <SidePanel
                   projectPath={sidePanelProjectPath}
                   scopeId={sidePanelScopeId}
                   isVisible={sidePanelAvailable}
+                  contentSlotRef={setSidePanelSlotElement}
                 />
               </main>
             </div>

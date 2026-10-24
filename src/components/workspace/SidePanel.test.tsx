@@ -269,6 +269,17 @@ describe('SidePanel', () => {
     expect(screen.getByTestId('panel-resize-overlay')).toBeTruthy();
   });
 
+  it('把内容区元素经 contentSlotRef 交给布局层(完整视图宿主按它定位)', () => {
+    const contentSlotRef = vi.fn();
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" contentSlotRef={contentSlotRef} />);
+
+    // 挂载即上报:内容区是 tab 栏下方那块区域(带 data 标识),不是面板头。
+    const slot = contentSlotRef.mock.calls[0]?.[0] as HTMLElement | undefined;
+    expect(slot).toBeInstanceOf(HTMLDivElement);
+    expect(slot.hasAttribute('data-side-panel-content-slot')).toBe(true);
+    expect(slot.querySelector('[data-testid="terminal-panel"]')).toBeTruthy();
+  });
+
   it('鼠标抬起或窗口失焦都会结束拖拽,避免拖拽卡住', () => {
     render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
 

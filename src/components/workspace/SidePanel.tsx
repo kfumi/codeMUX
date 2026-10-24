@@ -29,12 +29,14 @@ interface SidePanelProps {
   projectPath?: string | null;
   scopeId: string;
   isVisible?: boolean;
+  /** 完整视图的对话宿主按面板内容区（tab 栏下方）定位；元素经此回调交给布局层。 */
+  contentSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
 /** tab 栏里两种标签(面板标签 / 固定对话标签)共用的 chip 外形。 */
 const SIDE_PANEL_TAB_CHIP_CLASS = 'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-fast';
 
-export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelProps) {
+export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotRef }: SidePanelProps) {
   // 工单 02:宿主能力清单决定壳独占入口(内置浏览器)是否可见。
   const capabilities = useHostCapabilities();
   // 工单 03:窄屏上面板没有横向空间可分享,直接占满内容区(聊天主视图留在
@@ -337,7 +339,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
           </div>
         </div>
 
-        <div className="relative min-h-0 flex-1">
+        <div ref={contentSlotRef} data-side-panel-content-slot="" className="relative min-h-0 flex-1">
           {terminalTabs.map((tab) => {
             const isActive = isPanelTabActive(tab.id);
             return (
