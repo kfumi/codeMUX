@@ -190,8 +190,10 @@ export function MainLayout({
   // slot）元素经回调 ref 交上来；对话 surface 激活时对话列由宿主层 fixed 盖住 slot,
   // 对话 DOM 不移动不重挂载。普通视图下宿主是透明的一层 flex 容器。
   const [sidePanelSlotElement, setSidePanelSlotElement] = useState<HTMLDivElement | null>(null);
-  const conversationSurfaceActive = sidePanelAvailable
-    && useSidePanelStore(selectConversationSurfaceActive);
+  // hook 必须无条件调用（sidePanelAvailable 随路由变化，短路会造成条件式 hook），
+  // 面板不可用只是让 surface 判定恒为 false。
+  const conversationSurfaceActiveInStore = useSidePanelStore(selectConversationSurfaceActive);
+  const conversationSurfaceActive = sidePanelAvailable && conversationSurfaceActiveInStore;
 
   const sidebarToggleButton = sidebar != null ? (
     <TooltipHint content={sidebarVisible ? `收起侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}` : `展开侧栏${sidebarToggleHint ? ` · ${sidebarToggleHint}` : ''}`}>

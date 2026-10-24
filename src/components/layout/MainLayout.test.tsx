@@ -22,12 +22,20 @@ const sidePanelStoreState = vi.hoisted(() => ({
   conversationActive: false,
 }));
 
-vi.mock('../../stores/sidePanelStore', () => ({
-  useSidePanelStore: (selector: (state: typeof sidePanelStoreState) => unknown) =>
-    selector(sidePanelStoreState),
-  selectConversationSurfaceActive: (state: typeof sidePanelStoreState) =>
-    state.isOpen && state.isExpanded && state.conversationActive,
-}));
+// selector 用真实现(importOriginal):mock 复制派生逻辑会让断言与实现同源,
+// 实现改了测试还在按旧口径通过。useSidePanelStore 也要用真 hook(useSyncExternalStore)
+// 承载 mock 状态 —— 纯函数 mock 不消耗 hook 槽位,「条件式调用 store hook」这类
+// 违规在本文件会静默通过(回归见 2026-10-24 二次 review)。
+vi.mock('../../stores/sidePanelStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../stores/sidePanelStore')>();
+  const { useSyncExternalStore } = await import('react');
+  const subscribeNoop = () => () => {};
+  return {
+    useSidePanelStore: (selector: (state: typeof sidePanelStoreState) => unknown) =>
+      selector(useSyncExternalStore(subscribeNoop, () => sidePanelStoreState)),
+    selectConversationSurfaceActive: actual.selectConversationSurfaceActive,
+  };
+});
 
 vi.mock('../../hooks/useWindowMaximized', () => ({
   useWindowMaximized: () => windowState.maximized,
@@ -511,6 +519,25 @@ describe('MainLayout', () => {
       | ((element: HTMLDivElement | null) => void)
       | undefined;
     act(() => contentSlotRef?.(document.createElement('div')));
+
+    const host = document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
+    expect(host.dataset.conversationFullViewHost).toBe('idle');
+  });
+
+  it('sidePanelAvailable 从 true 切到 false 不产生条件式 hook(回归)', () => {
+    sidePanelStoreState.isExpanded = true;
+    sidePanelStoreState.conversationActive = true;
+    const tree = (available: boolean) => (
+      <MainLayout sidePanelAvailable={available} sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>
+    );
+    const { rerender } = render(tree(true));
+
+    // app → 设置页:MainLayout 常驻挂载,sidePanelAvailable 变 false 时 hook 数量必须
+    // 不变。曾经的 `sidePanelAvailable && useSidePanelStore(...)` 短路写法会让 React
+    // 直接抛「Rendered fewer hooks than expected」——首渲染就传 false 的用例拦不住它。
+    expect(() => rerender(tree(false))).not.toThrow();
 
     const host = document.querySelector('[data-conversation-full-view-host]') as HTMLElement;
     expect(host.dataset.conversationFullViewHost).toBe('idle');
