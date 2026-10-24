@@ -460,7 +460,7 @@ describe('side panel full view conversation surface', () => {
     expect(useSidePanelStore.getState().conversationActive).toBe(false);
   });
 
-  it('keeps the panel open and lands on the conversation tab when the last panel tab is closed in full view', () => {
+  it('closing the last panel tab in full view collapses the panel and exits full view', () => {
     const { store, reviewTabId } = enterFullViewWithReviewTab();
     store.activateConversationTab();
 
@@ -469,9 +469,9 @@ describe('side panel full view conversation surface', () => {
     expect(useSidePanelStore.getState()).toMatchObject({
       tabs: [],
       activeTabId: null,
-      isOpen: true,
-      isExpanded: true,
-      conversationActive: true,
+      isOpen: false,
+      isExpanded: false,
+      conversationActive: false,
     });
   });
 

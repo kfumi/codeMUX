@@ -503,14 +503,10 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           : null;
 
     if (tabs.length === 0) {
-      // 完整视图下有固定「对话」标签兜底:关掉最后一个面板标签不收起面板,落到对话标签;
-      // 普通视图维持「关最后一个标签即收起面板」的现状。
-      if (state.isExpanded) {
-        set({ tabs, activeTabId: null, isOpen: true, conversationActive: true });
-      } else {
-        set({ tabs, activeTabId, isOpen: false, isExpanded: false, conversationActive: false });
-        void useBrowserStore.getState().hideAllBrowserHosts();
-      }
+      // 最后一个面板标签被关掉即收起面板,完整视图(展开预览)也一样连带退出,
+      // 主对话回到对话列 —— 与参考实现「面板按既有规则收起,同时退出完整视图」同口径。
+      set({ tabs, activeTabId, isOpen: false, isExpanded: false, conversationActive: false });
+      void useBrowserStore.getState().hideAllBrowserHosts();
     } else {
       set({ tabs, activeTabId, isOpen: true });
     }
