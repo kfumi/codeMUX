@@ -83,7 +83,7 @@
  */
 @theme static {
   --font-sans: var(--font-ui);
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Consolas, monospace;
+  --font-mono: 'JetBrains Mono Variable', var(--font-ui), ui-monospace, SFMono-Regular, Consolas, monospace;
   --text-code: var(--code-font-size);
   --text-ui-micro: max(9px, calc(var(--ui-font-size) - 4px));
   --text-ui-caption: max(10px, calc(var(--ui-font-size) - 3px));
@@ -1244,8 +1244,8 @@ html.cmx-panel-resizing webview {
 }
 
 /* 组头的计数行（`2 个 Subagent · 已完成 1/2 · 3m 33s`）是界面文案，跟着界面字体与
-   界面字号走；数字用 tabular-nums 对齐，所以不需要等宽字体——`--font-mono` 不可由
-   用户配置，中文落进去只会被替换成系统兜底字体。 */
+   界面字号走；数字用 tabular-nums 对齐，所以不需要等宽字体——`--font-mono` 的字族
+   不可由用户配置。 */
 .subagent-activity-metrics {
   min-width: 0;
   overflow: hidden;

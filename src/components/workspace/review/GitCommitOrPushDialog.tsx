@@ -252,7 +252,7 @@ export function GitCommitOrPushDialog({
             <span className="min-w-0 truncate">{branchLabel}</span>
             <ChevronDown className="size-3.5 shrink-0 opacity-60" />
           </span>
-          <span className="shrink-0 font-mono text-ui-caption tabular-nums">
+          <span className="shrink-0 text-ui-caption tabular-nums">
             <span className="text-diff-added">+{formatDelta(totals.additions)}</span>
             <span className="ml-2 text-diff-removed">-{formatDelta(totals.deletions)}</span>
           </span>
@@ -351,7 +351,7 @@ export function GitCommitOrPushDialog({
                   </span>
                   <span className="min-w-0 flex-1 truncate text-left">{action.label}</span>
                   {selected ? (
-                    <span className="shrink-0 font-mono text-ui-micro text-muted-foreground">
+                    <span className="shrink-0 text-ui-micro text-muted-foreground">
                       {commitShortcutLabel()}
                     </span>
                   ) : null}

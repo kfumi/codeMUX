@@ -695,7 +695,7 @@ export function ProgressBar({
         </span>
         {/* 百分比是 daemon 真的测出来才显示；未知时宁可留空也不编一个 0%。 */}
         {percent !== null && (
-          <span className="shrink-0 font-mono text-muted-foreground">{percent}%</span>
+          <span className="shrink-0 tabular-nums text-muted-foreground">{percent}%</span>
         )}
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
@@ -711,10 +711,10 @@ export function ProgressBar({
         )}
       </div>
       <div className="flex items-center justify-between text-ui-caption text-muted-foreground">
-        <span className="font-mono">{bytesDone !== null && bytesTotal !== null
+        <span className="tabular-nums">{bytesDone !== null && bytesTotal !== null
           ? `${formatBytes(bytesDone)} / ${formatBytes(bytesTotal)}`
           : ''}</span>
-        <span className="font-mono">已用时 {formatElapsed(elapsed)}</span>
+        <span className="tabular-nums">已用时 {formatElapsed(elapsed)}</span>
       </div>
     </div>
   );

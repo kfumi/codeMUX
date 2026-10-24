@@ -294,7 +294,7 @@ function EnvironmentSection({
               <GitCommitHorizontal className="h-3 w-3" />
             </span>
             <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
-            <span className="shrink-0 font-mono text-ui-caption">
+            <span className="shrink-0 text-ui-caption tabular-nums">
               <span className="text-diff-added">+{formatDelta(totals.additions)}</span>
               <span className="ml-2 text-diff-removed">-{formatDelta(totals.deletions)}</span>
             </span>

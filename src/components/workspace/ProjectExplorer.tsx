@@ -279,7 +279,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
         {isMultiRoot ? (
           <span className="shrink-0 text-ui-micro text-[hsl(var(--sidebar-fg))]">{roots.length} 个源文件夹</span>
         ) : null}
-        <span className="ml-auto font-mono text-[hsl(var(--sidebar-fg))]/70">{totalNodes}</span>
+        <span className="ml-auto tabular-nums text-[hsl(var(--sidebar-fg))]/70">{totalNodes}</span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">

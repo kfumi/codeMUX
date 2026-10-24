@@ -117,7 +117,7 @@ export function AboutSettings() {
           <SettingsCard>
             <div className="flex flex-col gap-2 px-4 py-3">
               {updatePercent !== null && (
-                <span className="font-mono text-code text-foreground">{updatePercent}%</span>
+                <span className="text-ui-body tabular-nums text-foreground">{updatePercent}%</span>
               )}
               {stage === 'downloading' && (
                 <>

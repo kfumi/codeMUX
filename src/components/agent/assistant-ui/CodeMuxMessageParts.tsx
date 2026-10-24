@@ -408,7 +408,7 @@ function CodeMuxToolCallMessagePartImpl({
           tooltipPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground">
+                <span className="min-w-0 truncate text-ui-meta font-normal text-muted-foreground">
                   {headerText}
                 </span>
               </TooltipTrigger>
@@ -417,13 +417,13 @@ function CodeMuxToolCallMessagePartImpl({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="min-w-0 truncate font-mono text-ui-meta font-normal text-muted-foreground">
+            <span className="min-w-0 truncate text-ui-meta font-normal text-muted-foreground">
               {headerText}
             </span>
           )
         )}
         {codeChangeStats && (
-          <span className="inline-flex shrink-0 gap-1.5 font-mono text-ui-caption tabular-nums">
+          <span className="inline-flex shrink-0 gap-1.5 text-ui-caption tabular-nums">
             {(codeChangeStats.additions > 0 || codeChangeStats.deletions > 0) && (
               <>
                 <span className="text-green-600 dark:text-green-400">
@@ -1211,7 +1211,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
               }}
             >
               <FileTypeIcon filePath={diff.file} />
-              <span className="max-w-[28%] shrink-0 truncate font-mono text-foreground/80">
+              <span className="max-w-[28%] shrink-0 truncate text-foreground/80">
                 {getSummaryFileName(diff.file)}
               </span>
               <TooltipHint content={diff.file}>
