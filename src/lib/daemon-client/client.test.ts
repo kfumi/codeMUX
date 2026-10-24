@@ -39,6 +39,27 @@ describe('daemon client', () => {
     );
   });
 
+  it('中继隧道请求也带 bearer token(否则 daemon 判 Missing token)', async () => {
+    const seen: Array<Record<string, string>> = [];
+    const client = createDaemonClient({
+      baseUrl: 'relay://relay.example.com:443',
+      token: 'relay-token',
+      polling: true,
+      transport: {
+        request: async (_path, init) => {
+          seen.push((init?.headers ?? {}) as Record<string, string>);
+          return { status: 200, body: JSON.stringify({ ok: true }) };
+        },
+      },
+    });
+
+    await client.getBootstrap();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].Authorization).toBe('Bearer relay-token');
+    expect(seen[0]['x-codemux-trace-id']).toBeTruthy();
+  });
+
   it('每个请求带 trace 头,失败时把同一 trace 挂到错误上', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('boom', { status: 500 }));
     const client = createDaemonClient(config);

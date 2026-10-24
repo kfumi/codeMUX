@@ -18,7 +18,10 @@ interface HttpTunnelResponse {
   body: string;
 }
 
-const RELAY_HANDSHAKE_TIMEOUT_MS = 5_000;
+// 冷启动(首次 DNS + TCP + TLS + 反代升级)在公网/移动网络上可能超过 5s,
+// 而此前的 5s 上限会让第一条连接必然超时(实测首次 6.2s、后续 200ms)。
+// 请求超时(15s)是在 connect 之后才开始计时,这里放宽到 20s 不会互相打架。
+const RELAY_HANDSHAKE_TIMEOUT_MS = 20_000;
 
 export class RelayTunnelClient {
   private socket: WebSocket | null = null;

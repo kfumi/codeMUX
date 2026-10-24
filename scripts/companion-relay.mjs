@@ -65,9 +65,14 @@ async function startRelayServer() {
         return;
       }
       entry.control = socket;
+      socket.isAlive = true;
+      socket.on('pong', () => {
+        socket.isAlive = true;
+      });
       sendJson(socket, { type: 'sync', connectionIds: [...entry.data.keys()] });
 
       socket.on('message', (raw) => {
+        socket.isAlive = true;
         const msg = parseControlMessage(raw);
         if (!msg) return;
         if (msg.type === 'ping') sendJson(socket, { type: 'pong' });
@@ -128,6 +133,27 @@ async function startRelayServer() {
   httpServer.listen(port, () => {
     console.log(`Companion relay listening on http://localhost:${port} (ws path /ws)`);
   });
+
+  // 控制通道半开检测:TCP 静默断开时服务端不会立刻感知,僵尸控制通道会让
+  // 手机的数据连接被误判为「桌面不在线」。用协议级 ping 清理,未回 pong 的
+  // 直接 terminate,其 close 回调会关闭该 serverId 下挂起的数据连接。
+  const heartbeat = setInterval(() => {
+    for (const entry of servers.values()) {
+      const control = entry.control;
+      if (!isSocketOpen(control)) continue;
+      if (control.isAlive === false) {
+        control.terminate();
+        continue;
+      }
+      control.isAlive = false;
+      try {
+        control.ping();
+      } catch {
+        control.terminate();
+      }
+    }
+  }, 30000);
+  heartbeat.unref?.();
 }
 
 startRelayServer().catch((error) => {

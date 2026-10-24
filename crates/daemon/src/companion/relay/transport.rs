@@ -151,6 +151,14 @@ pub fn start_relay_transport(
                     state_for_task.set(RelayConnectionState::Connected).await;
                     info!(target: "companion", "Relay control connected: {}", control_url);
                     let (mut write, mut read) = ws.split();
+                    // 半开连接检测:控制通道静默断开时 TCP 不会立刻报错,桌面端会
+                    // 一直以为自己在线,中继侧却已失去这条控制连接,于是把手机的数据
+                    // 连接以 1013 踢掉(手机侧表现为 "Relay handshake timed out")。
+                    // 用应用层 ping/pong 主动探活,超时就断开重连。
+                    let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+                    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    heartbeat.tick().await;
+                    let mut last_pong = tokio::time::Instant::now();
                     let data_tasks_for_read = data_tasks_for_task.clone();
                     let endpoint_for_data = endpoint.clone();
                     let server_id_for_data = server_id.clone();
@@ -163,9 +171,20 @@ pub fn start_relay_transport(
                                 let _ = write.close().await;
                                 return;
                             }
+                            _ = heartbeat.tick() => {
+                                if last_pong.elapsed() >= Duration::from_secs(45) {
+                                    warn!(target: "companion", "Relay control heartbeat timed out, reconnecting");
+                                    break;
+                                }
+                                if let Err(error) = write.send(Message::Text(json!({"type":"ping"}).to_string().into())).await {
+                                    warn!(target: "companion", "Relay control ping failed: {}", error);
+                                    break;
+                                }
+                            }
                             incoming = read.next() => {
                                 match incoming {
                                     Some(Ok(Message::Text(text))) => {
+                                        last_pong = tokio::time::Instant::now();
                                         if let Ok(message) = serde_json::from_str::<ControlMessage>(&text) {
                                             match message {
                                                 ControlMessage::Sync { connection_ids } => {
@@ -225,6 +244,8 @@ pub fn start_relay_transport(
                 }
             }
 
+            // 控制通道断开后旧的数据隧道已无意义,一并回收,避免重连后残留。
+            abort_data_tasks(&data_tasks_for_task).await;
             attempt = attempt.saturating_add(1);
             let delay = Duration::from_secs(std::cmp::min(30, 2u64.pow(attempt.min(4))));
             tokio::time::sleep(delay).await;

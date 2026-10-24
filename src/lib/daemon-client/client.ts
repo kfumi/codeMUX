@@ -119,9 +119,20 @@ async function daemonFetch<T>(
   const method = init?.method ?? 'GET';
 
   if (config.transport) {
+    // 中继隧道分支自己发请求,不会经过下面的 fetch 头合并,必须在这里补齐
+    // 鉴权与 trace 头;否则配对后第一个业务请求就被 daemon 判 Missing token。
+    const tunnelInit: RequestInit = {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+        'x-codemux-trace-id': traceId,
+        ...(init?.headers ?? {}),
+      },
+    };
     let result: { status: number; body: string };
     try {
-      result = await config.transport.request(path, init);
+      result = await config.transport.request(path, tunnelInit);
     } catch (error) {
       logRequestFailure(traceId, method, path, undefined, error);
       throw error;

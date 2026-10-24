@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { RelayTunnelClient } from './client';
+import { exportPublicKeyB64, generateKeyPair } from '../e2ee';
 import type { CompanionConnectionEntry } from '../types';
 
 class FakeWebSocket {
@@ -58,6 +59,38 @@ describe('RelayTunnelClient', () => {
 
       expect(result).toBe('Relay connection closed before handshake');
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('allows a cold start slower than 5s to finish the handshake', async () => {
+    const desktopPublicKeyB64 = exportPublicKeyB64(generateKeyPair().publicKey);
+    const connection: Extract<CompanionConnectionEntry, { type: 'relay' }> = {
+      id: 'relay:desktop-1',
+      type: 'relay',
+      endpoint: 'relay.example.com:443',
+      useTls: true,
+      desktopPublicKeyB64,
+    };
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    vi.useFakeTimers();
+
+    try {
+      const client = new RelayTunnelClient(connection, 'desktop-1');
+      const resultPromise = client.connect().then(
+        () => 'resolved',
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      const socket = FakeWebSocket.instances[0];
+      socket.onopen?.();
+      // 冷启动超过旧上限(5s),但仍在新的 20s 窗口内。
+      vi.advanceTimersByTime(8_000);
+      socket.onmessage?.({ data: JSON.stringify({ type: 'e2ee_ready' }) });
+
+      await expect(resultPromise).resolves.toBe('resolved');
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
