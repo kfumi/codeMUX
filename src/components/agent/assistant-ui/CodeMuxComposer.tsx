@@ -94,6 +94,8 @@ interface CodeMuxComposerProps {
   /** 上下文窗口查不到时是否退回 200k 猜测值；见 buildContextUsageViewModel。 */
   assumeDefaultContextWindow?: boolean;
   placeholder?: string;
+  /** 占位符末尾是否追加「聚焦输入框」快捷键提示（如 · Ctrl+L）；自带头部引导文案的面板可关掉。 */
+  showShortcutHintInPlaceholder?: boolean;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
   /** Issue 07: independent Plan toggle state (orthogonal to Workflow Mode). */
@@ -246,6 +248,7 @@ export function CodeMuxComposer({
   configuredContextWindow,
   assumeDefaultContextWindow,
   placeholder = '输入消息... (@ 引用文件, / 命令)',
+  showShortcutHintInPlaceholder = true,
   modelSelector,
   permissionSelector,
   planMode = 'off',
@@ -719,7 +722,7 @@ tokenUsage,
               <CodeMuxLexicalComposerInput
                 ref={editorRef}
                 submitMode="enter"
-                placeholder={focusComposerHint ? `${placeholder} · ${focusComposerHint}` : placeholder}
+                placeholder={showShortcutHintInPlaceholder && focusComposerHint ? `${placeholder} · ${focusComposerHint}` : placeholder}
                 directiveChip={DIRECTIVE_CHIP}
                 formatter={formatter}
                 onPaste={handleComposerPaste}

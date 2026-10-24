@@ -151,7 +151,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     : '我们应该做什么？';
   const placeholder = useMemo(() => {
     const label = selectedAgent?.label ?? 'Claude Code';
-    return `给 ${label} 发送第一条任务指令... (@ 引用文件, / 查看命令)`;
+    return `向 ${label} 提问，使用 @ 添加上下文，使用 / 选择命令或能力`;
   }, [selectedAgent]);
 
   useEffect(() => {
@@ -378,6 +378,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               configuredContextWindow={configuredContextWindow}
               assumeDefaultContextWindow={!isFreeSelection}
               placeholder={placeholder}
+              showShortcutHintInPlaceholder={false}
               disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}
               planMode={selectedPlanMode}
