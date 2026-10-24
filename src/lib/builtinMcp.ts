@@ -17,7 +17,7 @@ export const BUILTIN_MCP_SERVER_NAMES: readonly string[] = [
   ...BUILTIN_MCP_LEGACY_SERVER_NAMES,
 ];
 
-/** 内置 server 的两族工具前缀:24 个工具就分这两族。 */
+/** 内置 server 的两族工具前缀:26 个工具就分这两族。 */
 export const BROWSER_TOOL_PREFIX = 'browser_';
 export const DESKTOP_TOOL_PREFIX = 'computer_';
 

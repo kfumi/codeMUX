@@ -57,6 +57,7 @@ function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
     updater,
     sendToRenderer: vi.fn(),
     browserGuests,
+    agentOpenResult: vi.fn().mockReturnValue(false),
     syncUnreadBadge: vi.fn(),
     ...overrides,
   };

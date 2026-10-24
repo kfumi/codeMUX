@@ -18,6 +18,7 @@ import http from 'node:http';
 import path from 'node:path';
 
 import { createBrowserGuestTracker, guardWebviewAttach, type BrowserGuestTracker } from './browser-host';
+import { createAgentOpenCoordinator, type AgentOpenCoordinator } from './browser-agent-open';
 import { createBrowserAutomationService, type BrowserAutomationService } from './browser-automation';
 import { createComputerUseArming, type ComputerUseArming } from './computer-use-arming';
 import { createEstopEndpoint, DaemonHttpError } from './computer-use-estop';
@@ -217,6 +218,8 @@ let quitting = false;
 let unregisterBridge: (() => void) | null = null;
 /** Browser Host(工单 07)guest 登记表(webview webContentsId → browserId)。 */
 let browserGuests: BrowserGuestTracker | null = null;
+/** browser_open 的渲染层往返协调器(daemon open op → 渲染层开标签 → 回 browserId)。 */
+let agentOpen: AgentOpenCoordinator | null = null;
 /** 浏览器自动化接缝(工单 08):daemon → 壳内页面的自动化执行客户端。 */
 let automation: BrowserAutomationService | null = null;
 /** 全局 Esc 急停(工单 06):有回合在跑且系统级执行开着时武装。 */
@@ -567,6 +570,9 @@ async function quitApplication(): Promise<void> {
   // 自动化客户端先行断开(不重连),再停自有 daemon。
   automation?.stop();
   automation = null;
+  // 开页协调器收口:还在等的 open 一律按失败返回,不留悬挂 promise。
+  agentOpen?.dispose();
+  agentOpen = null;
   // 解除全局 Esc:退出后不该再占着这个键(也避免重入时残留注册)。
   emergencyStop?.setArmed(false);
   emergencyStop = null;
@@ -648,12 +654,23 @@ if (!gotLock) {
     // 这些事件的原投递方(app.emit)由本 sink 接管。
     // 这条连接同时是电脑控制的链路(工单 03):daemon 的活动事件决定提示条与全局 Esc,
     // 连接状态决定 fail-hidden(见 computer-use-arming.ts)。
+    // browser_open 的渲染层往返协调器(自举对):daemon 的 open op 经 WS 到这里,
+    // 再以 browser-agent-open 事件请渲染层开标签;渲染层的回包走 shell-bridge 的
+    // browserAgentOpenResult 通道回到协调器(见 registerShellBridge 接线)。
+    agentOpen = createAgentOpenCoordinator({
+      sendOpenRequest: (payload) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return false;
+        mainWindow.webContents.send('browser-agent-open', payload);
+        return true;
+      },
+    });
     automation = createBrowserAutomationService({
       getPort: () => supervisor?.getPort() ?? null,
       readToken: () => readLocalDaemonToken(resolveAppDataDir()),
       resolveTarget: (browserId) => guests.resolveTarget(browserId),
       resolveMostRecent: () => guests.resolveMostRecent(),
       listTargets: () => guests.list(),
+      openViaRenderer: (url) => agentOpen!.open(url),
       // 工单 03:`computer-use-activity` 不只是转发 —— 壳自己也要据此武装全局 Esc 与
       // 显隐提示条。「这台机器正在被驱动」的权威在 daemon:没人开界面、渲染层从没加载、
       // 浏览器/手机客户端在用,这些形态下渲染层都算不出来。
@@ -731,6 +748,7 @@ if (!gotLock) {
       updater,
       sendToRenderer,
       browserGuests: guests,
+      agentOpenResult: (payload) => agentOpen?.submitResult(payload) ?? false,
       syncUnreadBadge: unreadBadgeSync.sync,
     });
     createTray(() => {

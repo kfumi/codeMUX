@@ -1,5 +1,5 @@
 //! 唯一的系统内置 MCP server(`codemux-daemon mcp-control` 子命令):会话驱动内置
-//! 浏览器与桌面应用/窗口的单一工具面,承载两族工具 —— 浏览器级 10 个(`browser_*`)
+//! 浏览器与桌面应用/窗口的单一工具面,承载两族工具 —— 浏览器级 12 个(`browser_*`)
 //! 与电脑控制 15 个(`computer_*`)。
 //!
 //! 服务名 `codemux-control`(2026-10 由 `codemux-browser` 改名):取设置页
@@ -304,8 +304,31 @@ fn automation_error_text(body: &Value) -> String {
 fn tool_definitions() -> Value {
     json!([
         {
+            "name": "browser_open",
+            "description": "在内置浏览器中新开一个页面并导航到指定 URL(仅 http/https)。返回新页面的 browserId,后续 browser_* 工具用它(或省略 browserId 取最近页面)。这是唯一能新建页面的入口:browser_list 为空时,先用本工具打开页面,不要用电脑控制(computer_*)工具绕路。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "要打开的完整 URL,必须以 http:// 或 https:// 开头" },
+                },
+                "required": ["url"],
+            },
+        },
+        {
+            "name": "browser_navigate",
+            "description": "把一个已打开的内置浏览器页面导航到新 URL(仅 http/https);省略 browserId 时取最近打开的页面。要新开页面用 browser_open。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "目标 URL,必须以 http:// 或 https:// 开头" },
+                    "browserId": { "type": "string", "description": "目标页面;省略时取最近打开的页面" },
+                },
+                "required": ["url"],
+            },
+        },
+        {
             "name": "browser_list",
-            "description": "列出内置浏览器当前打开的页面(browserId/URL/标题)。操作其他浏览器工具前先调用它确定目标。",
+            "description": "列出内置浏览器当前打开的页面(browserId/URL/标题)。操作其他浏览器工具前先调用它确定目标。结果为空(pages: [])说明还没有页面 —— 先用 browser_open(url) 打开一个。",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {
@@ -660,9 +683,11 @@ enum ToolGroup {
 /// 工具名 → 分组;`None` 表示没登记(测试锁死每个工具都必须登记)。
 fn tool_group(name: &str) -> Option<ToolGroup> {
     Some(match name {
-        "browser_list" | "browser_eval" | "browser_screenshot" | "browser_input"
-        | "browser_cdp" | "browser_snapshot" | "browser_click" | "browser_type"
-        | "browser_scroll" | "browser_select" => ToolGroup::Browser,
+        "browser_open" | "browser_navigate" | "browser_list" | "browser_eval"
+        | "browser_screenshot" | "browser_input" | "browser_cdp" | "browser_snapshot"
+        | "browser_click" | "browser_type" | "browser_scroll" | "browser_select" => {
+            ToolGroup::Browser
+        }
         "computer_windows" | "computer_screenshot" | "computer_active_window" => {
             ToolGroup::DesktopObservation
         }
@@ -780,6 +805,22 @@ async fn call_tool(
 ) -> Result<Value, (i64, String)> {
     let browser_id = args.get("browserId").and_then(|v| v.as_str());
     let result: Result<Value, String> = match name {
+        "browser_open" => match args.get("url").and_then(|v| v.as_str()) {
+            Some(url) if !url.trim().is_empty() => {
+                runtime
+                    .call_execute(name, "open", None, json!({ "url": url }))
+                    .await
+            }
+            _ => Err("browser_open 缺少必填参数 url".to_string()),
+        },
+        "browser_navigate" => match args.get("url").and_then(|v| v.as_str()) {
+            Some(url) if !url.trim().is_empty() => {
+                runtime
+                    .call_execute(name, "navigate", browser_id, json!({ "url": url }))
+                    .await
+            }
+            _ => Err("browser_navigate 缺少必填参数 url".to_string()),
+        },
         "browser_list" => runtime.call_execute(name, "list", None, json!({})).await,
         "browser_eval" => match args.get("code").and_then(|v| v.as_str()) {
             Some(code) if !code.trim().is_empty() => {
@@ -1219,6 +1260,8 @@ mod tests {
         // 工具面覆盖全部 op 面:浏览器 op 一一对应,桌面只读三件套(04 票)按
         // 「覆盖」断言,工单 13 的桌面工具面另有一份自己的 op 表(不走 execute)。
         let mut expected = vec![
+            "browser_open",
+            "browser_navigate",
             "browser_list",
             "browser_eval",
             "browser_screenshot",
@@ -1238,6 +1281,8 @@ mod tests {
         // 工具面覆盖全部 op 面:每个合法 op 至少有一个工具能到达它(01 票的
         // 一一对应在 04 票加了桌面只读三件套,这里按「覆盖」而非「同名」断言)。
         let ops_reachable = [
+            "open",
+            "navigate",
             "list",
             "eval",
             "screenshot",
@@ -1274,9 +1319,9 @@ mod tests {
         // 全关:一个都不列(这份 server 只在开关打开过的会话里才会被注入)。
         assert!(names(false, false, false).is_empty());
 
-        // 只开浏览器控制:10 个 browser_*,桌面工具一个都不出现。
+        // 只开浏览器控制:12 个 browser_*,桌面工具一个都不出现。
         let browser_only = names(true, false, false);
-        assert_eq!(browser_only.len(), 10, "{browser_only:?}");
+        assert_eq!(browser_only.len(), 12, "{browser_only:?}");
         assert!(browser_only.iter().all(|name| name.starts_with("browser_")));
 
         // 只开电脑控制:壳侧只读三件套;驱动面(含驱动侧只读)不出现。
@@ -1290,7 +1335,7 @@ mod tests {
         // 三开:与静态表逐字一致(过滤只做删减,不改顺序、不动 schema)。
         let full = names(true, true, true);
         assert_eq!(full, config_names(None));
-        assert_eq!(full.len(), 25);
+        assert_eq!(full.len(), 27);
     }
 
     /// 设置页拿到的工具名:与 `tools/list` 同源,且随开关走(工单 16)。
@@ -1309,8 +1354,8 @@ mod tests {
 
         let full = entry(true, true, true);
         assert_eq!(full.tools, config_names(None));
-        assert_eq!(full.tools.len(), 25);
-        assert_eq!(entry(true, false, false).tools.len(), 10);
+        assert_eq!(full.tools.len(), 27);
+        assert_eq!(entry(true, false, false).tools.len(), 12);
         assert_eq!(entry(false, true, false).tools.len(), 3);
         assert_eq!(entry(false, true, true).tools.len(), 15);
         assert!(entry(false, false, false).tools.is_empty());
@@ -1394,20 +1439,20 @@ mod tests {
         let runtime = runtime_in(dir.path(), 1);
 
         let browser_only = listed_names(&runtime).await;
-        assert_eq!(browser_only.len(), 10, "{browser_only:?}");
+        assert_eq!(browser_only.len(), 12, "{browser_only:?}");
         assert!(browser_only.iter().all(|name| name.starts_with("browser_")));
 
         // 开关改了(daemon 落盘),重新列清单就跟着变 —— 只列一次的老客户端
         // 仍按启动时的清单跑,调用侧由端点闸门兜底。
         write_switches(dir.path(), true, true, true);
-        assert_eq!(listed_names(&runtime).await.len(), 25);
+        assert_eq!(listed_names(&runtime).await.len(), 27);
     }
 
     #[tokio::test]
     async fn an_unreadable_config_keeps_every_tool_visible() {
         // 失败开口:工具面静默缺失比多列几个更贵(工单 05/07 两次事故)。
         let runtime = runtime_at(1);
-        assert_eq!(listed_names(&runtime).await.len(), 25);
+        assert_eq!(listed_names(&runtime).await.len(), 27);
     }
 
     #[test]
@@ -1438,6 +1483,8 @@ mod tests {
     async fn missing_required_args_fail_without_network() {
         let runtime = runtime_at(1);
         for (name, args) in [
+            ("browser_open", json!({})),
+            ("browser_navigate", json!({})),
             ("browser_eval", json!({})),
             ("browser_input", json!({ "event": "not-object" })),
             ("browser_cdp", json!({})),

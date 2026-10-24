@@ -189,7 +189,7 @@
 | [codex-collab-subagent-parity](tickets/codex-collab-subagent-parity/) | 3 | [2026-09-20](specs/2026-09-20-codex-collab-subagent-parity.md) |
 | [codex-ui-alignment](tickets/codex-ui-alignment/) | 11 | [2026-10-14](specs/2026-10-14-codex-ui-alignment.md) |
 | [companion-pairing-evolution](tickets/companion-pairing-evolution/) | 9 | [2026-08-16](specs/2026-08-16-companion-pairing-evolution.md) + [map](plans/2026-08-16-companion-pairing-evolution-map.md) |
-| [computer-use](tickets/computer-use/) | 19 | [2026-10-07](specs/2026-10-07-computer-use.md) |
+| [computer-use](tickets/computer-use/) | 20 | [2026-10-07](specs/2026-10-07-computer-use.md) |
 | [computer-use-activity-authority-in-daemon](tickets/computer-use-activity-authority-in-daemon/) | 5 | [2026-10-10](specs/2026-10-10-computer-use-activity-authority-in-daemon.md) + [ADR 0018](adr/0018-computer-use-activity-authority-in-daemon.md) |
 | [daemon-boundary](tickets/daemon-boundary/) | 12 | [2026-09-07](specs/2026-09-07-daemon-boundary.md) |
 | [desktop-unread-badge](tickets/desktop-unread-badge/) | 5 | [2026-10-21](specs/2026-10-21-desktop-unread-badge.md) |

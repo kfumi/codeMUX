@@ -142,6 +142,9 @@ const bridge = {
   browserClearData: (scope: string) => invoke<void>('browserClearData', { scope }),
   browserRegisterGuest: (webContentsId: number, browserId: string) =>
     invoke<void>('browserRegisterGuest', { webContentsId, browserId }),
+  /** browser_open 回包(自举对):开好/开失败标签后把 {requestId, browserId|error} 交回 main。 */
+  browserAgentOpenResult: (payload: { requestId: string; browserId?: string; error?: string }) =>
+    invoke<boolean>('browserAgentOpenResult', payload),
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen: () => invoke<{ image: string; width: number; height: number }>('captureDesktopScreen'),
   // 全局 Esc 急停的武装/心跳通道已随工单 04 退役(提示条与 Esc 由壳跟随 daemon 活动事件

@@ -336,6 +336,130 @@ async fn execute_rejects_unknown_op_with_400() {
     stop_daemon(&fixture).await;
 }
 
+#[tokio::test]
+async fn open_and_navigate_reject_non_http_urls_with_400() {
+    let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
+
+    for op in ["open", "navigate"] {
+        for url in [
+            "file:///C:/Windows/system.ini",
+            "javascript:alert(1)",
+            "github.com/magpie",
+        ] {
+            let (status, body) = execute_automation(
+                fixture.port,
+                Some(&fixture.token),
+                serde_json::json!({"op": op, "params": {"url": url}}),
+            )
+            .await;
+            assert_eq!(status, 400, "{op} 非 http(s) URL 必须 400,got {body:?}");
+            let message = body["error"].as_str().unwrap_or_default();
+            assert!(
+                message.contains("http"),
+                "{op} 的报错要指向 http/https:{message}"
+            );
+        }
+        // 缺 url 同样 400(参数必经校验)。
+        let (status, _) = execute_automation(
+            fixture.port,
+            Some(&fixture.token),
+            serde_json::json!({"op": op, "params": {}}),
+        )
+        .await;
+        assert_eq!(status, 400, "{op} 缺 url 必须 400");
+    }
+
+    // 合法 URL 不被参数校验拦:与 eval 同深度停在审批闸门(无界面订阅 → 403)。
+    let (status, body) = execute_automation(
+        fixture.port,
+        Some(&fixture.token),
+        serde_json::json!({"op": "open", "params": {"url": "https://github.com"}}),
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "合法 URL 应通过校验,停在审批闸门(与 eval 同深度),got {body:?}"
+    );
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(
+        !message.contains("必须是 http"),
+        "合法 URL 不该再报 URL 校验错: {message}"
+    );
+    assert!(
+        message.contains("人工放行") && message.contains("打开新页面 https://github.com"),
+        "open 的审批文案要带动作摘要(见 approval::action_summary): {message}"
+    );
+
+    stop_daemon(&fixture).await;
+}
+
+#[tokio::test]
+async fn empty_list_result_carries_bootstrap_hint() {
+    let fixture = start_daemon_fixture().await;
+    enable_browser_control(&fixture);
+
+    let stream = tokio_tungstenite::connect_async(format!(
+        "ws://127.0.0.1:{}/api/ws?token={}",
+        fixture.port, fixture.token
+    ))
+    .await
+    .expect("connect ws")
+    .0;
+    let (_write, mut read) = stream.split();
+    let hello = tokio::time::timeout(Duration::from_secs(5), read.next())
+        .await
+        .expect("hello in time")
+        .expect("hello message")
+        .expect("hello ok");
+    assert!(hello.to_string().contains("\"hello\""));
+
+    let port = fixture.port;
+    let token = fixture.token.clone();
+    let execute_task = tokio::spawn(async move {
+        execute_automation(
+            port,
+            Some(&token),
+            serde_json::json!({"op": "list", "params": {}}),
+        )
+        .await
+    });
+
+    let event = read_automation_request(&mut read, fixture.port, &fixture.token).await;
+    let request_id = event["event"]["requestId"]
+        .as_str()
+        .expect("requestId")
+        .to_string();
+
+    // 壳侧回空数组(内置浏览器没有任何页面)。
+    let (status, _) = http_json(
+        fixture.port,
+        "POST",
+        "/api/browser-automation/result",
+        Some(&fixture.token),
+        Some(serde_json::json!({
+            "requestId": request_id,
+            "ok": true,
+            "payload": []
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (execute_status, execute_body) = execute_task.await.expect("execute task");
+    assert_eq!(execute_status, 200, "got {execute_body:?}");
+    assert_eq!(execute_body["ok"], true);
+    // 空清单不是裸 []:必须带 pages 与指向 browser_open 的下一步。
+    assert_eq!(execute_body["payload"]["pages"], serde_json::json!([]));
+    let hint = execute_body["payload"]["hint"].as_str().unwrap_or_default();
+    assert!(
+        hint.contains("browser_open"),
+        "hint 要点名 browser_open:{hint}"
+    );
+
+    stop_daemon(&fixture).await;
+}
+
 // ---------------------------------------------------------------------------
 // 请求-响应回路
 // ---------------------------------------------------------------------------

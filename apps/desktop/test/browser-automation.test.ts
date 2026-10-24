@@ -122,6 +122,7 @@ const httpState = vi.hoisted(() => {
 vi.mock('node:http', () => ({ default: { request: httpState.request } }));
 
 import {
+  AGENT_OPEN_GUEST_WAIT_MS,
   CONTROL_PING_INTERVAL_MS,
   CONTROL_PONG_TIMEOUT_MS,
   createBrowserAutomationService,
@@ -606,6 +607,8 @@ describe('browser-automation 纯函数', () => {
     );
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toContain('browser not found');
+    // 失败文案必须给出下一步(自举对):裸报错会把模型推向瞎试。
+    expect(outcome.error).toContain('browser_open');
   });
 
   it('executeAutomationRequest:无 browserId 回落到最近登记的 guest', async () => {
@@ -633,6 +636,118 @@ describe('browser-automation 纯函数', () => {
     );
     expect(outcome.ok).toBe(true);
     expect(outcome.payload).toEqual(guests);
+  });
+});
+
+describe('browser-automation 自举对(open/navigate)', () => {
+  it('open:渲染层开页 + guest 登记后,回 browserId 与 url', async () => {
+    const target = makeTarget();
+    let known = false;
+    const outcome = await executeAutomationRequest(
+      {
+        resolveTarget: (browserId) => (browserId === 'browser-new' && known ? target : undefined),
+        listTargets: () => [],
+        openViaRenderer: async (url) => {
+          expect(url).toBe('https://github.com/search?q=magpie');
+          known = true; // 模拟 did-attach + browserRegisterGuest 已落登记表
+          return { ok: true, browserId: 'browser-new' };
+        },
+      },
+      { requestId: 'r', op: 'open', params: { url: 'https://github.com/search?q=magpie' } },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.payload).toEqual({ browserId: 'browser-new', url: 'https://github.com/search?q=magpie' });
+  });
+
+  it('open:渲染层回 browserId 但 guest 迟迟不出现 → 报可跟进的失败(不回半成品 id)', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = executeAutomationRequest(
+        {
+          resolveTarget: () => undefined,
+          listTargets: () => [],
+          openViaRenderer: async () => ({ ok: true, browserId: 'browser-ghost' }),
+        },
+        { requestId: 'r', op: 'open', params: { url: 'https://example.com' } },
+      );
+      const outcome = await vi.advanceTimersByTimeAsync(AGENT_OPEN_GUEST_WAIT_MS + 1_000).then(() => pending);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain('browser_list');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('open:非 http(s) URL 在壳侧再拦一道(防线第二层)', async () => {
+    const outcome = await executeAutomationRequest(
+      {
+        resolveTarget: () => undefined,
+        listTargets: () => [],
+        openViaRenderer: async () => ({ ok: true, browserId: 'x' }),
+      },
+      { requestId: 'r', op: 'open', params: { url: 'file:///C:/Windows/win.ini' } },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain('http');
+  });
+
+  it('open:渲染层报错(面板未挂载等)原样冒泡', async () => {
+    const outcome = await executeAutomationRequest(
+      {
+        resolveTarget: () => undefined,
+        listTargets: () => [],
+        openViaRenderer: async () => ({ ok: false, error: '浏览器面板未能创建页面' }),
+      },
+      { requestId: 'r', op: 'open', params: { url: 'https://example.com' } },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain('浏览器面板未能创建页面');
+  });
+
+  it('open:宿主没接渲染层开页(纯浏览器形态)明确报需要桌面壳', async () => {
+    const outcome = await executeAutomationRequest(
+      { resolveTarget: () => undefined, listTargets: () => [] },
+      { requestId: 'r', op: 'open', params: { url: 'https://example.com' } },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain('桌面壳');
+  });
+
+  it('navigate:对已开页面 location.assign 到新 URL(经 will-navigate 拦截)', async () => {
+    const target = makeTarget();
+    const outcome = await executeAutomationRequest(
+      {
+        resolveTarget: (browserId) => (browserId === 'browser-1' ? target : undefined),
+        listTargets: () => [],
+      },
+      { requestId: 'r', op: 'navigate', browserId: 'browser-1', params: { url: 'https://example.com/next' } },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(target.calls.execute).toEqual(['location.assign("https://example.com/next")']);
+    expect(outcome.payload).toEqual({ url: 'https://example.com/next' });
+  });
+
+  it('navigate:省略 browserId 回落最近页面;非 http(s) 拒绝', async () => {
+    const target = makeTarget();
+    const okOutcome = await executeAutomationRequest(
+      {
+        resolveTarget: () => undefined,
+        resolveMostRecent: () => target,
+        listTargets: () => [],
+      },
+      { requestId: 'r1', op: 'navigate', params: { url: 'https://example.com' } },
+    );
+    expect(okOutcome.ok).toBe(true);
+
+    const badOutcome = await executeAutomationRequest(
+      {
+        resolveTarget: () => target,
+        listTargets: () => [],
+      },
+      { requestId: 'r2', op: 'navigate', browserId: 'browser-1', params: { url: 'javascript:alert(1)' } },
+    );
+    expect(badOutcome.ok).toBe(false);
+    expect(badOutcome.error).toContain('http');
   });
 });
 

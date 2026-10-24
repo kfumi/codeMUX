@@ -59,6 +59,12 @@ export interface ShellBridgeDeps {
   /** Browser Host(工单 07)guest 登记表(main.ts 创建并挂到 app 事件)。 */
   browserGuests: BrowserGuestTracker;
   /**
+   * browser_open 的渲染层回包入口(自举对):渲染层开好/开失败标签后经
+   * `browserAgentOpenResult` 通道回 {requestId, browserId|error},main 把它交给
+   * browser-agent-open 协调器按 requestId 唤醒等待方。返回 false = 没有等待方。
+   */
+  agentOpenResult(payload: unknown): boolean;
+  /**
    * 未读角标同步(工单 01):渲染层是未读真值源,壳只负责画到任务栏/托盘。
    * 载荷校验在本方法内完成,非法值直接拒绝。
    */
@@ -487,6 +493,10 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
       throw new Error('browserId must be a non-empty string');
     }
     deps.browserGuests.register(webContentsId, browserId);
+  });
+  // browser_open 回包(自举对):形状交给协调器判,桥面只做转达。
+  handle('browserAgentOpenResult', (payload: unknown) => {
+    return deps.agentOpenResult(payload);
   });
 
   // --- perf / devtools ------------------------------------------------------

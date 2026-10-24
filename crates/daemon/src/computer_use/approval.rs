@@ -66,6 +66,20 @@ pub fn redact_params(value: &serde_json::Value) -> serde_json::Value {
 pub fn action_summary(op: &str, params: &serde_json::Value) -> String {
     let element = params.get("elementId").and_then(|value| value.as_str());
     match op {
+        "open" => {
+            let url = params
+                .get("url")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            format!("在内置浏览器打开新页面 {url}")
+        }
+        "navigate" => {
+            let url = params
+                .get("url")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            format!("把内置浏览器页面导航到 {url}")
+        }
         "list" => "列出内置浏览器打开的页面".to_string(),
         "snapshot" => "读取页面快照(编号截图加元素列表)".to_string(),
         "screenshot" => "截取页面截图".to_string(),
@@ -699,6 +713,19 @@ mod tests {
         assert_eq!(
             action_summary("desktop-screenshot", &json!({})),
             "截取桌面或窗口"
+        );
+    }
+
+    #[test]
+    fn open_and_navigate_summaries_show_the_url() {
+        // URL 是审批卡的核心信息(用户放行的就是「去这个地址」),不是秘密键,原样展示。
+        assert_eq!(
+            action_summary("open", &json!({ "url": "https://github.com" })),
+            "在内置浏览器打开新页面 https://github.com"
+        );
+        assert_eq!(
+            action_summary("navigate", &json!({ "url": "https://example.com/docs" })),
+            "把内置浏览器页面导航到 https://example.com/docs"
         );
     }
 

@@ -184,6 +184,22 @@ export interface DesktopBrowserNewWindowPayload {
   url?: string;
 }
 
+/**
+ * browser_open 请求载荷(main → 渲染层 `browser-agent-open` 事件,自举对):
+ * 渲染层开好标签后经 browserAgentOpenResult 按 requestId 回 browserId 或 error。
+ */
+export interface DesktopBrowserAgentOpenPayload {
+  requestId: string;
+  url: string;
+}
+
+/** browser_open 回包载荷(渲染层 → main `browserAgentOpenResult` 通道)。 */
+export interface DesktopBrowserAgentOpenResult {
+  requestId: string;
+  browserId?: string;
+  error?: string;
+}
+
 /** window-maximize-changed 事件载荷(main 窗口 maximize/unmaximize 转发)。 */
 export type DesktopWindowMaximizePayload = boolean;
 
@@ -264,6 +280,8 @@ export interface CodemuxDesktopBridge {
   browserClearData(scope: BrowserDataScope): Promise<void>;
   /** guest webContentsId → browserId 登记(弹窗拒绝转发据此回填来源)。 */
   browserRegisterGuest(webContentsId: number, browserId: string): Promise<void>;
+  /** browser_open 回包(自举对):开好/开失败标签后把结果交回 main 的协调器。 */
+  browserAgentOpenResult(payload: DesktopBrowserAgentOpenResult): Promise<boolean>;
   /** 手动贴屏(工单 04):截主屏,返回 base64 PNG 与像素尺寸。 */
   captureDesktopScreen(): Promise<{ image: string; width: number; height: number }>;
   // 全局 Esc 急停的武装/心跳桥面已随工单 04 退役:提示条显隐与 Esc 由壳跟随 daemon 的

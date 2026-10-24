@@ -52,6 +52,8 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   close_agent: '关闭子智能体',
   resume_agent: '恢复子智能体',
   view_image: '查看图片',
+  browser_open: '打开浏览器页面',
+  browser_navigate: '页面导航',
   browser_list: '浏览器页面列表',
   browser_eval: '执行页面脚本',
   browser_screenshot: '浏览器页面截图',

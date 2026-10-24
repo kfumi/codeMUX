@@ -17,6 +17,8 @@ export interface BrowserStepInfo {
 }
 
 const BROWSER_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'browser_open',
+  'browser_navigate',
   'browser_list',
   'browser_eval',
   'browser_screenshot',

@@ -34,9 +34,17 @@ pub const AUTOMATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 合法自动化操作集合(壳侧按 op 分发执行)。
 ///
-/// 前十个是浏览器级(01 票);`desktop-*` 三个是桌面只读观测(04 票),
-/// 由 `computer_use.enabled` 单独闸门 —— 开浏览器控制不等于允许看桌面。
-pub const AUTOMATION_OPS: [&str; 13] = [
+/// 前十二个是浏览器级(01 票 + open/navigate 引导对);`desktop-*` 三个是桌面
+/// 只读观测(04 票),由 `computer_use.enabled` 单独闸门 —— 开浏览器控制不等于
+/// 允许看桌面。
+///
+/// `open`/`navigate` 是自举对(2026-10-24 实测事故引出):此前工具面的前提是
+/// 「内置浏览器里已经有页面」,没有页面时 `list` 返回空数组、其余工具全部
+/// `browser not found`,模型无路可走只能瞎试。`open` 经壳请求渲染层开新标签,
+/// `navigate` 给已开页面改 URL —— 这两个 op 不需要已存在的目标页。
+pub const AUTOMATION_OPS: [&str; 15] = [
+    "open",
+    "navigate",
     "eval",
     "screenshot",
     "input",
@@ -62,6 +70,47 @@ pub const DESKTOP_OPS: [&str; 3] = [
 /// 是否为桌面只读操作。
 pub fn is_desktop_op(op: &str) -> bool {
     DESKTOP_OPS.contains(&op)
+}
+
+/// `open` / `navigate` 的参数必经校验:必填 url,绝对 http/https,长度 ≤ 2048。
+///
+/// 三层防御的第一层(daemon 权威侧):壳侧 op 执行再看一遍 scheme,渲染层
+/// webview 的 will-navigate 拦截兜底。非 http(s) 地址放进 webview 只会在页面
+/// 层撞拦截报一句看不懂的错,不如进壳之前就给模型一句能执行的拒绝。
+pub(crate) fn validate_open_url(op: &str, params: &serde_json::Value) -> Result<(), String> {
+    let url = params
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if url.is_empty() {
+        return Err(format!("{op} 缺少必填参数 url"));
+    }
+    if url.len() > 2048 {
+        return Err(format!("{op} 的 url 过长({} 字符,上限 2048)", url.len()));
+    }
+    // scheme 按 RFC 3986 大小写不敏感(HTTP://x 合法):与壳侧 isHttpUrl、渲染层
+    // normalizeBrowserUrl 同口径,不能最外层比内层更严。
+    let lowered = url.to_ascii_lowercase();
+    if !lowered.starts_with("http://") && !lowered.starts_with("https://") {
+        return Err(format!(
+            "{op} 的 url 必须是 http:// 或 https:// 开头的完整地址,收到: {url}"
+        ));
+    }
+    Ok(())
+}
+
+/// `list` 空结果 → 带指引的载荷(纯函数,测试锁文案)。
+///
+/// 空数组对模型是「成功但无路可走」:工具面没有一句话告诉它页面必须先被打开,
+/// 它只能瞎试 CDP、再降级到电脑控制去点别的应用(2026-10-24 实测:一轮白烧
+/// 十几次调用后用户放弃)。把下一步写进结果,让「没有页面」第一次出现时就
+/// 变成可执行的建议。非空列表保持数组原样 —— 有页面时清单本身就是答案。
+pub(crate) fn empty_list_payload() -> serde_json::Value {
+    serde_json::json!({
+        "pages": [],
+        "hint": "内置浏览器当前没有打开任何页面。先用 browser_open(url) 新开一个(返回的 browserId 供后续工具使用),再用 browser_snapshot 等页面级工具操作;不要为打开页面改用电脑控制(computer_*)工具。",
+    })
 }
 
 /// 一次自动化请求的终态(经 oneshot 送回挂起的 execute)。
@@ -303,6 +352,24 @@ async fn execute_browser_automation(
         )));
     }
 
+    // open/navigate 的参数校验(自举对):url 必须是绝对 http/https。放在开关闸门
+    // 与 op 校验之后、**审批之前** —— 非法 URL 直接 400,不会出现在审批卡上
+    // (用户不该被要求放行一个非法地址)。
+    if body.op == "open" || body.op == "navigate" {
+        if let Err(message) = validate_open_url(&body.op, &body.params) {
+            audit_attempt(
+                &ctx,
+                &body.op,
+                body.tool.as_deref(),
+                body.browser_id.as_deref(),
+                body.session_id.as_deref(),
+                false,
+                Some("gate: invalid url"),
+            );
+            return Err(ApiError::bad_request(message));
+        }
+    }
+
     // 电脑控制审批闸门(03 票):只读可「按会话记住」,输入动作一次一放行,
     // 敏感场景(登录/支付/验证码/密码/删除/关防护)强制人工确认。输入动作
     // 不吃权限档位 —— 闸门入参里根本没有档位可传。
@@ -416,6 +483,16 @@ async fn execute_browser_automation(
                 Ok(filtered) => AutomationOutcome::Ok(filtered),
                 Err(refusal) => AutomationOutcome::Failed(refusal),
             }
+        }
+        other => other,
+    };
+
+    // 空清单指引(自举对):「没有页面」必须是带下一步的结果,不是裸空数组。
+    let outcome = match outcome {
+        AutomationOutcome::Ok(payload)
+            if body.op == "list" && payload.as_array().is_some_and(|pages| pages.is_empty()) =>
+        {
+            AutomationOutcome::Ok(empty_list_payload())
         }
         other => other,
     };
@@ -568,6 +645,62 @@ mod tests {
         for op in ["snapshot", "click", "type", "scroll", "select"] {
             assert!(AUTOMATION_OPS.contains(&op), "op {op:?} 应为合法自动化操作");
         }
+    }
+
+    #[test]
+    fn bootstrap_ops_are_accepted() {
+        for op in ["open", "navigate"] {
+            assert!(AUTOMATION_OPS.contains(&op), "op {op:?} 应为合法自动化操作");
+        }
+    }
+
+    #[test]
+    fn open_url_validation_matrix() {
+        for op in ["open", "navigate"] {
+            for url in [
+                "https://github.com/search?q=magpie",
+                "http://127.0.0.1:1420/index.html",
+                "https://example.com/中文路径",
+                // scheme 大小写不敏感(RFC 3986):与壳侧 isHttpUrl 同口径。
+                "HTTPS://Example.COM/Path",
+            ] {
+                assert!(
+                    validate_open_url(op, &serde_json::json!({ "url": url })).is_ok(),
+                    "{op} 应接受 {url}"
+                );
+            }
+            for bad in [
+                serde_json::json!({}),
+                serde_json::json!({ "url": "" }),
+                serde_json::json!({ "url": "  " }),
+                serde_json::json!({ "url": "github.com/magpie" }),
+                serde_json::json!({ "url": "file:///C:/Windows/system.ini" }),
+                serde_json::json!({ "url": "javascript:alert(1)" }),
+                serde_json::json!({ "url": "codemux://browser/open?url=https://x" }),
+                serde_json::json!({ "url": format!("https://example.com/{}", "a".repeat(2048)) }),
+            ] {
+                assert!(
+                    validate_open_url(op, &bad).is_err(),
+                    "{op} 应拒绝 {bad} —— 兜底防线不能放行非 http(s) 或超长地址"
+                );
+            }
+        }
+        // 报错文案带 op 与原因(模型直接读它决定下一步)。
+        let message = validate_open_url("open", &serde_json::json!({ "url": "ftp://x" }))
+            .expect_err("ftp 必须被拒");
+        assert!(
+            message.contains("open") && message.contains("ftp://x"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn empty_list_payload_carries_next_step_hint() {
+        let payload = empty_list_payload();
+        assert_eq!(payload["pages"], serde_json::json!([]));
+        let hint = payload["hint"].as_str().expect("hint 必须是字符串");
+        assert!(hint.contains("browser_open"), "指引必须点名 browser_open");
+        assert!(hint.contains("computer_"), "指引必须劝阻用电脑控制绕路");
     }
 
     #[test]

@@ -31,8 +31,25 @@ import {
 
 /** 受控自动化操作(浏览器级 + 桌面只读观测,工单 04)。 */
 export type AutomationOp =
-  | 'eval' | 'screenshot' | 'input' | 'cdp' | 'snapshot' | 'click' | 'type' | 'scroll' | 'select'
+  | 'open' | 'navigate' | 'eval' | 'screenshot' | 'input' | 'cdp' | 'snapshot' | 'click' | 'type' | 'scroll' | 'select'
   | 'desktop-windows' | 'desktop-screenshot' | 'desktop-active-window';
+
+/** `open`(browser_open)的渲染层往返结果:协调器(browser-agent-open.ts)产出。 */
+export type AgentOpenReply = { ok: true; browserId: string } | { ok: false; error: string };
+
+/** open 之后等渲染层 webview did-attach + guest 登记(轮询 resolveTarget)的上限。 */
+export const AGENT_OPEN_GUEST_WAIT_MS = 6_000;
+/** guest 轮询间隔:attach 正常在亚秒级,100ms 步进足够跟手。 */
+const GUEST_POLL_INTERVAL_MS = 100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** open/navigate 的 scheme 检查(与 daemon 侧 validate_open_url 同一条防线)。 */
+export function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
 
 /** automation 请求(daemon → 壳)的载荷形状。 */
 export interface AutomationRequest {
@@ -82,6 +99,11 @@ export interface BrowserAutomationDeps {
   resolveMostRecent?(): AutomationTarget | undefined;
   /** 全部存活 guest 清单(list 操作)。 */
   listTargets(): AutomationTargetInfo[];
+  /**
+   * browser_open 的渲染层往返(自举对):向渲染层发开页请求并等回 browserId。
+   * 缺省视为本宿主开不了页面(纯浏览器形态/无壳接线)。
+   */
+  openViaRenderer?(url: string): Promise<AgentOpenReply>;
   /** 日志出口(缺省 console;测试注入断言)。 */
   log?: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** 重连退避基值(ms),指数翻倍,上限 10s;测试注入更小值。 */
@@ -376,13 +398,41 @@ async function executeElementOp(target: AutomationTarget, cacheKey: string, op: 
 }
 
 export async function executeAutomationRequest(
-  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets' | 'desktop'>,
+  deps: Pick<BrowserAutomationDeps, 'resolveTarget' | 'resolveMostRecent' | 'listTargets' | 'desktop' | 'openViaRenderer'>,
   request: AutomationRequest,
 ): Promise<AutomationOutcome> {
   const op = request.op;
-  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'snapshot' && op !== 'click' && op !== 'type' && op !== 'scroll' && op !== 'select' && op !== 'list'
+  if (op !== 'eval' && op !== 'screenshot' && op !== 'input' && op !== 'cdp' && op !== 'snapshot' && op !== 'click' && op !== 'type' && op !== 'scroll' && op !== 'select' && op !== 'list' && op !== 'open' && op !== 'navigate'
     && op !== 'desktop-windows' && op !== 'desktop-screenshot' && op !== 'desktop-active-window') {
     return { ok: false, error: `unknown automation op: ${op}` };
+  }
+  const params = request.params ?? {};
+  // open 不需要已存在的目标页(它就是「让页面出现」的那条路):先经渲染层开标签,
+  // 再等 guest 登记表认得这个 browserId —— 回给模型的 browserId 必须是下一发
+  // browser_snapshot 立刻可用的,否则只是把「找不到页面」推迟了一步。
+  if (op === 'open') {
+    const url = typeof params.url === 'string' ? params.url.trim() : '';
+    if (!isHttpUrl(url)) {
+      return { ok: false, error: 'open 仅支持 http:// 或 https:// 开头的完整 URL' };
+    }
+    if (!deps.openViaRenderer) {
+      return { ok: false, error: '当前宿主不支持打开内置浏览器页面(需要桌面壳)' };
+    }
+    const reply = await deps.openViaRenderer(url);
+    if (!reply.ok) {
+      return { ok: false, error: reply.error };
+    }
+    const deadline = Date.now() + AGENT_OPEN_GUEST_WAIT_MS;
+    while (deps.resolveTarget(reply.browserId) === undefined) {
+      if (Date.now() > deadline) {
+        return {
+          ok: false,
+          error: `页面已创建(${reply.browserId})但 webview 尚未挂载完成:稍后用 browser_list 确认它出现,再继续页面级操作`,
+        };
+      }
+      await sleep(GUEST_POLL_INTERVAL_MS);
+    }
+    return { ok: true, payload: { browserId: reply.browserId, url } };
   }
   // 桌面只读观测(工单 04):不碰页面,走独立的捕获依赖面。
   if (op === 'desktop-windows' || op === 'desktop-screenshot' || op === 'desktop-active-window') {
@@ -409,11 +459,20 @@ export async function executeAutomationRequest(
     ? deps.resolveTarget(request.browserId)
     : deps.resolveMostRecent?.();
   if (!target) {
-    return { ok: false, error: `browser not found: ${request.browserId ?? '(none)'}` };
+    return { ok: false, error: `browser not found: ${request.browserId ?? '(none)'} —— 内置浏览器没有这个页面。先 browser_list 查已打开页面;一个都没有时用 browser_open(url) 新开,不要改用电脑控制(computer_*)工具绕路` };
   }
-  const params = request.params ?? {};
   try {
     switch (op) {
+      case 'navigate': {
+        const url = typeof params.url === 'string' ? params.url.trim() : '';
+        if (!isHttpUrl(url)) {
+          return { ok: false, error: 'navigate 仅支持 http:// 或 https:// 开头的完整 URL' };
+        }
+        // location.assign 经页面发起导航,会过 guest 的 will-navigate 拦截
+        // (渲染层 electronBrowserHost 只放行 http/https)—— 三层防线的最内一层。
+        await target.executeJavaScript(`location.assign(${JSON.stringify(url)})`);
+        return { ok: true, payload: { url } };
+      }
       case 'eval': {
         const code = typeof params.code === 'string' ? params.code : '';
         if (!code) {
