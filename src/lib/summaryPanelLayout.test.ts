@@ -40,8 +40,8 @@ describe('resolveSummaryPanelDisplayMode', () => {
     expect(at(width)).toBe(expected);
   });
 
-  it('正文铺满对话列（铺满档）时没有空槽，只能浮层', () => {
-    // stream 档下 --content-width 解析不出来，调用方把正文列宽取成对话列宽。
+  it('正文铺满对话列（百分比取值）时没有空槽，只能浮层', () => {
+    // --content-width 解析不出来时，调用方把正文列宽取成对话列宽。
     expect(resolveSummaryPanelDisplayMode(1600, { contentWidth: 1600 })).toBe('overlay');
   });
 
@@ -139,7 +139,7 @@ describe('parseContentWidthToken', () => {
     expect(parseContentWidthToken(' 48rem ', 10)).toBe(480);
   });
 
-  it('铺满档、空值与垃圾值返回 null，由调用方退化', () => {
+  it('百分比、空值与垃圾值返回 null，由调用方退化', () => {
     expect(parseContentWidthToken('100%')).toBeNull();
     expect(parseContentWidthToken('')).toBeNull();
     expect(parseContentWidthToken('auto')).toBeNull();

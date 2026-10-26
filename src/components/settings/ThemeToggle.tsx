@@ -274,7 +274,7 @@ export function ThemeToggle() {
             description={
               prefs.contentWidth === 'fixed'
                 ? '对话消息与发送框定宽居中'
-                : '内容宽度尽量撑满中间区域'
+                : '内容区更宽，宽屏下最宽 1024px'
             }
             control={
               <Select

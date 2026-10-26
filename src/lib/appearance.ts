@@ -118,7 +118,10 @@ export const RADIUS_PREVIEW: Record<RadiusKey, string> = {
 
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
   fixed: '48rem',
-  stream: '100%',
+  // 仍是「流式」：消费方都是 `w-full` + `max-width`，窗口窄于上限时自动铺满，
+  // 只是宽屏下不再让行宽无限拉长。用 rem 而不是 `min(100%, 64rem)`，是为了让
+  // `parseContentWidthToken` 能解析出真实列宽，摘要面板才敢在两侧空槽里落位。
+  stream: '64rem',
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {

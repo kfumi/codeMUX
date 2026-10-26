@@ -59,8 +59,8 @@ export type SummaryPanelSurface = 'inline' | 'popover' | null;
 /**
  * 把 `--content-width` 的取值解析成像素。
  *
- * 只认 `px` / `rem`；`%`（外观设置里的「铺满」档）与无法识别的取值返回 `null`，
- * 由调用方决定退化。铺满档没有侧边空槽，面板只能走浮层 —— 这不是特例分支，
+ * 只认 `px` / `rem`；`%`（无上限铺满）与无法识别的取值返回 `null`，
+ * 由调用方决定退化。百分比取值没有侧边空槽，面板只能走浮层 —— 这不是特例分支，
  * 而是把正文列宽取成对话列宽后算法的自然结果。
  */
 export function parseContentWidthToken(token: string, rootFontSize = 16): number | null {

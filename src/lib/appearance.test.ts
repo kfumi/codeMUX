@@ -229,6 +229,18 @@ describe('appearance preferences', () => {
     expect(root.style.fontSize).toBe('');
   });
 
+  it('caps the stream content width at 64rem so wide panes keep margins', () => {
+    const root = document.documentElement;
+
+    applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'fixed' }, false);
+    expect(root.style.getPropertyValue('--content-width')).toBe('48rem');
+
+    // 流式档仍随窗口收窄（消费方都是 w-full + max-width），但宽屏下封顶 64rem，
+    // 不让行宽一路拉到整块对话列。
+    applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'stream' }, false);
+    expect(root.style.getPropertyValue('--content-width')).toBe('64rem');
+  });
+
   it('writes the whole derived variable table onto the document root', () => {
     const prefs = { ...DEFAULT_PREFS, accent: 'emerald', contrast: 62 } as const;
     applyAppearance(prefs, true);
