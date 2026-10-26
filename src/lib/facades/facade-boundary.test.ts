@@ -20,6 +20,7 @@ import {
   createProjectViaDaemon,
   deleteProjectViaDaemon,
   renameProjectViaDaemon,
+  reorderProjectsViaDaemon,
   listSessionsViaDaemon,
 } from './daemon-facade';
 import { shellFacade } from './shell-facade';
@@ -120,6 +121,7 @@ describe('facade boundary', () => {
       createProject: createProjectViaDaemon,
       deleteProject: deleteProjectViaDaemon,
       renameProject: renameProjectViaDaemon,
+      reorderProjects: reorderProjectsViaDaemon,
       forkClaudeViaDaemon,
       forkClaude: forkClaudeViaDaemon,
     };

@@ -84,6 +84,41 @@ describe('ProjectGroup', () => {
     expect(cluster.className).not.toContain('opacity-100 group-hover');
   });
 
+  it('exposes the whole project row as the drag surface when sorting is enabled', () => {
+    const onMoveProject = vi.fn();
+    const { container } = render(
+      <TooltipProvider>
+        <ProjectGroup
+          {...baseProps}
+          project={makeProject()}
+          dragEnabled
+          onMoveProject={onMoveProject}
+        />
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector<HTMLElement>('[data-project-row="project-1"]');
+    expect(row).toBeTruthy();
+    expect(row?.tabIndex).toBe(0);
+    expect(row?.getAttribute('aria-keyshortcuts')).toBe('Alt+ArrowUp Alt+ArrowDown');
+    expect(row?.className).toContain('touch-none');
+    // 行尾不再有需要按住的拖拽按钮或图标。
+    expect(container.querySelector('.lucide-grip-vertical')).toBeNull();
+    expect(screen.queryByRole('button', { name: /拖动调整项目/ })).toBeNull();
+
+    fireEvent.keyDown(row!, { key: 'ArrowDown', altKey: true });
+    expect(onMoveProject).toHaveBeenCalledWith('project-1', 1);
+  });
+
+  it('does not expose sorting affordances without dragEnabled', () => {
+    const { container } = renderProjectGroup();
+
+    const row = container.querySelector<HTMLElement>('[data-project-row="project-1"]');
+    expect(row?.getAttribute('tabindex')).toBeNull();
+    expect(row?.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(row?.className).not.toContain('touch-none');
+  });
+
   it('always shows the action cluster on narrow viewports (no hover on touch)', () => {
     narrowState.value = true;
     renderProjectGroup();

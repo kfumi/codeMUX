@@ -428,6 +428,7 @@ fn build_router(ctx: ServerContext, static_dir: Option<PathBuf>) -> Router {
         )
         .route("/sessions/{session_id}/interrupt", post(interrupt_session))
         .route("/projects", get(list_projects).post(create_project))
+        .route("/projects/reorder", post(reorder_projects))
         .route(
             "/projects/{project_id}",
             patch(update_project).delete(delete_project),
@@ -1163,6 +1164,30 @@ async fn delete_project(
         .lock()
         .map_err(|error| ApiError::internal(error.to_string()))?;
     operations::delete_project(&db, &project_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderProjectsRequest {
+    /// 用户拖拽后的完整顺序；未列出的项目追加到末尾。
+    ids: Vec<String>,
+}
+
+/// 重排侧栏项目。只改 `position`，不改 `updated_at`。
+async fn reorder_projects(
+    State(ctx): State<ServerContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ReorderProjectsRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&ctx, &headers, Some(peer))?;
+    let app_state = ctx.daemon.app.clone();
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    operations::reorder_projects(&db, &body.ids)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
 }

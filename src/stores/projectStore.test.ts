@@ -5,10 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../types/project';
 import { useProjectStore } from './projectStore';
 
-const { listProjectsMock, createProjectMock, updateProjectMock } = vi.hoisted(() => ({
+const { listProjectsMock, createProjectMock, updateProjectMock, reorderProjectsMock } = vi.hoisted(() => ({
   listProjectsMock: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(),
   createProjectMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   updateProjectMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  reorderProjectsMock: vi.fn<(ids: string[]) => Promise<void>>(),
 }));
 
 vi.mock('../lib/facades/daemon-facade', () => ({
@@ -18,6 +19,7 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     deleteProject: vi.fn(),
     renameProject: vi.fn(),
     updateProject: updateProjectMock,
+    reorderProjects: reorderProjectsMock,
   },
 }));
 
@@ -84,6 +86,63 @@ describe('project store expand/collapse all', () => {
     useProjectStore.getState().setAllProjectsExpanded(true);
 
     expect(useProjectStore.getState().collapsedProjects.size).toBe(0);
+  });
+});
+
+describe('project store reorder', () => {
+  const a = projectFixture({ id: 'p1', name: 'A' });
+  const b = projectFixture({ id: 'p2', name: 'B' });
+  const c = projectFixture({ id: 'p3', name: 'C' });
+
+  function ids(): string[] {
+    return useProjectStore.getState().projects.map((project) => project.id);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useProjectStore.setState({
+      projects: [a, b, c],
+      isLoading: false,
+      hasLoadedOnce: true,
+      error: null,
+    });
+  });
+
+  it('applies the requested order optimistically before the daemon answers', async () => {
+    let resolveReorder!: () => void;
+    reorderProjectsMock.mockReturnValue(new Promise<void>((resolve) => {
+      resolveReorder = resolve;
+    }));
+
+    const pending = useProjectStore.getState().reorderProjects(['p3', 'p1', 'p2']);
+
+    // 请求未返回时本地顺序已经变了。
+    expect(ids()).toEqual(['p3', 'p1', 'p2']);
+
+    resolveReorder();
+    await pending;
+    expect(reorderProjectsMock).toHaveBeenCalledWith(['p3', 'p1', 'p2']);
+    expect(ids()).toEqual(['p3', 'p1', 'p2']);
+  });
+
+  it('keeps projects missing from ids at the end', async () => {
+    reorderProjectsMock.mockResolvedValue(undefined);
+
+    await useProjectStore.getState().reorderProjects(['p3']);
+
+    expect(ids()).toEqual(['p3', 'p1', 'p2']);
+  });
+
+  it('rolls back and refetches when the daemon rejects', async () => {
+    reorderProjectsMock.mockRejectedValue(new Error('boom'));
+    listProjectsMock.mockResolvedValue([a, b, c]);
+
+    await expect(
+      useProjectStore.getState().reorderProjects(['p3', 'p2', 'p1']),
+    ).rejects.toThrow('boom');
+
+    expect(ids()).toEqual(['p1', 'p2', 'p3']);
+    expect(listProjectsMock).toHaveBeenCalled();
   });
 });
 

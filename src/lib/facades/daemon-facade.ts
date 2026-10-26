@@ -115,6 +115,11 @@ export async function updateProjectViaDaemon(
   return client.updateProject(projectId, patch) as Promise<Project>;
 }
 
+export async function reorderProjectsViaDaemon(ids: string[]): Promise<void> {
+  const client = await ensureDaemonClient();
+  await client.reorderProjects(ids);
+}
+
 export async function forkClaudeViaDaemon(
   sessionId: string,
   forkEventId: string,
@@ -401,6 +406,7 @@ export const daemonFacade = {
   deleteProject: deleteProjectViaDaemon,
   renameProject: renameProjectViaDaemon,
   updateProject: updateProjectViaDaemon,
+  reorderProjects: reorderProjectsViaDaemon,
   isSessionTurnActive: async (sessionId: string) => {
     const state = await (await ensureDaemonClient()).getSessionRuntimeState(sessionId);
     return state.running;

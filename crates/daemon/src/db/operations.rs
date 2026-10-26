@@ -226,9 +226,15 @@ pub fn create_project_with_primary(
     let primary_key = project_root_key(&primary);
 
     let tx = conn.unchecked_transaction()?;
+    // 新项目插到最前，保持现有「新项目在顶部」的直觉；重排时再归一化成 0..n-1。
+    let position: i64 = tx.query_row(
+        "SELECT COALESCE(MIN(position), 0) - 1 FROM projects",
+        [],
+        |row| row.get(0),
+    )?;
     tx.execute(
-        "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![id, name, now, now],
+        "INSERT INTO projects (id, name, position, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, name, position, now, now],
     )?;
     write_project_roots(&tx, &id, &roots, &primary)?;
     tx.commit()?;
@@ -375,7 +381,8 @@ pub fn get_project(conn: &Connection, project_id: &str) -> Result<Option<Project
 
 pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, created_at, updated_at FROM projects ORDER BY updated_at DESC",
+        "SELECT id, name, created_at, updated_at FROM projects \
+         ORDER BY position ASC, updated_at DESC, created_at DESC, id ASC",
     )?;
     let rows = stmt
         .query_map([], |row| {
@@ -399,6 +406,46 @@ pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
             })
         })
         .collect()
+}
+
+/// 按 ids 顺序重写项目位置（0..n-1）。
+///
+/// - 不存在的 id 与重复 id 忽略；
+/// - 未列出的项目（并发新建）按原顺序追加到末尾，保证 `position` 不重复；
+/// - 只改 `position`，不碰 `updated_at`，否则旧的「最后修改优先」兜底会冲掉手工顺序。
+pub fn reorder_projects(conn: &Connection, ids: &[String]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let mut existing: Vec<String> = {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM projects ORDER BY position ASC, updated_at DESC, created_at DESC, id ASC",
+        )?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>>>()?;
+        ids
+    };
+
+    let mut seen = std::collections::HashSet::new();
+    let mut ordered: Vec<String> = Vec::with_capacity(existing.len());
+    for id in ids {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if existing.iter().any(|candidate| candidate == id) {
+            ordered.push(id.clone());
+        }
+    }
+    existing.retain(|id| !seen.contains(id));
+    ordered.extend(existing);
+
+    for (position, project_id) in ordered.iter().enumerate() {
+        tx.execute(
+            "UPDATE projects SET position = ?1 WHERE id = ?2",
+            params![position as i64, project_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2204,14 +2251,14 @@ mod tests {
         create_session_for_project_with_permissions, delete_agent_session_mapping, delete_session,
         fetch_session_timeline, filter_new_timeline_event_indexes, frozen_directory_scope,
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
-        get_all_sessions, get_model_distribution, get_primary_root, get_project, get_project_roots,
-        get_session, get_session_events_after, get_session_timeline, get_usage_heatmap,
-        get_usage_overview, import_session_snapshot, list_native_sessions_for_cleanup,
-        normalize_session_title, refresh_auto_session_title, rename_session_title,
-        replace_session_timeline, resolve_app_session_id_for_timeline,
-        session_needs_git_branch_capture, session_timeline_max_sequence,
-        sessions_with_legacy_timeline_artifacts, set_session_pinned, set_session_read_only,
-        unarchive_session, update_project, update_session_provider,
+        get_all_projects, get_all_sessions, get_model_distribution, get_primary_root, get_project,
+        get_project_roots, get_session, get_session_events_after, get_session_timeline,
+        get_usage_heatmap, get_usage_overview, import_session_snapshot,
+        list_native_sessions_for_cleanup, normalize_session_title, refresh_auto_session_title,
+        rename_session_title, reorder_projects, replace_session_timeline,
+        resolve_app_session_id_for_timeline, session_needs_git_branch_capture,
+        session_timeline_max_sequence, sessions_with_legacy_timeline_artifacts, set_session_pinned,
+        set_session_read_only, unarchive_session, update_project, update_session_provider,
         update_session_reasoning_effort, update_session_settings, update_session_working_path,
         upsert_agent_session_mapping, upsert_session_subagent, GitBranchWrite,
         ImportedSessionSnapshot, ProjectUpdate,
@@ -3864,6 +3911,14 @@ mod tests {
         paths.iter().map(|path| path.to_string()).collect()
     }
 
+    fn project_ids(conn: &Connection) -> Vec<String> {
+        get_all_projects(conn)
+            .unwrap()
+            .into_iter()
+            .map(|project| project.id)
+            .collect()
+    }
+
     #[test]
     fn creates_multi_root_projects_in_selection_order() {
         let conn = Connection::open_in_memory().unwrap();
@@ -3922,6 +3977,85 @@ mod tests {
 
         assert!(create_project(&conn, "Empty", &[]).is_err());
         assert!(create_project(&conn, "Blank", &roots(&["   "])).is_err());
+    }
+
+    #[test]
+    fn new_projects_are_listed_first() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let first = create_project(&conn, "First", &roots(&["D:/work/first"])).unwrap();
+        let second = create_project(&conn, "Second", &roots(&["D:/work/second"])).unwrap();
+
+        assert_eq!(project_ids(&conn), vec![second.id, first.id]);
+    }
+
+    #[test]
+    fn reorder_projects_applies_ids_order_and_keeps_unlisted_projects_last() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let a = create_project(&conn, "A", &roots(&["D:/work/a"])).unwrap();
+        let b = create_project(&conn, "B", &roots(&["D:/work/b"])).unwrap();
+        let c = create_project(&conn, "C", &roots(&["D:/work/c"])).unwrap();
+        // 创建顺序决定初始顺序：C、B、A。
+        assert_eq!(
+            project_ids(&conn),
+            vec![c.id.clone(), b.id.clone(), a.id.clone()]
+        );
+
+        reorder_projects(&conn, &[c.id.clone(), a.id.clone()]).unwrap();
+
+        // 未列出的 B 追加在末尾，position 归一化为 0..n-1。
+        assert_eq!(
+            project_ids(&conn),
+            vec![c.id.clone(), a.id.clone(), b.id.clone()]
+        );
+        let positions: Vec<(String, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, position FROM projects ORDER BY position ASC")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(positions, vec![(c.id, 0), (a.id, 1), (b.id, 2)],);
+    }
+
+    #[test]
+    fn reorder_projects_ignores_unknown_and_duplicate_ids_without_bumping_updated_at() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let a = create_project(&conn, "A", &roots(&["D:/work/a"])).unwrap();
+        let b = create_project(&conn, "B", &roots(&["D:/work/b"])).unwrap();
+        let before: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, updated_at FROM projects").unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        reorder_projects(
+            &conn,
+            &[
+                "missing".to_string(),
+                b.id.clone(),
+                b.id.clone(),
+                a.id.clone(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(project_ids(&conn), vec![b.id.clone(), a.id.clone()]);
+        let after: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, updated_at FROM projects").unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(before, after);
     }
 
     #[test]

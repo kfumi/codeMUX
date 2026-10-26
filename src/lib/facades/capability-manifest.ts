@@ -41,6 +41,7 @@ export const CAPABILITY_MANIFEST: CapabilityEntry[] = [
   { id: 'project.create', owner: 'daemon', companionRoute: 'POST /api/projects', daemonMethod: 'createProject' },
   { id: 'project.delete', owner: 'daemon', companionRoute: 'DELETE /api/projects/:id', daemonMethod: 'deleteProject' },
   { id: 'project.rename', owner: 'daemon', companionRoute: 'PATCH /api/projects/:id', daemonMethod: 'renameProject' },
+  { id: 'project.reorder', owner: 'daemon', companionRoute: 'POST /api/projects/reorder', daemonMethod: 'reorderProjects' },
 
   // Config / control plane
   { id: 'config.app', owner: 'daemon', companionRoute: 'GET|PATCH /api/config', daemonMethod: 'getConfig' },
@@ -108,6 +109,7 @@ export const PROTOCOL_BACKED_DAEMON_METHODS = [
   'createProject',
   'deleteProject',
   'renameProject',
+  'reorderProjects',
   'getBootstrap',
   'getTimeline',
   'subscribeSession',

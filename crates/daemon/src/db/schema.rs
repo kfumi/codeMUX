@@ -26,6 +26,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -529,6 +530,33 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
              WHERE path IS NOT NULL AND trim(path) <> '';
              ALTER TABLE projects DROP COLUMN path;",
         )?;
+    }
+
+    // Migration: projects.position — 侧栏项目顺序。老库没有这一列时按现有
+    // 展示顺序（updated_at 倒序）回填，升级后列表不跳。
+    let has_project_position: bool = conn
+        .prepare("SELECT position FROM projects LIMIT 0")
+        .is_ok();
+    if !has_project_position {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        let project_ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM projects ORDER BY updated_at DESC, created_at DESC, id ASC",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>>>()?;
+            ids
+        };
+        for (position, project_id) in project_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE projects SET position = ?1 WHERE id = ?2",
+                rusqlite::params![position as i64, project_id],
+            )?;
+        }
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
@@ -1145,11 +1173,52 @@ mod tests {
     }
 
     #[test]
+    fn migrates_projects_position_by_current_display_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 老库：没有 position 列，展示顺序由 updated_at 倒序决定。
+        conn.execute_batch(
+            "CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO projects VALUES ('old', 'Old', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO projects VALUES ('new', 'New', '2026-01-02T00:00:00Z', '2026-03-01T00:00:00Z');
+            INSERT INTO projects VALUES ('mid', 'Mid', '2026-01-03T00:00:00Z', '2026-02-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let positions: Vec<(String, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, position FROM projects ORDER BY position ASC")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            positions,
+            vec![
+                ("new".to_string(), 0),
+                ("mid".to_string(), 1),
+                ("old".to_string(), 2),
+            ]
+        );
+    }
+
+    #[test]
     fn fresh_database_has_project_roots_and_session_directory_scope() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();
 
         assert!(conn.prepare("SELECT path FROM projects LIMIT 0").is_err());
+        assert!(conn
+            .prepare("SELECT position FROM projects LIMIT 0")
+            .is_ok());
         assert!(conn
             .prepare("SELECT root_path FROM project_roots LIMIT 0")
             .is_ok());

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { shellFacade } from '../../lib/facades/shell-facade';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, Folders, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
@@ -16,10 +18,13 @@ import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { FoldersOpenIcon } from '../ui/folders-open-icon';
 import { cn } from '../../lib/utils';
+import { resolveProjectDropPosition } from './projectReorder';
 
 const INITIAL_VISIBLE_PROJECT_SESSIONS = 5;
 const FIRST_EXPANDED_PROJECT_SESSIONS = 15;
 const PROJECT_SESSION_EXPAND_STEP = 10;
+// 与 --motion-duration-normal 对齐；easing 直接用令牌，避免手写曲线。
+const PROJECT_SORT_TRANSITION = { duration: 200, easing: 'var(--motion-ease-standard)' };
 
 interface ProjectGroupProps {
   project: Project;
@@ -35,6 +40,10 @@ interface ProjectGroupProps {
   onOpenProjectFiles: (project: Project) => void;
   onOpenImportSessions: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
+  /** 启用侧栏整行拖拽排序；缺省时不注册 sortable（ProjectGroup 仍可独立复用）。 */
+  dragEnabled?: boolean;
+  /** 键盘 Alt+↑/↓ 平移项目；由列表层负责计算新顺序。 */
+  onMoveProject?: (projectId: string, direction: -1 | 1) => void;
 }
 
 export function ProjectGroup({
@@ -51,6 +60,8 @@ export function ProjectGroup({
   onOpenProjectFiles,
   onOpenImportSessions,
   onDeleteProject,
+  dragEnabled = false,
+  onMoveProject,
 }: ProjectGroupProps) {
   const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
   const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
@@ -69,6 +80,24 @@ export function ProjectGroup({
   const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_VISIBLE_PROJECT_SESSIONS);
   const visibleSessions = sessions.slice(0, visibleSessionLimit);
   const hasHiddenSessions = visibleSessionLimit < sessions.length;
+  const {
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+    activeIndex,
+    index,
+  } = useSortable({
+    id: project.id,
+    disabled: !dragEnabled,
+    transition: PROJECT_SORT_TRANSITION,
+  });
+  // 落点线跟随 sortable 的 over 项；被拖项自身与无 active 状态不画线。
+  const dropPosition = dragEnabled
+    ? resolveProjectDropPosition(isOver, isDragging, activeIndex, index)
+    : null;
   const canCollapseSessions = sessions.length > INITIAL_VISIBLE_PROJECT_SESSIONS
     && visibleSessionLimit > INITIAL_VISIBLE_PROJECT_SESSIONS;
   // 多根项目用叠放的文件夹图标区分；展开时换成打开版，单根同样切到 FolderOpen。
@@ -91,16 +120,53 @@ export function ProjectGroup({
   };
 
   return (
-    <div className="mb-1">
+    <div
+      ref={setNodeRef}
+      data-project-group={project.id}
+      style={{
+        // 项目高度不一致时 dnd-kit 会缩放活动项；只保留排序位移。
+        transform: transform
+          ? CSS.Transform.toString({ ...transform, scaleX: 1, scaleY: 1 })
+          : undefined,
+        // 让位动画由 sortable 提供：拖拽中才有过渡，落位时不会二次位移。
+        transition,
+        position: 'relative',
+        zIndex: isDragging ? 10 : dropPosition ? 20 : undefined,
+      }}
+      className="mb-1"
+    >
       <div
+        data-project-row={project.id}
+        tabIndex={dragEnabled ? 0 : undefined}
+        aria-keyshortcuts={dragEnabled ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast',
+          'group relative flex select-none items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast',
           'text-[hsl(var(--sidebar-fg))]/86 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
+          'cursor-pointer',
+          dragEnabled && 'touch-none',
+          isDragging && 'cursor-grabbing',
         )}
         onClick={() => toggleProjectExpanded(project.id)}
+        {...(dragEnabled ? listeners : {})}
+        onKeyDown={(event) => {
+          if (!dragEnabled || !onMoveProject) return;
+          if (!event.altKey) return;
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+          event.preventDefault();
+          onMoveProject(project.id, event.key === 'ArrowUp' ? -1 : 1);
+        }}
       >
+        {dropPosition ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-[hsl(var(--sidebar-glow))]',
+              dropPosition === 'before' ? '-top-px' : '-bottom-px',
+            )}
+          />
+        ) : null}
         <ChevronRight
           className={cn(
             'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-normal',
@@ -126,6 +192,7 @@ export function ProjectGroup({
             isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
           )}
           onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
         >
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>

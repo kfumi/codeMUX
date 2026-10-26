@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, act } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '../../types/project';
@@ -43,6 +43,7 @@ vi.mock('../../lib/facades/daemon-facade', () => ({
     createProject: vi.fn(),
     deleteProject: vi.fn(),
     renameProject: vi.fn(),
+    reorderProjects: vi.fn(() => Promise.resolve()),
     getInitError: vi.fn(() => null),
     resetClient: vi.fn(),
     ensureClient: vi.fn(() => Promise.resolve({})),
@@ -338,6 +339,58 @@ describe('SessionList', () => {
 
     expect(screen.getByText('Fumi Session')).toBeTruthy();
     expect(screen.getByRole('button', { name: '收起全部项目' })).toBeTruthy();
+  });
+
+  function setTwoProjects() {
+    useProjectStore.setState({
+      projects: [
+        makeProject({ id: 'project-1', name: 'codeMUX' }),
+        makeProject({ id: 'project-2', name: 'fumi-git' }),
+      ],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set<string>(),
+    });
+    useSessionStore.setState({
+      sessions: [],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+  }
+
+  function projectRow(name: string): HTMLElement {
+    const row = screen.getByText(name).closest<HTMLElement>('[data-project-row]');
+    expect(row).toBeTruthy();
+    return row!;
+  }
+
+  it('reorders projects with Alt+ArrowDown while the row has focus', async () => {
+    setTwoProjects();
+    renderSessionList();
+
+    const row = projectRow('codeMUX');
+    row.focus();
+    fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true });
+
+    await waitFor(() => {
+      expect(useProjectStore.getState().projects.map((project) => project.id))
+        .toEqual(['project-2', 'project-1']);
+    });
+    expect(daemonFacade.reorderProjects).toHaveBeenCalledWith(['project-2', 'project-1']);
+  });
+
+  it('still toggles expansion from a plain row click', () => {
+    setTwoProjects();
+    renderSessionList();
+
+    fireEvent.click(projectRow('codeMUX'));
+
+    expect(useProjectStore.getState().collapsedProjects.has('project-1')).toBe(true);
   });
 
   it('reveals the add-project action only on hover or keyboard focus', () => {

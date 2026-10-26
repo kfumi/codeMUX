@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ChevronRight, ListChevronsDownUp, ListChevronsUpDown, MessageSquarePlus, Plus } from 'lucide-react';
 
 import type { Project } from '../../types/project';
@@ -13,6 +16,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
 import { ProjectGroup } from './ProjectGroup';
+import { moveProjectToIndex, reorderFromDragEnd } from './projectReorder';
 import { SessionItem } from './SessionItem';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Button } from '../ui/button';
@@ -154,6 +158,7 @@ export function SessionList({
     fetchProjects,
     deleteProject,
     setAllProjectsExpanded,
+    reorderProjects,
   } = useProjectStore();
   const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
@@ -180,6 +185,27 @@ export function SessionList({
 
   const pinnedSessions = useMemo(() => sessions.filter((session) => session.is_pinned), [sessions]);
   const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id && !session.is_pinned), [sessions]);
+
+  // 项目拖拽排序：ids 顺序即 daemon 返回顺序，拖拽只提交一次完整顺序。
+  const projectOrder = useMemo(() => projects.map((project) => project.id), [projects]);
+  const handleReorderProjects = useCallback((ids: string[]) => {
+    void reorderProjects(ids).catch(() => {
+      // store 已回滚并重新拉取；这里只避免未处理的 rejection。
+    });
+  }, [reorderProjects]);
+  const handleProjectDragEnd = useCallback((event: DragEndEvent) => {
+    const next = reorderFromDragEnd(projectOrder, String(event.active.id), event.over ? String(event.over.id) : null);
+    if (next !== projectOrder) handleReorderProjects(next);
+  }, [handleReorderProjects, projectOrder]);
+  const handleMoveProject = useCallback((projectId: string, direction: -1 | 1) => {
+    const from = projectOrder.indexOf(projectId);
+    const next = moveProjectToIndex(projectOrder, projectId, from + direction);
+    if (next !== projectOrder) handleReorderProjects(next);
+  }, [handleReorderProjects, projectOrder]);
+  // 与参考实现一致：移动 6px 才进入拖拽，未移动的按下仍然是点击。
+  const projectSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
 
   const daemonIssue = useMemo(() => {
     const startupError = getDaemonStartupError();
@@ -346,26 +372,38 @@ export function SessionList({
             )}
           />
 
-          {projectsExpanded && projects.map((project) => (
-            <ProjectGroup
-              key={project.id}
-              project={project}
-              sessions={projectSessions.get(project.id) || []}
-              activeSessionId={activeSessionId}
-              isActiveProject={project.id === activeProjectId}
-              onSelectSession={(id) => {
-                onSelectSession(id, project.id);
-              }}
-              onArchiveSession={archiveSession}
-              onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
-              onDeleteSession={deleteSession}
-              onRenameSession={(sessionId, title) => updateSessionTitle(sessionId, title, { titleLocked: true })}
-              onNewSessionInProject={onNewSessionInProject}
-              onOpenProjectFiles={onOpenProjectFiles}
-              onOpenImportSessions={handleOpenImportSessions}
-              onDeleteProject={deleteProject}
-            />
-          ))}
+          {projectsExpanded && (
+            <DndContext
+              sensors={projectSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleProjectDragEnd}
+            >
+              <SortableContext items={projectOrder} strategy={verticalListSortingStrategy}>
+                {projects.map((project) => (
+                  <ProjectGroup
+                    key={project.id}
+                    project={project}
+                    sessions={projectSessions.get(project.id) || []}
+                    activeSessionId={activeSessionId}
+                    isActiveProject={project.id === activeProjectId}
+                    onSelectSession={(id) => {
+                      onSelectSession(id, project.id);
+                    }}
+                    onArchiveSession={archiveSession}
+                    onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
+                    onDeleteSession={deleteSession}
+                    onRenameSession={(sessionId, title) => updateSessionTitle(sessionId, title, { titleLocked: true })}
+                    onNewSessionInProject={onNewSessionInProject}
+                    onOpenProjectFiles={onOpenProjectFiles}
+                    onOpenImportSessions={handleOpenImportSessions}
+                    onDeleteProject={deleteProject}
+                    dragEnabled
+                    onMoveProject={handleMoveProject}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          )}
         </div>
       )}
 

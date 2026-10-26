@@ -138,6 +138,7 @@
 | [2026-10-21-desktop-unread-badge.md](specs/2026-10-21-desktop-unread-badge.md) | 桌面未读角标：任务栏与托盘提示点 |
 | [2026-10-22-project-multi-root.md](specs/2026-10-22-project-multi-root.md) | 项目关联多源文件夹 |
 | [2026-10-24-side-panel-full-view.md](specs/2026-10-24-side-panel-full-view.md) | 侧面板完整视图：主对话固定为首个标签 |
+| [2026-10-26-project-ordering.md](specs/2026-10-26-project-ordering.md) | 侧栏项目拖拽排序：daemon 持久化、Pointer 拖拽与键盘重排 |
 
 ### plans
 
@@ -201,6 +202,7 @@
 | [pi-agent-integration](tickets/pi-agent-integration/) | 12 | [2026-09-03](specs/2026-09-03-pi-agent-integration.md) |
 | [project-scoped-agent-skills](tickets/project-scoped-agent-skills/) | 3 | [2026-08-08](specs/2026-08-08-project-scoped-agent-skills.md) |
 | [project-multi-root](tickets/project-multi-root/) | 9 | [2026-10-22](specs/2026-10-22-project-multi-root.md) |
+| [project-ordering](tickets/project-ordering/) | 2 | [2026-10-26](specs/2026-10-26-project-ordering.md) |
 | [side-panel-full-view](tickets/side-panel-full-view/) | 2 | [2026-10-24](specs/2026-10-24-side-panel-full-view.md) |
 | [rewind-any-message](tickets/rewind-any-message/) | 3 | [2026-08-23](specs/2026-08-23-rewind-to-any-user-message.md) |
 | [turn-artifact-summary](tickets/turn-artifact-summary/) | 3 | [2026-09-30](specs/2026-09-30-turn-artifact-summary-v2.md)(取代 [2026-09-01](specs/2026-09-01-turn-artifact-summary.md)) |

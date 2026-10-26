@@ -43,6 +43,8 @@ interface ProjectState {
     projectId: string,
     patch: { name?: string; roots?: string[]; primaryRoot?: string },
   ) => Promise<Project>;
+  /** 侧栏拖拽排序：ids 是用户期望的完整顺序，乐观更新失败回滚并重新拉取。 */
+  reorderProjects: (ids: string[]) => Promise<void>;
   setActiveProject: (projectId: string | null) => void;
   toggleProjectExpanded: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
@@ -50,7 +52,7 @@ interface ProjectState {
   setAllProjectsExpanded: (expanded: boolean) => void;
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
+export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   activeProjectId: null,
   isLoading: false,
@@ -177,5 +179,29 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
   setActiveProject: (projectId: string | null) => {
     set({ activeProjectId: projectId });
+  },
+  reorderProjects: async (ids) => {
+    const previous = get().projects;
+    const byId = new Map(previous.map((project) => [project.id, project]));
+    const ordered: Project[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const project = byId.get(id);
+      if (project) ordered.push(project);
+    }
+    // ids 正常是完整列表；未列出的项目（并发新建）接到末尾，保证不丢行。
+    for (const project of previous) {
+      if (!seen.has(project.id)) ordered.push(project);
+    }
+    set({ projects: ordered });
+    try {
+      await daemonFacade.reorderProjects(ids);
+    } catch (error) {
+      set({ projects: previous, error: String(error) });
+      await get().fetchProjects();
+      throw error;
+    }
   },
 }));

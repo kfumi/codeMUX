@@ -44,6 +44,8 @@ interface DaemonClientCore {
     projectId: string,
     patch: { name?: string; roots?: string[]; primaryRoot?: string },
   ): Promise<unknown>;
+  /** 重排侧栏项目：ids 即用户拖拽后的完整顺序。 */
+  reorderProjects(ids: string[]): Promise<void>;
   getBootstrap(): Promise<unknown>;
   getTimeline(
     sessionId: string,
@@ -331,6 +333,12 @@ export function createDaemonClient(config: DaemonConnectionConfig): DaemonClient
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
+    reorderProjects: async (ids) => {
+      await daemonFetch(config, '/api/projects/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      });
+    },
     getBootstrap: () => daemonFetch(config, '/api/bootstrap'),
     getTimeline: (sessionId, query = {}) => {
       const params = new URLSearchParams();
