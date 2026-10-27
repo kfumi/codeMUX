@@ -1,6 +1,6 @@
 # 侧栏项目拖拽排序
 
-**What to build:** 侧栏「项目」分区的**整行**可拖拽：鼠标放在项目行上按下并移动即可上下调整顺序，行跟随指针移动、其余行实时让位，松手后立即生效并持久化。移动未超过 6px 时仍按点击处理（展开 / 收起）。不显示额外拖拽图标；行聚焦后支持键盘 `Alt+↑/↓`，触屏可拖。
+**What to build:** 桌面应用与 PC 浏览器的侧栏「项目」分区支持**整行**拖拽：鼠标放在项目行上按下并移动即可上下调整顺序，行跟随指针移动、其余行实时让位，松手后立即生效并持久化。移动未超过 6px 时仍按点击处理（展开 / 收起）。不显示额外拖拽图标；行聚焦后支持键盘 `Alt+↑/↓`。移动端不启用排序，保留点击与纵向滚动。
 
 **Why:** 项目顺序目前不可控，用户无法把常用项目固定在固定位置；参考实现的交互是整行拖动 + sortable 位移动画，按住把手的实现不够顺滑。
 
@@ -14,6 +14,7 @@
 - [ ] `src/components/session/projectReorder.ts`：纯逻辑 `moveProjectToIndex` / `reorderFromDragEnd` / `resolveProjectDropPosition`。
 - [ ] `src/components/session/SessionList.tsx`：`DndContext`（`PointerSensor` + `distance: 6`、`closestCenter`）+ `SortableContext`（`verticalListSortingStrategy`）；`onDragEnd` 提交一次完整顺序。
 - [ ] `src/components/session/ProjectGroup.tsx`：`useSortable` 绑定整组（行 + 会话列表）；外层应用 `transform` / `transition` / `zIndex`，行应用 listeners 与键盘处理；操作簇 `pointerdown` 阻断冒泡。
+- [ ] `SessionList` 读取宿主形态，只在 `desktop` / `browser` 传入 `dragEnabled`；`mobile` 不注册排序快捷键，也不加 `touch-none`。
 
 ## 交互约束
 
@@ -22,6 +23,7 @@
 - 被拖项拖拽期间不加 transform 过渡（跟手）；其余行用 `--motion-duration-normal` / `--motion-ease-standard` 平滑让位。
 - 落点无变化时不发请求、不画插入线；dnd-kit 已负责拦截拖拽后的 click。
 - 不渲染拖拽图标；行 `select-none touch-none`。
+- 移动端不挂拖拽监听、不显示落点线，点击项目行仍展开 / 收起。
 
 ## 测试
 
@@ -29,4 +31,5 @@
 - [ ] `projectStore`：成功时列表顺序立即变化；失败时回滚并重新拉取。
 - [ ] `ProjectGroup`：启用排序时整行可聚焦、挂载快捷键并调用 `onMoveProject`；未启用时没有 tabIndex / 快捷键 / `touch-none`；页面上不存在拖拽图标。
 - [ ] `SessionList`：整行 `Alt+ArrowDown` 调用 `reorderProjects`；普通点击仍展开 / 收起。
+- [ ] `SessionList`：`hostForm = mobile` 时项目行没有 `tabIndex` / `aria-keyshortcuts` / `touch-none`，快捷键不重排，点击仍展开 / 收起。
 - [ ] `npx vitest run src/components/session src/stores src/lib/facades src/lib/daemon-client`。

@@ -136,7 +136,10 @@ export function SessionList({
 }: SessionListProps) {
   // 工单 02:添加项目依赖壳的原生目录选择框,浏览器/移动形态隐藏入口而不是
   // 让用户点到一个必然报错的按钮。
-  const canPickDirectory = useHostCapabilities().has('dialog.directory');
+  const hostCapabilities = useHostCapabilities();
+  const canPickDirectory = hostCapabilities.has('dialog.directory');
+  // 移动端以点击和纵向滚动为主；整行拖拽会禁用触摸滚动，也容易与轻扫冲突。
+  const canReorderProjects = hostCapabilities.form !== 'mobile';
   const {
     sessions,
     activeSessionId,
@@ -397,7 +400,7 @@ export function SessionList({
                     onOpenProjectFiles={onOpenProjectFiles}
                     onOpenImportSessions={handleOpenImportSessions}
                     onDeleteProject={deleteProject}
-                    dragEnabled
+                    dragEnabled={canReorderProjects}
                     onMoveProject={handleMoveProject}
                   />
                 ))}

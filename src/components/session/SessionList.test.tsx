@@ -393,6 +393,24 @@ describe('SessionList', () => {
     expect(useProjectStore.getState().collapsedProjects.has('project-1')).toBe(true);
   });
 
+  it('disables project drag sorting on mobile while keeping tap expansion', () => {
+    setTwoProjects();
+    useDaemonConnectionStore.setState({ hostForm: 'mobile' });
+    vi.mocked(daemonFacade.reorderProjects).mockClear();
+    renderSessionList();
+
+    const row = projectRow('codeMUX');
+    expect(row.getAttribute('tabindex')).toBeNull();
+    expect(row.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(row.className).not.toContain('touch-none');
+
+    fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true });
+    expect(daemonFacade.reorderProjects).not.toHaveBeenCalled();
+
+    fireEvent.click(row);
+    expect(useProjectStore.getState().collapsedProjects.has('project-1')).toBe(true);
+  });
+
   it('reveals the add-project action only on hover or keyboard focus', () => {
     useDaemonConnectionStore.setState({ hostForm: 'desktop' });
     useProjectStore.setState({

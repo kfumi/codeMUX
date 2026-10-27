@@ -138,7 +138,7 @@
 | [2026-10-21-desktop-unread-badge.md](specs/2026-10-21-desktop-unread-badge.md) | 桌面未读角标：任务栏与托盘提示点 |
 | [2026-10-22-project-multi-root.md](specs/2026-10-22-project-multi-root.md) | 项目关联多源文件夹 |
 | [2026-10-24-side-panel-full-view.md](specs/2026-10-24-side-panel-full-view.md) | 侧面板完整视图：主对话固定为首个标签 |
-| [2026-10-26-project-ordering.md](specs/2026-10-26-project-ordering.md) | 侧栏项目拖拽排序：daemon 持久化、Pointer 拖拽与键盘重排 |
+| [2026-10-26-project-ordering.md](specs/2026-10-26-project-ordering.md) | 侧栏项目拖拽排序：桌面 / PC 浏览器持久化与键盘重排，移动端不启用手势 |
 
 ### plans
 
