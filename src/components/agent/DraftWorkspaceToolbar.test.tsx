@@ -133,7 +133,7 @@ describe('DraftWorkspaceToolbar', () => {
 
     const bar = screen.getByTestId('draft-workspace-toolbar');
     // 上下文条是**发送框顶部贴着的那一条**（Codex 的 composer rail）：
-    // 左右各内缩一个输入框圆角、只圆上面两角、直接压在输入框顶边上；底色取
+    // 与输入框同列、左右各内缩一个圆角、只圆上面两角、直接压在输入框顶边上；底色取
     // `--composer-action-bar-bg`（Codex 的 `background-composer-action-bar`）。
     expect(bar.getAttribute('data-composer-rail')).toBe('true');
     expect(bar.className).toContain('rounded-t-xl');

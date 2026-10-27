@@ -190,10 +190,9 @@ export function DraftWorkspaceToolbar({ className }: DraftWorkspaceToolbarProps)
       className={cn(
         // 上下文条是**发送框顶部贴着的那一条**（Codex 的 composer rail）：
         //
-        //   · 与输入框同宽同列，但**左右各内缩一个输入框圆角**（`mx-[var(--radius-xl)]`），
-        //     因为输入框自己的顶角是圆的 —— 内缩量正好等于圆角半径时，rail 的两条竖边
-        //     与输入框顶角弧线的终点接上，外轮廓连成一条（Codex 的
-        //     `--home-composer-inline-inset` 与它的 composer 圆角同为 12px）。
+        //   · 与输入框同列，但左右各内缩一个输入框圆角（`mx-[var(--radius-xl)]`）：
+        //     输入框自己顶角是圆的，rail 内缩到圆角弧线的终点，外轮廓才会连成一条；
+        //     视觉上也保持「上沿比输入框短一截」的层级。
         //   · 只圆上面两角、下面两角是直角，直接压在输入框顶边上，中间没有缝也没有线。
         //   · 底色 `--composer-action-bar-bg`（Codex 的 `background-composer-action-bar`）：
         //     比输入框退档、也比页面底色低一档，读作「凹进页面里的一条」。

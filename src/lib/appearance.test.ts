@@ -229,16 +229,18 @@ describe('appearance preferences', () => {
     expect(root.style.fontSize).toBe('');
   });
 
-  it('caps the stream content width at 64rem so wide panes keep margins', () => {
+  it('keeps the stream width fluid with responsive safe gutters instead of a hard cap', () => {
     const root = document.documentElement;
 
     applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'fixed' }, false);
     expect(root.style.getPropertyValue('--content-width')).toBe('48rem');
 
-    // 流式档仍随窗口收窄（消费方都是 w-full + max-width），但宽屏下封顶 64rem，
-    // 不让行宽一路拉到整块对话列。
+    // 流式档必须继续跟随可用宽度；两侧只留随视口收放的安全边距，
+    // 不能再出现宽屏到 1024px 就停住的固定上限。
     applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'stream' }, false);
-    expect(root.style.getPropertyValue('--content-width')).toBe('64rem');
+    expect(root.style.getPropertyValue('--content-width')).toBe(
+      'calc(100% - clamp(2rem, 6vw, 6rem))',
+    );
   });
 
   it('writes the whole derived variable table onto the document root', () => {

@@ -334,13 +334,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
           首页构图对齐 Codex：问候区占满上半屏居中，composer 贴底。
 
           整页的列宽、水平内边距与底部间距**与真实对话页逐值一致** —— `--content-width` /
-          px-5 / pb-3 就是 CodeMuxThread 里 thread-content-shell 与 ViewportFooter 用的
+          thread-content-column / pb-3 就是 CodeMuxThread 里 thread-content-shell 与 ViewportFooter 用的
           同一组值。这样点发送后会话页接手时，composer 的宽度与离底高度不动，用户看到的
           只是消息从它上方长出来。上一版列宽是 max-w-2xl(42rem)、底部 py-10，发送瞬间
           输入框会跳宽跳位。
         */}
         <div
-          className="mx-auto flex min-h-full w-full flex-col px-5 pb-3 pt-4"
+          className="thread-content-column mx-auto flex min-h-full w-full flex-col pb-3 pt-4"
           style={{ maxWidth: 'var(--content-width, 52rem)' }}
         >
           <div className="flex flex-1 flex-col items-center justify-center gap-4 animate-in fade-in fill-mode-both duration-slow ease-motion-out">

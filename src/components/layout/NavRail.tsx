@@ -1,4 +1,4 @@
-import { ListTodo, MessageSquare, Settings, Timer, type LucideIcon } from 'lucide-react';
+import { Clock8, ListTodo, MessageSquare, Settings, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { useShortcutHint } from '../../hooks/useShortcutHint';
@@ -39,16 +39,42 @@ interface NavRailProps {
 interface RailItem {
   target: NavRailTarget;
   label: string;
+  tooltipLabel?: string;
   Icon: LucideIcon;
 }
 
 const MAIN_ITEMS: RailItem[] = [
   { target: 'app', label: '会话', Icon: MessageSquare },
-  { target: 'automation', label: '自动化', Icon: Timer },
-  { target: 'todo', label: '工单', Icon: ListTodo },
+  { target: 'automation', label: '自动化', Icon: Clock8 },
+  { target: 'todo', label: '工单', tooltipLabel: '待办任务', Icon: ListTodo },
 ];
 
 const SETTINGS_ITEM: RailItem = { target: 'settings', label: '设置', Icon: Settings };
+
+/**
+ * Lucide 只提供描边时钟。选中态使用专用实心图形，
+ * 表针按选中按钮底色反向绘制，避免把时钟填成一整块白色。
+ */
+function FilledClock8Icon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      data-icon="filled-clock8"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="10" fill="currentColor" />
+      <path
+        d="M12 6v6l-4 2"
+        stroke="hsl(var(--chrome-bg-hover))"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.25"
+      />
+    </svg>
+  );
+}
 
 export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
   const attentionCount = useWorkTaskStore((state) => selectAttentionCount(state.tasks));
@@ -61,7 +87,7 @@ export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
     const hint = hintFor(item);
     const showBadge = item.target === 'todo' && attentionCount > 0;
     return (
-      <TooltipHint key={item.target} side="right" content={`${item.label}${hint ? ` · ${hint}` : ''}`}>
+      <TooltipHint key={item.target} side="right" content={`${item.tooltipLabel ?? item.label}${hint ? ` · ${hint}` : ''}`}>
         <button
           type="button"
           onClick={() => onSelect(item.target)}
@@ -73,16 +99,20 @@ export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
             // 焦点环用不透明主色 + 外偏移：`ring-ring/45` 压在近白表面上只有
             // 约 2:1，达不到 WCAG 2.2 SC 2.4.11 对焦点指示的 3:1。
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--chrome-bg))]',
-            // 选中/悬停档取 `--chrome-bg-hover`：这里压在**窗口面**上，那一档是
-            // 窗口面往 ink 方向走一档（浅色更深、深色更亮），与 Codex 的
-            // `buttonTertiaryBackgroundHover` 同一套公式。沿用侧栏的 `--sidebar-muted`
-            // 压在窗口面上只剩几级差，等于没按。
+            // 与 Codex 一致：选中项只轻提亮按钮底，重点靠图标自身转为实心。
             active
               ? 'bg-[hsl(var(--chrome-bg-hover))] text-[hsl(var(--foreground))]'
               : 'text-muted-foreground hover:bg-[hsl(var(--chrome-bg-hover))] hover:text-[hsl(var(--foreground))]',
           )}
         >
-          <item.Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+          {active && item.target === 'automation' ? (
+            <FilledClock8Icon className="h-[18px] w-[18px]" />
+          ) : (
+            <item.Icon
+              className={cn('h-[18px] w-[18px]', active && 'fill-current')}
+              strokeWidth={active ? 2 : 1.75}
+            />
+          )}
           {showBadge && (
             <span className="absolute right-1 top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive-vivid px-0.5 text-ui-micro font-medium leading-none text-destructive-foreground">
               {attentionCount > 99 ? '99+' : attentionCount}

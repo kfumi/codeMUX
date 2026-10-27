@@ -603,14 +603,11 @@ tokenUsage,
   };
 
   return (
-    // 发送框比正文栏**宽出一截**：Codex 的 `--composer-inline-overhang` = 24px/边，
-    // 完整口径 `thread-content-max-width + overhang×2 − inset×2`。取 24px 的直观量，
-    // 于是 `mx-auto` 时它比左右的消息列各宽 24px —— 这是 Codex 发送框的辨识特征。
-    // 首页与会话页共用这一个组件，两处的宽度因此天生一致。
+    // 发送框宽度完全继承共享内容列：首页与会话页使用同一列宽与响应式内边距，
+    // 不再给自身叠加额外宽度，避免会话切换时发送框左右跳动。
     <div
       ref={composerRootRef}
       className="relative mx-auto flex w-full flex-col"
-      style={{ maxWidth: 'calc(var(--content-width, 52rem) + 48px)' }}
       onKeyDownCapture={handleComposerKeyDown}
     >
       {menuVisible && (

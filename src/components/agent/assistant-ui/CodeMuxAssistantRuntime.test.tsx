@@ -3563,7 +3563,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-5');
+    expect(shell.className).toContain('thread-content-column');
+    expect(shell.className).not.toContain('px-5');
     expect(shell.className).not.toContain('px-20');
   });
 
@@ -3592,7 +3593,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-10');
+    expect(shell.className).toContain('thread-content-column');
+    expect(shell.className).not.toContain('px-10');
     expect(shell.className).not.toContain('pl-14');
     expect(shell.className).not.toContain('pr-4');
     expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');

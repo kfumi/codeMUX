@@ -118,10 +118,9 @@ export const RADIUS_PREVIEW: Record<RadiusKey, string> = {
 
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
   fixed: '48rem',
-  // 仍是「流式」：消费方都是 `w-full` + `max-width`，窗口窄于上限时自动铺满，
-  // 只是宽屏下不再让行宽无限拉长。用 rem 而不是 `min(100%, 64rem)`，是为了让
-  // `parseContentWidthToken` 能解析出真实列宽，摘要面板才敢在两侧空槽里落位。
-  stream: '64rem',
+  // 流式档不再设固定上限：宽度跟随对话列，只从两侧让出安全边距，
+  // 给消息导航、滚动条和窗口边缘留出呼吸位。`vw` 让窄屏的边距同步收窄。
+  stream: 'calc(100% - clamp(2rem, 6vw, 6rem))',
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {

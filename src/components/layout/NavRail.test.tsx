@@ -117,11 +117,37 @@ describe('NavRail', () => {
     expect(select).toHaveBeenCalledWith('settings');
   });
 
+  it('labels the work-task rail tooltip as 待办任务', async () => {
+    renderRail();
+
+    fireEvent.focus(screen.getByRole('button', { name: '工单' }));
+
+    expect((await screen.findByRole('tooltip')).textContent).toBe('待办任务');
+  });
+
   it('marks exactly the active view with aria-current', () => {
     renderRail('todo');
 
     expect(screen.getByRole('button', { name: '工单' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('button', { name: '会话' }).getAttribute('aria-current')).toBeNull();
+  });
+
+  it('uses a subtle selected surface and fills the active rail icon', () => {
+    renderRail('automation');
+
+    const active = screen.getByRole('button', { name: '自动化' });
+    const inactive = screen.getByRole('button', { name: '会话' });
+    const activeIcon = active.querySelector('svg');
+    const inactiveIcon = inactive.querySelector('svg');
+
+    expect(active.className).toContain('bg-[hsl(var(--chrome-bg-hover))]');
+    expect(active.className).not.toContain('bg-foreground');
+    expect(activeIcon?.getAttribute('data-icon')).toBe('filled-clock8');
+    expect(activeIcon?.querySelector('circle')?.getAttribute('fill')).toBe('currentColor');
+    expect(activeIcon?.querySelector('path')?.getAttribute('stroke'))
+      .toBe('hsl(var(--chrome-bg-hover))');
+    expect(inactiveIcon?.getAttribute('class')).not.toContain('fill-current');
+    expect(inactiveIcon?.getAttribute('stroke-width')).toBe('1.75');
   });
 
   it('badges the work-item rail only when something needs attention', () => {

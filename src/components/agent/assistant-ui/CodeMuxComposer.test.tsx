@@ -332,9 +332,9 @@ describe('CodeMuxComposer', () => {
 
     const className = lexicalProps[0]?.className ?? '';
 
-    expect((container.firstElementChild as HTMLElement | null)?.style.maxWidth).toBe(
-      'calc(var(--content-width, 52rem) + 48px)',
-    );
+    // 宽度由共享内容列决定；composer 不再自带额外 overhang，否则首页与会话页
+    // 会因为父列内边距不同而出现宽度跳变。
+    expect((container.firstElementChild as HTMLElement | null)?.style.maxWidth).toBe('');
     expect(className).toContain('relative');
     expect(className).toContain('[&_.aui-lexical-input]:px-2');
     expect(className).toContain('[&_.aui-lexical-input]:py-1');

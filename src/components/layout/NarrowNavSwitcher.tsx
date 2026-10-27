@@ -1,4 +1,4 @@
-import { ListTodo, MessageSquare, Timer, type LucideIcon } from 'lucide-react';
+import { Clock8, ListTodo, MessageSquare, type LucideIcon } from 'lucide-react';
 
 import { selectAttentionCount, useWorkTaskStore } from '../../stores/workTaskStore';
 import { cn } from '../../lib/utils';
@@ -29,7 +29,7 @@ interface SwitcherItem {
 
 const VIEW_ITEMS: SwitcherItem[] = [
   { target: 'app', label: '会话', Icon: MessageSquare },
-  { target: 'automation', label: '自动化', Icon: Timer },
+  { target: 'automation', label: '自动化', Icon: Clock8 },
   { target: 'todo', label: '工单', Icon: ListTodo },
 ];
 

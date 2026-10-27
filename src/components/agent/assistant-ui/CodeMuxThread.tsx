@@ -130,8 +130,6 @@ const EMPTY_SUBAGENT_DESCRIPTORS: Record<string, never> = {};
 const EMPTY_SUBAGENT_EVENTS: Record<string, never> = {};
 const INTERRUPT_LABEL = '用户中断请求';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
-const THREAD_CONTENT_PADDING_WITH_NAV = 'px-10';
-const THREAD_CONTENT_PADDING_WITHOUT_NAV = 'px-5';
 /**
  * Above this event count (~60 messages) the transcript is long enough that
  * off-screen rows are worth excluding from layout/paint. See the
@@ -606,10 +604,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
             <div
               data-testid="thread-content-shell"
               data-long-thread={events.length > LONG_THREAD_EVENT_THRESHOLD ? '' : undefined}
-              className={cn(
-                'relative mx-auto flex w-full flex-1 flex-col pt-4',
-                showMessageNav ? THREAD_CONTENT_PADDING_WITH_NAV : THREAD_CONTENT_PADDING_WITHOUT_NAV,
-              )}
+              className="thread-content-column relative mx-auto flex w-full flex-1 flex-col pt-4"
               // 摘要面板钉住时正文列整体左移（Codex 的 contentShift）。位移施加在正文列
               // **自己**身上（`relative` + `left`），滚动容器因此保持满宽 —— 滚动条留在
               // 窗口最右侧，而不是被让位内边距挤到浮岛左边。

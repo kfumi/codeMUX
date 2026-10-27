@@ -271,10 +271,11 @@ describe('NewSessionPanel', () => {
     expect(hero.nextElementSibling).toBe(column.lastElementChild);
     expect(column.lastElementChild!.contains(screen.getByText('Mock Composer'))).toBe(true);
 
-    // 列宽 / 水平内边距 / 底部间距与 CodeMuxThread 的 thread-content-shell 逐值一致 ——
+    // 列宽 / 响应式水平内边距 / 底部间距与 CodeMuxThread 的 thread-content-shell 逐值一致 ——
     // 发送后会话页接手,composer 的宽度与离底高度不动(用户要的就是「点发送输入框不动」)。
     expect(column.style.maxWidth).toBe('var(--content-width, 52rem)');
-    expect(column.className).toContain('px-5');
+    expect(column.className).toContain('thread-content-column');
+    expect(column.className).not.toContain('px-5');
     expect(column.className).toContain('pb-3');
   });
 
