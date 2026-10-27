@@ -372,6 +372,45 @@ describe('GitEnvironmentPopover', () => {
     expect(section.textContent).not.toContain('子智能体1');
   });
 
+  it('caps the popover and scrolls when many subagents are expanded', async () => {
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: Array.from({ length: 15 }, (_, index) => `toolu_${index + 1}`),
+          descriptors: Object.fromEntries(
+            Array.from({ length: 15 }, (_, index) => {
+              const id = `toolu_${index + 1}`;
+              return [id, {
+                subagentId: id,
+                provider: 'claude',
+                description: `子智能体${index + 1}`,
+                status: 'completed' as const,
+                updatedAt: Date.now(),
+              }];
+            }),
+          ),
+          events: {},
+          seenEventIds: {},
+        },
+      },
+    });
+
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+    await screen.findByText('环境信息');
+    fireEvent.click(screen.getByTestId('git-environment-subagents-expand'));
+
+    const popover = screen.getByTestId('git-environment-popover');
+    const scroll = screen.getByTestId('git-environment-scroll');
+    expect(popover.className).toContain(
+      'max-h-[var(--radix-popover-content-available-height)]',
+    );
+    expect(popover.className).toContain('overflow-hidden');
+    expect(scroll.className).toContain('overflow-y-auto');
+    expect(scroll.textContent).toContain('子智能体15');
+  });
+
   it('hides the subagent section when the active session has no subagents', async () => {
     render(<GitEnvironmentPopover projectPath="D:/project/app" />);
 

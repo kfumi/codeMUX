@@ -65,6 +65,19 @@ describe('SummaryPanelSurface', () => {
     expect(screen.getByTestId('git-environment-changes')).toBeTruthy();
   });
 
+  it('高度受对话区限制，内容超出时在面板内部滚动', async () => {
+    useSummaryPanelStore.getState().setMetrics({ availableWidth: WIDE, contentWidth: 768 });
+    useSummaryPanelStore.getState().setPinned(true);
+
+    render(<SummaryPanelSurface projectPath="D:/project/app" />);
+
+    const card = screen.getByTestId('summary-panel-card');
+    const scroll = screen.getByTestId('summary-panel-scroll');
+    expect(card.className).toContain('max-h-full');
+    expect(card.className).toContain('overflow-hidden');
+    expect(scroll.className).toContain('overflow-y-auto');
+  });
+
   it('窄档（overlay）：不渲染内联面 —— 面板那时挂在标题栏按钮上', () => {
     useSummaryPanelStore.getState().setMetrics({ availableWidth: NARROW, contentWidth: 768 });
     useSummaryPanelStore.getState().setPinned(true);

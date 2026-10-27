@@ -46,8 +46,14 @@ export function SummaryPanelSurface({
       className="pointer-events-none absolute inset-y-5 right-5 z-30 flex max-w-[calc(100%-2.5rem)] items-start justify-end"
       style={{ width: view.panelWidth }}
     >
-      <div className="pointer-events-auto flex w-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-elevation animate-in fade-in slide-in-from-right-3 fill-mode-both duration-slow ease-motion-out">
-        <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        data-testid="summary-panel-card"
+        className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-elevation animate-in fade-in slide-in-from-right-3 fill-mode-both duration-slow ease-motion-out"
+      >
+        <div
+          data-testid="summary-panel-scroll"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
           <SummaryPanelBody projectPath={projectPath} todos={todos} />
         </div>
       </div>

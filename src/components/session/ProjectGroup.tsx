@@ -268,9 +268,10 @@ export function ProjectGroup({
       </div>
       {expanded && (
         <div
+          data-project-sessions={project.id}
           className={cn(
             'ml-2.5 mt-1 space-y-1 pl-1.5',
-            sessions.length > 0 && 'border-l border-[hsl(var(--sidebar-border))]/45',
+            sessions.length > 0 && 'border-l border-[hsl(var(--sidebar-fg))]/12',
           )}
         >
           {sessions.length === 0 ? (

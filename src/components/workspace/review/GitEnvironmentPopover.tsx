@@ -624,17 +624,24 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
             align="end"
             side="bottom"
             sideOffset={8}
+            collisionPadding={8}
             // 宽度与内联面同源（store 里的 panelWidth = Codex 的 300）：
             // 跨档切换时面板只挪位置、不变宽窄。
             style={{ width: panelWidth }}
-            className="rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
+            data-testid="git-environment-popover"
+            className="flex max-h-[var(--radix-popover-content-available-height)] flex-col overflow-hidden rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-elevation"
           >
-            <SummaryPanelBody
-              projectPath={projectPath}
-              todos={todos}
-              onOpenReview={closeSummaryPopover}
-              onOpenSubagent={closeSummaryPopover}
-            />
+            <div
+              data-testid="git-environment-scroll"
+              className="min-h-0 overflow-y-auto overscroll-contain"
+            >
+              <SummaryPanelBody
+                projectPath={projectPath}
+                todos={todos}
+                onOpenReview={closeSummaryPopover}
+                onOpenSubagent={closeSummaryPopover}
+              />
+            </div>
           </PopoverContent>
         </Popover>
       ) : (

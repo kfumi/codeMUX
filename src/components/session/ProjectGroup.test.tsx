@@ -20,6 +20,7 @@ import { TooltipProvider } from '../ui/tooltip';
 import { ProjectGroup } from './ProjectGroup';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Project } from '../../types/project';
+import type { Session } from '../../types/session';
 
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
@@ -28,6 +29,26 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     roots: [{ path: 'D:/work/demo', position: 0, isPrimary: true }],
     created_at: '',
     updated_at: '',
+    ...overrides,
+  };
+}
+
+function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: 'session-1',
+    title: 'Session 1',
+    agent_kind: 'codex',
+    provider_id: null,
+    model: null,
+    reasoning_effort: null,
+    mode: null,
+    permission_config: null,
+    plan_mode: null,
+    project_id: 'project-1',
+    created_at: '',
+    updated_at: '',
+    is_archived: false,
+    is_pinned: false,
     ...overrides,
   };
 }
@@ -62,10 +83,13 @@ describe('ProjectGroup', () => {
     cleanup();
   });
 
-  function renderProjectGroup(project: Project = makeProject()) {
+  function renderProjectGroup(
+    project: Project = makeProject(),
+    sessions: Session[] = [],
+  ) {
     return render(
       <TooltipProvider>
-        <ProjectGroup {...baseProps} project={project} />
+        <ProjectGroup {...baseProps} project={project} sessions={sessions} />
       </TooltipProvider>,
     );
   }
@@ -208,6 +232,15 @@ describe('ProjectGroup', () => {
     renderProjectGroup();
 
     expect(screen.getByText('暂无对话')).toBeTruthy();
+  });
+
+  it('renders a visible hierarchy line for an expanded project with sessions', () => {
+    const { container } = renderProjectGroup(makeProject(), [makeSession()]);
+
+    const sessionsContainer = container.querySelector<HTMLElement>(
+      '[data-project-sessions="project-1"]',
+    );
+    expect(sessionsContainer?.className).toContain('border-[hsl(var(--sidebar-fg))]/12');
   });
 
   it('hides the empty placeholder when the project is collapsed', () => {
