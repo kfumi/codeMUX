@@ -320,6 +320,7 @@ describe('runtimeLoader', () => {
       expect(sdkPackageName('claude_code')).toBe('@anthropic-ai/claude-agent-sdk');
       expect(sdkPackageName('codex')).toBe('@openai/codex');
       expect(sdkPackageName('opencode')).toBe('@opencode-ai/sdk');
+      expect(sdkPackageName('pi')).toBe('@earendil-works/pi-coding-agent');
     });
   });
 });

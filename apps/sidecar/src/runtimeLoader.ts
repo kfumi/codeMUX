@@ -365,5 +365,7 @@ export function sdkPackageName(provider: Provider): string {
       return '@openai/codex';
     case 'opencode':
       return '@opencode-ai/sdk';
+    case 'pi':
+      return '@earendil-works/pi-coding-agent';
   }
 }

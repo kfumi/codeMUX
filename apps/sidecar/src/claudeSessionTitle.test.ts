@@ -118,7 +118,7 @@ vi.mock('./sdkLoader.js', () => ({
   }),
 }));
 
-import { SessionRuntime } from './index.js';
+import { SessionRuntime } from './claudeRuntime.js';
 import { extractClaudeSessionTitle } from './sessionTitleEvent.js';
 
 function titleEvents(): Array<Record<string, unknown>> {

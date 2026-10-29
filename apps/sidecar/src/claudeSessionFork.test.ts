@@ -37,7 +37,7 @@ vi.mock('./sdkLoader.js', () => ({
   }),
 }));
 
-import { SessionRuntime } from './index.js';
+import { SessionRuntime } from './claudeRuntime.js';
 
 describe('SessionRuntime Claude fork', () => {
   let runtime: SessionRuntime;

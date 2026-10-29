@@ -126,6 +126,9 @@ export type SidecarCommand =
   | { type: 'stop_proxy' }
   | { type: 'proxy_status' };
 
+export type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+export type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
+
 // The sidecar emits raw SDKMessage JSON lines to stdout.
 // We re-export key shapes here for reference only.
 export interface SidecarReadyEvent {

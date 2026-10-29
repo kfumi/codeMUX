@@ -3,7 +3,7 @@ import {
   expireClaudeToolResponses,
   resolveClaudeToolResponse,
   waitForClaudeToolResponse,
-} from './index.js';
+} from './claudeRuntime.js';
 
 describe('Claude interactive response waits', () => {
   it('waits indefinitely when timeoutMs is 0 (default approval/question)', async () => {

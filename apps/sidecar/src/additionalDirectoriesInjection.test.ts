@@ -38,7 +38,7 @@ vi.mock('./sdkLoader.js', () => ({
   }),
 }));
 
-import { SessionRuntime } from './index.js';
+import { SessionRuntime } from './claudeRuntime.js';
 
 const ensureCommand = (overrides: Record<string, unknown> = {}) => ({
   type: 'ensure_session',

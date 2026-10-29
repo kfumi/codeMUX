@@ -1,8 +1,8 @@
 {
   "_comment": "冻结基线：这些文件当前超过默认预算，允许保持现状但**不允许再增长**（涨一行就失败）。新增/收紧用 `node scripts/check-file-size-budget.mjs --update-baseline`。",
   "files": {
+    "apps/sidecar/src/claudeRuntime.ts": 2008,
     "apps/sidecar/src/codexAppServerRuntime.ts": 2070,
-    "apps/sidecar/src/index.ts": 2658,
     "apps/sidecar/src/opencodeEvents.ts": 826,
     "apps/sidecar/src/opencodeRuntime.ts": 1696,
     "apps/sidecar/src/piRuntime.ts": 1245,

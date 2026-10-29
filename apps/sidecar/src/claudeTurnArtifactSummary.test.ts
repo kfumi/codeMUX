@@ -99,7 +99,7 @@ vi.mock('./sdkLoader.js', () => ({
   }),
 }));
 
-import { SessionRuntime } from './index.js';
+import { SessionRuntime } from './claudeRuntime.js';
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 10; i += 1) {

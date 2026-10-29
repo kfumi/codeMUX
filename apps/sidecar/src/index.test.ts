@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { SidecarCommand } from './types.js';
-import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarCommandDispatcher, waitForWarmup } from './index.js';
+import { buildUserMessageEvent, createSidecarCommandDispatcher } from './index.js';
+import { buildOpenCodeSessionMappingEvent } from './opencodeSidecarRuntime.js';
+import { waitForWarmup } from './claudeRuntime.js';
 // 静态导入:在 it() 内 await import 会把首次模块图加载计入该用例的超时预算。
 import { SteerUnavailableError } from './steer.js';
 

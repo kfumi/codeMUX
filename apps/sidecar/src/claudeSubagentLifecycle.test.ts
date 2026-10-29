@@ -102,7 +102,7 @@ vi.mock('./sdkLoader.js', () => ({
   }),
 }));
 
-import { SessionRuntime } from './index.js';
+import { SessionRuntime } from './claudeRuntime.js';
 import type { CodeMuxSubagentUpsertEvent } from './codeMuxProtocol.js';
 
 const flush = async (): Promise<void> => {
