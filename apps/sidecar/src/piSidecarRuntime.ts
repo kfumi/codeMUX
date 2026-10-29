@@ -5,7 +5,7 @@ import type { PiApprovalMode } from './piExtension.js';
 import type { PiThinkingLevel } from './piEvents.js';
 import type { SidecarPermissionConfig } from './agentPermissions.js';
 import type { EnsureSessionCommand, PiSessionConfig, PiSessionMapping } from './types.js';
-import type { SidecarRuntime } from './runtimePort.js';
+import { normalizeToolResponseAnswers, type SidecarRuntime } from './runtimePort.js';
 
 export function buildPiSessionMappingEvent(mapping: PiSessionMapping): {
   type: 'agent_session_mapping';
@@ -106,6 +106,7 @@ export function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntim
   });
   const piRuntime = new PiRuntime(config);
   return {
+    flavor: 'pi',
     ensure: async () => {
       const mapping = await piRuntime.ensure();
       emit(buildPiSessionMappingEvent(mapping));
@@ -126,6 +127,13 @@ export function createPiSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntim
     respondToPermission: (requestId, response, sessionId) =>
       piRuntime.respondToPermission(requestId, response, sessionId),
     respondToQuestion: (requestId, answers) => piRuntime.respondToQuestion(requestId, answers),
+    respondToToolUse: async (toolUseId, response) => {
+      if (piRuntime.isPendingQuestion(toolUseId)) {
+        await piRuntime.respondToQuestion(toolUseId, normalizeToolResponseAnswers(response));
+        return;
+      }
+      throw new Error('pi tool responses are only supported while a question is pending');
+    },
     forkSession: (sourceAgentSessionId) => piRuntime.forkSession(sourceAgentSessionId),
     rewindConversation: async (input) => {
       if (!input.entryId) {

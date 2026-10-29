@@ -67,6 +67,7 @@ import { setLogCtx, writeLog } from './writeLog.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import { isNativeResumeFailure } from './runtimeErrors.js';
+import type { SidecarRuntime } from './runtimePort.js';
 
 const WARM_START_TIMEOUT_MS = 30_000;
 /**
@@ -285,7 +286,9 @@ function isMissingClaudeConversationError(err: unknown): boolean {
   return String(err).includes('No conversation found with session ID');
 }
 
-export class SessionRuntime {
+export class SessionRuntime implements SidecarRuntime {
+  readonly flavor = 'claude' as const;
+
   private config: SessionBootstrap | null = null;
   private configFingerprint: string | null = null;
   private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
@@ -427,6 +430,20 @@ export class SessionRuntime {
     process.stderr.write(
       `[sidecar] Runtime permissions updated: session_id=${nextConfig.sessionId || 'none'} plan_mode=${nextConfig.planMode ?? 'off'}\n`,
     );
+  }
+
+  /**
+   * Claude 的权限应答与 AskUserQuestion 应答共用同一个 pending 表，
+   * 因此两条命令都落到 `resolveClaudeToolResponse`。
+   */
+  async respondToPermission(requestId: string, response: unknown): Promise<void> {
+    if (!resolveClaudeToolResponse(requestId, response)) {
+      throw new Error(`Claude permission request ${requestId} is no longer pending`);
+    }
+  }
+
+  async respondToToolUse(toolUseId: string, response: unknown): Promise<void> {
+    resolveClaudeToolResponse(toolUseId, response);
   }
 
   async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {

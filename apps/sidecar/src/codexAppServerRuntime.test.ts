@@ -1725,7 +1725,7 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         const requestId = String(question.tool_use_id);
         expect(runtime.isPendingQuestion(requestId)).toBe(true);
 
-        await runtime.respondToQuestion(requestId, [['是']]);
+        await runtime.respondToToolUse(requestId, [['是']]);
         await input;
 
         const responses = serverResponses(readLog(), 'item/tool/requestUserInput');

@@ -3,7 +3,7 @@ import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { emit, syncStreamSessionContext } from './streamEventBatcher.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import type { EnsureSessionCommand, OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
-import type { SidecarRuntime } from './runtimePort.js';
+import { normalizeToolResponseAnswers, type SidecarRuntime } from './runtimePort.js';
 
 export function buildOpenCodeSessionMappingEvent(mapping: OpenCodeSessionMapping): {
   type: 'agent_session_mapping';
@@ -60,6 +60,7 @@ export function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): Sidecar
     openCodeRuntime.updatePermissions({ permissionConfig: cmd.permissionConfig });
   }
   return {
+    flavor: 'opencode',
     ensure: async () => {
       const mapping = await openCodeRuntime.start();
       emit(buildOpenCodeSessionMappingEvent(mapping));
@@ -95,5 +96,12 @@ export function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): Sidecar
     shutdown: () => openCodeRuntime.shutdown(),
     respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),
     respondToQuestion: (requestId, answers) => openCodeRuntime.respondToQuestion(requestId, answers),
+    respondToToolUse: async (toolUseId, response) => {
+      if (openCodeRuntime.isPendingQuestion(toolUseId)) {
+        await openCodeRuntime.respondToQuestion(toolUseId, normalizeToolResponseAnswers(response));
+        return;
+      }
+      throw new Error('OpenCode tool responses are server-managed/not supported');
+    },
   };
 }

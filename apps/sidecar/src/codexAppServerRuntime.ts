@@ -96,6 +96,10 @@ import {
   type CodexSubagentDeclaration,
 } from './codexSubagentSource.js';
 import { isSteerBlockedPrompt, SteerUnavailableError } from './steer.js';
+import {
+  normalizeToolResponseAnswers,
+  type SidecarRuntime,
+} from './runtimePort.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -221,7 +225,9 @@ export type CodexAppServerRuntimeOptions = {
   emit?: (event: unknown) => void;
 };
 
-export class CodexAppServerRuntime {
+export class CodexAppServerRuntime implements SidecarRuntime {
+  readonly flavor = 'codex' as const;
+
   private config: CodexSessionBootstrap | null = null;
   private configFingerprint: string | null = null;
   private transport: AppServerTransport | null = null;
@@ -991,6 +997,17 @@ export class CodexAppServerRuntime {
     }
     await bridge.respondToQuestion(requestId, answers);
     this.emitPermissionResolved(requestId, 'question');
+  }
+
+  /**
+   * Codex 只有提问走客户端应答；普通 tool 调用由 app-server 自行管理，
+   * 因此非提问的 tool_response 静默忽略（与历史行为一致）。
+   */
+  async respondToToolUse(toolUseId: string, response: unknown): Promise<void> {
+    if (!this.isPendingQuestion(toolUseId)) {
+      return;
+    }
+    await this.respondToQuestion(toolUseId, normalizeToolResponseAnswers(response));
   }
 
   /**

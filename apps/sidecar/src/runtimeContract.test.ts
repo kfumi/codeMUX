@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
+  PROVIDERS,
   isProvider,
   providerCliCommand,
   providerLabel,
@@ -34,6 +37,25 @@ describe('runtimeContract', () => {
       expect(isProvider('codex')).toBe(true);
       expect(isProvider('opencode')).toBe(true);
       expect(isProvider('pi')).toBe(true);
+    });
+
+    it('matches the Rust from_str table exactly', () => {
+      const rustSource = readFileSync(
+        fileURLToPath(new URL('../../../crates/daemon/src/runtime/types.rs', import.meta.url)),
+        'utf8',
+      );
+      const fromStrStart = rustSource.indexOf('pub fn from_str');
+      const fromStrEnd = rustSource.indexOf('pub fn all');
+      expect(fromStrStart).toBeGreaterThanOrEqual(0);
+      expect(fromStrEnd).toBeGreaterThan(fromStrStart);
+
+      const rustProviders = [
+        ...rustSource
+          .slice(fromStrStart, fromStrEnd)
+          .matchAll(/"([a-z_]+)" => Some/g),
+      ].map((match) => match[1]);
+
+      expect([...PROVIDERS].sort()).toEqual(rustProviders.sort());
     });
 
     it('rejects unknown values', () => {

@@ -10,6 +10,7 @@ import { SteerUnavailableError } from './steer.js';
 
 function createRuntime() {
   return {
+    flavor: 'claude' as const,
     ensure: vi.fn().mockResolvedValue(undefined),
     canReuse: vi.fn().mockReturnValue(false),
     emitSessionMapping: vi.fn(),
@@ -22,6 +23,7 @@ function createRuntime() {
     interrupt: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn().mockResolvedValue(undefined),
+    respondToToolUse: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -296,6 +298,9 @@ describe('sidecar command dispatcher', () => {
 
   it('routes OpenCode lifecycle commands and permission responses', async () => {
     const opencode = createRuntime();
+    opencode.respondToToolUse.mockRejectedValue(
+      new Error('OpenCode tool responses are server-managed/not supported'),
+    );
     const emit = vi.fn();
     const dispatcher = createSidecarCommandDispatcher({
       claudeRuntime: createRuntime(),
@@ -346,7 +351,7 @@ describe('sidecar command dispatcher', () => {
     expect(opencode.interrupt).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith({
       type: 'sidecar_error',
-      error: 'OpenCode tool responses are server-managed/not supported',
+      error: 'Error: OpenCode tool responses are server-managed/not supported',
     });
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'opencode', sessionId: 'session-1', planMode: 'on' });
     expect(opencode.updatePermissions).toHaveBeenCalledTimes(2);
@@ -384,11 +389,10 @@ describe('sidecar command dispatcher', () => {
     });
   });
 
-  it('routes Codex permission responses and pending question answers through the Codex runtime', async () => {
+  it('routes Codex permission responses and tool responses through the active runtime', async () => {
     const codex = {
       ...createRuntime(),
-      isPendingQuestion: vi.fn().mockReturnValue(true),
-      respondToQuestion: vi.fn().mockResolvedValue(undefined),
+      respondToToolUse: vi.fn().mockResolvedValue(undefined),
     };
     const emit = vi.fn();
     const dispatcher = createSidecarCommandDispatcher({
@@ -409,8 +413,54 @@ describe('sidecar command dispatcher', () => {
       expect(codex.respondToPermission).toHaveBeenCalledWith('permission-1', 'once', 'codex-session');
     });
     await vi.waitFor(() => {
-      expect(codex.respondToQuestion).toHaveBeenCalledWith('question-1', [['是']]);
+      expect(codex.respondToToolUse).toHaveBeenCalledWith('question-1', [['是']]);
     });
+  });
+
+  it('routes Claude permission responses through the Claude runtime', async () => {
+    const claude = createRuntime();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'claude-session' });
+    await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'claude-session', response: 'once' });
+    await dispatcher.dispatch({ type: 'tool_response', toolUseId: 'tool-1', response: { approved: true } });
+
+    await vi.waitFor(() => {
+      expect(claude.respondToPermission).toHaveBeenCalledWith('permission-1', 'once', 'claude-session');
+    });
+    await vi.waitFor(() => {
+      expect(claude.respondToToolUse).toHaveBeenCalledWith('tool-1', { approved: true });
+    });
+  });
+
+  it('routes tool responses to the active runtime instead of probing other runtimes', async () => {
+    const claude = createRuntime();
+    const codex = createRuntime();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: codex,
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      createPiRuntime: vi.fn(() => createRuntime()),
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'claude-session' });
+    await dispatcher.dispatch({ type: 'tool_response', toolUseId: 'tool-1', response: 'once' });
+
+    await vi.waitFor(() => {
+      expect(claude.respondToToolUse).toHaveBeenCalledWith('tool-1', 'once');
+    });
+    expect(codex.respondToToolUse).not.toHaveBeenCalled();
   });
 
   it('reports Codex runtime not initialized when permission responses are unsupported', async () => {

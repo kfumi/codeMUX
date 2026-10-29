@@ -1,15 +1,15 @@
 import type { AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
-import type { EnsureSessionCommand, UpdatePermissionsCommand } from './types.js';
+import type { EnsureSessionCommand, RuntimeFlavor, UpdatePermissionsCommand } from './types.js';
 
 /**
  * sidecar 侧四家运行时的统一端口。
  *
- * 目前在 `index.ts` 内保持原样，仅先搬到这里：`claudeRuntime`、`codexAppServerRuntime`
- * 与 OpenCode / pi 的适配器都以它为准。可选方法表示「这一家没有这个能力」，
+ * 每个 adapter 声明自己的 `flavor`；可选方法表示「这一家没有这个能力」，
  * 调用点用 optional-call 判定，而不是按 flavor 分支。
  */
 export type SidecarRuntime = {
+  readonly flavor: RuntimeFlavor;
   ensure(cmd: EnsureSessionCommand): Promise<void>;
   canReuse?(cmd: EnsureSessionCommand): boolean;
   emitSessionMapping?(cmd: EnsureSessionCommand): void;
@@ -41,5 +41,31 @@ export type SidecarRuntime = {
   shutdown(): Promise<void>;
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
   respondToQuestion?(requestId: string, answers: string[][]): Promise<void>;
-  isPendingQuestion?(requestId: string): boolean;
+  /**
+   * 应答一个 `tool_response` 命令。问题类的 tool_use 由各 adapter 内部转成
+   * `respondToQuestion`；没有这条通道的 runtime 直接抛错，而不是由 dispatcher
+   * 按 flavor 猜。
+   */
+  respondToToolUse?(toolUseId: string, response: unknown): Promise<void>;
 };
+
+/** 用户可见的 runtime 名称（与 daemon 侧 Provider::label 的口径一致）。 */
+export function runtimeDisplayName(flavor: RuntimeFlavor): string {
+  switch (flavor) {
+    case 'claude':
+      return 'Claude';
+    case 'codex':
+      return 'Codex';
+    case 'opencode':
+      return 'OpenCode';
+    case 'pi':
+      return 'pi';
+  }
+}
+
+/** `tool_response` 的 answers 归一：string[][]，标量包成单元素数组。 */
+export function normalizeToolResponseAnswers(response: unknown): string[][] {
+  const raw = Array.isArray(response) ? response : [];
+  return raw.map((answer) => (Array.isArray(answer) ? answer.map(String) : [String(answer)]));
+}
+

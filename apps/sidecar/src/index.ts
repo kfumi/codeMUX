@@ -3,13 +3,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EnsureSessionCommand, SidecarCommand } from './types.js';
-import { resolveClaudeToolResponse, SessionRuntime } from './claudeRuntime.js';
+import { SessionRuntime } from './claudeRuntime.js';
 import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
 import { createOpenCodeSidecarRuntime } from './opencodeSidecarRuntime.js';
 import { createPiSidecarRuntime } from './piSidecarRuntime.js';
-import type { SidecarRuntime } from './runtimePort.js';
+import { runtimeDisplayName, type SidecarRuntime } from './runtimePort.js';
+import { SidecarRuntimePool } from './runtimePool.js';
 import { isNativeResumeFailure } from './runtimeErrors.js';
-import { getRuntimeFlavor } from './runtimeEvents.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import { deleteOpenCodeSessionWithOfficialSdk } from './opencodeSdk.js';
 import { enrichAttachments } from './attachmentEnrichment/index.js';
@@ -48,7 +48,6 @@ function isSidecarEntrypoint(scriptPath: string | undefined): boolean {
     return path.resolve(scriptPath) === entrypoint;
   }
 }
-
 
 export function buildUserMessageEvent(
   sessionId: string,
@@ -95,13 +94,17 @@ type SidecarCommandDispatcherOptions = {
 };
 
 export function createSidecarCommandDispatcher(options: SidecarCommandDispatcherOptions) {
-  let activeAgentKind: string | undefined;
   let activeSessionId: string | undefined;
   let activeResumeOnly = false;
   let activeAgentSessionId: string | undefined;
-  let activeManagedRuntime: { flavor: 'opencode' | 'pi'; runtime: SidecarRuntime } | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
   const pendingPermissionResponses = new Map<SidecarRuntime, Map<string, Promise<void>>>();
+  const runtimes = new SidecarRuntimePool({
+    claude: { kind: 'singleton', runtime: options.claudeRuntime },
+    codex: { kind: 'singleton', runtime: options.codexRuntime },
+    opencode: { kind: 'managed', create: options.createOpenCodeRuntime },
+    pi: { kind: 'managed', create: options.createPiRuntime },
+  });
 
   const emitError = (error: unknown): void => {
     options.emit({ type: 'sidecar_error', error: String(error) });
@@ -126,17 +129,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     return message.includes('abort') || message.includes('the operation was aborted');
   };
 
-  const shutdownManagedRuntime = async (): Promise<void> => {
-    const current = activeManagedRuntime;
-    if (!current) return;
-    await current.runtime.shutdown();
-    if (activeManagedRuntime === current) {
-      activeManagedRuntime = undefined;
-    }
-  };
-
   const ensureSession = async (cmd: EnsureSessionCommand): Promise<void> => {
-    const flavor = getRuntimeFlavor(cmd.agentKind);
     // 附加目录不可用是会话级事实：发一条可持久化的系统事件让界面提示。
     // event_id 稳定，重建 runtime 时重复 ensure 不会刷屏。
     if (cmd.unavailableAdditionalDirectories?.length) {
@@ -149,46 +142,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         content: `以下源文件夹当前不可用，已跳过：${unavailable.join('、')}`,
       });
     }
-    activeAgentKind = cmd.agentKind;
     activeSessionId = cmd.sessionId;
     activeResumeOnly = cmd.resumeOnly === true;
     activeAgentSessionId = cmd.agentSessionId;
-    if (flavor !== 'opencode' && flavor !== 'pi') {
-      await shutdownManagedRuntime();
-      const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
-      await selectedRuntime.ensure(cmd);
-      return;
-    }
-
-    const current = activeManagedRuntime;
-    if (current?.flavor === flavor && current.runtime.canReuse?.(cmd)) {
-      process.stderr.write(
-        `[${flavor}-task] ensure_session REUSE sessionId=${cmd.sessionId ?? 'null'}\n`,
-      );
-      await current.runtime.updatePermissions({
-        type: 'update_permissions',
-        sessionId: cmd.sessionId,
-        agentKind: cmd.agentKind,
-        permissionConfig: cmd.permissionConfig,
-        planMode: cmd.planMode,
-      });
-      current.runtime.emitSessionMapping?.(cmd);
-      return;
-    }
-
-    await shutdownManagedRuntime();
-    const nextRuntime = flavor === 'pi' ? options.createPiRuntime(cmd) : options.createOpenCodeRuntime(cmd);
-    try {
-      await nextRuntime.ensure(cmd);
-    } catch (error) {
-      try {
-        await nextRuntime.shutdown();
-      } catch (cleanupError) {
-        emitError(`${String(error)}; ${flavor} cleanup failed: ${String(cleanupError)}`);
-      }
-      throw error;
-    }
-    activeManagedRuntime = { flavor, runtime: nextRuntime };
+    await runtimes.ensure(cmd);
   };
 
   const dispatchEnsure = (cmd: EnsureSessionCommand): Promise<void> => {
@@ -197,11 +154,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     return operation;
   };
 
-  const selectedRuntime = (): SidecarRuntime | undefined => {
-    const flavor = getRuntimeFlavor(activeAgentKind);
-    if (flavor === 'opencode' || flavor === 'pi') return activeManagedRuntime?.flavor === flavor ? activeManagedRuntime.runtime : undefined;
-    return flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
-  };
+  const selectedRuntime = (): SidecarRuntime | undefined => runtimes.current();
 
   const dispatch = async (cmd: SidecarCommand): Promise<void> => {
     const cmdSessionId = (cmd as { sessionId?: string }).sessionId;
@@ -227,20 +180,13 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         }
         return;
       case 'update_permissions': {
-        activeAgentKind = cmd.agentKind ?? activeAgentKind;
-        const flavor = getRuntimeFlavor(activeAgentKind);
-        if (flavor === 'pi') {
-          // pi 权限档位经 canReuse 比对在下一轮 ensure 重建生效，原地更新为 no-op。
-          return;
-        }
+        runtimes.setActiveKind(cmd.agentKind);
         try {
-          if (flavor === 'opencode') {
-            const current = selectedRuntime();
-            if (!current) throw new Error('OpenCode runtime is not initialized');
-            await current.updatePermissions(cmd);
-          } else {
-            await (flavor === 'codex' ? options.codexRuntime : options.claudeRuntime).updatePermissions(cmd);
+          const current = selectedRuntime();
+          if (!current) {
+            throw new Error(`${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
           }
+          await current.updatePermissions(cmd);
         } catch (error) {
           emitError(error);
         }
@@ -289,13 +235,13 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         const sessionId = cmd.sessionId ?? activeSessionId;
         const current = selectedRuntime();
         if (!current) {
-          emitTurnFailure(sessionId, `${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
+          emitTurnFailure(sessionId, `${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
           return;
         }
         if (cmd.delivery === 'steer') {
           try {
             if (!current.steerActiveTurn) {
-              throw new SteerUnavailableError(`${getRuntimeFlavor(activeAgentKind)} runtime does not support steer`);
+              throw new SteerUnavailableError(`${runtimeDisplayName(runtimes.flavor)} runtime does not support steer`);
             }
             await current.steerActiveTurn(cmd.prompt, cmd.inputPayload);
             if (sessionId) {
@@ -327,7 +273,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             options.emit({
               type: 'session_resume_failed',
               session_id: activeSessionId,
-              agent_kind: activeAgentKind,
+              agent_kind: runtimes.agentKind,
               agent_session_id: activeAgentSessionId,
               error: String(error),
             });
@@ -341,11 +287,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         await ensureTail;
         try {
           const current = selectedRuntime();
-          const flavor = getRuntimeFlavor(activeAgentKind);
-          if (
-            (flavor !== 'claude' && flavor !== 'codex' && flavor !== 'opencode' && flavor !== 'pi')
-            || !current?.forkSession
-          ) {
+          if (!current?.forkSession) {
             throw new Error('This provider runtime does not support session fork');
           }
           const agentSessionId = await current.forkSession(
@@ -358,7 +300,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             type: 'session_fork_result',
             request_id: cmd.requestId,
             session_id: cmd.sessionId,
-            agent_kind: activeAgentKind,
+            agent_kind: runtimes.agentKind,
             agent_session_id: agentSessionId,
             ok: true,
           });
@@ -367,7 +309,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             type: 'session_fork_result',
             request_id: cmd.requestId,
             session_id: cmd.sessionId,
-            agent_kind: activeAgentKind,
+            agent_kind: runtimes.agentKind,
             ok: false,
             error: String(error),
           });
@@ -378,8 +320,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         await ensureTail;
         try {
           const current = selectedRuntime();
-          const flavor = getRuntimeFlavor(activeAgentKind);
-          if (flavor !== 'claude' || !current?.rewindFiles) {
+          if (!current?.rewindFiles) {
             throw new Error('This provider runtime does not support file rewind');
           }
           const filesChanged = await current.rewindFiles(cmd.providerMessageId);
@@ -407,7 +348,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           const current = selectedRuntime();
           if (!current?.rewindConversation) {
             throw new Error(
-              `${getRuntimeFlavor(activeAgentKind)} runtime does not support conversation rewind`,
+              `${runtimeDisplayName(runtimes.flavor)} runtime does not support conversation rewind`,
             );
           }
           const agentSessionId = await current.rewindConversation({
@@ -416,7 +357,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             providerMessageTurnOrdinal: cmd.providerMessageTurnOrdinal,
           });
           writeLog(
-            `[${getRuntimeFlavor(activeAgentKind)}-task]`,
+            `[${runtimes.flavor}-task]`,
             `rewind_conversation OK agent_session_id=${agentSessionId}`,
           );
           options.emit({
@@ -428,7 +369,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           });
         } catch (error) {
           writeLog(
-            `[${getRuntimeFlavor(activeAgentKind)}-task]`,
+            `[${runtimes.flavor}-task]`,
             `rewind_conversation FAILED error=${error instanceof Error ? error.message : String(error)}`,
           );
           options.emit({
@@ -444,7 +385,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       case 'reset_session':
         try {
           const current = selectedRuntime();
-          if (!current) throw new Error('OpenCode runtime is not initialized');
+          if (!current) throw new Error(`${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
           await current.resetSession(cmd.sessionId);
         } catch (error) {
           emitError(error);
@@ -481,63 +422,30 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       case 'interrupt':
         try {
           const current = selectedRuntime();
-          if (!current) throw new Error(`${getRuntimeFlavor(activeAgentKind)} runtime is not initialized`);
+          if (!current) throw new Error(`${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
           await current.interrupt();
         } catch (error) {
           if (!isAbortError(error)) emitError(error);
         }
         return;
       case 'tool_response': {
-        const flavor = getRuntimeFlavor(activeAgentKind);
-        const openCodeRuntime = flavor === 'opencode'
-          ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
-          : undefined;
-        const codexQuestionRuntime = flavor === 'codex' ? options.codexRuntime : undefined;
-        const piRuntime = flavor === 'pi'
-          ? (activeManagedRuntime?.flavor === 'pi' ? activeManagedRuntime.runtime : undefined)
-          : undefined;
-        if (openCodeRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
-          const raw = Array.isArray(cmd.response) ? cmd.response : [];
-          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
-          openCodeRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
-        } else if (codexQuestionRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
-          const raw = Array.isArray(cmd.response) ? cmd.response : [];
-          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
-          codexQuestionRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
-        } else if (piRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
-          const raw = Array.isArray(cmd.response) ? cmd.response : [];
-          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
-          piRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
-        } else if (flavor === 'pi') {
-          emitError('pi tool responses are only supported while a question is pending');
-        } else if (openCodeRuntime) {
-          options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
-        } else {
-          resolveClaudeToolResponse(cmd.toolUseId, cmd.response);
+        const current = selectedRuntime();
+        if (!current) {
+          emitError(`${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
+          return;
         }
+        if (!current.respondToToolUse) {
+          emitError(`${runtimeDisplayName(current.flavor)} tool responses are not supported`);
+          return;
+        }
+        void current.respondToToolUse(cmd.toolUseId, cmd.response)
+          .catch((error: unknown) => emitError(error));
         return;
       }
       case 'respond_to_permission': {
-        const flavor = getRuntimeFlavor(activeAgentKind);
-        if (flavor === 'claude') {
-          if (!resolveClaudeToolResponse(cmd.requestId, cmd.response)) {
-            emitError(`Claude permission request ${cmd.requestId} is no longer pending`);
-          }
-          return;
-        }
-        const current = flavor === 'opencode'
-          ? (activeManagedRuntime?.flavor === 'opencode' ? activeManagedRuntime.runtime : undefined)
-          : flavor === 'codex'
-            ? options.codexRuntime
-            : flavor === 'pi'
-              ? (activeManagedRuntime?.flavor === 'pi' ? activeManagedRuntime.runtime : undefined)
-              : undefined;
+        const current = selectedRuntime();
         if (!current?.respondToPermission) {
-          emitError(flavor === 'codex'
-            ? 'Codex runtime is not initialized'
-            : flavor === 'pi'
-              ? 'pi runtime is not initialized'
-              : 'OpenCode runtime is not initialized');
+          emitError(`${runtimeDisplayName(runtimes.flavor)} runtime is not initialized`);
           return;
         }
         const runtimePendingResponses = pendingPermissionResponses.get(current) ?? new Map<string, Promise<void>>();
@@ -570,12 +478,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
         };
         await attemptCleanup('Failed to stop proxy', options.stopProxy);
-        await attemptCleanup('Failed to shutdown managed runtime', shutdownManagedRuntime);
-        const activeFlavor = getRuntimeFlavor(activeAgentKind);
-        if (activeFlavor !== 'opencode' && activeFlavor !== 'pi') {
-          const currentRuntime = activeFlavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
-          await attemptCleanup('Failed to shutdown active runtime', () => currentRuntime.shutdown());
-        }
+        await attemptCleanup('Failed to shutdown runtimes', () => runtimes.shutdown());
         if (cleanupErrors.length > 0) {
           const aggregateError = new AggregateError(cleanupErrors, 'Sidecar shutdown cleanup failed');
           options.emit({ type: 'sidecar_error', error: `${aggregateError.message}: ${cleanupErrors.map(String).join('; ')}` });
