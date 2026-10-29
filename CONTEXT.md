@@ -28,7 +28,7 @@ CodeMUX 应用层的一条对话。它拥有稳定的会话身份和一条连续
 _Avoid_: thread（当指应用对话时）, conversation（与 Session 混用）, 混合模式对话
 
 ### Agent Kind
-独立的编码智能体运行时种类：Claude Code、Codex、OpenCode 或 pi（pi 为后接入的极简多供应商运行时，定义见 `src/types/agentRegistry.ts`）。每种有自己的工具协议、权限模型和原生 session 存储；它不是 Model Provider，也不是同一运行时内的 Plan/Build 模式。
+独立的编码智能体运行时种类：Claude Code、Codex、OpenCode 或 pi（pi 为后接入的极简多供应商运行时，规格见 `src/lib/agentKind/kinds.ts`）。每种有自己的工具协议、权限模型和原生 session 存储；它不是 Model Provider，也不是同一运行时内的 Plan/Build 模式。
 _Avoid_: 智能体（单独使用且未区分种类与模型时）, runtime（与 sidecar 进程混淆时）, agent, harness, 混合模式, gemini_cli（当前未接入，不是本上下文的 Agent Kind）
 
 ### Active Agent Kind

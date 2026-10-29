@@ -28,7 +28,7 @@ import {
   type ComputerUseApprovalChoice,
   type ComputerUseApprovalRequest,
 } from '../lib/computerUseApprovals';
-import { supportsCapability } from '../components/agent/agentCapabilities';
+import { supports } from '../lib/agentKind';
 import { createLogger, serializeError } from '../lib/logger';
 import { isDevDiagnosticsEnabled } from '../lib/dev/devDiagnostics';
 import {
@@ -3055,7 +3055,7 @@ function createSessionEventHandler(
       && !queuedDispatches.has(sessionId)
       && !isSteerBlockedPrompt(prompt)
       && !!targetSession
-      && supportsCapability(targetSession.agent_kind, 'supports_steer');
+      && supports(targetSession.agent_kind, 'supports_steer');
     if (steerOnSend) {
       await steerRunningTurn(sessionId, {
         prompt,
@@ -3559,7 +3559,7 @@ function createSessionEventHandler(
       && wasRunning
       && !isSteerBlockedPrompt(query.prompt)
       && !!targetSession
-      && supportsCapability(targetSession.agent_kind, 'supports_steer');
+      && supports(targetSession.agent_kind, 'supports_steer');
 
     if (canSteer) {
       const requestId = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

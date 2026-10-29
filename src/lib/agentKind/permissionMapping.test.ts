@@ -9,9 +9,9 @@ import {
   mapExecutionModeToPermissionConfig,
   serializePermissionConfig,
   type AgentPermissionConfig,
-} from './agentKind';
+} from './index';
 
-describe('agentPermissions', () => {
+describe('permission mapping', () => {
   it('uses safe defaults for each agent kind', () => {
     expect(buildDefaultPermissionConfig('pi')).toEqual({
       kind: 'pi',

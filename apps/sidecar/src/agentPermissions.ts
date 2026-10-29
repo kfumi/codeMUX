@@ -38,7 +38,7 @@ const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ['read-only', 'workspace-write',
 const CODEX_APPROVAL_POLICIES: CodexApprovalPolicy[] = ['untrusted', 'on-request', 'never'];
 const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-review', 'full-access'];
 
-// Shared default triplets — keep in sync with src/lib/agentPermissions.ts.
+// Shared default triplets — keep in sync with src/lib/agentKind/permissionMapping.ts.
 // Default tier mirrors the official ChatGPT Codex App's conservative
 // 「请求批准」selector entry (workspace-write + on-request).
 const CODEX_DEFAULT_PERMISSIONS = {
