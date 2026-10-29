@@ -38,9 +38,10 @@ export function useSummaryPanelLayout(paneRef: RefObject<HTMLElement | null>) {
       // 平白多一轮渲染，还会在拉伸窗口的中途把档位抖到 overlay。
       if (availableWidth <= 0) return;
       const token = window.getComputedStyle(pane).getPropertyValue('--content-width');
-      // 解析不出来（百分比取值、变量缺失）就按「正文铺满这一列」算：
-      // 没有侧边空槽，面板只能走浮层 —— 算法自己的结论，不是特例分支。
-      const contentWidth = parseContentWidthToken(token, rootFontSize()) ?? availableWidth;
+      // 把对话列宽一并交给解析器：流式档是 `calc(100% - <gutter>)`，宽度依赖容器，
+      // 光看字符串算不出来。真的解析不出来（变量缺失/写法不认识）才按「正文铺满
+      // 这一列」算 —— 没有侧边空槽，面板只能走浮层，是算法自己的结论。
+      const contentWidth = parseContentWidthToken(token, rootFontSize(), availableWidth) ?? availableWidth;
       measured = true;
       setMetrics({ availableWidth, contentWidth });
     };

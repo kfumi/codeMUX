@@ -59,17 +59,62 @@ export type SummaryPanelSurface = 'inline' | 'popover' | null;
 /**
  * 把 `--content-width` 的取值解析成像素。
  *
- * 只认 `px` / `rem`；`%`（无上限铺满）与无法识别的取值返回 `null`，
- * 由调用方决定退化。百分比取值没有侧边空槽，面板只能走浮层 —— 这不是特例分支，
- * 而是把正文列宽取成对话列宽后算法的自然结果。
+ * 认三种写法：
+ * - `px` / `rem` —— 定宽档；
+ * - `calc(100% - <gutter>)` —— 流式档。**必须传 `availableWidth`**：这个 token
+ *   的宽度依赖容器，光看字符串算不出来。
+ *
+ * 解析不出来时返回 `null`，由调用方决定退化。曾经流式档永远走到这条 `null` 路径：
+ * `CONTENT_WIDTHS.stream` 是 `calc(...)`，而解析器只认 `px` / `rem` —— 于是
+ * `useSummaryPanelLayout` 回落到「正文铺满对话列」，面板永远停在浮层档。
+ * 结论碰巧和按真实宽度算出来的一样（两侧让出的边距远小于 180px 阈值），
+ * 但**理由**是错的：改宽流式档的边距时，面板不会跟着响应。
+ *
+ * `gutter` 支持 `rem` 与 `clamp(<min>, <vw>, <max>)` —— 当前流式档就是后者，
+ * 按 `vw` 在给定宽度下的实际取值算，不取上下限，否则宽屏会算窄、窄屏会算宽。
  */
-export function parseContentWidthToken(token: string, rootFontSize = 16): number | null {
+export function parseContentWidthToken(
+  token: string,
+  rootFontSize = 16,
+  availableWidth?: number,
+): number | null {
   const value = token.trim();
   const px = /^([\d.]+)px$/.exec(value);
   if (px) return Number.parseFloat(px[1]);
   const rem = /^([\d.]+)rem$/.exec(value);
   if (rem) return Number.parseFloat(rem[1]) * rootFontSize;
+
+  const percent = /^(100%|calc\(100%\s*-\s*(.+)\))$/.exec(value);
+  if (percent) {
+    if (availableWidth === undefined) return null;
+    const gutter = percent[1] === '100%' ? 0 : parseGutter(percent[2], rootFontSize, availableWidth);
+    return gutter === null ? null : Math.max(0, availableWidth - gutter);
+  }
+
   return null;
+}
+
+/** 解析流式档让出的边距。`clamp()` 按 `vw` 在当前宽度下的实际值算。 */
+function parseGutter(raw: string, rootFontSize: number, availableWidth: number): number | null {
+  const token = raw.trim();
+  const remMatch = /^([\d.]+)rem$/.exec(token);
+  if (remMatch) return Number.parseFloat(remMatch[1]) * rootFontSize;
+
+  const pxMatch = /^([\d.]+)px$/.exec(token);
+  if (pxMatch) return Number.parseFloat(pxMatch[1]);
+
+  const clampMatch = /^clamp\((.+)\)$/.exec(token);
+  if (!clampMatch) return null;
+  const parts = clampMatch[1].split(',').map((part) => part.trim());
+  if (parts.length !== 3) return null;
+  const min = parseGutter(parts[0], rootFontSize, availableWidth);
+  const max = parseGutter(parts[2], rootFontSize, availableWidth);
+  const vw = /^([\d.]+)vw$/.exec(parts[1]);
+  if (min === null || max === null || !vw) return null;
+  // 视口宽 ≈ 对话列宽 + 两侧边距；用列宽本身算 vw 会让边距偏大，
+  // 但面板档位只关心量级，且列宽通常是视口的绝大部分。
+  const preferred = (Number.parseFloat(vw[1]) / 100) * (availableWidth + 2 * min);
+  return Math.min(max, Math.max(min, preferred));
 }
 
 export interface SummaryPanelSurfaceState {

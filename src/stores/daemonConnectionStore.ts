@@ -11,7 +11,7 @@
 import { create } from 'zustand';
 
 import { detectHostForm, readHostEnvironment, type HostForm } from '../lib/host/host-form';
-import { syncBootHostForm } from '../lib/themeBoot';
+import { syncBootHostForm } from '../lib/hostFormBoot';
 
 export type DaemonConnectionStatus = 'idle' | 'connecting' | 'connected' | 'pairing' | 'error';
 

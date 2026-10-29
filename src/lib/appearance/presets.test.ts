@@ -15,16 +15,16 @@ import {
   UI_FONT_SIZE_MIN,
   accentName,
   applyAppearance,
+  loadPrefs,
   buildUiFontFamily,
   clampCodeFontSize,
   clampContrast,
   clampUiFontSize,
   formatFontFamilyForCss,
   isHexColor,
-  loadPrefs,
   seedsForPrefs,
   type AccentKey,
-} from './appearance';
+} from './index';
 import {
   CODEX_DARK_SEEDS,
   CODEX_LIGHT_SEEDS,
@@ -33,7 +33,7 @@ import {
   deriveThemeTokens,
   hexToRgb,
   rgbToHslTriplet,
-} from './colorDerivation';
+} from '../colorDerivation';
 
 /** 把派生出来的 HSL 三元组还原成 RGB，好在测试里量对比度。 */
 function hslTripletToRgb(triplet: string) {

@@ -6,21 +6,23 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  APP_BACKGROUND_DARK,
-  APP_BACKGROUND_LIGHT,
-  BOOT_BACKGROUND_DARK,
-  BOOT_BACKGROUND_LIGHT,
   THEME_BOOT_SCRIPT,
   THEME_BOOT_STORAGE_KEY,
   cacheBootTheme,
   isTheme,
   readBootTheme,
-  resolveBootIsDark,
+  surfaceFor,
   syncThemeChrome,
-} from './themeBoot';
-import { CODEX_DARK_SEEDS, CODEX_LIGHT_SEEDS } from './colorDerivation';
+} from './boot';
+import { CODEX_DARK_SEEDS, CODEX_LIGHT_SEEDS } from '../colorDerivation';
 
-const indexHtml = readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+const indexHtml = readFileSync(path.resolve(__dirname, '../../../index.html'), 'utf8');
+
+/** jsdom 把内联 background-color 归一成 `rgb(r, g, b)`，比对时用同一种写法。 */
+function hexToRgbTriplet(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 function stubPrefersDark(prefersDark: boolean): void {
   Object.defineProperty(window, 'matchMedia', {
@@ -55,14 +57,6 @@ describe('themeBoot', () => {
     document.documentElement.removeAttribute('style');
   });
 
-  it('resolves dark from the cached enum and falls back to the OS preference', () => {
-    expect(resolveBootIsDark('Dark', false)).toBe(true);
-    expect(resolveBootIsDark('Light', true)).toBe(false);
-    expect(resolveBootIsDark('System', true)).toBe(true);
-    expect(resolveBootIsDark('System', false)).toBe(false);
-    expect(resolveBootIsDark(null, true)).toBe(true);
-  });
-
   it('round-trips the cached theme and ignores garbage values', () => {
     cacheBootTheme('Dark');
     expect(window.localStorage.getItem(THEME_BOOT_STORAGE_KEY)).toBe('Dark');
@@ -84,7 +78,7 @@ describe('themeBoot', () => {
     expect(root.classList.contains('dark')).toBe(true);
     expect(root.style.colorScheme).toBe('dark');
     expect(root.style.backgroundColor).toBeTruthy();
-    expect(root.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_DARK);
+    expect(root.style.getPropertyValue('--boot-bg')).toBe(CODEX_DARK_SEEDS.surface);
   });
 
   it('honors an explicit light theme even when the OS prefers dark', () => {
@@ -96,7 +90,7 @@ describe('themeBoot', () => {
     const root = document.documentElement;
     expect(root.classList.contains('dark')).toBe(false);
     expect(root.style.colorScheme).toBe('light');
-    expect(root.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_LIGHT);
+    expect(root.style.getPropertyValue('--boot-bg')).toBe(CODEX_LIGHT_SEEDS.surface);
   });
 
   it('falls back to the OS preference when no theme was cached yet', () => {
@@ -123,22 +117,24 @@ describe('themeBoot', () => {
     syncThemeChrome(true);
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(document.documentElement.style.colorScheme).toBe('dark');
-    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_DARK);
-    expect(document.documentElement.style.backgroundColor).not.toBe('');
+    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(CODEX_DARK_SEEDS.surface);
+    // jsdom 会把内联 background-color 归一成 rgb()，所以按归一形式比。
+    expect(document.documentElement.style.backgroundColor).toBe(hexToRgbTriplet(CODEX_DARK_SEEDS.surface));
 
     syncThemeChrome(false);
     expect(document.documentElement.classList.contains('dark')).toBe(false);
     expect(document.documentElement.style.colorScheme).toBe('light');
-    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(BOOT_BACKGROUND_LIGHT);
+    expect(document.documentElement.style.getPropertyValue('--boot-bg')).toBe(CODEX_LIGHT_SEEDS.surface);
   });
 
-  it('mirrors the surface seed so the pre-CSS frame matches the app', () => {
+  it('sources the pre-CSS frame colour from the surface seed, not a copy of it', () => {
     // 首帧底色必须等于 colorDerivation 的 surface 种子，否则滚动回弹会露出一帧异色。
-    expect(APP_BACKGROUND_LIGHT.toLowerCase()).toBe(CODEX_LIGHT_SEEDS.surface.toLowerCase());
-    expect(APP_BACKGROUND_DARK.toLowerCase()).toBe(CODEX_DARK_SEEDS.surface.toLowerCase());
-    // 启动画面与 html 底色同值，两边都不跳色。
-    expect(BOOT_BACKGROUND_LIGHT).toBe(APP_BACKGROUND_LIGHT);
-    expect(BOOT_BACKGROUND_DARK).toBe(APP_BACKGROUND_DARK);
+    // 曾经这里有两个常量逐位复制种子，靠注释提醒人别改错；现在直接取种子本身。
+    expect(surfaceFor(false)).toBe(CODEX_LIGHT_SEEDS.surface);
+    expect(surfaceFor(true)).toBe(CODEX_DARK_SEEDS.surface);
+    // 内联脚本跑不了派生引擎，只能插值字面量 —— 所以必须断言它插的就是种子。
+    expect(THEME_BOOT_SCRIPT).toContain(`'${CODEX_DARK_SEEDS.surface}'`);
+    expect(THEME_BOOT_SCRIPT).toContain(`'${CODEX_LIGHT_SEEDS.surface}'`);
   });
 });
 

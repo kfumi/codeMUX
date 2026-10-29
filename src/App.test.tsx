@@ -62,10 +62,6 @@ vi.mock('./components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('./hooks/useTheme', () => ({
-  useTheme: () => {},
-}));
-
 vi.mock('./lib/logger', () => ({
   createLogger: () => ({
     error: vi.fn(),

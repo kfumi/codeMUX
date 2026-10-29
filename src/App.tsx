@@ -15,7 +15,6 @@ import { useIsNarrowViewport } from './hooks/useIsNarrowViewport';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useEmergencyStop } from './hooks/useEmergencyStop';
 import { useModelDisplayNames } from './hooks/useModelDisplayNames';
-import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import { isElectronDesktop } from './lib/desktop-bridge';
 import type { AgentInputPayload } from './types/agentInput';
@@ -29,7 +28,6 @@ import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { resolveProjectPath } from './lib/projectPath';
 import { daemonFacade } from './lib/facades/daemon-facade';
 import { useAgentStore } from './stores/agentStore';
-import './stores/appearanceStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSessionStore';
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
@@ -128,7 +126,6 @@ function App() {
   const sidePanelProjectPath = resolveProjectPath(activeProjectId, projects);
   const sidePanelScopeId = activeSessionId ?? (isDraftOpen ? `draft:${draftProjectId ?? 'none'}` : 'home');
 
-  useTheme();
   useAgentNotifications();
   useUnreadBadge();
   useModelDisplayNames();

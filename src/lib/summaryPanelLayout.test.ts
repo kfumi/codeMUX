@@ -9,6 +9,7 @@ import {
   resolveSummaryPanelView,
   SUMMARY_PANEL_WIDTH,
 } from './summaryPanelLayout';
+import { CONTENT_WIDTHS } from './appearance';
 
 /**
  * 冻结表：阈值直接照 Codex 的 `thread-summary-panel-layout` 反推。
@@ -140,9 +141,61 @@ describe('parseContentWidthToken', () => {
   });
 
   it('百分比、空值与垃圾值返回 null，由调用方退化', () => {
-    expect(parseContentWidthToken('100%')).toBeNull();
     expect(parseContentWidthToken('')).toBeNull();
     expect(parseContentWidthToken('auto')).toBeNull();
     expect(parseContentWidthToken('calc(48rem + 1px)')).toBeNull();
+    // 百分比依赖容器宽度：不给 availableWidth 就无从算起。
+    expect(parseContentWidthToken('100%')).toBeNull();
+  });
+
+  it('流式档的 calc(100% - gutter) 按容器宽度算，不是恒返回 null', () => {
+    // 回归用例：CONTENT_WIDTHS.stream 就是这种写法，而解析器曾经只认 px/rem，
+    // 于是流式档永远走「解析失败 → 正文铺满对话列」那条路，面板永远停在浮层。
+    expect(parseContentWidthToken('calc(100% - 48px)', 16, 800)).toBe(752);
+    expect(parseContentWidthToken('calc(100% - 3rem)', 16, 800)).toBe(752);
+    expect(parseContentWidthToken('100%', 16, 800)).toBe(800);
+  });
+
+  it('流式档的边距按 clamp(rem, vw, rem) 的当前取值算，不取上下限', () => {
+    // 窄屏取下限 2rem=32，宽屏按 6vw 放大，极宽时被上限 6rem=96 夹住。
+    expect(parseContentWidthToken('calc(100% - clamp(2rem, 6vw, 6rem))', 16, 400)).toBe(400 - 32);
+    expect(parseContentWidthToken('calc(100% - clamp(2rem, 6vw, 6rem))', 16, 1600)).toBe(1600 - 96);
+  });
+});
+
+describe('CONTENT_WIDTHS 与 parseContentWidthToken 之间的契约', () => {
+  // 这两个 module 之间曾经没有一条测试连着：CONTENT_WIDTHS 是字符串字面量，
+  // 解析器在另一个文件，改任何一边都不会让另一边变红。这组断言就是那条连接。
+  it('每个真实档位在常见宽度下都能解析出非 null', () => {
+    for (const [key, token] of Object.entries(CONTENT_WIDTHS)) {
+      for (const availableWidth of [320, 400, 600, 800, 1024, 1600, 2560]) {
+        const parsed = parseContentWidthToken(token, 16, availableWidth);
+        expect(parsed, `${key} @ ${availableWidth}`).not.toBeNull();
+        expect(parsed as number, `${key} @ ${availableWidth}`).toBeGreaterThan(0);
+        // 只有流式档的宽度依赖容器；定宽档是绝对值，容器比它窄时仍然返回 768
+        // （CSS 视觉上会收窄，但 token 本身不变）。
+        if (key === 'stream') {
+          expect(parsed as number, `${key} @ ${availableWidth}`).toBeLessThanOrEqual(availableWidth);
+        }
+      }
+    }
+  });
+
+  it('流式档随容器单调铺开，定宽档恒定', () => {
+    const widths = [400, 800, 1200, 1600];
+    const stream = widths.map((w) => parseContentWidthToken(CONTENT_WIDTHS.stream, 16, w) as number);
+    for (let i = 1; i < stream.length; i += 1) {
+      expect(stream[i]).toBeGreaterThan(stream[i - 1]);
+    }
+    for (const w of widths) {
+      expect(parseContentWidthToken(CONTENT_WIDTHS.fixed, 16, w)).toBe(768);
+    }
+  });
+
+  it('流式档的正文列宽严格小于对话列宽 —— 两侧确实让出了边距', () => {
+    // 「让出边距」正是面板档位算法的前提：half = (avail - contentWidth) / 2 > 0。
+    // 若流式档改成真正的 100%，这条会失败，提示人重新审视面板档位阈值。
+    const parsed = parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1200) as number;
+    expect(parsed).toBeLessThan(1200);
   });
 });

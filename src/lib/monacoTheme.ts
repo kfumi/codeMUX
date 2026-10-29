@@ -6,7 +6,7 @@
  * 1. **色板只有一个来源**。色值的权威定义在 `src/styles/globals.css`(`--card`、
  *    `--muted`、`--border` 等)。这里全部用 `getComputedStyle` 读回来,而不是在 TS
  *    里按 `prefs` 再推导一遍 —— 后者会形成第二份色板,和 CSS 迟早漂移。强调色是
- *    例外:它本来就是 `src/lib/appearance.ts` 里的 JS 数据,读它就是读同一个来源。
+ *    例外:它本来就是 `src/lib/appearance/presets.ts` 里的 JS 数据,读它就是读同一个来源。
  *
  * 2. **Monaco 吃不了 CSS 变量**。主题是 JS 对象,拿不到 `var(--card)`;字号与字体
  *    也只能通过 options 传。所以外观变化必须主动推给 Monaco,这是这套桥存在的

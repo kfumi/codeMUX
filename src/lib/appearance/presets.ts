@@ -1,10 +1,17 @@
+/**
+ * 外观的**纯数据与纯函数** —— 没有状态、不碰 DOM、不读 localStorage。
+ *
+ * 这一层刻意不含任何副作用：`index.ts` 负责「什么时候 apply」，
+ * `boot.ts` 负责「首帧之前怎么写」，而这个文件只回答「某个旋钮取什么值、
+ * 某个值合法吗」。测试可以直接调这些函数而不必搭 DOM。
+ */
+
 import {
   CODEX_DARK_SEEDS,
   CODEX_LIGHT_SEEDS,
   type ThemeSeeds,
-  deriveThemeTokens,
-} from './colorDerivation';
-import type { Theme } from '../types/provider';
+} from '../colorDerivation';
+import type { Theme } from '../../types/provider';
 
 export type AccentKey =
   | 'azure'
@@ -134,15 +141,6 @@ export const DEFAULT_PREFS: AppearancePrefs = {
   contentWidth: 'fixed',
 };
 
-const STORAGE_KEY = 'codemux:appearance';
-
-const LEGACY_UI_FONT_MAP: Record<string, string> = {
-  system: '',
-  inter: 'Inter',
-  'ibm-plex-sans': 'IBM Plex Sans',
-  'noto-sans-sc': 'Noto Sans SC',
-};
-
 export function buildUiFontFamily(family: string): string {
   const trimmed = family.trim();
   if (!trimmed) return SYSTEM_FONT_STACK;
@@ -179,82 +177,6 @@ export function clampContrast(value: number): number {
   return Math.min(CONTRAST_MAX, Math.max(CONTRAST_MIN, Math.round(value)));
 }
 
-export function loadPrefs(): AppearancePrefs {
-  if (typeof window === 'undefined') return DEFAULT_PREFS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      accent: isValidAccent(parsed.accent) ? parsed.accent : DEFAULT_PREFS.accent,
-      contrast: clampContrast(
-        typeof parsed.contrast === 'number' ? parsed.contrast : CONTRAST_DEFAULT,
-      ),
-      uiFontFamily: resolveStoredUiFontFamily(parsed),
-      uiFontSize: resolveStoredUiFontSize(parsed.uiFontSize, parsed.fontSize),
-      codeFontSize: resolveStoredCodeFontSize(parsed.codeFontSize),
-      radius: isValidRadius(parsed.radius) ? parsed.radius : DEFAULT_PREFS.radius,
-      contentWidth: isValidContentWidth(parsed.contentWidth) ? parsed.contentWidth : DEFAULT_PREFS.contentWidth,
-    };
-  } catch {
-    return DEFAULT_PREFS;
-  }
-}
-
-export function savePrefs(prefs: AppearancePrefs): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
-  } catch {
-    // ignore quota errors
-  }
-}
-
-export function resolveIsDark(theme: Theme | undefined): boolean {
-  if (theme === 'Dark') return true;
-  if (theme === 'Light') return false;
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-
-  const tokens = deriveThemeTokens(
-    seedsForPrefs(prefs, isDark),
-    isDark,
-  );
-  for (const [name, value] of Object.entries(tokens)) {
-    root.style.setProperty(name, value);
-  }
-
-  root.style.setProperty('--radius-scale', String(RADIUS_SCALES[prefs.radius]));
-  root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
-  root.style.setProperty('--font-ui', buildUiFontFamily(prefs.uiFontFamily));
-  root.style.setProperty('--ui-font-size', `${clampUiFontSize(prefs.uiFontSize)}px`);
-  root.style.setProperty('--code-font-size', `${clampCodeFontSize(prefs.codeFontSize)}px`);
-}
-
-function isValidAccent(v: unknown): v is AccentKey {
-  return typeof v === 'string' && v in ACCENTS;
-}
-
-function isValidRadius(v: unknown): v is RadiusKey {
-  return typeof v === 'string' && v in RADII;
-}
-
-function isValidContentWidth(v: unknown): v is ContentWidthKey {
-  return typeof v === 'string' && v in CONTENT_WIDTHS;
-}
-
-function resolveStoredUiFontFamily(parsed: Record<string, unknown>): string {
-  if (typeof parsed.uiFontFamily === 'string') return parsed.uiFontFamily;
-  if (typeof parsed.uiFont === 'string') {
-    return LEGACY_UI_FONT_MAP[parsed.uiFont] ?? DEFAULT_PREFS.uiFontFamily;
-  }
-  return DEFAULT_PREFS.uiFontFamily;
-}
-
 export function clampUiFontSize(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_PREFS.uiFontSize;
   return Math.min(UI_FONT_SIZE_MAX, Math.max(UI_FONT_SIZE_MIN, Math.round(value)));
@@ -265,16 +187,32 @@ export function clampCodeFontSize(value: number): number {
   return Math.min(CODE_FONT_SIZE_MAX, Math.max(CODE_FONT_SIZE_MIN, Math.round(value)));
 }
 
-function resolveStoredUiFontSize(currentValue: unknown, legacyValue: unknown): number {
-  if (typeof currentValue === 'number') return clampUiFontSize(currentValue);
-
-  if (legacyValue === 'compact') return 13;
-  if (legacyValue === 'standard') return 14;
-  if (legacyValue === 'comfortable') return 16;
-
-  return DEFAULT_PREFS.uiFontSize;
+/**
+ * 解析「当前生效的明暗」。
+ *
+ * 显式主题直接取，「跟随系统」按系统偏好解析。这是**唯一**一份解析实现 ——
+ * 曾经 `appearance.ts` / `themeBoot.ts` / `settingsStore.ts` 各有一份，
+ * 三者对「theme 缺失时怎么办」的答案还不一致。
+ */
+export function resolveIsDark(theme: Theme | undefined): boolean {
+  if (theme === 'Dark') return true;
+  if (theme === 'Light') return false;
+  // 首帧脚本里同样有 `window.matchMedia &&` 这个守卫：没有 matchMedia 的环境
+  // （老浏览器、jsdom 默认、隐私模式的部分实现）按浅色处理，不能直接抛。
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function resolveStoredCodeFontSize(value: unknown): number {
-  return typeof value === 'number' ? clampCodeFontSize(value) : DEFAULT_PREFS.codeFontSize;
+export function isValidAccent(v: unknown): v is AccentKey {
+  return typeof v === 'string' && v in ACCENTS;
+}
+
+export function isValidRadius(v: unknown): v is RadiusKey {
+  return typeof v === 'string' && v in RADII;
+}
+
+export function isValidContentWidth(v: unknown): v is ContentWidthKey {
+  return typeof v === 'string' && v in CONTENT_WIDTHS;
 }

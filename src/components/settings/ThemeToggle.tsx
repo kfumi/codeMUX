@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import {
@@ -13,9 +13,10 @@ import {
   type ContentWidthKey,
   RADIUS_PREVIEW,
   type RadiusKey,
-  resolveIsDark,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
+  getIsDark,
+  subscribeIsDark,
 } from '../../lib/appearance';
 import { cn } from '../../lib/utils';
 import { useAppearanceStore } from '../../stores/appearanceStore';
@@ -154,30 +155,21 @@ const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
 const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
 
 /**
- * 解析当前生效的明暗：显式主题直接取，「跟随系统」按系统偏好解析 —— 色点、十六进制
- * 与「黑/白」显示名都要用这一份结果，不能拿 `theme === 'Dark'` 硬判(那会把「跟随
- * 系统」当成浅色，系统为深色时面板仍显示黑色)。系统偏好变化时同步重渲染。
+ * 当前生效的明暗 —— 色点、十六进制与「黑/白」显示名都要用它。
+ *
+ * 不再自己解析、也不再自己订阅 `matchMedia`：明暗归外观模块，这里只是它的一个
+ * 消费方。曾经这里有一份 `resolveIsDark(theme)` 加一个监听器，等于对
+ * 「明暗是什么」持有一套独立理解 —— 与模块那份漂移只是时间问题。
  */
-function useResolvedIsDark(theme: Theme): boolean {
-  const [isDark, setIsDark] = useState(() => resolveIsDark(theme));
-
-  useEffect(() => {
-    setIsDark(resolveIsDark(theme));
-    if (theme !== 'System' || typeof window === 'undefined') return;
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => setIsDark(resolveIsDark(theme));
-    media.addEventListener('change', handler);
-    return () => media.removeEventListener('change', handler);
-  }, [theme]);
-
-  return isDark;
+function useResolvedIsDark(): boolean {
+  return useSyncExternalStore(subscribeIsDark, getIsDark, getIsDark);
 }
 
 export function ThemeToggle() {
   const config = useSettingsStore((state) => state.config);
   const setTheme = useSettingsStore((state) => state.setTheme);
   const currentTheme: Theme = config?.theme ?? 'System';
-  const isDark = useResolvedIsDark(currentTheme);
+  const isDark = useResolvedIsDark();
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);

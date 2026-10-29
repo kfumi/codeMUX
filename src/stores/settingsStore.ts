@@ -23,22 +23,19 @@ import { normalizeComputerUse, type ComputerUseSettings } from '../lib/computerU
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 import { normalizeImmediateRunMode } from '../lib/agentSteer';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
-import { cacheBootTheme, syncThemeChrome } from '../lib/themeBoot';
+import { setTheme as setAppearanceTheme } from '../lib/appearance';
 
+/**
+ * 把主题交给外观模块。主题是 daemon 配置的一部分，但**应用**外观不是 ——
+ * 模块自己知道怎么合并 theme 与 prefs、怎么在配置未到时回落。
+ *
+ * 曾经这里有一份 `applyThemeLocally`：自己判深浅、自己同步 chrome、自己缓存。
+ * 那是「明暗是什么」的第三份实现（另两份在 appearance.ts 与 themeBoot.ts），
+ * 且它不看 boot 缓存 —— 配置未到时按系统偏好算，而 prefs 那条路径按 boot 缓存算，
+ * 于是会出现深色 class + 亮色强调色。
+ */
 export function applyThemeLocally(theme: Theme) {
-  if (typeof document === 'undefined') {
-    return;
-  }
-
-  const prefersDark = typeof window !== 'undefined'
-    && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const isDark = theme === 'Dark' ? true : theme === 'Light' ? false : prefersDark;
-
-  // `.dark` / color-scheme / html 与启动画面底色一起更新,避免 html 上留着上一次
-  // 的底色(切主题后滚动回弹会露出来);并把原始枚举缓存给 index.html 的首帧引导
-  // 脚本 —— 那是深色用户下一次冷启动不闪白的关键。见 src/lib/themeBoot.ts。
-  syncThemeChrome(isDark);
-  cacheBootTheme(theme);
+  setAppearanceTheme(theme);
 }
 
 interface SettingsState {

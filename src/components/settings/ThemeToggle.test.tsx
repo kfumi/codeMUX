@@ -22,6 +22,17 @@ vi.mock('../../stores/settingsStore', () => ({
     selector({ config: { theme: uiState.theme }, setTheme }),
 }));
 
+// 明暗来自外观模块的 getIsDark / subscribeIsDark；prefs 仍来自投影 store。
+let appearanceIsDark = false;
+vi.mock('../../lib/appearance', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/appearance')>();
+  return {
+    ...actual,
+    getIsDark: () => appearanceIsDark,
+    subscribeIsDark: () => () => {},
+  };
+});
+
 vi.mock('../../stores/appearanceStore', () => ({
   useAppearanceStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
     prefs: {
@@ -46,6 +57,11 @@ vi.mock('../../stores/appearanceStore', () => ({
 
 import { ACCENTS, accentSwatch, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '../../lib/appearance';
 
+/** 让外观模块报出指定的明暗（组件通过 useSyncExternalStore 读它）。 */
+function stubAppearanceIsDark(isDark: boolean): void {
+  appearanceIsDark = isDark;
+}
+
 vi.mock('../../lib/systemFonts', () => ({
   loadSystemFonts: vi.fn().mockResolvedValue(['Segoe UI', 'Microsoft YaHei UI']),
 }));
@@ -58,6 +74,7 @@ describe('ThemeToggle', () => {
     setTheme.mockClear();
     uiState.theme = 'Light';
     uiState.accent = 'azure';
+    appearanceIsDark = false;
     Element.prototype.scrollIntoView = vi.fn();
     // jsdom 没实现 matchMedia / ResizeObserver,Radix 的浮层要这两样。
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -138,16 +155,14 @@ describe('ThemeToggle', () => {
     expect(accentTrigger.textContent).toContain(ACCENTS.azure.name);
   });
 
-  it('跟随系统时色点、十六进制与显示名按系统深浅解析,而不是恒按浅色', () => {
+  it('色点、十六进制与显示名取自外观模块的明暗,不自己解析', () => {
     uiState.theme = 'System';
     uiState.accent = 'graphite';
-    // 系统为深色:面板必须显示白色那一面(hex + 色点 + 名称「白」)。
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query.includes('prefers-color-scheme: dark'),
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
+    // 明暗现在归外观模块：组件通过 useSyncExternalStore 读 getIsDark()。
+    // 这里直接把模块报成深色，断言面板显示白色那一面(hex + 色点 + 名称「白」)。
+    // 曾经组件自己 resolveIsDark(theme) + 自己订阅 matchMedia —— 那是「明暗是什么」
+    // 的第二份实现，与本轮合并的方向相反。
+    stubAppearanceIsDark(true);
 
     render(<ThemeToggle />);
 

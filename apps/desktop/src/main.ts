@@ -322,7 +322,7 @@ function createMainWindow(): BrowserWindow {
     resizable: true,
     fullscreenable: true,
     // 窗口创建到渲染层首帧之间的底色。渲染层在 index.html <head> 里有一段同步的
-    // 主题引导(见 src/lib/themeBoot.ts),首帧就按用户主题上色并接管 #boot 加载画面,
+    // 主题引导(见 src/lib/appearance/boot.ts),首帧就按用户主题上色并接管 #boot 加载画面,
     // 所以这里取深色与深色主题无接缝;浅色主题只在这之前露一两帧,随后被浅色覆盖。
     // 取值与 colorDerivation 的深色 surface 种子一致(#111111)。
     backgroundColor: '#111111',
