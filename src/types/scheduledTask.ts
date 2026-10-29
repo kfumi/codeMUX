@@ -1,5 +1,5 @@
 import type { AgentKind, AgentPlanMode, ReasoningEffort } from './session';
-import type { AgentPermissionConfig } from '../lib/agentPermissions';
+import type { AgentPermissionConfig } from '../lib/agentKind';
 
 export type ScheduleKind = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
 export type TaskRunStatus = 'running' | 'completed' | 'failed' | 'awaiting_input' | 'skipped';

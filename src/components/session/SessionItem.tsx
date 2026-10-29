@@ -17,7 +17,7 @@ import { TooltipHint } from '../ui/tooltip';
 import { sessionAwaitsUserConfirmation } from '../../lib/pendingUserInput';
 import { cn } from '../../lib/utils';
 import type { AgentPermissionRequest } from '../../types/agent';
-import { getAgentDefinition, type AgentDefinition } from '../../types/agentRegistry';
+import { describeKind, type AgentKindDescriptor } from '../../lib/agentKind';
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -63,7 +63,7 @@ function SessionStatusIcon({
 }: {
   session: Session;
   isActive: boolean;
-  agentDef: AgentDefinition | undefined;
+  agentDef: AgentKindDescriptor | undefined;
 }) {
   // 状态点跟随智能体图标右下角(参考 圆点头像徽章):进行中=黄色、出错=红色、
   // 未读=绿色;"进行中"的转圈统一放到行右侧(时间/操作区域)。
@@ -82,7 +82,7 @@ function SessionStatusIcon({
   return (
     <span className={cn('relative flex h-4 w-4 shrink-0 transition-opacity duration-normal', isActive ? 'opacity-100' : 'opacity-70')}>
       {agentDef ? (
-        <AgentBrandIcon agent={agentDef} size="sm" />
+        <AgentBrandIcon brandIcon={agentDef.brandIcon} fallbackLabel={agentDef.label} size="sm" />
       ) : (
         <span className={cn(
           'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-ui-micro font-semibold tracking-normal',
@@ -121,7 +121,7 @@ export function SessionItem({
   // 拦截点击),操作统一走长按/右键菜单;桌面保持 hover 展开不变。
   const isNarrow = useIsNarrowViewport();
   const canOpenExplorer = useHostCapabilities().has('shell.explorer');
-  const agentDef = getAgentDefinition(session.agent_kind);
+  const agentDef = describeKind(session.agent_kind);
   const flowActive = useSessionFlowActive(session.id);
   const awaitsConfirmation = useAgentStore((state) => sessionAwaitsUserConfirmation(
     state.events[session.id] ?? EMPTY_EVENTS,

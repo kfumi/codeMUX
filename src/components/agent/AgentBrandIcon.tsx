@@ -5,16 +5,16 @@ import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 
 import { cn } from '../../lib/utils';
-import type { AgentDefinition } from '../../types/agentRegistry';
+import type { AgentBrandIconName } from '../../lib/agentKind';
 
-const AGENT_ICON_COLORS: Partial<Record<AgentDefinition['icon'], string>> = {
+const AGENT_ICON_COLORS: Partial<Record<AgentBrandIconName, string>> = {
   claude: 'text-foreground',
   codex: 'text-foreground',
   gemini: 'text-foreground',
   opencode: 'text-foreground',
 };
 
-const AGENT_BRAND_SVGS: Partial<Record<AgentDefinition['icon'], string>> = {
+const AGENT_BRAND_SVGS: Partial<Record<AgentBrandIconName, string>> = {
   claude: claudeSvg,
   codex: openAiSvg,
   gemini: geminiSvg,
@@ -23,13 +23,18 @@ const AGENT_BRAND_SVGS: Partial<Record<AgentDefinition['icon'], string>> = {
 };
 
 interface AgentBrandIconProps {
-  agent: AgentDefinition;
+  /**
+   * 品牌图标标识。过去这里收整个 `AgentDefinition`，但组件只读 `icon` 与 `label`
+   * 两个字段 —— 改收标识与回落文案后，调用方不必为了画一个图标构造完整规格。
+   */
+  brandIcon: AgentBrandIconName;
+  /** 没有品牌 SVG 时的字母回落（取前两个字符）。 */
+  fallbackLabel?: string;
   size?: 'sm' | 'md' | 'hero';
 }
 
-export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
-  const brandSvg = AGENT_BRAND_SVGS[agent.icon];
-  // iconClassName no longer needed — SVG dimensions are set inline
+export function AgentBrandIcon({ brandIcon, fallbackLabel = '', size = 'sm' }: AgentBrandIconProps) {
+  const brandSvg = AGENT_BRAND_SVGS[brandIcon];
   const wrapperClassName =
     size === 'hero'
       ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center text-foreground'
@@ -48,7 +53,7 @@ export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
 
     return (
       <span
-        className={cn(wrapperClassName, AGENT_ICON_COLORS[agent.icon])}
+        className={cn(wrapperClassName, AGENT_ICON_COLORS[brandIcon])}
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: cleanedSvg }}
       />
@@ -67,7 +72,7 @@ export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
       )}
       aria-hidden="true"
     >
-      {agent.label.slice(0, 2).toUpperCase()}
+      {fallbackLabel.slice(0, 2).toUpperCase()}
     </span>
   );
 }

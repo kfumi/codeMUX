@@ -32,7 +32,7 @@ import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
 import { countDiffLines, parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
-import { getAgentDefinition } from '@/types/agentRegistry';
+import { describeKind } from '@/lib/agentKind';
 import type { AgentKind } from '@/types/session';
 import { ReferencedMarkdownFilesList } from '../ReferencedMarkdownFilesList';
 import { extractReferencedMarkdownFiles } from '@/lib/referencedMarkdownFiles';
@@ -760,7 +760,7 @@ function agentKindDisplayLabel(kind?: string): string | undefined {
     return undefined;
   }
 
-  return getAgentDefinition(kind as AgentKind)?.label ?? kind;
+  return describeKind(kind as AgentKind)?.label ?? kind;
 }
 
 function nativeSessionRebuiltCaption(agentKind?: string): string {

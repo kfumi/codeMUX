@@ -2,7 +2,7 @@ import { Check, Info } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
-import { isPlanApprovalPermission } from '../../lib/agentPermissions';
+import { isPlanApprovalPermission } from '../../lib/agentKind';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';

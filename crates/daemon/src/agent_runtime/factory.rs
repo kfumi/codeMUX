@@ -1,38 +1,14 @@
-use super::claude_code::ClaudeCodeRuntime;
-use super::codex::CodexRuntime;
-use super::opencode::OpenCodeRuntime;
-use super::pi::PiRuntime;
-use super::types::AgentRuntime;
+use super::types::AgentRuntimeKind;
 
-/// Resolve a runtime instance for the given agent_kind string.
-/// Falls back to ClaudeCodeRuntime for unknown kinds.
-pub fn runtime_for_agent_kind(agent_kind: &str) -> Box<dyn AgentRuntime> {
-    match agent_kind {
-        "codex" => Box::new(CodexRuntime),
-        "opencode" => Box::new(OpenCodeRuntime),
-        "pi" => Box::new(PiRuntime),
-        _ => Box::new(ClaudeCodeRuntime),
-    }
+/// 解析 kind 字符串对应的运行时种类。
+///
+/// 唯一的用途是「这个 kind 最终由哪个运行时承载」这类判断。daemon 不持有运行时
+/// 对象：真正的运行时在 sidecar 内，daemon 只发命令信封。
+pub fn runtime_kind_for(agent_kind: &str) -> AgentRuntimeKind {
+    AgentRuntimeKind::from_agent_kind(agent_kind)
 }
 
-/// Look up the session's agent_kind from the database and return a runtime instance.
-pub fn session_runtime(
-    db: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<Box<dyn AgentRuntime>, String> {
-    let agent_kind: String = db
-        .query_row(
-            "SELECT agent_kind FROM sessions WHERE id = ?1",
-            rusqlite::params![session_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("Session not found {}: {}", session_id, e))?;
-
-    Ok(runtime_for_agent_kind(&agent_kind))
-}
-
-/// Look up the session's agent_kind and return the kind name string.
-/// Used by agent::commands to pass agent_kind to the sidecar.
+/// 查会话的 kind 并返回其运行时种类名。
 pub fn session_runtime_kind_name(
     db: &rusqlite::Connection,
     session_id: &str,
@@ -53,27 +29,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_claude_and_codex_runtime_variants() {
-        let claude = runtime_for_agent_kind("claude_code");
-        assert_eq!(claude.kind_name(), "claude_code");
-
-        let codex = runtime_for_agent_kind("codex");
-        assert_eq!(codex.kind_name(), "codex");
-
-        let opencode = runtime_for_agent_kind("opencode");
-        assert_eq!(opencode.kind_name(), "opencode");
-
-        let pi = runtime_for_agent_kind("pi");
-        assert_eq!(pi.kind_name(), "pi");
+    fn resolves_each_runtime_kind() {
+        assert_eq!(runtime_kind_for("claude_code").as_str(), "claude_code");
+        assert_eq!(runtime_kind_for("codex").as_str(), "codex");
+        assert_eq!(runtime_kind_for("opencode").as_str(), "opencode");
+        assert_eq!(runtime_kind_for("pi").as_str(), "pi");
     }
 
     #[test]
-    fn falls_back_to_claude_for_unknown() {
-        let runtime = runtime_for_agent_kind("gemini_cli");
-        assert_eq!(runtime.kind_name(), "claude_code");
-
-        let runtime = runtime_for_agent_kind("");
-        assert_eq!(runtime.kind_name(), "claude_code");
+    fn falls_back_to_claude_for_unknown_kinds() {
+        // `gemini_cli` 与未来未知值都走 claude 回退 —— 这是既有行为，
+        // `mcp_tooling_applies_to` 依赖它给这些会话注入工具面。
+        assert_eq!(runtime_kind_for("gemini_cli").as_str(), "claude_code");
+        assert_eq!(runtime_kind_for("").as_str(), "claude_code");
     }
 
     #[test]

@@ -60,7 +60,7 @@ import { useBrowserElementStore } from '../../../stores/browserElementStore';
 import { BrowserElementPills } from '../../browser/BrowserElementPills';
 import { usePreviewStore, type FileTreeNodeData, type RootFileTree } from '../../../stores/previewStore';
 import { useSessionStore } from '../../../stores/sessionStore';
-import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
+import { mapExecutionModeToPermissionConfig } from '../../../lib/agentKind';
 import type { AgentKind } from '../../../types/session';
 import type { ProjectSkill } from '../../../types/skill';
 import { ContextDisplay } from '../../assistant-ui/context-display';

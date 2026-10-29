@@ -1,49 +1,26 @@
-import type { AgentKind } from '../types/session';
-
-export type AgentExecutionMode = 'confirm_before_edit' | 'auto_edit' | 'plan' | 'full_access' | 'read_only' | 'auto_review';
-export type AgentPlanMode = 'off' | 'on';
-export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
-export type CodexWorkflowMode = 'read-only' | 'auto' | 'auto-review' | 'full-access';
-
-export type OpenCodePermissionConfig = {
-  kind: 'opencode';
-  /**
-   * Mirrors the official OpenCode "auto-approve permissions" toggle: when on,
-   * permission rules that would ask are auto-approved (explicit deny rules are
-   * still enforced by the server). Plan vs build stays an orthogonal
-   * plan_mode toggle, like the official Build/Plan agent selector.
-   */
-  autoApprovePermissions: boolean;
-};
-
-export type ClaudePermissionConfig = {
-  kind: 'claude_code';
-  permissionMode: ClaudePermissionMode;
-};
-
-export type CodexPermissionConfig = {
-  kind: 'codex';
-  workflowMode: CodexWorkflowMode;
-  networkAccessEnabled: boolean;
-};
-
 /**
- * pi 无原生权限模式，档位由临时扩展的 tool_call 拦截策略实现：确认编辑/
- * 仅确认命令/全放行（plan 档对 pi 不适用，选择器不提供）。变更经 pi 进程
- * 重建于下一轮生效（与模型/思考等级同机制）。
+ * 档位 ↔ 原生权限配置的映射 —— 四家原生权限词汇的差异全部关在这里。
+ *
+ * 调用方（选择器、设置页、store）只讲 `AgentExecutionMode`，不再各自写
+ * `if (agentKind === 'codex')`。plan 的正交性由 `kinds.ts` 的 `planMode` 字段驱动，
+ * 不在这里按 kind 字符串分支。
  */
-export type PiPermissionConfig = {
-  kind: 'pi';
-  executionMode: 'confirm_before_edit' | 'auto_edit' | 'full_access';
-};
+
+import type { AgentKind } from '../../types/session';
+import { AGENT_KIND_SPECS } from './kinds';
+import {
+  type AgentExecutionMode,
+  type AgentPermissionConfig,
+  type ClaudePermissionMode,
+  type CodexWorkflowMode,
+  type PiPermissionConfig,
+} from './types';
 
 const PI_EXECUTION_MODES: PiPermissionConfig['executionMode'][] = [
   'confirm_before_edit',
   'auto_edit',
   'full_access',
 ];
-
-export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig | OpenCodePermissionConfig | PiPermissionConfig;
 
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
   'default',
@@ -59,7 +36,7 @@ const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-re
 // Shared defaults — keep in sync with apps/sidecar/src/agentPermissions.ts.
 // Default tier mirrors the official ChatGPT Codex App's conservative
 // 「请求批准」selector entry (workspace-write + on-request).
-const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
+const CODEX_DEFAULT_PERMISSIONS: Omit<Extract<AgentPermissionConfig, { kind: 'codex' }>, 'kind'> = {
   workflowMode: 'auto',
   networkAccessEnabled: true,
 };
@@ -141,6 +118,68 @@ export function mapExecutionModeToPermissionConfig(
 }
 
 /**
+ * 选一个档位之后，配置与 plan 一起落地的原子结果。
+ *
+ * 这是选择器唯一需要的写入路径：它同时给出「原生配置」和「plan_mode 该变成什么」，
+ * 免掉调用方自己拼 `if (kind === 'codex')` 的 plan 判断。plan 的正交性从规格表读
+ * （ADR 0010），调用方不需要知道 `planModeShape` 这个概念。
+ *
+ * - `via-tier`：plan 是档位之一 → 选中即 on，选走即 off。
+ * - `orthogonal-toggle` / `unsupported`：档位不触碰 plan → 原样保留。
+ */
+export function applyTier(
+  agentKind: AgentKind,
+  mode: AgentExecutionMode,
+  previousConfig: unknown,
+  planMode: 'off' | 'on',
+): { config: AgentPermissionConfig; planMode: 'off' | 'on' } {
+  const config = mapExecutionModeToPermissionConfig(agentKind, mode, previousConfig);
+  const planModeShape = AGENT_KIND_SPECS.find((spec) => spec.kind === agentKind)?.planMode
+    ?? 'unsupported';
+  const nextPlanMode = planModeShape === 'via-tier'
+    ? (mode === 'plan' ? 'on' as const : 'off' as const)
+    : planMode;
+  return { config: resolveEffectivePermissionConfig(agentKind, config, nextPlanMode), planMode: nextPlanMode };
+}
+
+/**
+ * 从存下来的快照反推它落在哪个档位 —— 选择器显示当前选中项用。
+ *
+ * 四家的反推规则不同，全部收在这里；组件不再各自实现一遍。
+ */
+export function inferExecutionMode(
+  agentKind: AgentKind,
+  permissionConfig: AgentPermissionConfig,
+  planMode: 'off' | 'on',
+): AgentExecutionMode {
+  if (agentKind === 'opencode') {
+    // Plan vs build mirrors the official agent selector and is carried by
+    // the orthogonal plan_mode toggle; the snapshot only tracks the shield.
+    if (planMode === 'on') return 'plan';
+    return 'confirm_before_edit';
+  }
+
+  if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
+    // Plan Mode is orthogonal (ADR 0010 Decision 4): the selector always
+    // reflects the stored Workflow tier, never the plan toggle.
+    return codexWorkflowModeToExecutionMode(permissionConfig.workflowMode);
+  }
+
+  if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {
+    if (planMode === 'on' || permissionConfig.permissionMode === 'plan') return 'plan';
+    if (permissionConfig.permissionMode === 'bypassPermissions') return 'full_access';
+    if (permissionConfig.permissionMode === 'auto') return 'auto_review';
+    if (permissionConfig.permissionMode === 'acceptEdits') return 'auto_edit';
+  }
+
+  if (agentKind === 'pi' && permissionConfig.kind === 'pi') {
+    return permissionConfig.executionMode;
+  }
+
+  return 'confirm_before_edit';
+}
+
+/**
  * Maps a Codex Workflow Mode tier onto the shared execution-mode enum.
  * Inverse of the Codex branch in {@link mapExecutionModeToPermissionConfig};
  * plan mode stays orthogonal (ADR 0010) and is applied by callers.
@@ -175,31 +214,26 @@ export function isPlanApprovalPermission(
     || metadata?.presentation === 'plan-approval';
 }
 
-export function isOpenCodeAutoApproveEnabled(config: unknown): boolean {
-  return Boolean(config)
-    && typeof config === 'object'
-    && (config as Record<string, unknown>).kind === 'opencode'
-    && (config as Record<string, unknown>).autoApprovePermissions === true;
-}
-
-export function resolveEffectivePermissionConfig(
+/**
+ * Claude 的 plan 由 `permissionMode: 'plan'` 承载，因此「plan_mode 开着」必须
+ * 覆盖快照里的档位。其余三家的 plan 不走这条快照（Codex 正交、OpenCode 走
+ * plan_mode 列、pi 没有 plan）。
+ *
+ * 内部函数：外部只需要 `applyTier()`，它已经把这一步合并进原子写入。
+ */
+function resolveEffectivePermissionConfig(
   agentKind: AgentKind,
   config: unknown,
-  planMode: AgentPlanMode,
+  planMode: 'off' | 'on',
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
-  if (agentKind === 'opencode') {
-    // Plan vs build is carried by the orthogonal plan_mode column; the
-    // serialized snapshot only tracks the auto-approve toggle.
-    return normalized;
-  }
   if (agentKind === 'claude_code' && planMode === 'on') {
     return {
       kind: 'claude_code',
       permissionMode: 'plan',
     };
   }
-  // Codex: plan mode is orthogonal — the Workflow tier snapshot stands.
+  // 其余三家：plan 是正交的，快照照原样留下。
   return normalized;
 }
 
@@ -249,7 +283,7 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
  * migrated by sandbox mode: read-only → read-only, workspace-write → auto,
  * danger-full-access → full-access.
  */
-export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWorkflowMode {
+function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWorkflowMode {
   if (isCodexWorkflowMode(raw.workflowMode)) {
     return raw.workflowMode;
   }
@@ -258,6 +292,13 @@ export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWor
   if (sandboxMode === 'workspace-write') return 'auto';
   if (sandboxMode === 'danger-full-access') return 'full-access';
   return CODEX_DEFAULT_PERMISSIONS.workflowMode;
+}
+
+function isOpenCodeAutoApproveEnabled(config: unknown): boolean {
+  return Boolean(config)
+    && typeof config === 'object'
+    && (config as Record<string, unknown>).kind === 'opencode'
+    && (config as Record<string, unknown>).autoApprovePermissions === true;
 }
 
 function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {

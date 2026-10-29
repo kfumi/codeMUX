@@ -1,12 +1,12 @@
 import type { AppConfig } from '../types/provider';
 import type { ScheduledTaskDraft } from '../types/scheduledTask';
 import type { AgentKind } from '../types/session';
-import { getDefaultAgentKind } from '../types/agentRegistry';
+import { getDefaultAgentKind } from './agentKind';
 import {
   buildDefaultPermissionConfig,
   serializePermissionConfig,
   type AgentPermissionConfig,
-} from './agentPermissions';
+} from './agentKind';
 
 export interface AgentModelOption {
   modelId: string;

@@ -26,7 +26,7 @@ use super::context_usage::{
 };
 use super::native_jsonl::read_json_stream_values;
 use super::{spawn_sidecar, SidecarHandle};
-use crate::agent_runtime::opencode::OpenCodeRuntime;
+use crate::agent_runtime::opencode::OpenCodeCommands;
 
 pub(crate) fn home_dir() -> Result<PathBuf, String> {
     std::env::var("USERPROFILE")
@@ -1561,8 +1561,7 @@ pub(crate) fn build_ensure_session_command(
 /// ClaudeCodeRuntime,因此同样拿到工具面 —— 这正是按字符串排除时静默丢工具
 /// 的那个缺口。新增运行时若不消费 `mcpServers`,这条断言会先失败。
 fn mcp_tooling_applies_to(agent_kind: &str) -> bool {
-    let runtime_kind =
-        crate::agent_runtime::factory::runtime_for_agent_kind(agent_kind).kind_name();
+    let runtime_kind = crate::agent_runtime::factory::runtime_kind_for(agent_kind).as_str();
     matches!(runtime_kind, "claude_code" | "codex" | "opencode" | "pi")
 }
 
@@ -1691,7 +1690,7 @@ pub async fn interrupt_agent_session_for_companion(
         };
         if let Some(handle) = sidecar {
             let _ = handle
-                .send_command(&OpenCodeRuntime::interrupt_command().to_string())
+                .send_command(&OpenCodeCommands::interrupt_command().to_string())
                 .await;
             agent_state
                 .sidecars
@@ -1966,7 +1965,7 @@ pub async fn start_agent_session_core(
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
         let mut input_cmd =
-            OpenCodeRuntime::send_input_command(&session_id, prompt, display_content.as_deref());
+            OpenCodeCommands::send_input_command(&session_id, prompt, display_content.as_deref());
         if let Some(payload) = input_payload {
             input_cmd["inputPayload"] = payload;
         }
@@ -2016,7 +2015,7 @@ pub async fn reset_agent_session_for_companion(
         let _lifecycle_guard = lifecycle_lock.lock().await;
         let agent_kind = resolve_session_agent_kind(state, session_id)?;
         invalidate_session_generation(agent_state, session_id).await;
-        let cmd = OpenCodeRuntime::reset_session_command(session_id);
+        let cmd = OpenCodeCommands::reset_session_command(session_id);
 
         let command_sender = {
             let sidecars = agent_state.sidecars.lock().await;
@@ -3163,7 +3162,7 @@ mod tests {
         // 与 factory 的回退保持一致:除 pi/codex/opencode 外都是 claude。
         for kind in ["claude_code", "gemini_cli", "unknown"] {
             assert_eq!(
-                crate::agent_runtime::factory::runtime_for_agent_kind(kind).kind_name(),
+                crate::agent_runtime::factory::runtime_kind_for(kind).as_str(),
                 "claude_code"
             );
         }

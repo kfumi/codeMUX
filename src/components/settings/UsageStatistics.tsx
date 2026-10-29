@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { buildTokenThresholds } from '../../lib/usageHeatmapScale';
-import { getAgentDefinition } from '../../types/agentRegistry';
+import { describeKind } from '../../lib/agentKind';
 import type { TokenBreakdownResponse, UsageStatsResponse } from '../../types/usage';
 import { Button } from '../ui/button';
 import {
@@ -252,11 +252,11 @@ export function UsageStatistics() {
           </SelectTrigger>
           <SelectContent>
             {AGENT_OPTIONS.map((opt) => {
-              const agentDef = opt.value === 'all' ? null : getAgentDefinition(opt.value as never);
+              const agentDef = opt.value === 'all' ? null : describeKind(opt.value as never);
               return (
                 <SelectItem key={opt.value} value={opt.value}>
                   <span className="flex items-center gap-2">
-                    {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
+                    {agentDef && <AgentBrandIcon brandIcon={agentDef.brandIcon} fallbackLabel={agentDef.label} size="sm" />}
                     {opt.label}
                   </span>
                 </SelectItem>
@@ -342,11 +342,11 @@ export function UsageStatistics() {
               {mergedAgentDistribution.map((item) => {
                 const percent =
                   agentTokenTotal > 0 ? (item.totalTokens / agentTokenTotal) * 100 : 0;
-                const agentDef = getAgentDefinition(item.agentKind as never);
+                const agentDef = describeKind(item.agentKind as never);
                 return (
                   <div key={item.agentKind} className="flex items-center gap-3 text-sm">
                     <span className="flex w-24 shrink-0 items-center gap-1.5 truncate text-foreground sm:w-28 sm:gap-2">
-                      {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
+                      {agentDef && <AgentBrandIcon brandIcon={agentDef.brandIcon} fallbackLabel={agentDef.label} size="sm" />}
                       {agentLabel(item.agentKind)}
                     </span>
                     <div className="relative h-6 flex-1 overflow-hidden rounded bg-muted/40">

@@ -14,7 +14,7 @@ import type {
 } from '../types/provider';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useNewSessionStore } from './newSessionStore';
-import { getDefaultAgentKind } from '../types/agentRegistry';
+import { getDefaultAgentKind } from '../lib/agentKind';
 import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
 import { normalizeGitSettings } from '../lib/gitSettings';

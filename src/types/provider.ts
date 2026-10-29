@@ -1,5 +1,5 @@
 import type { AgentKind, ReasoningEffort } from './session';
-import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig, PiPermissionConfig } from '../lib/agentPermissions';
+import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig, PiPermissionConfig } from '../lib/agentKind';
 import type { OpenTarget } from '../lib/openTargets';
 
 export type Theme = 'Light' | 'Dark' | 'System';

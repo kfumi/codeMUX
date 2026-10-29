@@ -4,16 +4,11 @@ import {
   Check,
   CheckCircle2,
   CircleDot,
-  ClipboardList,
   Download,
-  Hand,
   Loader2,
   RefreshCw,
-  Shield,
-  ShieldCheck,
   TriangleAlert,
   Upload,
-  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,11 +23,13 @@ import type {
 import {
   codexWorkflowModeToExecutionMode,
   mapExecutionModeToPermissionConfig,
+  permissionMenu,
   type AgentExecutionMode,
   type AgentPermissionConfig,
   type ClaudePermissionMode,
   type CodexWorkflowMode,
-} from '../../lib/agentPermissions';
+} from '../../lib/agentKind';
+import { tierIcon } from '../agent/tierIcon';
 import { cn } from '../../lib/utils';
 import { isProviderUsable } from '../../lib/modelProviders';
 import { resolveModelDisplayName } from '../../lib/providerModels';
@@ -42,7 +39,7 @@ import {
   useOpenCodeFreeModelOptions,
 } from '../../hooks/useAgentModels';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { getAgentDefinition } from '../../types/agentRegistry';
+import { describeKind, selectableKinds, type AgentBrandIconName } from '../../lib/agentKind';
 import type { AgentKind } from '../../types/session';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
@@ -89,32 +86,6 @@ const RUNTIME_STATUS_META: Record<
 };
 
 // 与发送框 AgentPermissionSelector 保持一致的 Claude Code 权限选项。
-const CLAUDE_PERMISSION_OPTIONS: Array<{
-  mode: AgentExecutionMode;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  tone?: 'default' | 'warning';
-}> = [
-  { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行敏感工具前先询问。', icon: Hand },
-  { mode: 'auto_edit', label: '自动编辑', description: '允许 Claude 自动编辑文件。', icon: ShieldCheck },
-  { mode: 'auto_review', label: '自动模式', description: '所有操作自动执行，后台进行安全检查。', icon: Zap },
-  { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
-  { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
-];
-
-const CODEX_PERMISSION_OPTIONS: Array<{
-  mode: AgentExecutionMode;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  tone?: 'default' | 'warning';
-}> = [
-  { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问。', icon: Hand },
-  { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准。', icon: ShieldCheck },
-  { mode: 'full_access', label: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件。', icon: Shield, tone: 'warning' },
-];
-
 function claudePermissionModeToExecutionMode(mode: ClaudePermissionMode): AgentExecutionMode {
   switch (mode) {
     case 'acceptEdits':
@@ -496,14 +467,7 @@ function AgentConfigurationCard({
   piExecutionMode,
   onPiPermissionChange,
 }: AgentConfigurationCardProps) {
-  const definition = getAgentDefinition(agent.kind);
-  const agentDefinition = definition ?? {
-    kind: agent.kind,
-    label: agent.label,
-    description: '',
-    icon: agent.icon,
-    capabilities: [],
-  };
+  const agentDefinition = describeKind(agent.kind);
 
   return (
     <article
@@ -516,7 +480,7 @@ function AgentConfigurationCard({
     >
       <div className="flex items-start gap-3">
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/45 bg-background/78">
-          <AgentBrandIcon agent={agentDefinition} size="md" />
+          <AgentBrandIcon brandIcon={agentDefinition?.brandIcon ?? agent.brandIcon} fallbackLabel={agentDefinition?.label ?? agent.label} size="md" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -529,7 +493,7 @@ function AgentConfigurationCard({
             )}
           </div>
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-            {agentDefinition.description}
+            {agentDefinition?.description ?? ''}
           </p>
         </div>
         {!isDefault && (
@@ -586,12 +550,6 @@ function AgentConfigurationCard({
 
 /* ------------------------------- pi 默认权限区 ------------------------------ */
 
-const PI_PERMISSION_OPTIONS: Array<{ mode: AgentExecutionMode; label: string }> = [
-  { mode: 'confirm_before_edit', label: '变更前确认' },
-  { mode: 'auto_edit', label: '自动编辑' },
-  { mode: 'full_access', label: '完全访问' },
-];
-
 function PiPermissionSection({
   executionMode,
   onChange,
@@ -614,7 +572,7 @@ function PiPermissionSection({
             <SelectValue placeholder="选择默认权限" />
           </SelectTrigger>
           <SelectContent>
-            {PI_PERMISSION_OPTIONS.map((option) => (
+            {permissionMenu('pi', null, 'off').tiers.map((option) => (
               <SelectItem key={option.mode} value={option.mode}>
                 {option.label}
               </SelectItem>
@@ -676,7 +634,7 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
       onValueChange={saveDefault}
       disabled={usableProviders.length === 0 && freeModels.length === 0}
     >
-      <SelectTrigger aria-label={`${getAgentDefinition(agentKind)?.label ?? agentKind} 默认供应商和模型`} className="h-9">
+      <SelectTrigger aria-label={`${describeKind(agentKind)?.label ?? agentKind} 默认供应商和模型`} className="h-9">
         <SelectValue placeholder="暂无可用供应商或模型">
           {isFreeSelection && selectedFreeModel ? (
             <span className="flex min-w-0 items-center gap-2">
@@ -771,12 +729,9 @@ interface RuntimeDetectionSectionProps {
 }
 
 // 运行时检测支持的智能体(与 Rust AGENT_SPECS 对齐,用于加载骨架)
-const RUNTIME_AGENTS: Array<{ kind: AgentKind; label: string; icon: 'claude' | 'codex' | 'opencode' | 'pi' }> = [
-  { kind: 'claude_code', label: 'Claude Code', icon: 'claude' },
-  { kind: 'codex', label: 'Codex', icon: 'codex' },
-  { kind: 'opencode', label: 'OpenCode', icon: 'opencode' },
-  { kind: 'pi', label: 'pi', icon: 'pi' },
-];
+// 骨架屏只需要「哪几家会出现在检测结果里」+ 名称 + 品牌图标 —— 全部从规格表派生，
+// 不再手抄第四份 kind 表。
+const RUNTIME_AGENTS = selectableKinds();
 
 function RuntimeDetectionSection({
   runtimes,
@@ -814,7 +769,7 @@ function RuntimeDetectionSection({
       <div className="grid gap-3 sm:grid-cols-2">
         {checking && !runtimes
           ? RUNTIME_AGENTS.map((agent) => (
-              <RuntimeSkeletonCard key={agent.kind} label={agent.label} iconKind={agent.icon} />
+              <RuntimeSkeletonCard key={agent.kind} label={agent.label} iconKind={agent.brandIcon} />
             ))
           : runtimes?.map((runtime) => (
               <RuntimeCard
@@ -844,14 +799,14 @@ function RuntimeSkeletonCard({
   iconKind,
 }: {
   label: string;
-  iconKind: 'claude' | 'codex' | 'opencode' | 'pi';
+  iconKind: AgentBrandIconName;
 }) {
   return (
     <div className="flex animate-pulse flex-col gap-3 rounded-2xl border border-border/40 bg-background/60 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/40 bg-muted/40">
-            <AgentBrandIcon agent={{ kind: 'claude_code' as AgentKind, label: '', description: '', icon: iconKind, capabilities: [] }} size="md" />
+            <AgentBrandIcon brandIcon={iconKind} size="md" />
           </span>
           <div className="min-w-0 space-y-1.5">
             <div className="text-sm font-semibold text-foreground">{label}</div>
@@ -902,14 +857,10 @@ export function RuntimeCard({
 }: RuntimeCardProps) {
   const meta = RUNTIME_STATUS_META[runtime.status];
   const StatusIcon = meta.icon;
-  const definition = getAgentDefinition(runtime.agentKind as AgentKind);
-  const agent = definition ?? {
-    kind: runtime.agentKind as AgentKind,
-    label: runtime.label,
-    description: '',
-    icon: 'claude' as const,
-    capabilities: [],
-  };
+  const definition = describeKind(runtime.agentKind as AgentKind);
+  // 未知 kind 的回落：只保留画卡片需要的两个字段，不再伪造一份完整规格。
+  const brandIcon = definition?.brandIcon ?? 'claude';
+  const agentLabel = definition?.label ?? runtime.label;
 
   // 三态探测:installed_but_broken=true 时展示差异化文案
   const isBroken = runtime.installedButBroken === true;
@@ -935,7 +886,7 @@ export function RuntimeCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/45 bg-background/78">
-            <AgentBrandIcon agent={agent} size="md" />
+            <AgentBrandIcon brandIcon={brandIcon} fallbackLabel={agentLabel} size="md" />
           </span>
           <div className="min-w-0 space-y-1">
             <div className="flex items-center gap-2">
@@ -1162,9 +1113,11 @@ function CodexPermissionSection({
   executionMode,
   onChange,
 }: CodexPermissionSectionProps) {
+  // 设置页只编辑「默认档」，没有会话上下文：传 null 让 module 用该 kind 的默认快照。
+  const codexMenu = useMemo(() => permissionMenu('codex', null, 'off'), []);
   const selectedOption = useMemo(
-    () => CODEX_PERMISSION_OPTIONS.find((option) => option.mode === executionMode) ?? CODEX_PERMISSION_OPTIONS[0],
-    [executionMode],
+    () => codexMenu.tiers.find((option) => option.mode === executionMode) ?? codexMenu.tiers[0],
+    [codexMenu, executionMode],
   );
 
   if (compact) {
@@ -1180,7 +1133,7 @@ function CodexPermissionSection({
               <SelectValue placeholder="选择默认权限" />
             </SelectTrigger>
             <SelectContent>
-              {CODEX_PERMISSION_OPTIONS.map((option) => (
+              {codexMenu.tiers.map((option) => (
                 <SelectItem key={option.mode} value={option.mode}>
                   {option.label}
                 </SelectItem>
@@ -1201,9 +1154,9 @@ function CodexPermissionSection({
         </p>
       </div>
       <div className={cn('grid gap-2 sm:grid-cols-2', compact && 'sm:grid-cols-1')}>
-        {CODEX_PERMISSION_OPTIONS.map((option) => {
+        {codexMenu.tiers.map((option) => {
           const active = option.mode === selectedOption.mode;
-          const Icon = option.icon;
+          const Icon = tierIcon(option.iconName);
           return (
             <button
               key={option.mode}
@@ -1214,7 +1167,7 @@ function CodexPermissionSection({
                 active
                   ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
                   : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
-                option.tone === 'warning' && !active && 'hover:border-orange-500/35',
+                option.dangerous && !active && 'hover:border-orange-500/35',
               )}
             >
               <span
@@ -1222,7 +1175,7 @@ function CodexPermissionSection({
                   'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border',
                   active
                     ? 'border-[hsl(var(--primary)/0.22)] bg-[hsl(var(--primary)/0.14)] text-[hsl(var(--primary))]'
-                    : option.tone === 'warning'
+                    : option.dangerous
                       ? 'border-border/55 text-orange-500'
                       : 'border-border/55 text-muted-foreground',
                 )}
@@ -1285,9 +1238,11 @@ function ClaudePermissionSection({
   executionMode,
   onChange,
 }: ClaudePermissionSectionProps) {
+  // 设置页只编辑「默认档」，没有会话上下文：传 null 让 module 用该 kind 的默认快照。
+  const claudeMenu = useMemo(() => permissionMenu('claude_code', null, 'off'), []);
   const selectedOption = useMemo(
-    () => CLAUDE_PERMISSION_OPTIONS.find((option) => option.mode === executionMode) ?? CLAUDE_PERMISSION_OPTIONS[0],
-    [executionMode],
+    () => claudeMenu.tiers.find((option) => option.mode === executionMode) ?? claudeMenu.tiers[0],
+    [claudeMenu, executionMode],
   );
 
   if (compact) {
@@ -1303,7 +1258,7 @@ function ClaudePermissionSection({
               <SelectValue placeholder="选择默认权限" />
             </SelectTrigger>
             <SelectContent>
-              {CLAUDE_PERMISSION_OPTIONS.map((option) => (
+              {claudeMenu.tiers.map((option) => (
                 <SelectItem key={option.mode} value={option.mode}>
                   {option.label}
                 </SelectItem>
@@ -1324,9 +1279,9 @@ function ClaudePermissionSection({
         </p>
       </div>
       <div className={cn('grid gap-2 sm:grid-cols-2', compact && 'sm:grid-cols-1')}>
-        {CLAUDE_PERMISSION_OPTIONS.map((option) => {
+        {claudeMenu.tiers.map((option) => {
           const active = option.mode === selectedOption.mode;
-          const Icon = option.icon;
+          const Icon = tierIcon(option.iconName);
           return (
             <button
               key={option.mode}
@@ -1337,7 +1292,7 @@ function ClaudePermissionSection({
                 active
                   ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
                   : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
-                option.tone === 'warning' && !active && 'hover:border-orange-500/35',
+                option.dangerous && !active && 'hover:border-orange-500/35',
               )}
             >
               <span
@@ -1345,7 +1300,7 @@ function ClaudePermissionSection({
                   'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border',
                   active
                     ? 'border-[hsl(var(--primary)/0.22)] bg-[hsl(var(--primary)/0.14)] text-[hsl(var(--primary))]'
-                    : option.tone === 'warning'
+                    : option.dangerous
                       ? 'border-border/55 text-orange-500'
                       : 'border-border/55 text-muted-foreground',
                 )}

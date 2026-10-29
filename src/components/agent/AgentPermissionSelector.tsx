@@ -1,25 +1,17 @@
-import {
-  Check,
-  ChevronDown,
-  ClipboardList,
-  Eye,
-  Hand,
-  Shield,
-  ShieldCheck,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react';
+import { Check, ChevronDown, Shield, ShieldCheck } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import {
+  applyTier,
   buildDefaultPermissionConfig,
-  codexWorkflowModeToExecutionMode,
-  mapExecutionModeToPermissionConfig,
+  permissionMenu,
   serializePermissionConfig,
   type AgentExecutionMode,
   type AgentPermissionConfig,
   type AgentPlanMode,
-} from '../../lib/agentPermissions';
+  type AgentTier,
+} from '../../lib/agentKind';
+import { tierIcon } from './tierIcon';
 import {
   COMPOSER_BAR_CONTROL_CLASS,
   COMPOSER_BAR_ICON_CONTROL_CLASS,
@@ -49,59 +41,6 @@ interface AgentPermissionSelectorProps {
   permissionResponsePending?: boolean;
 }
 
-type PermissionOption = {
-  mode: AgentExecutionMode;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  tone?: 'default' | 'warning';
-};
-
-const claudeOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行敏感工具前先询问。', icon: Hand },
-  { mode: 'auto_edit', label: '自动编辑', description: '允许 Claude 自动编辑文件。', icon: ShieldCheck },
-  { mode: 'auto_review', label: '自动模式', description: '所有操作自动执行，后台进行安全检查。', icon: Zap },
-  { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
-  { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
-];
-
-// Official OpenCode exposes a Build/Plan agent selector plus an orthogonal
-// "auto-approve permissions" shield toggle. The dropdown mirrors the agent
-// selector (plan drives plan_mode); the shield lives beside the chip.
-const opencodeOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '构建模式', description: '正常执行，敏感操作按 OpenCode 权限规则确认。', icon: Zap },
-  { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
-];
-
-// Workflow Mode tiers (ADR 0010): auto / auto-review / full-access, worded
-// after the official ChatGPT Codex App approval selector. read-only stays a
-// valid internal enum (legacy snapshots migrate onto it) but only surfaces as
-// an exit hatch for sessions already stored on that tier. The selector never
-// mirrors the orthogonal Plan toggle — its entry lives in the composer add
-// menu and its active indicator in the chip beside this dropdown. Tiers reuse
-// the Claude Code icons so approval semantics stay visually consistent across
-// agents (ask-before-edits → Hand, auto-approve edits → ShieldCheck).
-const codexWorkflowOptions: PermissionOption[] = [
-  { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: Hand },
-  { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: ShieldCheck },
-  { mode: 'full_access', label: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: Shield, tone: 'warning' },
-];
-
-/** Exit hatch for sessions whose stored snapshot is still on the read-only tier. */
-const codexReadOnlyOption: PermissionOption = {
-  mode: 'read_only',
-  label: '只读模式',
-  description: '只读探索代码库，不写入文件。',
-  icon: Eye,
-};
-
-// pi 无原生权限模式，档位由临时扩展的 tool_call 拦截策略实现；plan 档不适用。
-const piOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行命令前先询问。', icon: Hand },
-  { mode: 'auto_edit', label: '自动编辑', description: '允许 pi 自动编辑文件，运行命令前询问。', icon: ShieldCheck },
-  { mode: 'full_access', label: '完全访问', description: '跳过权限确认，直接执行所有工具。', icon: Shield, tone: 'warning' },
-];
-
 export function AgentPermissionSelector({
   agentKind,
   permissionConfig,
@@ -118,46 +57,36 @@ export function AgentPermissionSelector({
   permissionResponsePending,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
-  // Normalize through serializePermissionConfig so legacy Codex snapshots
-  // (sandbox/approval triples from the SDK era) migrate onto workflow tiers.
-  const normalized = permissionConfig
-    ? serializePermissionConfig(agentKind, permissionConfig)
-    : buildDefaultPermissionConfig(agentKind);
-  const selectedMode = inferExecutionMode(agentKind, normalized, planMode);
-  const codexWorkflowTier = normalized.kind === 'codex' ? normalized.workflowMode : null;
-
-  const options = useMemo(() => {
-    if (agentKind === 'opencode') return opencodeOptions;
-    if (agentKind === 'pi') return piOptions;
-    if (agentKind === 'codex') {
-      // The official three-tier selector; sessions already stored on the
-      // read-only tier keep that entry as an exit hatch. The orthogonal Plan
-      // toggle never injects an entry here.
-      return codexWorkflowTier === 'read-only'
-        ? [codexReadOnlyOption, ...codexWorkflowOptions]
-        : codexWorkflowOptions;
-    }
-    return claudeOptions;
-  }, [agentKind, codexWorkflowTier]);
-  const selected = useMemo(
-    () => options.find((option) => option.mode === selectedMode) ?? options[0],
-    [options, selectedMode],
+  // 档位、当前选中项与 plan 语义全部来自 module；这里不再自己挑表。
+  // 归一化（legacy Codex sandbox 三元组 → workflow tiers）也在 module 内完成。
+  const menu = useMemo(
+    () => permissionMenu(agentKind, permissionConfig, planMode),
+    [agentKind, permissionConfig, planMode],
   );
-  const SelectedIcon = selected.icon;
+  // 仍需要归一化后的快照：OpenCode 的盾牌开关要在切档时保留。
+  const normalized = useMemo(
+    () => serializePermissionConfig(
+      agentKind,
+      permissionConfig ?? buildDefaultPermissionConfig(agentKind),
+    ),
+    [agentKind, permissionConfig],
+  );
+  const options: AgentTier[] = menu.tiers;
+  const selected = useMemo(
+    () => options.find((option) => option.mode === menu.selectedMode) ?? options[0],
+    [options, menu.selectedMode],
+  );
+  const SelectedIcon = tierIcon(selected.iconName);
 
   const selectMode = (mode: AgentExecutionMode) => {
-    // OpenCode Build/Plan only flips plan_mode; the auto-approve shield state
-    // must survive the switch.
-    const nextConfig = agentKind === 'opencode'
-      ? { kind: 'opencode' as const, autoApprovePermissions: normalized.kind === 'opencode' && normalized.autoApprovePermissions }
-      : mapExecutionModeToPermissionConfig(agentKind, mode);
-    // Codex Plan Mode is orthogonal (ADR 0010 Decision 4): picking a Workflow
-    // tier never flips the plan toggle. Claude/OpenCode treat plan as a native
-    // permission mode, so their selection drives plan state directly. pi 无
-    // plan 档，选择即落 off。
-    const nextPlanMode = agentKind === 'codex' || agentKind === 'pi'
-      ? planMode
-      : (mode === 'plan' ? 'on' as const : 'off' as const);
+    // 配置与 plan 一起算：正交性（Codex）与 via-tier（Claude/OpenCode）都在
+    // module 里按规格判断，组件不再按 kind 字符串分支。
+    const { config: nextConfig, planMode: nextPlanMode } = applyTier(
+      agentKind,
+      mode,
+      normalized,
+      planMode,
+    );
 
     // Prefer the atomic callback to avoid race conditions between
     // separate config and plan-mode state updates.
@@ -165,7 +94,8 @@ export function AgentPermissionSelector({
       onModeChange(nextConfig, nextPlanMode);
     } else {
       onPermissionConfigChange(nextConfig);
-      if (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode') {
+      // 有 plan 概念的 kind 才回调 plan（pi 没有 plan 档，给它发噪声没有意义）。
+      if (menu.planMode !== 'unsupported') {
         onPlanModeChange(nextPlanMode);
       }
     }
@@ -201,7 +131,7 @@ export function AgentPermissionSelector({
                     className={cn(
                       COMPOSER_BAR_CONTROL_CLASS,
                       compact ? 'max-w-9 px-0' : 'max-w-none',
-                      selected.tone === 'warning' &&
+                      selected.dangerous &&
                         'text-orange-500 hover:bg-orange-500/10 hover:text-orange-500',
                     )}
                   >
@@ -220,8 +150,8 @@ export function AgentPermissionSelector({
               className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-elevation backdrop-blur-lg"
             >
               {options.map((option) => {
-                const active = selectedMode === option.mode;
-                const Icon = option.icon;
+                const active = menu.selectedMode === option.mode;
+                const Icon = tierIcon(option.iconName);
                 return (
                   <button
                     key={option.mode}
@@ -238,7 +168,7 @@ export function AgentPermissionSelector({
                       active && 'option-row-selected',
                     )}
                   >
-                    <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
+                    <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground', option.dangerous && 'text-orange-500')} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium text-foreground">{option.label}</span>
                       <span className="block truncate text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
@@ -302,36 +232,4 @@ export function AgentPermissionSelector({
       )}
     </div>
   );
-}
-
-function inferExecutionMode(
-  agentKind: AgentKind,
-  permissionConfig: AgentPermissionConfig,
-  planMode: AgentPlanMode,
-): AgentExecutionMode {
-  if (agentKind === 'opencode') {
-    // Plan vs build mirrors the official agent selector and is carried by
-    // the orthogonal plan_mode toggle; the snapshot only tracks the shield.
-    if (planMode === 'on') return 'plan';
-    return 'confirm_before_edit';
-  }
-
-  if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
-    // Plan Mode is orthogonal (ADR 0010 Decision 4): the selector always
-    // reflects the stored Workflow tier, never the plan toggle.
-    return codexWorkflowModeToExecutionMode(permissionConfig.workflowMode);
-  }
-
-  if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {
-    if (planMode === 'on' || permissionConfig.permissionMode === 'plan') return 'plan';
-    if (permissionConfig.permissionMode === 'bypassPermissions') return 'full_access';
-    if (permissionConfig.permissionMode === 'auto') return 'auto_review';
-    if (permissionConfig.permissionMode === 'acceptEdits') return 'auto_edit';
-  }
-
-  if (agentKind === 'pi' && permissionConfig.kind === 'pi') {
-    return permissionConfig.executionMode;
-  }
-
-  return 'confirm_before_edit';
 }

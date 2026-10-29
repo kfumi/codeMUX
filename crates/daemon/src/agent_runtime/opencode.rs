@@ -1,50 +1,26 @@
-use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::types::{AgentRuntime, RuntimeRequest};
+use super::types::send_input_command as build_send_input;
 
-/// Rust-side adapter for the OpenCode sidecar runtime.
+/// Rust 侧的 sidecar 命令信封构造器（OpenCode）。
 ///
-/// OpenCode SDK calls stay in the sidecar. This adapter only owns the stable
-/// command envelopes and delegates them through the existing sidecar stdin
-/// channel when a handle is supplied by the agent command layer.
-#[derive(Default)]
-pub struct OpenCodeRuntime;
+/// 这里**没有**运行时对象，也没有 trait 实现：OpenCode SDK 调用全在 sidecar 内，
+/// daemon 只负责把稳定的命令信封发过去。曾经这里有一个 `AgentRuntime` trait 的
+/// 空实现（六个方法只打日志再返回 `Ok(())`），它的存在让人误以为 daemon 驾驶运行时，
+/// 而真正驾驶的是 sidecar。
+///
+/// 只保留**实际被调用**的信封：`ensure_session` 由
+/// `agent::session_lifecycle::build_ensure_session_command` 构造（它要按 kind 拼
+/// 权限快照、附加目录、MCP 等十几个字段），这里的同名函数是历史残留，已删除。
+pub struct OpenCodeCommands;
 
-impl OpenCodeRuntime {
-    pub fn ensure_session_command(request: &RuntimeRequest) -> Value {
-        let mut command = json!({
-            "type": "ensure_session",
-            "agentKind": "opencode",
-            "cwd": request.cwd,
-            "sessionId": request.session_id,
-        });
-        if let Some(api_key) = &request.api_key {
-            command["apiKey"] = Value::String(api_key.clone());
-        }
-        if let Some(base_url) = &request.base_url {
-            command["baseUrl"] = Value::String(base_url.clone());
-        }
-        if let Some(model) = &request.model {
-            command["model"] = Value::String(model.clone());
-        }
-        command
-    }
-
+impl OpenCodeCommands {
     pub fn send_input_command(
         session_id: &str,
         prompt: String,
         display_content: Option<&str>,
     ) -> Value {
-        let mut command = json!({
-            "type": "send_input",
-            "sessionId": session_id,
-            "prompt": prompt,
-        });
-        if let Some(display_content) = display_content {
-            command["displayContent"] = Value::String(display_content.to_string());
-        }
-        command
+        build_send_input(session_id, prompt, display_content)
     }
 
     pub fn interrupt_command() -> Value {
@@ -94,164 +70,39 @@ impl OpenCodeRuntime {
             "response": response,
         })
     }
-
-    pub async fn send_command(
-        handle: &crate::agent::SidecarHandle,
-        command: Value,
-    ) -> Result<(), String> {
-        handle.send_command(&command.to_string()).await
-    }
-}
-
-#[async_trait]
-impl AgentRuntime for OpenCodeRuntime {
-    fn kind_name(&self) -> &'static str {
-        "opencode"
-    }
-
-    async fn ensure(&self, request: RuntimeRequest) -> Result<(), String> {
-        crate::log_ctx!(
-            info,
-            target: "agent_runtime::opencode",
-            "ensure cwd={}",
-            request.cwd,
-        );
-        Ok(())
-    }
-
-    async fn start(&self, request: RuntimeRequest) -> Result<(), String> {
-        self.ensure(request).await
-    }
-
-    async fn send_input(&self, _session_id: &str, prompt: String) -> Result<(), String> {
-        crate::log_ctx!(
-            info,
-            target: "agent_runtime::opencode",
-            "send_input prompt_len={}",
-            prompt.len(),
-        );
-        Ok(())
-    }
-
-    async fn interrupt(&self, _session_id: &str) -> Result<(), String> {
-        crate::log_ctx!(
-            info,
-            target: "agent_runtime::opencode",
-            "interrupt",
-        );
-        Ok(())
-    }
-
-    async fn shutdown(&self, _session_id: &str) -> Result<(), String> {
-        crate::log_ctx!(
-            info,
-            target: "agent_runtime::opencode",
-            "shutdown",
-        );
-        Ok(())
-    }
-
-    async fn reset(&self, _session_id: &str) -> Result<(), String> {
-        crate::log_ctx!(
-            info,
-            target: "agent_runtime::opencode",
-            "reset",
-        );
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn request() -> RuntimeRequest {
-        RuntimeRequest {
-            session_id: "app-session".to_string(),
-            agent_kind: "opencode".to_string(),
-            cwd: "D:\\workspace".to_string(),
-            prompt: None,
-            api_key: Some("secret".to_string()),
-            base_url: Some("https://example.test".to_string()),
-            model: Some("open-code-model".to_string()),
-        }
+    #[test]
+    fn send_input_omits_display_content_when_absent() {
+        let with = OpenCodeCommands::send_input_command("s1", "hi".into(), Some("shown"));
+        assert_eq!(with["displayContent"], "shown");
+
+        let without = OpenCodeCommands::send_input_command("s1", "hi".into(), None);
+        assert!(without.get("displayContent").is_none());
     }
 
     #[test]
-    fn builds_opencode_command_envelopes_without_changing_agent_kind() {
-        assert_eq!(
-            OpenCodeRuntime::ensure_session_command(&request()),
-            json!({
-                "type": "ensure_session",
-                "agentKind": "opencode",
-                "cwd": "D:\\workspace",
-                "sessionId": "app-session",
-                "apiKey": "secret",
-                "baseUrl": "https://example.test",
-                "model": "open-code-model"
-            })
+    fn permission_response_echoes_the_response_payload() {
+        let command = OpenCodeCommands::respond_to_permission_command(
+            "r1",
+            "s1",
+            json!({ "behavior": "allow" }),
         );
-        assert_eq!(
-            OpenCodeRuntime::send_input_command("app-session", "hello".to_string(), None),
-            json!({ "type": "send_input", "sessionId": "app-session", "prompt": "hello" })
-        );
-        assert_eq!(
-            OpenCodeRuntime::interrupt_command(),
-            json!({ "type": "interrupt" })
-        );
-        assert_eq!(
-            OpenCodeRuntime::reset_session_command("app-session"),
-            json!({ "type": "reset_session", "sessionId": "app-session" })
-        );
-        assert_eq!(
-            OpenCodeRuntime::delete_session_command(
-                "app-session",
-                "opencode-session",
-                "request-1",
-                Some("D:\\workspace"),
-                &crate::runtime::ProviderRuntimeRef {
-                    provider: "opencode".to_string(),
-                    runtime_root: "D:\\runtimes".to_string(),
-                    runtime_path: "D:\\runtimes\\opencode\\1.18.3".to_string(),
-                    runtime_version: "1.18.3".to_string(),
-                    sidecar_compat: None,
-                },
-            ),
-            json!({
-                "type": "delete_session",
-                "sessionId": "app-session",
-                "agentSessionId": "opencode-session",
-                "requestId": "request-1",
-                "cwd": "D:\\workspace",
-                "runtimeRef": {
-                    "provider": "opencode",
-                    "runtimeRoot": "D:\\runtimes",
-                    "runtimePath": "D:\\runtimes\\opencode\\1.18.3",
-                    "runtimeVersion": "1.18.3",
-                },
-            })
-        );
-        assert_eq!(
-            OpenCodeRuntime::shutdown_command(),
-            json!({ "type": "shutdown" })
-        );
-        assert_eq!(
-            OpenCodeRuntime::respond_to_permission_command(
-                "permission-1",
-                "app-session",
-                json!({ "approved": true }),
-            ),
-            json!({
-                "type": "respond_to_permission",
-                "requestId": "permission-1",
-                "sessionId": "app-session",
-                "response": { "approved": true }
-            })
-        );
+        assert_eq!(command["type"], "respond_to_permission");
+        assert_eq!(command["response"]["behavior"], "allow");
     }
 
-    #[tokio::test]
-    async fn reports_opencode_kind_name() {
-        assert_eq!(OpenCodeRuntime.kind_name(), "opencode");
+    #[test]
+    fn session_lifecycle_commands_carry_the_session_id() {
+        assert_eq!(
+            OpenCodeCommands::reset_session_command("s1")["sessionId"],
+            "s1"
+        );
+        assert_eq!(OpenCodeCommands::interrupt_command()["type"], "interrupt");
+        assert_eq!(OpenCodeCommands::shutdown_command()["type"], "shutdown");
     }
 }

@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import type { AgentKind, Session, SessionMode } from '../types/session';
-import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
+import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentKind';
 import { isAppFocused } from '../lib/appActivity';
 import { isValidWorkingPath } from '../lib/sessionCwd';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import { useAgentStore } from './agentStore';
 import { useSettingsStore } from './settingsStore';
-import { getDefaultAgentKind } from '../types/agentRegistry';
+import { getDefaultAgentKind } from '../lib/agentKind';
 
 interface SessionState {
   sessions: Session[];

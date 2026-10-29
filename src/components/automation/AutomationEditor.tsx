@@ -5,7 +5,7 @@ import {
   buildDefaultPermissionConfig,
   serializePermissionConfig,
   type AgentPermissionConfig,
-} from '../../lib/agentPermissions';
+} from '../../lib/agentKind';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import {
   buildScheduledTaskDraftFromSettings,

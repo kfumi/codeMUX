@@ -1,4 +1,4 @@
-import { getAgentDefinition } from '../types/agentRegistry';
+import { supports } from './agentKind';
 import type { ImmediateRunMode } from '../types/provider';
 import type { AgentKind } from '../types/session';
 
@@ -16,7 +16,7 @@ export function queuedRunNowHint(
 ): string {
   const canSteer = normalizeImmediateRunMode(mode) === 'steer'
     && !!agentKind
-    && (getAgentDefinition(agentKind)?.capabilities.includes('supports_steer') ?? false);
+    && supports(agentKind, 'supports_steer');
   return canSteer
     ? '注入当前轮并立即执行这条消息'
     : '打断当前任务并立即执行这条消息';

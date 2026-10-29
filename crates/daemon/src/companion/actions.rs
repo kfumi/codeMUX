@@ -7,7 +7,7 @@ use crate::agent::commands::{
 };
 use crate::agent::session_lifecycle::start_agent_session_core;
 use crate::agent::sidecar_events::null_sink;
-use crate::agent_runtime::opencode::OpenCodeRuntime;
+use crate::agent_runtime::opencode::OpenCodeCommands;
 use crate::companion::CompanionState;
 use crate::config::types::AgentKind;
 use crate::daemon::DaemonState;
@@ -130,7 +130,7 @@ pub(crate) async fn send_companion_message_owned(
         match decide_active_sidecar_send(delivery, flow_busy) {
             ActiveSidecarSendDecision::Steer => {
                 let mut cmd =
-                    OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
+                    OpenCodeCommands::send_input_command(session_id, prompt.to_string(), None);
                 if let Some(input_payload) = input_payload {
                     cmd["inputPayload"] = input_payload;
                 }
@@ -150,7 +150,7 @@ pub(crate) async fn send_companion_message_owned(
             ActiveSidecarSendDecision::StartTurn => {
                 let turn_epoch = companion_state.mark_turn_active(session_id);
                 let mut cmd =
-                    OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
+                    OpenCodeCommands::send_input_command(session_id, prompt.to_string(), None);
                 if let Some(input_payload) = input_payload {
                     cmd["inputPayload"] = input_payload;
                 }
@@ -369,7 +369,7 @@ pub async fn respond_companion_permission(
     let agent_state = &daemon.agent;
     crate::agent::commands::reject_read_only_session(app_state, session_id)?;
 
-    let cmd = OpenCodeRuntime::respond_to_permission_command(request_id, session_id, response);
+    let cmd = OpenCodeCommands::respond_to_permission_command(request_id, session_id, response);
     send_command_to_session(agent_state, session_id, cmd).await
 }
 

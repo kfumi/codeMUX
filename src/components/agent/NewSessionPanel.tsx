@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandInput } from '../../lib/slashCommands';
-import { serializePermissionConfig } from '../../lib/agentPermissions';
+import { serializePermissionConfig } from '../../lib/agentKind';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from '../../stores/newSessionStore';
@@ -14,7 +14,7 @@ import { useAgentModels } from '../../hooks/useAgentModels';
 import { isOpenCodeFreeProviderId } from '../../hooks/useAgentModels';
 import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
-import { getAgentDefinition } from '../../types/agentRegistry';
+import { describeKind } from '../../lib/agentKind';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
@@ -60,7 +60,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
-  const selectedAgent = getAgentDefinition(selectedAgentKind);
+  const selectedAgent = describeKind(selectedAgentKind);
   const usesProviderModel = isProviderAgent(selectedAgentKind);
   const modelProviders = config?.model_providers ?? [];
   const activeProviderId = config?.active_provider_id ?? null;

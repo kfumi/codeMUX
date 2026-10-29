@@ -6,7 +6,7 @@ import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { cn } from '../../lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import type { AgentPermissionConfig, AgentPlanMode } from '../../lib/agentPermissions';
+import type { AgentPermissionConfig, AgentPlanMode } from '../../lib/agentKind';
 
 const logger = createLogger('AskUserQuestionCard');
 

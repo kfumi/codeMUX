@@ -13,6 +13,7 @@ describe('runtimeContract', () => {
       expect(providerLabel('claude_code')).toBe('Claude Code');
       expect(providerLabel('codex')).toBe('Codex');
       expect(providerLabel('opencode')).toBe('OpenCode');
+      expect(providerLabel('pi')).toBe('pi');
     });
   });
 
@@ -21,14 +22,18 @@ describe('runtimeContract', () => {
       expect(providerCliCommand('claude_code')).toBe('claude');
       expect(providerCliCommand('codex')).toBe('codex');
       expect(providerCliCommand('opencode')).toBe('opencode');
+      expect(providerCliCommand('pi')).toBe('pi');
     });
   });
 
   describe('isProvider', () => {
-    it('accepts the three known providers', () => {
+    it('accepts every provider the Rust side declares', () => {
+      // 与 crates/daemon/src/runtime/types.rs 的 Provider 四变体对齐；
+      // 这份契约曾漏掉 pi，两侧没有对拍测试时不会有任何东西报警。
       expect(isProvider('claude_code')).toBe(true);
       expect(isProvider('codex')).toBe(true);
       expect(isProvider('opencode')).toBe(true);
+      expect(isProvider('pi')).toBe(true);
     });
 
     it('rejects unknown values', () => {

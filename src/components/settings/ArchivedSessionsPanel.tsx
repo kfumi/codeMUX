@@ -9,7 +9,7 @@ import {
 } from '../../lib/sessionTitle';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
-import { AGENT_REGISTRY, getAgentDefinition } from '../../types/agentRegistry';
+import { allKinds, describeKind } from '../../lib/agentKind';
 import type { AgentKind } from '../../types/session';
 import type { Session } from '../../types/session';
 import { Button } from '../ui/button';
@@ -129,7 +129,7 @@ export function ArchivedSessionsPanel() {
     const query = keyword.trim().toLowerCase();
     const result = archivedSessions.filter((session) => {
       const displayTitle = resolvedTitles[session.id] ?? getSessionDisplayTitle(session.title);
-      const agentLabel = getAgentDefinition(session.agent_kind)?.label ?? session.agent_kind;
+      const agentLabel = describeKind(session.agent_kind)?.label ?? session.agent_kind;
       const matchesKeyword =
         !query ||
         displayTitle.toLowerCase().includes(query) ||
@@ -215,7 +215,8 @@ export function ArchivedSessionsPanel() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部智能体</SelectItem>
-            {AGENT_REGISTRY.map((agent) => (
+            {/* 归档筛选覆盖历史：含未接入的 kind（导入的历史会话可能是它们）。 */}
+            {allKinds().map((agent) => (
               <SelectItem key={agent.kind} value={agent.kind}>
                 {agent.label}
               </SelectItem>
@@ -265,7 +266,7 @@ export function ArchivedSessionsPanel() {
           ) : (
             filteredSessions.map((session) => {
               const displayTitle = resolvedTitles[session.id] ?? getSessionDisplayTitle(session.title);
-              const agentDef = getAgentDefinition(session.agent_kind);
+              const agentDef = describeKind(session.agent_kind);
               const agentLabel = agentDef?.label ?? session.agent_kind;
 
               return (
@@ -291,7 +292,7 @@ export function ArchivedSessionsPanel() {
                     <span className="inline-flex min-w-0 items-center gap-1">
                       {agentDef ? (
                         <>
-                          <AgentBrandIcon agent={agentDef} size="sm" />
+                          <AgentBrandIcon brandIcon={agentDef.brandIcon} fallbackLabel={agentDef.label} size="sm" />
                           <span className="truncate">{agentLabel}</span>
                         </>
                       ) : (

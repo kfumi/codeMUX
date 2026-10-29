@@ -24,7 +24,7 @@ import { registerSkillCommands } from './lib/slashCommands';
 import { focusActiveComposer } from './lib/shortcuts/composerFocus';
 import { cycleActiveThoughtLevel } from './lib/shortcuts/thoughtLevelCycle';
 import { resetAppZoom, zoomInApp, zoomOutApp } from './lib/shortcuts/appZoom';
-import { serializePermissionConfig } from './lib/agentPermissions';
+import { serializePermissionConfig } from './lib/agentKind';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
 import { resolveProjectPath } from './lib/projectPath';
 import { daemonFacade } from './lib/facades/daemon-facade';

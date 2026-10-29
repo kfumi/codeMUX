@@ -1,8 +1,11 @@
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Agent kinds supported by the runtime.
+///
+/// 这是 kind 字符串与规范名之间的唯一映射，`as_str()` 与 `from_agent_kind()`
+/// 互为逆运算。daemon 侧判断「这个 kind 最终由哪个运行时承载」时用它，
+/// 不再为了一次字符串比较而构造运行时对象。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRuntimeKind {
@@ -32,68 +35,21 @@ impl AgentRuntimeKind {
     }
 }
 
-/// Shared request envelope passed to every runtime operation.
-#[derive(Clone)]
-pub struct RuntimeRequest {
-    pub session_id: String,
-    pub agent_kind: String,
-    pub cwd: String,
-    pub prompt: Option<String>,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-}
-
-impl std::fmt::Debug for RuntimeRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeRequest")
-            .field("session_id", &self.session_id)
-            .field("agent_kind", &self.agent_kind)
-            .field("cwd", &self.cwd)
-            .field("prompt", &self.prompt)
-            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
-            .field("base_url", &self.base_url)
-            .field("model", &self.model)
-            .finish()
+/// 构造 `send_input` 命令。
+pub fn send_input_command(
+    session_id: &str,
+    prompt: String,
+    display_content: Option<&str>,
+) -> Value {
+    let mut command = json!({
+        "type": "send_input",
+        "sessionId": session_id,
+        "prompt": prompt,
+    });
+    if let Some(display_content) = display_content {
+        command["displayContent"] = Value::String(display_content.to_string());
     }
-}
-
-/// Contract that every agent runtime must implement.
-///
-/// The default implementations return `Ok(())` so that runtimes only need to
-/// override the operations they actually support. The factory resolves a
-/// `Box<dyn AgentRuntime>` from the session's `agent_kind`.
-#[async_trait]
-pub trait AgentRuntime: Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
-    async fn ensure(&self, _request: RuntimeRequest) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn start(&self, _request: RuntimeRequest) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn send_input(&self, _session_id: &str, _prompt: String) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn interrupt(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn shutdown(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn reset(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn load_history(&self, _session_id: &str) -> Result<Vec<Value>, String> {
-        Ok(Vec::new())
-    }
+    command
 }
 
 #[cfg(test)]
@@ -101,7 +57,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_claude_and_codex_runtime_variants() {
+    fn resolves_every_kind_variant() {
         assert_eq!(
             AgentRuntimeKind::from_agent_kind("claude_code"),
             AgentRuntimeKind::ClaudeCode
@@ -115,6 +71,10 @@ mod tests {
             AgentRuntimeKind::OpenCode
         );
         assert_eq!(
+            AgentRuntimeKind::from_agent_kind("pi"),
+            AgentRuntimeKind::Pi
+        );
+        assert_eq!(
             AgentRuntimeKind::from_agent_kind("unknown"),
             AgentRuntimeKind::ClaudeCode
         );
@@ -122,8 +82,17 @@ mod tests {
 
     #[test]
     fn kind_name_round_trips() {
-        assert_eq!(AgentRuntimeKind::ClaudeCode.as_str(), "claude_code");
-        assert_eq!(AgentRuntimeKind::Codex.as_str(), "codex");
-        assert_eq!(AgentRuntimeKind::OpenCode.as_str(), "opencode");
+        for kind in [
+            AgentRuntimeKind::ClaudeCode,
+            AgentRuntimeKind::Codex,
+            AgentRuntimeKind::OpenCode,
+            AgentRuntimeKind::Pi,
+        ] {
+            assert_eq!(
+                AgentRuntimeKind::from_agent_kind(kind.as_str()),
+                kind,
+                "as_str/from_agent_kind 必须互逆"
+            );
+        }
     }
 }

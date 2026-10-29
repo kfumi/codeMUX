@@ -1,14 +1,15 @@
+/** 测试从 module 的公开 interface 取 plan 语义，不硬编码 kind 字符串。 */
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyTier,
   buildDefaultPermissionConfig,
   codexWorkflowModeToExecutionMode,
   isPlanApprovalPermission,
   mapExecutionModeToPermissionConfig,
-  resolveEffectivePermissionConfig,
   serializePermissionConfig,
   type AgentPermissionConfig,
-} from './agentPermissions';
+} from './agentKind';
 
 describe('agentPermissions', () => {
   it('uses safe defaults for each agent kind', () => {
@@ -122,11 +123,12 @@ describe('agentPermissions', () => {
       autoApprovePermissions: false,
     });
     // The snapshot never carries plan; the orthogonal plan_mode column does.
-    expect(resolveEffectivePermissionConfig(
+    expect(applyTier(
       'opencode',
+      'plan',
       { kind: 'opencode', autoApprovePermissions: true },
       'on',
-    )).toEqual({ kind: 'opencode', autoApprovePermissions: true });
+    ).config).toEqual({ kind: 'opencode', autoApprovePermissions: true });
   });
 
   it('maps the four Codex workflow tiers to distinct permission configs', () => {
@@ -159,10 +161,14 @@ describe('agentPermissions', () => {
       networkAccessEnabled: true,
     };
 
-    expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
-      kind: 'codex',
-      workflowMode: 'full-access',
-      networkAccessEnabled: true,
+    expect(applyTier('codex', 'full_access', configured, 'on')).toEqual({
+      config: {
+        kind: 'codex',
+        workflowMode: 'full-access',
+        networkAccessEnabled: true,
+      },
+      // 正交：选档位不得把 plan 关掉。
+      planMode: 'on',
     });
   });
 
@@ -186,14 +192,19 @@ describe('agentPermissions', () => {
 
   it('maps Claude plan mode onto the native plan permission mode', () => {
     expect(
-      resolveEffectivePermissionConfig(
+      applyTier(
         'claude_code',
+        'plan',
         { kind: 'claude_code', permissionMode: 'bypassPermissions' },
-        'on',
+        'off',
       ),
     ).toEqual({
-      kind: 'claude_code',
-      permissionMode: 'plan',
+      config: {
+        kind: 'claude_code',
+        permissionMode: 'plan',
+      },
+      // Claude 的 plan 由档位承载：选 plan 档必须把 plan_mode 一起打开。
+      planMode: 'on',
     });
   });
 

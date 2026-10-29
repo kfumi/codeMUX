@@ -12,7 +12,7 @@ use super::session_lifecycle::{
 };
 use super::{spawn_sidecar, SidecarHandle};
 use crate::agent::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
-use crate::agent_runtime::opencode::OpenCodeRuntime;
+use crate::agent_runtime::opencode::OpenCodeCommands;
 use crate::config::types::AgentKind;
 
 #[cfg(test)]
@@ -2377,7 +2377,7 @@ pub(crate) async fn delete_opencode_native_session(
         .ok_or_else(|| "OpenCode Runtime 未安装或不可用，请先在设置中安装".to_string())?;
 
     let request_id = uuid::Uuid::new_v4().to_string();
-    let command = OpenCodeRuntime::delete_session_command(
+    let command = OpenCodeCommands::delete_session_command(
         app_session_id,
         opencode_session_id,
         &request_id,

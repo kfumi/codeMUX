@@ -1,7 +1,7 @@
 import { Folder, GitBranch } from 'lucide-react';
 
 import { useRepoBranch } from '../../hooks/useRepoBranch';
-import { getAgentDefinition } from '../../types/agentRegistry';
+import { describeKind } from '../../lib/agentKind';
 import type { Session } from '../../types/session';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 
@@ -11,7 +11,7 @@ interface SessionInfoCardProps {
 }
 
 export function SessionInfoCard({ session, workingPath }: SessionInfoCardProps) {
-  const agentDef = getAgentDefinition(session.agent_kind);
+  const agentDef = describeKind(session.agent_kind);
   // 分支优先级：库里的 git_branch（会话建立时所在的分支）→ 回退实时查询工作目录
   // → 两者都拿不到就不显示这一行。传 null 给 hook 表示不发起实时查询，所以正常
   // 情况下悬停不再产生 Git 调用；只有 git_branch 为空的老会话才走兜底。
@@ -28,7 +28,7 @@ export function SessionInfoCard({ session, workingPath }: SessionInfoCardProps) 
           {session.title || '未命名对话'}
         </p>
         <div className="flex min-w-0 items-center gap-1.5 text-ui-caption text-muted-foreground">
-          {agentDef ? <AgentBrandIcon agent={agentDef} size="sm" /> : null}
+          {agentDef ? <AgentBrandIcon brandIcon={agentDef.brandIcon} fallbackLabel={agentDef.label} size="sm" /> : null}
           <span className="truncate">
             {agentDef?.label ?? session.agent_kind}
             {model ? ` · ${model}` : ''}

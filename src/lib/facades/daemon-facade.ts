@@ -1,5 +1,5 @@
 import type { AgentKind, Session, SessionMode } from '../../types/session';
-import type { AgentPermissionConfig, AgentPlanMode } from '../agentPermissions';
+import type { AgentPermissionConfig, AgentPlanMode } from '../agentKind';
 import type { AgentInputAttachment, EnrichmentBlockResult } from '../../types/agentInput';
 import type { AppConfig, Provider, ModelProvider } from '../../types/provider';
 import type { CompanionStatus } from '../../types/companion';

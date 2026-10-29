@@ -5,7 +5,7 @@
 // Provider Runtime 路径，sidecar 据此动态加载 SDK。
 
 /** CodeMUX 托管的 Provider Runtime 种类。值与 Rust `Provider::as_str()` 对齐。 */
-export type Provider = 'claude_code' | 'codex' | 'opencode';
+export type Provider = 'claude_code' | 'codex' | 'opencode' | 'pi';
 
 /** Runtime 状态。描述 CodeMUX 自有 Runtime，不得由外部 CLI 缺失推导为不可用。 */
 export type RuntimeStatus =
@@ -111,6 +111,8 @@ export function providerLabel(provider: Provider): string {
       return 'Codex';
     case 'opencode':
       return 'OpenCode';
+    case 'pi':
+      return 'pi';
   }
 }
 
@@ -123,10 +125,12 @@ export function providerCliCommand(provider: Provider): string {
       return 'codex';
     case 'opencode':
       return 'opencode';
+    case 'pi':
+      return 'pi';
   }
 }
 
 /** 判定一个值是否为合法的 Provider。 */
 export function isProvider(value: unknown): value is Provider {
-  return value === 'claude_code' || value === 'codex' || value === 'opencode';
+  return value === 'claude_code' || value === 'codex' || value === 'opencode' || value === 'pi';
 }

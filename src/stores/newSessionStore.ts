@@ -10,7 +10,7 @@ import {
   buildDefaultPermissionConfig,
   type AgentPermissionConfig,
   type AgentPlanMode,
-} from '../lib/agentPermissions';
+} from '../lib/agentKind';
 
 /** Shared composer/runtime id for the empty-state new-session draft. */
 export const NEW_SESSION_DRAFT_SESSION_ID = 'new-session-draft';

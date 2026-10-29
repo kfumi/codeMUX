@@ -7,7 +7,7 @@ import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProvide
 import { normalizeReasoningEffort } from '../../lib/reasoningEffort';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
-import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
+import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentKind';
 import { isProviderAgent } from '../../lib/scheduledTaskDefaults';
 import {
   isOpenCodeFreeProviderId,
