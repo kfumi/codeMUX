@@ -150,6 +150,18 @@ describe('NavRail', () => {
     expect(inactiveIcon?.getAttribute('stroke-width')).toBe('1.75');
   });
 
+  it('punches the gear axis hole so the active settings icon is not a solid blob', () => {
+    renderRail('settings');
+
+    const activeIcon = screen.getByRole('button', { name: '设置' }).querySelector('svg');
+
+    expect(activeIcon?.getAttribute('data-icon')).toBe('filled-settings');
+    expect(activeIcon?.getAttribute('class')).not.toContain('fill-current');
+    expect(activeIcon?.querySelector('path')?.getAttribute('fill')).toBe('currentColor');
+    expect(activeIcon?.querySelector('circle')?.getAttribute('fill'))
+      .toBe('hsl(var(--chrome-bg-hover))');
+  });
+
   it('badges the work-item rail only when something needs attention', () => {
     renderRail();
     expect(screen.getByRole('button', { name: '工单' }).textContent).toBe('');

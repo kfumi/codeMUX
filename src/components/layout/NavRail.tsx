@@ -76,6 +76,28 @@ function FilledClock8Icon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * 齿轮的实心态同样需要专用图形：Lucide 的 `Settings` 是「齿廓 + 中心圆」两条独立轮廓，
+ * 直接 `fill-current` 会把齿轮填成一整块没有轴孔的白色团块。
+ */
+function FilledSettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      data-icon="filled-settings"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"
+        fill="currentColor"
+      />
+      <circle cx="12" cy="12" r="3" fill="hsl(var(--chrome-bg-hover))" />
+    </svg>
+  );
+}
+
 export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
   const attentionCount = useWorkTaskStore((state) => selectAttentionCount(state.tasks));
   const settingsHint = useShortcutHint('openSettings');
@@ -107,6 +129,8 @@ export function NavRail({ activeTarget, onSelect, accessory }: NavRailProps) {
         >
           {active && item.target === 'automation' ? (
             <FilledClock8Icon className="h-[18px] w-[18px]" />
+          ) : active && item.target === 'settings' ? (
+            <FilledSettingsIcon className="h-[18px] w-[18px]" />
           ) : (
             <item.Icon
               className={cn('h-[18px] w-[18px]', active && 'fill-current')}
