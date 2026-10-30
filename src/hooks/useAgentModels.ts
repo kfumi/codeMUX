@@ -83,8 +83,7 @@ function fetchOpenCodeFreeModelRows(): Promise<OpenCodeFreeModelRow[]> {
     return Promise.resolve(freeModelsCache);
   }
   if (!freeModelsInFlight) {
-    freeModelsInFlight = daemonFacade
-      .fetchOpenCodeFreeModels()
+    freeModelsInFlight = daemonFacade.provider.fetchOpenCodeFreeModels()
       .then((payload) => {
         const list: unknown[] = Array.isArray(payload) ? payload : [];
         const rows = list

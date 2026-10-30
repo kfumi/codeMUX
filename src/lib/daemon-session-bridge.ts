@@ -1,5 +1,5 @@
 import { createLogger } from './logger';
-import { ensureDaemonClient } from './facades/daemon-facade';
+import { daemonFacade } from './facades/daemon-facade';
 
 const logger = createLogger('daemon-session-bridge');
 
@@ -180,13 +180,12 @@ export async function catchUpTimelineAfterSequence(sessionId: string): Promise<v
   const after = getLastEventSequence(sessionId);
   if (after < 0) return;
   try {
-    const client = await ensureDaemonClient();
     const handler = handlers.get(sessionId);
     if (!handler) return;
     // 拉尾部而非 `after 水位线`：水位线之下的洞（乱序窗口里丢掉的帧，实测是
     // 产物汇总帧）cursor 补拉永远拉不回来，只能按「已接受序号集合」逐帧对账。
     // 集合去重保证已接受的帧（含洞后已到达的帧）不会被重复投喂。
-    const page = await client.getTimeline(sessionId, { direction: 'tail', limit: 200 });
+    const page = await daemonFacade.timeline.get(sessionId, { direction: 'tail', limit: 200 });
     const accepted = acceptedSequences(sessionId);
     for (const event of page.events ?? []) {
       if (event && typeof event === 'object') {
@@ -219,8 +218,7 @@ export async function catchUpTimelineAfterSequence(sessionId: string): Promise<v
  */
 export async function reconcileSequenceAfterReconnect(sessionId: string): Promise<void> {
   try {
-    const client = await ensureDaemonClient();
-    const page = await client.getTimeline(sessionId, { direction: 'tail', limit: 8 });
+    const page = await daemonFacade.timeline.get(sessionId, { direction: 'tail', limit: 8 });
     const seqEnd = (page as { seqEnd?: number }).seqEnd;
     if (typeof seqEnd !== 'number') return;
     if (reconcileHistorySequence(sessionId, seqEnd) === 'reset') {
@@ -258,10 +256,9 @@ function handleTimelineReset(sessionId: string, record: Record<string, unknown>)
 async function ensureDaemonSubscription(sessionId: string): Promise<void> {
   if (unsubscribeFns.has(sessionId)) return;
   try {
-    const client = await ensureDaemonClient();
     // 订阅(重新)建立:接下来一小段是服务端的 tail 回放,那段窗口内的去重是正常的。
     lastAcceptedFrameAt.set(sessionId, Date.now());
-    const unsubscribe = client.subscribeSession(sessionId, {
+    const unsubscribe = await daemonFacade.timeline.subscribe(sessionId, {
       getInitialSequence: () => getLastEventSequence(sessionId),
       onEvent: (event) => {
         const handler = handlers.get(sessionId);

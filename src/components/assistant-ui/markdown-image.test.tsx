@@ -17,7 +17,9 @@ const DATA_URL = 'data:image/png;base64,AAAA';
 
 vi.mock('@/lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    previewImageFile: (...args: unknown[]) => previewImageFile(...args),
+    workspace: {
+      previewImage: (...args: unknown[]) => previewImageFile(...args),
+    },
   },
 }));
 

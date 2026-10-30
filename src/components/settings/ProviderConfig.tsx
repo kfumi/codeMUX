@@ -272,7 +272,7 @@ export function ProviderConfigPanel() {
 
   useEffect(() => {
     void fetchConfig();
-    void daemonFacade.listBuiltinProviderTemplates().then(setTemplates).catch(() => setTemplates([]));
+    void daemonFacade.provider.listTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, [fetchConfig]);
 
   const catalog = useMemo(() => {
@@ -458,8 +458,7 @@ export function ProviderConfigPanel() {
       return;
     }
     let cancelled = false;
-    daemonFacade
-      .lookupModelCatalog(editingModelId, draftTemplateId)
+    daemonFacade.provider.lookupCatalog(editingModelId, draftTemplateId)
       .then((lookup) => {
         if (cancelled) return;
         setCatalogHit(lookup.found ? lookup.entry ?? null : null);
@@ -745,7 +744,7 @@ export function ProviderConfigPanel() {
     }
 
     try {
-      const fetched = await daemonFacade.fetchProviderModels(
+      const fetched = await daemonFacade.provider.fetchModels(
         apiKey,
         baseUrl,
         current.builtin_template_id,

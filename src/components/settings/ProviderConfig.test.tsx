@@ -112,11 +112,13 @@ vi.mock('@/stores/settingsStore', () => ({
 
 vi.mock('@/lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    listBuiltinProviderTemplates: listTemplates,
-    fetchProviderModels,
-    // The models.dev catalog is advisory: a miss is the normal answer for
-    // relay endpoints, so the default mock is "no opinion".
-    lookupModelCatalog,
+    provider: {
+      listTemplates,
+      fetchModels: fetchProviderModels,
+      // The models.dev catalog is advisory: a miss is the normal answer for
+      // relay endpoints, so the default mock is "no opinion".
+      lookupCatalog: lookupModelCatalog,
+    },
   },
 }));
 

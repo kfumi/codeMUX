@@ -13,7 +13,9 @@ const fetchOpenCodeFreeModelsMock = vi.fn();
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    fetchOpenCodeFreeModels: (...args: unknown[]) => fetchOpenCodeFreeModelsMock(...args),
+    provider: {
+      fetchOpenCodeFreeModels: (...args: unknown[]) => fetchOpenCodeFreeModelsMock(...args),
+    },
   },
 }));
 

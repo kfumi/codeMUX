@@ -14,7 +14,9 @@ const { createProjectMock, openDialogMock } = vi.hoisted(() => ({
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    createProject: createProjectMock,
+    project: {
+      create: createProjectMock,
+    },
   },
 }));
 

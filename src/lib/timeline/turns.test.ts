@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentMessage } from '@/stores/agentStore';
 
-import { buildConversationTurns } from './conversationTurns';
+import { buildConversationTurns } from './turns';
 
 let assistantCount = 0;
 

@@ -24,7 +24,7 @@ import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Project } from '../../types/project';
-import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '../../lib/projectRoot';
 import { Input } from '../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { TooltipHint } from '../ui/tooltip';

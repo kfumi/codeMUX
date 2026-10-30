@@ -60,7 +60,7 @@ import {
   THREAD_WINDOW_GROW_TRIGGER_TOP_PX,
   THREAD_WINDOW_INITIAL_COMMIT_TURNS,
 } from '../../../lib/threadWindow';
-import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/timeline/turns';
 import type { ConversationTurn, ConversationTurnStatus } from '../../../types/conversationTurn';
 
 import { isCodexCompactSummaryText, isInterruptMarker } from '../../../stores/agentEventParsing';

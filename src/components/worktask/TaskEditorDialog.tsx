@@ -28,7 +28,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkTaskStore } from '../../stores/workTaskStore';
 import type { WorkTask, WorkTaskInput } from '../../types/workTask';
 import type { ReasoningEffort } from '../../types/session';
-import { getPrimaryProjectRoot } from '../../types/project';
+import { getPrimaryProjectRoot } from '../../lib/projectRoot';
 import type { GitRepositoryState } from '../../lib/gitTypes';
 
 interface TaskEditorDialogProps {

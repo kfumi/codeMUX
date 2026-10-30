@@ -1,6 +1,6 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 
-import { companionViaDaemon } from '../lib/facades/daemon-facade';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import {
   DEFAULT_COMPANION_POLL_INTERVAL_MS,
   applyCompanionStatus,
@@ -68,23 +68,23 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
   }, []);
 
   const setEnabled = useCallback(
-    (enabled: boolean) => runMutation(() => companionViaDaemon.setEnabled(enabled)),
+    (enabled: boolean) => runMutation(() => daemonFacade.companion.setEnabled(enabled)),
     [runMutation],
   );
 
   const refreshPairingCode = useCallback(
-    () => runMutation(() => companionViaDaemon.refreshPairingCode()),
+    () => runMutation(() => daemonFacade.companion.refreshPairingCode()),
     [runMutation],
   );
 
   const setRelayEnabled = useCallback(
-    (enabled: boolean) => runMutation(() => companionViaDaemon.setRelayEnabled(enabled)),
+    (enabled: boolean) => runMutation(() => daemonFacade.companion.setRelayEnabled(enabled)),
     [runMutation],
   );
 
   const setRelayConfig = useCallback(
     (endpoint: string, useTls: boolean) =>
-      runMutation(() => companionViaDaemon.setRelayConfig(endpoint, useTls)),
+      runMutation(() => daemonFacade.companion.setRelayConfig(endpoint, useTls)),
     [runMutation],
   );
 

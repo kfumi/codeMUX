@@ -5,7 +5,11 @@ import type { StreamdownProps } from 'streamdown';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/stores/projectStore';
-import { getPrimaryProjectRoot, getProjectRootPaths } from '@/types/project';
+import {
+  getProjectRootPaths,
+  normalizeProjectRootPath,
+  resolveProjectPath,
+} from '@/lib/projectRoot';
 import { usePreviewStore, type FileTreeNodeData } from '@/stores/previewStore';
 import { useSidePanelStore } from '@/stores/sidePanelStore';
 import { TooltipHint } from '@/components/ui/tooltip';
@@ -327,7 +331,7 @@ export function resolveLocalMarkdownBasePath(filePath: string): string | undefin
   }
 
   if (!isAbsoluteLocalPath(filePath)) {
-    return getPrimaryProjectRoot(projects.find((project) => project.id === activeProjectId)) ?? undefined;
+    return resolveProjectPath(activeProjectId, projects) ?? undefined;
   }
 
   // 会话工作目录可能不是注册项目（如 agent 的 working_path 指向项目外目录），
@@ -633,7 +637,7 @@ function normalizeRelativePathSegments(value: string): string {
 
 function getActiveProjectPath(): string | null {
   const { projects, activeProjectId } = useProjectStore.getState();
-  return getPrimaryProjectRoot(projects.find((project) => project.id === activeProjectId));
+  return resolveProjectPath(activeProjectId, projects);
 }
 
 function isPathInsideRegisteredProject(filePath: string): boolean {
@@ -731,7 +735,7 @@ function isAbsoluteLocalPath(value: string): boolean {
 }
 
 function normalizePathForCompare(value: string): string {
-  return normalizeWindowsDrivePrefix(value).replace(/\\/g, '/').toLowerCase();
+  return normalizeProjectRootPath(normalizeWindowsDrivePrefix(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

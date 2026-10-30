@@ -10,10 +10,14 @@ import {
 } from './useCatalogContextWindow';
 
 vi.mock('@/lib/facades/daemon-facade', () => ({
-  daemonFacade: { lookupModelCatalog: vi.fn() },
+  daemonFacade: {
+    provider: {
+      lookupCatalog: vi.fn(),
+    },
+  },
 }));
 
-const lookup = vi.mocked(daemonFacade.lookupModelCatalog);
+const lookup = vi.mocked(daemonFacade.provider.lookupCatalog);
 
 beforeEach(() => {
   __resetCatalogContextWindowCacheForTests();

@@ -8,7 +8,12 @@ import { NEW_SESSION_DRAFT_SESSION_ID, useNewSessionStore } from '../../stores/n
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import type { Project } from '../../types/project';
-import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
+import {
+  disambiguatedRootNames,
+  getPrimaryProjectRoot,
+  getProjectRootPaths,
+  projectRootName,
+} from '../../lib/projectRoot';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { TooltipHint } from '../ui/tooltip';
@@ -74,7 +79,7 @@ function TreeNode({
     setLoading(true);
     setLoadError(null);
     try {
-      const fetched = await daemonFacade.listDirectory(node.path, 1, projectPath, true);
+      const fetched = await daemonFacade.workspace.list(node.path, 1, projectPath, true);
       setChildren(fetched);
       setChildrenLoaded(true);
     } catch (error) {
@@ -186,6 +191,10 @@ function TreeNode({
 export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
   const roots = useMemo(() => getProjectRootPaths(project), [project]);
   const primaryRoot = useMemo(() => getPrimaryProjectRoot(project), [project]);
+  const rootNames = useMemo(() => {
+    const names = disambiguatedRootNames(roots.map((path) => ({ path })));
+    return new Map(roots.map((path, index) => [path, names[index]]));
+  }, [roots]);
   const isMultiRoot = roots.length > 1;
   const [rootStates, setRootStates] = useState<Array<{ root: string; nodes: FileTreeNode[]; error: string | null }>>([]);
   const [query, setQuery] = useState('');
@@ -200,7 +209,7 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
     // 每个根单独加载：一个附加目录不可用不应拖垮整棵树。
     const states = await Promise.all(roots.map(async (root) => {
       try {
-        const nodes = await daemonFacade.listDirectory(root, 5, root, true);
+        const nodes = await daemonFacade.workspace.list(root, 5, root, true);
         return { root, nodes, error: null };
       } catch (loadError) {
         return {
@@ -312,7 +321,9 @@ export function ProjectExplorer({ project, onBack }: ProjectExplorerProps) {
                 <TooltipHint content={state.root}>
                   <div className="mt-1 flex items-center gap-1.5 px-2 py-1 text-ui-micro font-medium text-[hsl(var(--sidebar-fg))]">
                     <Folder className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{state.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? state.root}</span>
+                    <span className="truncate">
+                      {rootNames.get(state.root) ?? projectRootName(state.root)}
+                    </span>
                     {state.error ? (
                       <span className="ml-auto shrink-0 text-destructive">不可用</span>
                     ) : null}

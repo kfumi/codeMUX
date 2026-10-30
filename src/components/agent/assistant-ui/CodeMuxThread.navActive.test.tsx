@@ -23,7 +23,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurns } from '../../../lib/timeline/turns';
 import { buildLongSessionEvents, userMessageEventIndex } from '../../../lib/dev/longSessionFixture';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';

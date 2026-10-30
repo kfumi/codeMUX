@@ -5,10 +5,12 @@ const subscribeSessionMock = vi.hoisted(() => vi.fn());
 const getTimelineMock = vi.hoisted(() => vi.fn(async () => ({ events: [] as unknown[], seqEnd: -1 })));
 
 vi.mock('./facades/daemon-facade', () => ({
-  ensureDaemonClient: vi.fn(async () => ({
-    subscribeSession: subscribeSessionMock,
-    getTimeline: getTimelineMock,
-  })),
+  daemonFacade: {
+    timeline: {
+      subscribe: subscribeSessionMock,
+      get: getTimelineMock,
+    },
+  },
 }));
 
 import {

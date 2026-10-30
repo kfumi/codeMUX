@@ -1,4 +1,4 @@
-import { companionViaDaemon } from './facades/daemon-facade';
+import { daemonFacade } from './facades/daemon-facade';
 import type { CompanionRelayStatus, CompanionStatus, PairedDevice } from '../types/companion';
 
 /**
@@ -224,7 +224,7 @@ export function loadCompanionStatus(options: LoadCompanionStatusOptions = {}): P
   entry.promise = (async () => {
     if (entry.visible) beginVisibleLoad();
     try {
-      const next = await companionViaDaemon.getStatus();
+      const next = await daemonFacade.companion.getStatus();
       // 已经被 reset:这次结果属于上一轮,任何一个字节都不要落到当前状态里。
       if (epoch !== epochAtStart) return;
       commitStatus(next);

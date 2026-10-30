@@ -19,7 +19,11 @@ const decideLocalPairing = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/lib/bootstrap/shell-event-bridge', () => ({
   shellEventBridge: { available: true, subscribe: shellSubscribe },
 }));
-vi.mock('@/lib/facades/daemon-facade', () => ({ daemonFacade: { decideLocalPairing } }));
+vi.mock('@/lib/facades/daemon-facade', () => ({ daemonFacade: {
+    companion: {
+      decideLocalPairing,
+    },
+  } }));
 vi.mock('@/components/ui/confirm-dialog', () => ({
   ConfirmDialog: ({
     open,

@@ -341,7 +341,7 @@ export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSe
 
 async function loadFirstUserMessage(session: Session): Promise<string> {
   try {
-    const page = await daemonFacade.getTimeline(session.id, { direction: 'tail', limit: 200 });
+    const page = await daemonFacade.timeline.get(session.id, { direction: 'tail', limit: 200 });
 
     for (const raw of page.events ?? []) {
       const rawMsg = raw as Record<string, unknown>;

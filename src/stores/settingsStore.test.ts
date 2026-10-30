@@ -60,21 +60,25 @@ const {
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    getConfig: (...args: unknown[]) => getConfigMock(...args),
-    deleteModelProvider: deleteModelProviderMock,
-    upsertModelProvider: vi.fn(),
-    setActiveProvider: vi.fn(),
-    setModelProviderEnabled: vi.fn(),
-    instantiateBuiltinProviderTemplate: vi.fn(),
-    testModelProvider: vi.fn(),
-    setDefaultAgentKind: setDefaultAgentKindMock,
-    updateAgentConfig: updateAgentConfigMock,
-    setCompactAiOutput: setCompactAiOutputMock,
-    setNotificationSettings: setNotificationSettingsMock,
-    setDefaultOpenTarget: setDefaultOpenTargetMock,
-    setImmediateRunMode: setImmediateRunModeMock,
-    setBrowserControl: setBrowserControlMock,
-    setKeybindings: setKeybindingsMock,
+    config: {
+      get: (...args: unknown[]) => getConfigMock(...args),
+      setDefaultAgentKind: setDefaultAgentKindMock,
+      updateAgentConfig: updateAgentConfigMock,
+      setCompactAiOutput: setCompactAiOutputMock,
+      setNotificationSettings: setNotificationSettingsMock,
+      setDefaultOpenTarget: setDefaultOpenTargetMock,
+      setImmediateRunMode: setImmediateRunModeMock,
+      setBrowserControl: setBrowserControlMock,
+      setKeybindings: setKeybindingsMock,
+    },
+    provider: {
+      delete: deleteModelProviderMock,
+      upsert: vi.fn(),
+      setActive: vi.fn(),
+      setEnabled: vi.fn(),
+      instantiateTemplate: vi.fn(),
+      test: vi.fn(),
+    },
   },
 }));
 

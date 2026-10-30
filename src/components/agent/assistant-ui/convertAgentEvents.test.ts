@@ -4,7 +4,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
 import { buildActivityRuns } from '../../../lib/activityRuns';
-import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurns } from '../../../lib/timeline/turns';
 
 /**
  * 这些事件在渲染侧被分成几段（处理段）——「相邻工具仍属同一个工具组」这条契约现在由

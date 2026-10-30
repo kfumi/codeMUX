@@ -6,7 +6,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { ChevronRight, ListChevronsDownUp, ListChevronsUpDown, MessageSquarePlus, Plus } from 'lucide-react';
 
 import type { Project } from '../../types/project';
-import { getProjectRootPaths } from '../../types/project';
+import { getProjectRootPaths } from '../../lib/projectRoot';
 import { getDaemonStartupError, initDaemonClient } from '../../lib/daemon-bootstrap';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { useCompanionStatus } from '../../hooks/useCompanionStatus';
@@ -14,6 +14,8 @@ import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSidebarExpansionStore } from '../../stores/sidebarExpansionStore';
+import { buildSidebarProjection } from '../../lib/sidebarProjection';
 import { ImportSessionsDialog } from '../layout/ImportSessionsDialog';
 import { ProjectGroup } from './ProjectGroup';
 import { moveProjectToIndex, reorderFromDragEnd } from './projectReorder';
@@ -28,10 +30,6 @@ interface SessionListProps {
   onAddProject: () => void;
   onSelectSession: (sessionId: string, projectId: string | null) => void;
 }
-
-const PROJECTS_SECTION_KEY = 'codemux-projects-section-expanded';
-const CONVERSATIONS_SECTION_KEY = 'codemux-conversations-section-expanded';
-const PINNED_SECTION_KEY = 'codemux-pinned-section-expanded';
 
 /**
  * 首屏骨架：会话/项目的首帧数据还没回来时占位。
@@ -54,24 +52,6 @@ function SessionListSkeleton() {
       ))}
     </div>
   );
-}
-
-function loadSectionExpanded(storageKey: string): boolean {
-  try {
-    const stored = localStorage.getItem(storageKey);
-    if (stored === 'false') return false;
-  } catch {
-    // Ignore storage errors and fall back to expanded.
-  }
-  return true;
-}
-
-function saveSectionExpanded(storageKey: string, expanded: boolean): void {
-  try {
-    localStorage.setItem(storageKey, String(expanded));
-  } catch {
-    // Ignore storage errors.
-  }
 }
 
 function SectionHeader({
@@ -142,6 +122,7 @@ export function SessionList({
   const canReorderProjects = hostCapabilities.form !== 'mobile';
   const {
     sessions,
+    archivedSessions,
     activeSessionId,
     error: sessionError,
     isLoading,
@@ -156,17 +137,23 @@ export function SessionList({
   const {
     projects,
     activeProjectId,
-    collapsedProjects,
     hasLoadedOnce: projectsLoaded,
     fetchProjects,
     deleteProject,
-    setAllProjectsExpanded,
     reorderProjects,
   } = useProjectStore();
+  const pinnedExpanded = useSidebarExpansionStore((state) => state.pinnedExpanded);
+  const projectsExpanded = useSidebarExpansionStore((state) => state.projectsExpanded);
+  const conversationsExpanded = useSidebarExpansionStore((state) => state.conversationsExpanded);
+  const collapsedProjects = useSidebarExpansionStore((state) => state.collapsedProjects);
+  const visibleSessionLimits = useSidebarExpansionStore((state) => state.visibleSessionLimits);
+  const toggleSection = useSidebarExpansionStore((state) => state.toggleSection);
+  const setSectionExpanded = useSidebarExpansionStore((state) => state.setSectionExpanded);
+  const setAllProjectsExpanded = useSidebarExpansionStore((state) => state.setAllProjectsExpanded);
+  const toggleProject = useSidebarExpansionStore((state) => state.toggleProject);
+  const showMoreProjectSessions = useSidebarExpansionStore((state) => state.showMoreProjectSessions);
+  const collapseProjectSessions = useSidebarExpansionStore((state) => state.collapseProjectSessions);
   const { status: companionStatus } = useCompanionStatus({ pollIntervalMs: 15_000, polling: true });
-  const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
-  const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
-  const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
   const [importProject, setImportProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -175,19 +162,32 @@ export function SessionList({
     fetchProjects();
   }, [fetchSessions, fetchArchivedSessions, fetchProjects]);
 
-  const projectSessions = useMemo(() => {
-    const map = new Map<string, typeof sessions>();
-    for (const session of sessions) {
-      if (!session.project_id || session.is_pinned) continue;
-      const list = map.get(session.project_id) || [];
-      list.push(session);
-      map.set(session.project_id, list);
-    }
-    return map;
-  }, [sessions]);
-
-  const pinnedSessions = useMemo(() => sessions.filter((session) => session.is_pinned), [sessions]);
-  const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id && !session.is_pinned), [sessions]);
+  const projection = useMemo(
+    () => buildSidebarProjection(sessions, archivedSessions, projects, {
+      pinnedExpanded,
+      projectsExpanded,
+      conversationsExpanded,
+      collapsedProjects,
+      visibleSessionLimits,
+    }),
+    [
+      sessions,
+      archivedSessions,
+      projects,
+      pinnedExpanded,
+      projectsExpanded,
+      conversationsExpanded,
+      collapsedProjects,
+      visibleSessionLimits,
+    ],
+  );
+  const {
+    pinnedSessions,
+    ungroupedSessions,
+    projects: projectSections,
+    sections: sidebarSections,
+    allProjectsExpanded,
+  } = projection;
 
   // 项目拖拽排序：ids 顺序即 daemon 返回顺序，拖拽只提交一次完整顺序。
   const projectOrder = useMemo(() => projects.map((project) => project.id), [projects]);
@@ -228,43 +228,32 @@ export function SessionList({
   const showEmptyState = sessions.length === 0 && projects.length === 0
     && !showDaemonIssue && !showInitialSkeleton;
 
-  const toggleProjectsExpanded = useCallback(() => {
-    setProjectsExpanded((current) => {
-      const next = !current;
-      saveSectionExpanded(PROJECTS_SECTION_KEY, next);
-      return next;
-    });
-  }, []);
+  const toggleProjectsExpanded = useCallback(
+    () => toggleSection('projectsExpanded'),
+    [toggleSection],
+  );
 
   // 「展开全部项目」在还有项目收起时出现；全部展开后按钮翻成「收起全部项目」。
-  const allProjectsExpanded = projects.every((project) => !collapsedProjects.has(project.id));
   const allProjectsToggleLabel = allProjectsExpanded ? '收起全部项目' : '展开全部项目';
 
   const toggleAllProjectsExpanded = useCallback(() => {
     const nextExpanded = !allProjectsExpanded;
-    setAllProjectsExpanded(nextExpanded);
+    setAllProjectsExpanded(nextExpanded, projectOrder);
     // 分区本身收着时，展开全部项目若只改组状态用户什么也看不到。
     if (nextExpanded && !projectsExpanded) {
-      setProjectsExpanded(true);
-      saveSectionExpanded(PROJECTS_SECTION_KEY, true);
+      setSectionExpanded('projectsExpanded', true);
     }
-  }, [allProjectsExpanded, projectsExpanded, setAllProjectsExpanded]);
+  }, [allProjectsExpanded, projectOrder, projectsExpanded, setAllProjectsExpanded, setSectionExpanded]);
 
-  const togglePinnedExpanded = useCallback(() => {
-    setPinnedExpanded((current) => {
-      const next = !current;
-      saveSectionExpanded(PINNED_SECTION_KEY, next);
-      return next;
-    });
-  }, []);
+  const togglePinnedExpanded = useCallback(
+    () => toggleSection('pinnedExpanded'),
+    [toggleSection],
+  );
 
-  const toggleConversationsExpanded = useCallback(() => {
-    setConversationsExpanded((current) => {
-      const next = !current;
-      saveSectionExpanded(CONVERSATIONS_SECTION_KEY, next);
-      return next;
-    });
-  }, []);
+  const toggleConversationsExpanded = useCallback(
+    () => toggleSection('conversationsExpanded'),
+    [toggleSection],
+  );
 
   const handleOpenImportSessions = useCallback((project: Project) => {
     setImportProject(project);
@@ -311,11 +300,11 @@ export function SessionList({
         <div className="space-y-1">
           <SectionHeader
             title="置顶"
-            expanded={pinnedExpanded}
+            expanded={sidebarSections.pinnedExpanded}
             toggleLabel="toggle-pinned-section"
             onToggle={togglePinnedExpanded}
           />
-          {pinnedExpanded && pinnedSessions.map((session) => (
+          {sidebarSections.pinnedExpanded && pinnedSessions.map((session) => (
             <SessionItem
               key={session.id}
               session={session}
@@ -336,7 +325,7 @@ export function SessionList({
         <div>
           <SectionHeader
             title="项目"
-            expanded={projectsExpanded}
+            expanded={sidebarSections.projectsExpanded}
             toggleLabel="toggle-projects-section"
             onToggle={toggleProjectsExpanded}
             actions={(
@@ -375,22 +364,26 @@ export function SessionList({
             )}
           />
 
-          {projectsExpanded && (
+          {sidebarSections.projectsExpanded && (
             <DndContext
               sensors={projectSensors}
               collisionDetection={closestCenter}
               onDragEnd={handleProjectDragEnd}
             >
               <SortableContext items={projectOrder} strategy={verticalListSortingStrategy}>
-                {projects.map((project) => (
+                {projectSections.map((section) => (
                   <ProjectGroup
-                    key={project.id}
-                    project={project}
-                    sessions={projectSessions.get(project.id) || []}
+                    key={section.project.id}
+                    project={section.project}
+                    section={section}
                     activeSessionId={activeSessionId}
-                    isActiveProject={project.id === activeProjectId}
+                    isActiveProject={section.project.id === activeProjectId}
+                    onToggleExpanded={() => toggleProject(section.project.id)}
+                    onShowMoreSessions={() =>
+                      showMoreProjectSessions(section.project.id, section.totalSessions)}
+                    onCollapseSessions={() => collapseProjectSessions(section.project.id)}
                     onSelectSession={(id) => {
-                      onSelectSession(id, project.id);
+                      onSelectSession(id, section.project.id);
                     }}
                     onArchiveSession={archiveSession}
                     onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
@@ -414,11 +407,11 @@ export function SessionList({
         <div className="space-y-1">
           <SectionHeader
             title="对话"
-            expanded={conversationsExpanded}
+            expanded={sidebarSections.conversationsExpanded}
             toggleLabel="toggle-conversations-section"
             onToggle={toggleConversationsExpanded}
           />
-          {conversationsExpanded && ungroupedSessions.map((session) => (
+          {sidebarSections.conversationsExpanded && ungroupedSessions.map((session) => (
             <SessionItem
               key={session.id}
               session={session}

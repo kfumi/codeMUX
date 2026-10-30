@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { Project } from '../../types/project';
-import { getPrimaryProjectRoot, getProjectRootPaths } from '../../types/project';
+import { getPrimaryProjectRoot, getProjectRootPaths } from '../../lib/projectRoot';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';

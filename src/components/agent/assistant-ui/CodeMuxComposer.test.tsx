@@ -189,8 +189,10 @@ vi.mock('./CodeMuxLexicalComposerInput', () => ({
 
 vi.mock('../../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    updatePermissions: updatePermissionsMock,
-    respondToInteractiveViaDaemon: sendToolResponseMock,
+    session: {
+      updatePermissions: updatePermissionsMock,
+      respondToInteractive: sendToolResponseMock,
+    },
   },
 }));
 

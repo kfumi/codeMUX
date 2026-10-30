@@ -1,4 +1,4 @@
-import { isTerminalAgentEvent } from '../stores/agentEventParsing';
+import { isTerminalAgentEvent } from './timeline/terminality';
 import type { AgentMessage } from '../stores/agentStore';
 
 export function shouldAttachLiveTurn(

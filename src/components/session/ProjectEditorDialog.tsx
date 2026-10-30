@@ -7,7 +7,16 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
 import type { Session } from '../../types/session';
-import { getPrimaryProjectRoot } from '../../types/project';
+import {
+  appendPickedRoots,
+  disambiguatedRootNames,
+  getPrimaryProjectRoot,
+  isPathInsideProjectRoot,
+  projectRootName as rootName,
+  removeRootKeepingPrimary,
+  toEditableProjectRoots,
+  type EditableProjectRoot,
+} from '../../lib/projectRoot';
 import { Button } from '../ui/button';
 import {
   Dialog,
@@ -20,31 +29,10 @@ import {
 import { Input } from '../ui/input';
 import { TooltipHint } from '../ui/tooltip';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import {
-  appendPickedRoots,
-  disambiguatedRootNames,
-  projectRootName as rootName,
-  removeRootKeepingPrimary,
-  type EditableProjectRoot,
-} from './projectRoots';
-
 interface ProjectEditorDialogProps {
   project: Project | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-function pathKey(path: string | null | undefined): string {
-  return (path ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-function isPathInside(root: string, candidate: string): boolean {
-  const normalizedRoot = pathKey(root);
-  const normalizedCandidate = pathKey(candidate);
-  if (!normalizedRoot || !normalizedCandidate) {
-    return false;
-  }
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`);
 }
 
 function projectSessionCount(projectId: string, sessions: readonly Session[]): number {
@@ -67,7 +55,7 @@ function sessionsUnderRoot(
     if (session.project_id !== project.id) {
       return false;
     }
-    return isPathInside(root, session.working_path ?? fallback ?? '');
+    return isPathInsideProjectRoot(root, session.working_path ?? fallback ?? '');
   }).length;
 }
 
@@ -92,15 +80,7 @@ export function ProjectEditorDialog({ project, open, onOpenChange }: ProjectEdit
       return;
     }
     setName(project.name);
-    setRoots(
-      [...project.roots]
-        .sort((left, right) => left.position - right.position)
-        .map((root, index, list) => ({
-          path: root.path,
-          // 主根缺失时顺序最小者兜底，与 daemon 的继承规则一致。
-          isPrimary: root.isPrimary || (index === 0 && !list.some((entry) => entry.isPrimary)),
-        })),
-    );
+    setRoots(toEditableProjectRoots(project.roots));
     setNotice(null);
   }, [open, project]);
 

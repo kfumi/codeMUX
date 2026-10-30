@@ -23,7 +23,9 @@ const { getTimelineMock } = vi.hoisted(() => ({
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    getTimeline: getTimelineMock,
+    timeline: {
+      get: getTimelineMock,
+    },
   },
 }));
 

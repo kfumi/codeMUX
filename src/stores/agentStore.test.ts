@@ -147,27 +147,35 @@ vi.mock('../lib/facades/daemon-facade', () => ({
     getTimeline: getTimelineMock,
   })),
   daemonFacade: {
-    sendMessageViaDaemon: sendMessageViaDaemonMock,
-    getTimeline: getTimelineMock,
-    interruptViaDaemon: interruptViaDaemonMock,
-    respondToPermissionViaDaemon: respondToAgentPermissionMock,
-    respondToComputerUseApproval: respondToComputerUseApprovalMock,
-    respondToInteractiveViaDaemon: vi.fn(),
-    rewindSession: rewindSessionMock,
-    resyncSessionFromNative: resyncSessionFromNativeMock,
-    updateWorkingPath: updateWorkingPathMock,
-    touchSession: vi.fn(() => Promise.resolve()),
     updateSessionTitle: vi.fn(() => Promise.resolve()),
-    listSessions: vi.fn(() => Promise.resolve([])),
-    listArchivedSessions: vi.fn(() => Promise.resolve([])),
-    listProjects: vi.fn(() => Promise.resolve([])),
     ensureClient: vi.fn(),
-    enrichAttachments: enrichAttachmentsMock,
-    loadLatestTokenUsage: loadLatestTokenUsageMock,
-    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
-    ensureAgentSession: vi.fn(() => Promise.resolve()),
     getAgentSessionInfo: vi.fn(() => Promise.resolve({ agentSessionId: null, messagePath: null })),
-    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+    session: {
+      sendMessage: sendMessageViaDaemonMock,
+      interrupt: interruptViaDaemonMock,
+      respondToPermission: respondToAgentPermissionMock,
+      respondToInteractive: vi.fn(),
+      rewind: rewindSessionMock,
+      resyncFromNative: resyncSessionFromNativeMock,
+      updateWorkingPath: updateWorkingPathMock,
+      touch: vi.fn(() => Promise.resolve()),
+      list: vi.fn(() => Promise.resolve([])),
+      listArchived: vi.fn(() => Promise.resolve([])),
+      enrichAttachments: enrichAttachmentsMock,
+      loadLatestTokenUsage: loadLatestTokenUsageMock,
+      loadSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
+      ensureAgent: vi.fn(() => Promise.resolve()),
+      isTurnActive: vi.fn(() => Promise.resolve(false)),
+    },
+    timeline: {
+      get: getTimelineMock,
+    },
+    project: {
+      list: vi.fn(() => Promise.resolve([])),
+    },
+    computerUse: {
+      respondToApproval: respondToComputerUseApprovalMock,
+    },
   },
   getDaemonClientInitError: vi.fn(() => null),
   resetDaemonClient: vi.fn(),
@@ -604,7 +612,7 @@ describe('agent store Codex history loading', () => {
 
   it('does not stop a live desktop query when attaching to a background turn', async () => {
     const session = await primeSession('codex');
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(false);
 
     startSessionMock.mockImplementationOnce(async () => undefined);
 
@@ -622,7 +630,7 @@ describe('agent store Codex history loading', () => {
   it('attachLiveSession subscribes the daemon stream and ends with the turn after a refresh', async () => {
     const session = await primeSession('codex');
     sessionHandlers.clear();
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(true);
 
     const attached = await useAgentStore.getState().attachLiveSession(session.id);
 
@@ -847,7 +855,7 @@ describe('agent store Codex history loading', () => {
   it('后台回合的完成探测由事件驱动，不用等被节流的兜底节拍', async () => {
     const session = await primeSession('codex');
     sessionHandlers.clear();
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(true);
 
     // 附着到进行中的回合（这会注册 WS 事件处理器），再把它标记成"后台回合"。
     expect(await useAgentStore.getState().attachLiveSession(session.id)).toBe(true);
@@ -855,7 +863,7 @@ describe('agent store Codex history loading', () => {
       backgroundLive: { ...state.backgroundLive, [session.id]: true },
     }));
 
-    const probesBefore = vi.mocked(daemonFacade.isSessionTurnActive).mock.calls.length;
+    const probesBefore = vi.mocked(daemonFacade.session.isTurnActive).mock.calls.length;
 
     // 普通事件到达：不该等 1s 兜底节拍（窗口隐藏时它还会被浏览器压到分钟级），
     // 防抖 250ms 之后就应当去探测一次。
@@ -866,14 +874,14 @@ describe('agent store Codex history loading', () => {
     }));
 
     await vi.waitFor(() => {
-      expect(vi.mocked(daemonFacade.isSessionTurnActive).mock.calls.length)
+      expect(vi.mocked(daemonFacade.session.isTurnActive).mock.calls.length)
         .toBeGreaterThan(probesBefore);
     }, { timeout: 900, interval: 25 });
   });
 
   it('settling a background turn clears late stream buffers and estimated tokens', async () => {
     const session = await primeSession('codex');
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(false);
     useAgentStore.setState({
       backgroundLive: { [session.id]: true },
       isRunning: { [session.id]: true },
@@ -893,7 +901,7 @@ describe('agent store Codex history loading', () => {
   it('proxy_status updates the settings indicator without entering the timeline', async () => {
     const session = await primeSession('codex');
     sessionHandlers.clear();
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(true);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(true);
 
     expect(await useAgentStore.getState().attachLiveSession(session.id)).toBe(true);
 
@@ -930,7 +938,7 @@ describe('agent store Codex history loading', () => {
   it('attachLiveSession is a no-op when the daemon turn is not active', async () => {
     const session = await primeSession('codex');
     sessionHandlers.clear();
-    vi.mocked(daemonFacade.isSessionTurnActive).mockResolvedValue(false);
+    vi.mocked(daemonFacade.session.isTurnActive).mockResolvedValue(false);
 
     const attached = await useAgentStore.getState().attachLiveSession(session.id);
 

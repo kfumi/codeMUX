@@ -1,6 +1,6 @@
 import { formatElapsed } from '@/components/agent/assistant-ui/RunningElapsed';
 import { buildActivityRuns } from '@/lib/activityRuns';
-import { buildConversationTurns } from '@/lib/conversationTurns';
+import { buildConversationTurns } from './timeline/turns';
 import { parseAgentEvent, type AgentMessage } from '@/stores/agentStore';
 import type { SubagentDescriptor, SubagentStatus } from '@/stores/subagentStore';
 

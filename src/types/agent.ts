@@ -130,6 +130,19 @@ export interface TodoItem {
   activeForm?: string;
 }
 
+/** 权限门拒绝时 daemon 返回的模式诊断。 */
+export type ModeBlockedDiagnostic = {
+  blocked_method?: string;
+  effective_mode?: string;
+  reason_code?: string;
+  reason?: string;
+  suggestion?: string;
+  request_id?: string | null;
+  /** 权限门归属(工单 07):哪一家的门拦下了这一步。 */
+  gate_agent_kind?: string;
+  gate_label?: string;
+};
+
 /** Sidecar lifecycle events */
 export interface SidecarReadyEvent {
   type: 'sidecar_ready';

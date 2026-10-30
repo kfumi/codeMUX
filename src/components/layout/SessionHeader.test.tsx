@@ -38,12 +38,14 @@ vi.mock('sonner', () => ({
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    patchSessionViaDaemon: vi.fn().mockResolvedValue(undefined),
-    archiveViaDaemon: vi.fn().mockResolvedValue(undefined),
-    unarchiveViaDaemon: vi.fn().mockResolvedValue(undefined),
-    updateWorkingPath: vi.fn().mockResolvedValue(undefined),
-    touchSession: vi.fn().mockResolvedValue(undefined),
-    getSessionInfo: mocks.getSessionInfo,
+    session: {
+      patch: vi.fn().mockResolvedValue(undefined),
+      archive: vi.fn().mockResolvedValue(undefined),
+      unarchive: vi.fn().mockResolvedValue(undefined),
+      updateWorkingPath: vi.fn().mockResolvedValue(undefined),
+      touch: vi.fn().mockResolvedValue(undefined),
+      getInfo: mocks.getSessionInfo,
+    },
   },
 }));
 
@@ -100,7 +102,6 @@ describe('SessionHeader', () => {
       activeProjectId: 'project-1',
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
     useSessionStore.setState({
       sessions: [makeSession({})],

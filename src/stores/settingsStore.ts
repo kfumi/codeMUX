@@ -82,7 +82,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
     try {
-      const rawConfig = await daemonFacade.getConfig();
+      const rawConfig = await daemonFacade.config.get();
       const config: AppConfig = {
         ...rawConfig,
         model_providers: rawConfig.model_providers ?? [],
@@ -111,7 +111,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await daemonFacade.setTheme(theme);
+      await daemonFacade.config.setTheme(theme);
     } catch (error) {
       applyThemeLocally(previousTheme);
       set((state) => ({
@@ -128,7 +128,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setCompactAiOutput(enabled);
+      await daemonFacade.config.setCompactAiOutput(enabled);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previous } : state.config,
@@ -145,7 +145,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setImmediateRunMode(next);
+      await daemonFacade.config.setImmediateRunMode(next);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, immediate_run_mode: previous } : state.config,
@@ -161,7 +161,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setAttachmentEnrichment(enrichment);
+      await daemonFacade.config.setAttachmentEnrichment(enrichment);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, attachment_enrichment: previous } : state.config,
@@ -177,7 +177,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setDefaultOpenTarget(target);
+      await daemonFacade.config.setDefaultOpenTarget(target);
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, default_open_target: previous } : state.config,
@@ -195,7 +195,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await daemonFacade.setNotificationSettings(nextSettings);
+      await daemonFacade.config.setNotificationSettings(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config && previousNotifications
@@ -215,7 +215,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await daemonFacade.setGitSettings(nextSettings);
+      await daemonFacade.config.setGitSettings(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config && previousGit
@@ -234,7 +234,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      await daemonFacade.setKeybindings(keybindings);
+      await daemonFacade.config.setKeybindings(keybindings);
     } catch (error) {
       set((state) => ({
         config: state.config
@@ -254,7 +254,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setBrowserControl(nextSettings);
+      await daemonFacade.config.setBrowserControl(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config
@@ -274,7 +274,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       error: null,
     }));
     try {
-      await daemonFacade.setComputerUse(nextSettings);
+      await daemonFacade.config.setComputerUse(nextSettings);
     } catch (error) {
       set((state) => ({
         config: state.config
@@ -288,7 +288,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setActiveProvider: async (providerId: string) => {
     try {
-      await daemonFacade.setActiveProvider(providerId);
+      await daemonFacade.provider.setActive(providerId);
       set((state) => ({
         config: state.config ? { ...state.config, active_provider_id: providerId } : null,
       }));
@@ -300,7 +300,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   upsertModelProvider: async (provider: ModelProvider) => {
     try {
-      await daemonFacade.upsertModelProvider(provider);
+      await daemonFacade.provider.upsert(provider);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -310,7 +310,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   deleteModelProvider: async (providerId: string) => {
     try {
-      await daemonFacade.deleteModelProvider(providerId);
+      await daemonFacade.provider.delete(providerId);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -320,7 +320,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setModelProviderEnabled: async (providerId: string, enabled: boolean) => {
     try {
-      await daemonFacade.setModelProviderEnabled(providerId, enabled);
+      await daemonFacade.provider.setEnabled(providerId, enabled);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -329,13 +329,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   instantiateBuiltinTemplate: async (templateId: string) => {
-    const provider = await daemonFacade.instantiateBuiltinProviderTemplate(templateId);
+    const provider = await daemonFacade.provider.instantiateTemplate(templateId);
     await get().fetchConfig();
     return provider as ModelProvider;
   },
 
   testModelProvider: async (apiKey: string, baseUrl: string) => {
-    return daemonFacade.testModelProvider(apiKey, baseUrl);
+    return daemonFacade.provider.test(apiKey, baseUrl);
   },
 
   getActiveProvider: () => {
@@ -361,7 +361,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setDefaultAgentKind: async (agentKind: AgentKind) => {
     try {
-      await daemonFacade.setDefaultAgentKind(agentKind);
+      await daemonFacade.config.setDefaultAgentKind(agentKind);
       useNewSessionStore.getState().setSelectedAgentKind(agentKind);
       set((state) => ({
         config: state.config
@@ -381,7 +381,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   updateAgentConfig: async <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => {
     try {
-      await daemonFacade.updateAgentConfig(agentKind, config);
+      await daemonFacade.config.updateAgentConfig(agentKind, config);
       set((state) => ({
         config: state.config
           ? {

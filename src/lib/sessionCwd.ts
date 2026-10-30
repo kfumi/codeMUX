@@ -9,7 +9,7 @@ import { daemonFacade } from './facades/daemon-facade';
 import { shellFacade } from './facades/shell-facade';
 import type { AgentMessage } from '../stores/agentStore';
 import type { Project } from '../types/project';
-import { getPrimaryProjectRoot } from '../types/project';
+import { getBoundProjectPath, getPrimaryProjectRoot } from './projectRoot';
 import type { Session } from '../types/session';
 
 export const DEFAULT_AGENT_CWD = '.';
@@ -69,16 +69,6 @@ export function getStoredAgentCwd(
   storage: Pick<Storage, 'getItem'> | null | undefined = globalThis.localStorage,
 ): string {
   return storage?.getItem('agent-user-cwd') || DEFAULT_AGENT_CWD;
-}
-
-function getBoundProjectPath(
-  session: Pick<Session, 'project_id'>,
-  projects: Project[],
-): string | null {
-  if (!session.project_id) {
-    return null;
-  }
-  return getPrimaryProjectRoot(projects.find((entry) => entry.id === session.project_id));
 }
 
 function isDistinctWorkingPath(

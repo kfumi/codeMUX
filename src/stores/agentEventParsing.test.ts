@@ -4,15 +4,17 @@ import {
   INTERRUPT_MARKER,
   collapsePersistedCompactMarkers,
   collapsePersistedCompactTimeline,
-  isTerminalAgentEvent,
   isInterruptMarker,
   mapPersistedClaudeMessage,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
   projectNativeSessionRebuiltData,
-  shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
 } from './agentEventParsing';
+import {
+  isTerminalAgentEvent,
+  shouldProcessTerminalEvent,
+} from '../lib/timeline/terminality';
 
 describe('interrupt marker detection', () => {
   it('only matches the canonical interrupt marker', () => {

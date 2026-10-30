@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockPreviewImageFile } = vi.hoisted(() => ({ mockPreviewImageFile: vi.fn() }));
 vi.mock('@/lib/facades/daemon-facade', () => ({
-  daemonFacade: { previewImageFile: mockPreviewImageFile },
+  daemonFacade: {
+    workspace: {
+      previewImage: mockPreviewImageFile,
+    },
+  },
 }));
 
 import { TooltipProvider } from '@/components/ui/tooltip';

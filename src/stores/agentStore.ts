@@ -35,22 +35,13 @@ import {
   buildSessionTitleFromUserContent,
 } from '../lib/sessionTitle';
 import { extractSessionWorkingPathFromEvents, isValidWorkingPath } from '../lib/sessionCwd';
-import { getPrimaryProjectRoot } from '../types/project';
+import { getPrimaryProjectRoot } from '../lib/projectRoot';
 import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
-  isClaudeCompactSummaryText,
-  isClaudeTaskNotificationEvent,
-  isCodexCompactSummaryText,
-  isAgentInjectedUserMessage,
   isInterruptMarker,
-  isTerminalAgentEvent,
   collapsePersistedCompactTimeline,
-  mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
-  normalizeClaudeUserEvent,
-  parseSdkUserMessage,
-  shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
   type SessionSummaryEvent,
 } from './agentEventParsing';
@@ -60,30 +51,7 @@ import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import { useSubagentStore } from './subagentStore';
 import { countDiffLines } from '../lib/diffStats';
-import {
-  isCodeMuxStreamEvent,
-  isCodeMuxToolEvent,
-  isCodeMuxAssistantMessageEvent,
-  isCodeMuxUserMessageEvent,
-  isCodeMuxSystemEvent,
-  isCodeMuxDiagnosticEvent,
-  isCodeMuxPersistedTimelineEvent,
-  isCodeMuxUserInputRequestedEvent,
-  isCodeMuxPermissionRequestedEvent,
-  isCodeMuxPermissionModeChangedEvent,
-  isCodeMuxTurnEvent,
-  toLegacyStreamingMessage,
-  toLegacyToolMessage,
-  toLegacyAssistantMessage,
-  toLegacyUserMessage,
-  toLegacySystemMessage,
-  toLegacyUserInputRequestedMessage,
-  toLegacyPermissionRequestedMessage,
-  toLegacyPermissionResolvedMessage,
-  isCodeMuxPermissionResolvedEvent,
-  toLegacyPermissionModeChangedMessage,
-  toLegacyTurnMessage,
-} from '../lib/codeMuxProtocol';
+import { isCodeMuxPersistedTimelineEvent } from '../lib/codeMuxProtocol';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -98,6 +66,7 @@ import type {
   SessionResumeFailedEvent,
   TodoItem,
   ChangedFile,
+  ModeBlockedDiagnostic,
 } from '../types/agent';
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, RewindMessageResult, UserAttachmentPreview } from '../types/agentInput';
@@ -109,7 +78,11 @@ import {
   normalizeThreadTokenUsage,
   type ThreadTokenUsage,
 } from '../components/agent/contextUsage';
-import { buildConversationTurns } from '../lib/conversationTurns';
+import { buildConversationTurns } from '../lib/timeline/turns';
+import { parseAgentEvent } from '../lib/timeline/parse';
+import { isTerminalAgentEvent, shouldProcessTerminalEvent } from '../lib/timeline/terminality';
+
+export { parseAgentEvent };
 import { estimateOutputTokens } from '../lib/tokenSpeed';
 import { extractTodosFromEvents } from '../lib/extractTodosFromEvents';
 import type { ConversationTurn } from '../types/conversationTurn';
@@ -143,18 +116,6 @@ export type AgentMessage =
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
-
-type ModeBlockedDiagnostic = {
-  blocked_method?: string;
-  effective_mode?: string;
-  reason_code?: string;
-  reason?: string;
-  suggestion?: string;
-  request_id?: string | null;
-  /** 权限门归属(工单 07):哪一家的门拦下了这一步。 */
-  gate_agent_kind?: string;
-  gate_label?: string;
-};
 
 interface AgentState {
   /** Events for each session */
@@ -1221,228 +1182,6 @@ function simulateStreamingContent(
  *
  * 用 `WeakMap` 而非 `Map`：条目随事件对象一起被回收，不会把整条时间线钉在内存里。
  */
-const parsedAgentEventCache = new WeakMap<Record<string, unknown>, AgentMessage>();
-
-export function parseAgentEvent(raw: string | Record<string, unknown>): AgentMessage {
-  if (typeof raw !== 'string') {
-    const cached = parsedAgentEventCache.get(raw);
-    if (cached) return cached;
-    const parsed = parseAgentEventUncached(raw);
-    // 解析结果必须是不可变快照才能安全共享：下游 reducer 会持有它，而调用方传进来的是
-    // store 里的原始事件对象。`parseAgentEventUncached` 每次都新建对象，天然满足。
-    parsedAgentEventCache.set(raw, parsed);
-    return parsed;
-  }
-  return parseAgentEventUncached(raw);
-}
-
-function parseAgentEventUncached(raw: string | Record<string, unknown>): AgentMessage {
-  try {
-    // 字符串生产者（遗留 sidecar 流、持久化时间线行、测试）才付解析代价；对象生产者
-    // 已经在调用方解析过了。
-    const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
-    // Filter out sub-agent (sidechain) messages from the main event stream.
-    if (isClaudeSubagentEvent(data)) {
-      return { kind: 'raw', data };
-    }
-
-    if (isClaudeTaskNotificationEvent(data)) {
-      return { kind: 'raw', data };
-    }
-
-    const codexCompactedEvent = mapCodexCompactedEvent(data);
-    if (codexCompactedEvent) {
-      return codexCompactedEvent;
-    }
-
-    switch (data.type) {
-      case 'sidecar_ready':
-        return { kind: 'ready', data };
-      case 'sidecar_error':
-        return { kind: 'error', data };
-      case 'session_resume_failed':
-        return { kind: 'resume_failed', data };
-      case 'sidecar_query_done':
-        return { kind: 'done' };
-      case 'mcp_status_update':
-        return { kind: 'mcp_status', data: { servers: (data as any).servers || {}, status: (data as any).status } };
-      case 'proxy_status':
-        return { kind: 'proxy_status', data: { running: (data as any).running, port: (data as any).port, upstreamBaseUrl: (data as any).upstreamBaseUrl } };
-      case 'codex_todo_list':
-        return {
-          kind: 'todo_list',
-          data: {
-            todos: Array.isArray((data as any).todos)
-              ? (data as any).todos
-                .map((todo: any) => ({
-                  content: String(todo?.content || ''),
-                  status: (['pending', 'in_progress', 'completed'].includes(todo?.status) ? todo.status : 'pending') as TodoItem['status'],
-                  activeForm: todo?.activeForm || undefined,
-                }))
-                .filter((todo: TodoItem) => todo.content.length > 0)
-              : [],
-          },
-        };
-      case 'assistant':
-        if (isAssistantCompactSummaryEvent(data)) {
-          return { kind: 'raw', data };
-        }
-        return { kind: 'assistant', data };
-      case 'user':
-        {
-          const event = parseSdkUserMessage(data);
-          if (event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)) {
-            return { kind: 'raw', data };
-          }
-          if (event.kind === 'user') {
-            if (
-              data.isMeta === true ||
-              data.isCompactSummary === true ||
-              data.isVisibleInTranscriptOnly === true ||
-              isClaudeCompactSummaryText(event.data.content)
-            ) {
-              return { kind: 'raw', data };
-            }
-            const normalized = normalizeClaudeUserEvent(event);
-            return normalized ?? { kind: 'raw', data };
-          }
-          return event;
-        }
-      case 'system':
-        if (data.subtype === 'init') {
-          return { kind: 'system', data };
-        }
-        if (data.subtype === 'api_retry') {
-          return { kind: 'api_retry', data };
-        }
-        if (data.subtype === 'compact_boundary') {
-          return { kind: 'compact', data };
-        }
-        return { kind: 'raw', data };
-      case 'result':
-        return { kind: 'result', data };
-      case 'ask_user_question':
-        return { kind: 'ask_user_question', data };
-      case 'permission':
-        if (typeof data.request_id !== 'string' || typeof data.permission_type !== 'string') return { kind: 'raw', data };
-        return { kind: 'permission', data: { request_id: data.request_id, permission_id: typeof data.permission_id === 'string' ? data.permission_id : undefined, permission_type: data.permission_type, description: typeof data.description === 'string' ? data.description : data.permission_type, metadata: data.metadata && typeof data.metadata === 'object' ? data.metadata as Record<string, unknown> : undefined } };
-      case 'ask_user_question_timeout':
-        return { kind: 'ask_user_question_timeout', data };
-      case 'file_snapshot':
-        return { kind: 'file_snapshot', data };
-      case 'stream_event':
-        return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
-      case 'stream_event_batch':
-        return { kind: 'streaming_batch', data: { events: Array.isArray(data.events) ? data.events : [], session_id: data.session_id } };
-      case 'codemux_event_batch': {
-        const codeMuxEvents = Array.isArray(data.events)
-          ? (data.events as unknown[]).filter(isCodeMuxStreamEvent)
-          : [];
-        const events = codeMuxEvents.flatMap((event) => {
-          const legacy = toLegacyStreamingMessage(event);
-          return legacy.kind === 'streaming' ? [legacy.data.event] : [];
-        });
-        return { kind: 'streaming_batch', data: { events, session_id: data.session_id } };
-      }
-      case 'content_started':
-      case 'text_delta':
-      case 'reasoning_delta':
-      case 'content_finished':
-        if (isCodeMuxStreamEvent(data)) return toLegacyStreamingMessage(data);
-        return { kind: 'raw', data };
-      case 'tool_started':
-      case 'tool_finished':
-        if (isCodeMuxToolEvent(data)) return toLegacyToolMessage(data);
-        return { kind: 'raw', data };
-      case 'assistant_message':
-        if (isCodeMuxAssistantMessageEvent(data)) {
-          const event = toLegacyAssistantMessage(data);
-          return event.kind === 'assistant' && isAssistantCompactSummaryEvent(event.data as unknown as Record<string, unknown>)
-            ? { kind: 'raw', data }
-            : event;
-        }
-        return { kind: 'raw', data };
-      case 'user_message':
-        if (isCodeMuxUserMessageEvent(data)) {
-          const event = toLegacyUserMessage(data);
-          return event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)
-            ? { kind: 'raw', data }
-            : event;
-        }
-        return { kind: 'raw', data };
-      case 'system_event':
-        if (isCodeMuxSystemEvent(data)) return toLegacySystemMessage(data);
-        return { kind: 'raw', data };
-      case 'diagnostic':
-        if (isCodeMuxDiagnosticEvent(data)) return { kind: 'raw', data };
-        return { kind: 'raw', data };
-      case 'user_input_requested':
-        if (isCodeMuxUserInputRequestedEvent(data)) return toLegacyUserInputRequestedMessage(data);
-        return { kind: 'raw', data };
-      case 'permission_requested':
-        if (isCodeMuxPermissionRequestedEvent(data)) return toLegacyPermissionRequestedMessage(data);
-        return { kind: 'raw', data };
-      case 'permission_resolved':
-        if (isCodeMuxPermissionResolvedEvent(data)) return toLegacyPermissionResolvedMessage(data);
-        return { kind: 'raw', data };
-      case 'permission_mode_changed':
-        if (isCodeMuxPermissionModeChangedEvent(data)) return toLegacyPermissionModeChangedMessage(data);
-        return { kind: 'raw', data };
-      case 'error':
-      case 'turn_finished':
-        if (isCodeMuxTurnEvent(data)) return toLegacyTurnMessage(data);
-        return { kind: 'raw', data };
-      case 'sidecar_debug':
-        return { kind: 'raw', data };
-      case 'sidecar_stream_status':
-        return {
-          kind: 'stream_status',
-          data: {
-            message: data.message,
-            is_reconnecting: data.is_reconnecting,
-            mode_blocked: isModeBlockedDiagnostic(data.mode_blocked) ? data.mode_blocked : null,
-          },
-        };
-      case 'vision_unsupported':
-        return { kind: 'raw', data };
-      default:
-        return { kind: 'raw', data };
-    }
-  } catch {
-    return { kind: 'raw', data: { type: 'parse_error', raw } };
-  }
-}
-
-function isModeBlockedDiagnostic(value: unknown): value is ModeBlockedDiagnostic {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isAssistantCompactSummaryEvent(data: Record<string, unknown>): boolean {
-  const message = data.message;
-  if (!message || typeof message !== 'object' || Array.isArray(message)) {
-    return false;
-  }
-
-  const content = (message as Record<string, unknown>).content;
-  if (typeof content === 'string') {
-    return isCodexCompactSummaryText(content);
-  }
-
-  if (!Array.isArray(content)) {
-    return false;
-  }
-
-  return content.some((block) => {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) {
-      return false;
-    }
-    const text = (block as Record<string, unknown>).text;
-    return typeof text === 'string' && isCodexCompactSummaryText(text);
-  });
-}
-
-
 type FileOriginalSnapshot = { content: string; isNew: boolean; toolUseId?: string };
 
 function findOriginalSnapshotKey(
@@ -2045,7 +1784,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const inflight: QueuedAgentQuery = { ...query, id: requestId, createdAt: Date.now() };
     inflightSteerRequests.set(requestId, { sessionId, query: inflight, fallback: 'enqueue' });
     try {
-      await daemonFacade.sendMessageViaDaemon(
+      await daemonFacade.session.sendMessage(
         sessionId,
         query.prompt,
         query.inputPayload,
@@ -2455,7 +2194,7 @@ function createSessionEventHandler(
             if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
               const filePath = parsedInput.file_path as string;
               const projectPath = usePreviewStore.getState().projectPath || undefined;
-              daemonFacade.readFile(filePath, projectPath).then((original) => {
+              daemonFacade.workspace.read(filePath, projectPath).then((original) => {
                 set((s) => {
                   const sessionOriginals = preserveFirstOriginalSnapshot(
                     s.fileOriginals[sessionId] || {},
@@ -2997,8 +2736,7 @@ function createSessionEventHandler(
         session.id === sessionId ? { ...session, working_path: trimmed } : session
       )),
     }));
-    void daemonFacade
-      .updateWorkingPath(sessionId, trimmed)
+    void daemonFacade.session.updateWorkingPath(sessionId, trimmed)
       .then((updated) => {
         // 守护进程在工作路径变化时会顺带采样「启动分支」；把结果回填进 store，
         // 悬停卡片就不用再实时查一次 Git。
@@ -3184,7 +2922,7 @@ function createSessionEventHandler(
     try {
       if (attachments.length > 0 && !supportsVision && enrichmentEnabled) {
         try {
-          const enrichmentResponse = await daemonFacade.enrichAttachments(attachments);
+          const enrichmentResponse = await daemonFacade.session.enrichAttachments(attachments);
           const blocks = enrichmentResponse.blocks ?? [];
           const successfulBlocks = filterSuccessfulEnrichmentBlocks(blocks);
           const failureCount = countEnrichmentFailures(blocks);
@@ -3262,7 +3000,7 @@ function createSessionEventHandler(
         },
         () => void get().reloadAfterTimelineReset(sessionId),
       );
-      await daemonFacade.sendMessageViaDaemon(
+      await daemonFacade.session.sendMessage(
         sessionId,
         payloadForModel.text,
         payloadForModel,
@@ -3293,7 +3031,7 @@ function createSessionEventHandler(
     }));
     await get().loadSessionMessages(sessionId, { force: true });
 
-    const companionTurnActive = await daemonFacade.isSessionTurnActive(sessionId);
+    const companionTurnActive = await daemonFacade.session.isTurnActive(sessionId);
     if (!shouldAttachLiveTurn(get().events[sessionId] ?? [], companionTurnActive)) {
       stopBackgroundPoll(sessionId);
       set((s) => {
@@ -3318,7 +3056,7 @@ function createSessionEventHandler(
       void get().completeBackgroundLiveIfIdle(sessionId);
     }, 1000));
 
-    await daemonFacade.ensureAgentSession(sessionId, cwd, undefined, reasoningEffort);
+    await daemonFacade.session.ensureAgent(sessionId, cwd, undefined, reasoningEffort);
     return get().isRunning[sessionId] ?? false;
   },
 
@@ -3326,7 +3064,7 @@ function createSessionEventHandler(
     if (!get().backgroundLive[sessionId]) return;
 
     // 先做廉价探测（一次 /state，只回一个布尔值），再决定要不要付全量重拉的代价。
-    const companionTurnActive = await daemonFacade.isSessionTurnActive(sessionId);
+    const companionTurnActive = await daemonFacade.session.isTurnActive(sessionId);
 
     const now = Date.now();
     const lastReloadAt = backgroundLiveReloadAt.get(sessionId) ?? 0;
@@ -3363,7 +3101,7 @@ function createSessionEventHandler(
     if (get().isRunning[sessionId]) return true;
     let turnActive = false;
     try {
-      turnActive = await daemonFacade.isSessionTurnActive(sessionId);
+      turnActive = await daemonFacade.session.isTurnActive(sessionId);
     } catch (error) {
       logger.warn('Failed to query session turn state for live attach', { sessionId }, serializeError(error));
       return false;
@@ -3411,7 +3149,7 @@ function createSessionEventHandler(
     const request = (get().pendingPermissions[sessionId] ?? []).find((item) => item.request_id === requestId);
     if (!request) return;
     try {
-      await daemonFacade.respondToPermissionViaDaemon(sessionId, request.request_id, response);
+      await daemonFacade.session.respondToPermission(sessionId, request.request_id, response);
       set((state) => ({
         pendingPermissions: {
           ...state.pendingPermissions,
@@ -3428,7 +3166,7 @@ function createSessionEventHandler(
     choice: ComputerUseApprovalChoice,
   ) => {
     try {
-      await daemonFacade.respondToComputerUseApproval(requestId, choice);
+      await daemonFacade.computerUse.respondToApproval(requestId, choice);
       set((state) => ({
         pendingComputerUseApprovals: dequeueComputerUseApprovals(
           state.pendingComputerUseApprovals,
@@ -3494,7 +3232,7 @@ function createSessionEventHandler(
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
     try {
-      await daemonFacade.interruptViaDaemon(sessionId);
+      await daemonFacade.session.interrupt(sessionId);
     } catch {
       // Sidecar may already be gone — UI is already stopped.
     }
@@ -3566,7 +3304,7 @@ function createSessionEventHandler(
       get().removeQueuedQuery(sessionId, queryId);
       inflightSteerRequests.set(requestId, { sessionId, query });
       try {
-        await daemonFacade.sendMessageViaDaemon(
+        await daemonFacade.session.sendMessage(
           sessionId,
           query.prompt,
           query.inputPayload,
@@ -3751,7 +3489,7 @@ function createSessionEventHandler(
     });
 
     try {
-      const rawUsage = await daemonFacade.loadLatestTokenUsage(sessionId, agentKind, freshness);
+      const rawUsage = await daemonFacade.session.loadLatestTokenUsage(sessionId, agentKind, freshness);
       const normalized = normalizeThreadTokenUsage(rawUsage);
       set((state) => {
         if (state.tokenUsageRefreshRequests[sessionId] !== requestId) {
@@ -3790,8 +3528,8 @@ function createSessionEventHandler(
 
     // Hydrate the subagent tracks in parallel with the parent timeline.
     const subagentsFetch: Promise<{ subagents: unknown[]; timelines: Record<string, unknown[]> } | null> =
-      typeof daemonFacade.loadSessionSubagents === 'function'
-        ? daemonFacade.loadSessionSubagents(sessionId)
+      typeof daemonFacade.session.loadSubagents === 'function'
+        ? daemonFacade.session.loadSubagents(sessionId)
             .then((payload) => {
               useSubagentStore.getState().replaceSession(sessionId, payload);
               return payload;
@@ -3807,7 +3545,7 @@ function createSessionEventHandler(
       const loadEpoch = getSessionHistoryEpoch(sessionId);
 
       try {
-        const timelinePage = await daemonFacade.getTimeline(sessionId, {
+        const timelinePage = await daemonFacade.timeline.get(sessionId, {
           direction: 'tail',
           limit: 5000,
         });
@@ -3973,9 +3711,9 @@ function createSessionEventHandler(
         // hydration, so an empty first fetch may have raced it — re-fetch once.
         const firstSubagents = await subagentsFetch;
         if ((firstSubagents == null || firstSubagents.subagents.length === 0)
-          && typeof daemonFacade.loadSessionSubagents === 'function') {
+          && typeof daemonFacade.session.loadSubagents === 'function') {
           try {
-            const payload = await daemonFacade.loadSessionSubagents(sessionId);
+            const payload = await daemonFacade.session.loadSubagents(sessionId);
             useSubagentStore.getState().replaceSession(sessionId, payload);
           } catch (error) {
             logger.warn('Failed to reload session subagents after history load', { sessionId }, serializeError(error));
@@ -4016,7 +3754,7 @@ function createSessionEventHandler(
       await pending;
     }
 
-    const result = await daemonFacade.resyncSessionFromNative(sessionId);
+    const result = await daemonFacade.session.resyncFromNative(sessionId);
     // daemon 端 `replace_session_timeline` 把整个时间线从 0 重新编号:水位线必须先回退,
     // 再由下面的重新加载对账,否则重建后的实时帧会被旧水位线全部挡掉。
     resetLastEventSequence(sessionId, -1);
@@ -4146,7 +3884,7 @@ function createSessionEventHandler(
     const invokeRewind = async (
       rewindTarget: AgentUserMessageLocator | undefined,
     ) => {
-      const result = await daemonFacade.rewindSession(sessionId, agentKind, rewindTarget, mode) as {
+      const result = await daemonFacade.session.rewind(sessionId, agentKind, rewindTarget, mode) as {
         filesChanged?: number;
       };
       if (result && typeof result.filesChanged === 'number') {

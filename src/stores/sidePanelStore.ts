@@ -377,7 +377,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     recordNavigation(get());
 
     try {
-      const content = await daemonFacade.readFile(filePath, projectPath);
+      const content = await daemonFacade.workspace.read(filePath, projectPath);
       set((state) => ({
         tabs: state.tabs.map((entry) => (
           entry.id === id
@@ -438,7 +438,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     }));
 
     try {
-      await daemonFacade.writeFile(tab.filePath, contentToSave, tab.projectPath);
+      await daemonFacade.workspace.write(tab.filePath, contentToSave, tab.projectPath);
       set((state) => ({
         tabs: state.tabs.map((entry) => (
           entry.id === tabId

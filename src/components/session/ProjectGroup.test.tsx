@@ -18,7 +18,7 @@ vi.mock('../../hooks/useHostCapabilities', () => ({
 
 import { TooltipProvider } from '../ui/tooltip';
 import { ProjectGroup } from './ProjectGroup';
-import { useProjectStore } from '../../stores/projectStore';
+import { buildSidebarProjection, type ProjectSidebarSection } from '../../lib/sidebarProjection';
 import type { Project } from '../../types/project';
 import type { Session } from '../../types/session';
 
@@ -55,9 +55,11 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 
 describe('ProjectGroup', () => {
   const baseProps = {
-    sessions: [],
     activeSessionId: null,
     isActiveProject: false,
+    onToggleExpanded: vi.fn(),
+    onShowMoreSessions: vi.fn(),
+    onCollapseSessions: vi.fn(),
     onSelectSession: vi.fn(),
     onArchiveSession: vi.fn(),
     onToggleSessionPinned: vi.fn(),
@@ -73,23 +75,40 @@ describe('ProjectGroup', () => {
     vi.clearAllMocks();
     narrowState.value = false;
     hostCaps.hasExplorer = true;
-    useProjectStore.setState({
-      projects: [],
-      collapsedProjects: new Set<string>(),
-    });
   });
 
   afterEach(() => {
     cleanup();
   });
 
+  function makeSection(
+    project: Project,
+    sessions: Session[] = [],
+    options: { collapsed?: boolean; visibleLimit?: number } = {},
+  ): ProjectSidebarSection {
+    return buildSidebarProjection(sessions, [], [project], {
+      pinnedExpanded: true,
+      projectsExpanded: true,
+      conversationsExpanded: true,
+      collapsedProjects: new Set(options.collapsed ? [project.id] : []),
+      visibleSessionLimits: options.visibleLimit != null
+        ? { [project.id]: options.visibleLimit }
+        : {},
+    }).projects[0];
+  }
+
   function renderProjectGroup(
     project: Project = makeProject(),
     sessions: Session[] = [],
+    options: { collapsed?: boolean; visibleLimit?: number } = {},
   ) {
     return render(
       <TooltipProvider>
-        <ProjectGroup {...baseProps} project={project} sessions={sessions} />
+        <ProjectGroup
+          {...baseProps}
+          project={project}
+          section={makeSection(project, sessions, options)}
+        />
       </TooltipProvider>,
     );
   }
@@ -115,6 +134,7 @@ describe('ProjectGroup', () => {
         <ProjectGroup
           {...baseProps}
           project={makeProject()}
+          section={makeSection(makeProject())}
           dragEnabled
           onMoveProject={onMoveProject}
         />
@@ -201,13 +221,12 @@ describe('ProjectGroup', () => {
   });
 
   it('uses the closed multi-folder icon for a collapsed multi-root project', () => {
-    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
     const { container } = renderProjectGroup(makeProject({
       roots: [
         { path: 'D:/work/demo', position: 0, isPrimary: true },
         { path: 'D:/work/other', position: 1, isPrimary: false },
       ],
-    }));
+    }), [], { collapsed: true });
 
     expect(container.querySelector('.lucide-folders')).toBeTruthy();
     expect(container.querySelector('[data-icon="folders-open"]')).toBeNull();
@@ -221,8 +240,7 @@ describe('ProjectGroup', () => {
   });
 
   it('uses the closed folder icon for a collapsed single-root project', () => {
-    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
-    const { container } = renderProjectGroup();
+    const { container } = renderProjectGroup(makeProject(), [], { collapsed: true });
 
     expect(container.querySelector('.lucide-folder')).toBeTruthy();
     expect(container.querySelector('.lucide-folder-open')).toBeNull();
@@ -244,8 +262,7 @@ describe('ProjectGroup', () => {
   });
 
   it('hides the empty placeholder when the project is collapsed', () => {
-    useProjectStore.setState({ collapsedProjects: new Set(['project-1']) });
-    renderProjectGroup();
+    renderProjectGroup(makeProject(), [], { collapsed: true });
 
     expect(screen.queryByText('暂无对话')).toBeNull();
   });

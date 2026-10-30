@@ -20,7 +20,9 @@ const { fetchOpenCodeFreeModelsMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    fetchOpenCodeFreeModels: fetchOpenCodeFreeModelsMock,
+    provider: {
+      fetchOpenCodeFreeModels: fetchOpenCodeFreeModelsMock,
+    },
   },
 }));
 

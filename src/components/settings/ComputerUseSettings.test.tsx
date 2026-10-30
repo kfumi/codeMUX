@@ -13,7 +13,9 @@ const daemonFacadeMock = vi.hoisted(() => ({
     installDriver: vi.fn(),
     audit: vi.fn(),
   },
-  setComputerUse: vi.fn(),
+  config: {
+    setComputerUse: vi.fn(),
+  },
 }));
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
@@ -102,7 +104,7 @@ describe('ComputerUseSettings', () => {
     fireEvent.click(screen.getByText('保存允许列表'));
 
     await waitFor(() =>
-      expect(daemonFacadeMock.setComputerUse).toHaveBeenCalledWith(
+      expect(daemonFacadeMock.config.setComputerUse).toHaveBeenCalledWith(
         expect.objectContaining({ allowlist: ['记事本', 'Excel'] }),
       ),
     );

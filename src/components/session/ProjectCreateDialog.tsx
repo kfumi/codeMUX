@@ -21,7 +21,7 @@ import {
   projectRootName,
   removeRootKeepingPrimary,
   type EditableProjectRoot,
-} from './projectRoots';
+} from '../../lib/projectRoot';
 
 interface ProjectCreateDialogProps {
   open: boolean;

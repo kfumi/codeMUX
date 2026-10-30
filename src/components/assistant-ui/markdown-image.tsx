@@ -23,7 +23,7 @@ import {
  * **文档所在目录**解析，再读磁盘字节渲染。渲染进程的页面 origin（Vite dev server 或
  * daemon 托管的 dist-web）与文档目录无关，直接用 `<img src="相对路径">` 只会 404。
  *
- * 数据由既有 Companion 接口 `/files/image-preview`（`daemonFacade.previewImageFile`）
+ * 数据由既有 Companion 接口 `/files/image-preview`（`daemonFacade.workspace.previewImage`）
  * 读取并返回 data URL：它只接受绝对路径，且限制 8 MiB 与受支持的栅格格式。
  */
 export type MarkdownImageDocument = {
@@ -218,7 +218,7 @@ function loadMarkdownImageDataUrl(absolutePath: string): Promise<string> {
 
   // 动态引入 facade：图片预览是次要路径，不把它拉进首屏依赖图（与工具卡片一致）。
   const request = import('@/lib/facades/daemon-facade')
-    .then(({ daemonFacade }) => daemonFacade.previewImageFile(absolutePath))
+    .then(({ daemonFacade }) => daemonFacade.workspace.previewImage(absolutePath))
     .then((dataUrl) => {
       rememberMarkdownImageDataUrl(absolutePath, dataUrl);
       return dataUrl;

@@ -34,7 +34,7 @@ export function WebPairingConfirmHost() {
     deciding.current = true;
     try {
       const { daemonFacade } = await import('@/lib/facades/daemon-facade');
-      await daemonFacade.decideLocalPairing(current.requestId, approve);
+      await daemonFacade.companion.decideLocalPairing(current.requestId, approve);
     } catch {
       // 失败时仅从队列移除:浏览器侧仍在轮询,会自己给出过期/失败提示。
     } finally {

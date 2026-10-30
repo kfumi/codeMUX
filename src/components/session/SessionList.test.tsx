@@ -8,6 +8,7 @@ import type { Session } from '../../types/session';
 import { TooltipProvider } from '../ui/tooltip';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { useSidebarExpansionStore } from '../../stores/sidebarExpansionStore';
 import { useDaemonConnectionStore } from '../../stores/daemonConnectionStore';
 import { SessionList } from './SessionList';
 // 静态导入:如果在 it() 内 await import,首次模块图加载会计入测试超时(15s)。
@@ -37,16 +38,20 @@ vi.mock('../../hooks/useCompanionStatus', () => ({
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    listSessions: vi.fn(() => Promise.resolve([])),
-    listArchivedSessions: vi.fn(() => Promise.resolve([])),
-    listProjects: vi.fn(() => Promise.resolve([])),
-    createProject: vi.fn(),
-    deleteProject: vi.fn(),
-    renameProject: vi.fn(),
-    reorderProjects: vi.fn(() => Promise.resolve()),
     getInitError: vi.fn(() => null),
     resetClient: vi.fn(),
     ensureClient: vi.fn(() => Promise.resolve({})),
+    session: {
+      list: vi.fn(() => Promise.resolve([])),
+      listArchived: vi.fn(() => Promise.resolve([])),
+    },
+    project: {
+      list: vi.fn(() => Promise.resolve([])),
+      create: vi.fn(),
+      delete: vi.fn(),
+      rename: vi.fn(),
+      reorder: vi.fn(() => Promise.resolve()),
+    },
   },
   getDaemonClientInitError: vi.fn(() => null),
   ensureDaemonClient: vi.fn(() => Promise.resolve({
@@ -102,9 +107,9 @@ describe('SessionList', () => {
   beforeEach(() => {
     useDaemonConnectionStore.setState({ hostForm: 'browser' });
     getDaemonStartupErrorMock.mockReturnValue(null);
-    vi.mocked(daemonFacade.listSessions).mockImplementation(() => Promise.resolve([]));
-    vi.mocked(daemonFacade.listArchivedSessions).mockImplementation(() => Promise.resolve([]));
-    vi.mocked(daemonFacade.listProjects).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(daemonFacade.session.list).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(daemonFacade.session.listArchived).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(daemonFacade.project.list).mockImplementation(() => Promise.resolve([]));
     useSessionStore.setState({
       sessions: [makeSession({ id: 'session-active', title: 'Active Session' })],
       archivedSessions: [
@@ -129,8 +134,14 @@ describe('SessionList', () => {
       isLoading: false,
       hasLoadedOnce: true,
       error: null,
-      collapsedProjects: new Set<string>(),
       fetchProjects: realFetchProjects,
+    });
+    useSidebarExpansionStore.setState({
+      pinnedExpanded: true,
+      projectsExpanded: true,
+      conversationsExpanded: true,
+      collapsedProjects: new Set<string>(),
+      visibleSessionLimits: {},
     });
   });
 
@@ -159,7 +170,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
     useSessionStore.setState({
       sessions: [
@@ -221,7 +231,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
     useSessionStore.setState({
       sessions: [makeSession({ id: 'session-in-project', title: 'Project Session', project_id: 'project-1' })],
@@ -258,7 +267,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set(['project-1', 'project-2']),
     });
     useSessionStore.setState({
       sessions: [
@@ -271,6 +279,9 @@ describe('SessionList', () => {
       isArchivedLoading: false,
       error: null,
       unreadSessions: new Set<string>(),
+    });
+    useSidebarExpansionStore.setState({
+      collapsedProjects: new Set(['project-1', 'project-2']),
     });
 
     renderSessionList();
@@ -288,7 +299,7 @@ describe('SessionList', () => {
 
     expect(screen.getByText('CodeMUX Session')).toBeTruthy();
     expect(screen.getByText('Fumi Session')).toBeTruthy();
-    expect(useProjectStore.getState().collapsedProjects.size).toBe(0);
+    expect(useSidebarExpansionStore.getState().collapsedProjects.size).toBe(0);
     expect(screen.getByRole('button', { name: '收起全部项目' })).toBeTruthy();
     expect(
       screen.getByRole('button', { name: '收起全部项目' }).querySelector('.lucide-list-chevrons-down-up'),
@@ -298,7 +309,7 @@ describe('SessionList', () => {
 
     expect(screen.queryByText('CodeMUX Session')).toBeNull();
     expect(screen.queryByText('Fumi Session')).toBeNull();
-    expect(useProjectStore.getState().collapsedProjects).toEqual(new Set(['project-1', 'project-2']));
+    expect(useSidebarExpansionStore.getState().collapsedProjects).toEqual(new Set(['project-1', 'project-2']));
     expect(screen.getByRole('button', { name: '展开全部项目' })).toBeTruthy();
     expect(
       screen.getByRole('button', { name: '展开全部项目' }).querySelector('.lucide-list-chevrons-up-down'),
@@ -314,7 +325,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set(['project-2']),
     });
     useSessionStore.setState({
       sessions: [
@@ -327,6 +337,9 @@ describe('SessionList', () => {
       isArchivedLoading: false,
       error: null,
       unreadSessions: new Set<string>(),
+    });
+    useSidebarExpansionStore.setState({
+      collapsedProjects: new Set(['project-2']),
     });
 
     renderSessionList();
@@ -350,7 +363,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
     useSessionStore.setState({
       sessions: [],
@@ -381,7 +393,7 @@ describe('SessionList', () => {
       expect(useProjectStore.getState().projects.map((project) => project.id))
         .toEqual(['project-2', 'project-1']);
     });
-    expect(daemonFacade.reorderProjects).toHaveBeenCalledWith(['project-2', 'project-1']);
+    expect(daemonFacade.project.reorder).toHaveBeenCalledWith(['project-2', 'project-1']);
   });
 
   it('still toggles expansion from a plain row click', () => {
@@ -390,13 +402,13 @@ describe('SessionList', () => {
 
     fireEvent.click(projectRow('codeMUX'));
 
-    expect(useProjectStore.getState().collapsedProjects.has('project-1')).toBe(true);
+    expect(useSidebarExpansionStore.getState().collapsedProjects.has('project-1')).toBe(true);
   });
 
   it('disables project drag sorting on mobile while keeping tap expansion', () => {
     setTwoProjects();
     useDaemonConnectionStore.setState({ hostForm: 'mobile' });
-    vi.mocked(daemonFacade.reorderProjects).mockClear();
+    vi.mocked(daemonFacade.project.reorder).mockClear();
     renderSessionList();
 
     const row = projectRow('codeMUX');
@@ -405,10 +417,10 @@ describe('SessionList', () => {
     expect(row.className).not.toContain('touch-none');
 
     fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true });
-    expect(daemonFacade.reorderProjects).not.toHaveBeenCalled();
+    expect(daemonFacade.project.reorder).not.toHaveBeenCalled();
 
     fireEvent.click(row);
-    expect(useProjectStore.getState().collapsedProjects.has('project-1')).toBe(true);
+    expect(useSidebarExpansionStore.getState().collapsedProjects.has('project-1')).toBe(true);
   });
 
   it('reveals the add-project action only on hover or keyboard focus', () => {
@@ -418,7 +430,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
 
     renderSessionList();
@@ -436,7 +447,6 @@ describe('SessionList', () => {
       activeProjectId: null,
       isLoading: false,
       error: null,
-      collapsedProjects: new Set<string>(),
     });
     useSessionStore.setState({
       sessions: Array.from({ length: 16 }, (_, index) => makeSession({
@@ -526,7 +536,7 @@ describe('SessionList', () => {
   it('renders a skeleton instead of the empty state before the first list arrives', async () => {
     // 回归用例：首屏「还没加载」被当成「确实没有会话」，会先闪一下空态再换成列表。
     let resolveSessions: (sessions: Session[]) => void = () => {};
-    vi.mocked(daemonFacade.listSessions).mockImplementation(() => new Promise((resolve) => {
+    vi.mocked(daemonFacade.session.list).mockImplementation(() => new Promise((resolve) => {
       resolveSessions = resolve;
     }));
     useSessionStore.setState({ sessions: [], hasLoadedOnce: false });
@@ -556,8 +566,8 @@ describe('SessionList', () => {
   });
 
   it('leaves the skeleton when the first load fails so the alert can take over', async () => {
-    vi.mocked(daemonFacade.listSessions).mockImplementation(() => Promise.reject(new Error('daemon down')));
-    vi.mocked(daemonFacade.listProjects).mockImplementation(() => Promise.reject(new Error('daemon down')));
+    vi.mocked(daemonFacade.session.list).mockImplementation(() => Promise.reject(new Error('daemon down')));
+    vi.mocked(daemonFacade.project.list).mockImplementation(() => Promise.reject(new Error('daemon down')));
     useSessionStore.setState({ sessions: [], hasLoadedOnce: false });
     useProjectStore.setState({ projects: [], hasLoadedOnce: false });
 

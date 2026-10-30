@@ -14,12 +14,14 @@ const { listProjectsMock, createProjectMock, updateProjectMock, reorderProjectsM
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    listProjects: listProjectsMock,
-    createProject: createProjectMock,
-    deleteProject: vi.fn(),
-    renameProject: vi.fn(),
-    updateProject: updateProjectMock,
-    reorderProjects: reorderProjectsMock,
+    project: {
+      list: listProjectsMock,
+      create: createProjectMock,
+      delete: vi.fn(),
+      rename: vi.fn(),
+      update: updateProjectMock,
+      reorder: reorderProjectsMock,
+    },
   },
 }));
 
@@ -63,29 +65,6 @@ describe('project store first load', () => {
 
     expect(useProjectStore.getState().hasLoadedOnce).toBe(true);
     expect(useProjectStore.getState().error).toContain('daemon down');
-  });
-});
-
-describe('project store expand/collapse all', () => {
-  beforeEach(() => {
-    useProjectStore.setState({
-      projects: [projectFixture(), projectFixture({ id: 'p2', name: 'Mobile' })],
-      collapsedProjects: new Set(['p1']),
-    });
-  });
-
-  it('collapses every project at once', () => {
-    useProjectStore.getState().setAllProjectsExpanded(false);
-
-    expect(useProjectStore.getState().collapsedProjects).toEqual(new Set(['p1', 'p2']));
-  });
-
-  it('expands every project at once, including stale collapsed ids', () => {
-    useProjectStore.setState({ collapsedProjects: new Set(['p1', 'removed-project']) });
-
-    useProjectStore.getState().setAllProjectsExpanded(true);
-
-    expect(useProjectStore.getState().collapsedProjects.size).toBe(0);
   });
 });
 

@@ -13,7 +13,7 @@ import { useAgentStore } from '../stores/agentStore';
 import { useGitEnvironmentStore } from '../stores/gitEnvironmentStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useSessionStore } from '../stores/sessionStore';
-import { resolveProjectPath } from './projectPath';
+import { resolveProjectPath } from './projectRoot';
 
 /** 会话所属项目的工作路径（摘要面板按项目路径键控环境信息）。 */
 export function resolveProjectPathForSession(sessionId: string): string | null {

@@ -29,7 +29,11 @@ const setKeybindingsFacadeMock = vi.hoisted(() => vi.fn());
 
 // 只有集成用例走真实 store 动作；其余用例仍在 beforeEach 里替换成 mock。
 vi.mock('../../lib/facades/daemon-facade', () => ({
-  daemonFacade: { setKeybindings: setKeybindingsFacadeMock },
+  daemonFacade: {
+    config: {
+      setKeybindings: setKeybindingsFacadeMock,
+    },
+  },
 }));
 
 const realSetKeybindings = useSettingsStore.getState().setKeybindings;

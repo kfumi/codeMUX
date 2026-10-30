@@ -84,7 +84,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 });
 
 import { buildActivityRuns } from '../../../lib/activityRuns';
-import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurns } from '../../../lib/timeline/turns';
 import { buildLongSessionEvents } from '../../../lib/dev/longSessionFixture';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSubagentStore } from '../../../stores/subagentStore';

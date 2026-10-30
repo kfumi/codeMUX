@@ -1,11 +1,11 @@
-import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText, isInterruptMarker } from '@/stores/agentEventParsing';
-import type { AgentMessage } from '@/stores/agentStore';
+import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText, isInterruptMarker } from '../../stores/agentEventParsing';
+import type { AgentMessage } from '../../stores/agentStore';
 import type {
   ConversationTurn,
   ConversationTurnDiagnostic,
   ConversationTurnStatus,
   ConversationTurnTermination,
-} from '@/types/conversationTurn';
+} from '../../types/conversationTurn';
 
 export interface ConversationTurnOptions {
   isRunning?: boolean;

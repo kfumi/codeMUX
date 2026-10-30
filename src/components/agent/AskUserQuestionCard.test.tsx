@@ -13,7 +13,9 @@ const { updateSessionPermissions } = vi.hoisted(() => ({
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    respondToInteractiveViaDaemon: sendToolResponse,
+    session: {
+      respondToInteractive: sendToolResponse,
+    },
   },
 }));
 

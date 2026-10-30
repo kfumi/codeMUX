@@ -25,7 +25,7 @@ import { cycleActiveThoughtLevel } from './lib/shortcuts/thoughtLevelCycle';
 import { resetAppZoom, zoomInApp, zoomOutApp } from './lib/shortcuts/appZoom';
 import { serializePermissionConfig } from './lib/agentKind';
 import { isProviderAgent } from './lib/scheduledTaskDefaults';
-import { resolveProjectPath } from './lib/projectPath';
+import { resolveProjectPath } from './lib/projectRoot';
 import { daemonFacade } from './lib/facades/daemon-facade';
 import { useAgentStore } from './stores/agentStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSessionStore';
@@ -445,7 +445,7 @@ function App() {
       }
 
       if (isProviderAgent(selectedAgentKind)) {
-        const runtimeCheck = await daemonFacade.checkManagedRuntimes();
+        const runtimeCheck = await daemonFacade.runtime.check();
         const runtime = runtimeCheck.runtimes.find((entry) => entry.provider === selectedAgentKind);
         if (!runtime || (runtime.status !== 'ready' && runtime.status !== 'outdated')) {
           throw new Error(runtime?.message ?? `${runtime?.label ?? selectedAgentKind} Runtime 未安装或不可用，请先在设置中安装`);
@@ -463,10 +463,10 @@ function App() {
       );
       createdSessionId = session.id;
       useAgentStore.getState().setSessionWorkingPath(session.id, cwd);
-      await daemonFacade.updateWorkingPath(session.id, cwd);
+      await daemonFacade.session.updateWorkingPath(session.id, cwd);
 
       if (resolvedProviderId && resolvedModel) {
-        await daemonFacade.updateProvider(
+        await daemonFacade.session.updateProvider(
           session.id,
           resolvedProviderId,
           resolvedModel,
@@ -483,7 +483,7 @@ function App() {
             : entry),
         }));
       }
-      await daemonFacade.updateReasoningEffort(session.id, selectedReasoningEffort);
+      await daemonFacade.session.updateReasoningEffort(session.id, selectedReasoningEffort);
       useSessionStore.setState((state) => ({
         sessions: state.sessions.map((entry) => entry.id === session.id
           ? { ...entry, reasoning_effort: selectedReasoningEffort }

@@ -16,8 +16,10 @@ const { updateProjectMock, deleteProjectMock, openDialogMock } = vi.hoisted(() =
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    updateProject: updateProjectMock,
-    deleteProject: deleteProjectMock,
+    project: {
+      update: updateProjectMock,
+      delete: deleteProjectMock,
+    },
   },
 }));
 

@@ -16,11 +16,13 @@ const { deleteSessionMock, archiveMock } = vi.hoisted(() => ({
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    listSessions: vi.fn(async () => []),
-    listArchivedSessions: vi.fn(async () => []),
-    deleteSession: deleteSessionMock,
-    archiveViaDaemon: archiveMock,
-    touchSession: vi.fn(async () => {}),
+    session: {
+      list: vi.fn(async () => []),
+      listArchived: vi.fn(async () => []),
+      delete: deleteSessionMock,
+      archive: archiveMock,
+      touch: vi.fn(async () => {}),
+    },
   },
 }));
 

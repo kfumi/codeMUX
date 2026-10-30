@@ -140,7 +140,7 @@ export async function loadModelDisplayNames(): Promise<void> {
   if (displayNameIndexLoad) return displayNameIndexLoad;
   displayNameIndexLoad = (async () => {
     try {
-      const result = await daemonFacade.fetchModelCatalogNames();
+      const result = await daemonFacade.provider.fetchCatalogNames();
       displayNameIndex = result;
     } catch {
       // The catalog is optional; without it every name falls back to

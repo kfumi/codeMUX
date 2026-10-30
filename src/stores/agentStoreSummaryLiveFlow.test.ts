@@ -9,22 +9,43 @@ import type { Session } from '../types/session';
 const {
   sendMessageViaDaemonMock,
   loadLatestTokenUsageMock,
+  subscribeSessionMock,
   subscribeSessionImpl,
+  getTimelineMock,
   timelineStore,
 } = vi.hoisted(() => {
   const sendMessageViaDaemonMock = vi.fn<(sessionId: string, prompt: string) => Promise<void>>();
   const loadLatestTokenUsageMock = vi.fn(() => Promise.resolve(null));
+  // 模拟 daemon 侧时间线(DB):补拉/历史加载都从这里读快照。
+  const timelineStore = {
+    frames: [] as Array<Record<string, unknown> & { sequence: number }>,
+  };
   // daemon WS 订阅回调(由真实 bridge 注册)
   const subscribeHandlers = new Map<string, {
     onEvent: (event: unknown) => void;
     onState: (running: boolean) => void;
   }>();
   const subscribeSessionImpl = { handlers: subscribeHandlers };
-  // 模拟 daemon 侧时间线(DB):补拉/历史加载都从这里读快照。
-  const timelineStore = {
-    frames: [] as Array<Record<string, unknown> & { sequence: number }>,
+  const subscribeSessionMock = vi.fn((sessionId: string, handlers: {
+    onEvent: (event: unknown) => void;
+    onState: (running: boolean) => void;
+  }) => {
+    subscribeSessionImpl.handlers.set(sessionId, handlers);
+    return () => {};
+  });
+  const getTimelineMock = vi.fn(async () => ({
+    events: timelineStore.frames.map((frame) => ({ ...frame })),
+    seqEnd: timelineStore.frames.length - 1,
+    hasOlder: false,
+  }));
+  return {
+    sendMessageViaDaemonMock,
+    loadLatestTokenUsageMock,
+    subscribeSessionMock,
+    subscribeSessionImpl,
+    getTimelineMock,
+    timelineStore,
   };
-  return { sendMessageViaDaemonMock, loadLatestTokenUsageMock, subscribeSessionImpl, timelineStore };
 });
 
 vi.mock('sonner', () => ({
@@ -32,46 +53,34 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('../lib/facades/daemon-facade', () => ({
-  ensureDaemonClient: vi.fn(() => Promise.resolve({
-    subscribeSession: vi.fn((sessionId: string, handlers: {
-      onEvent: (event: unknown) => void;
-      onState: (running: boolean) => void;
-    }) => {
-      subscribeSessionImpl.handlers.set(sessionId, handlers);
-      return () => {};
-    }),
-    getTimeline: vi.fn(async () => ({
-      events: timelineStore.frames.map((frame) => ({ ...frame })),
-      seqEnd: timelineStore.frames.length - 1,
-      hasOlder: false,
-    })),
-    sendMessage: sendMessageViaDaemonMock,
-  })),
   daemonFacade: {
-    sendMessageViaDaemon: sendMessageViaDaemonMock,
-    getTimeline: vi.fn(async () => ({
-      events: timelineStore.frames.map((frame) => ({ ...frame })),
-      seqEnd: timelineStore.frames.length - 1,
-      hasOlder: false,
-    })),
-    interruptViaDaemon: vi.fn(() => Promise.resolve()),
-    respondToPermissionViaDaemon: vi.fn(),
-    respondToInteractiveViaDaemon: vi.fn(),
-    rewindSession: vi.fn(),
-    resyncSessionFromNative: vi.fn(),
-    updateWorkingPath: vi.fn(() => Promise.resolve(null)),
-    touchSession: vi.fn(() => Promise.resolve()),
     updateSessionTitle: vi.fn(() => Promise.resolve()),
-    listSessions: vi.fn(() => Promise.resolve([])),
-    listArchivedSessions: vi.fn(() => Promise.resolve([])),
-    listProjects: vi.fn(() => Promise.resolve([])),
     ensureClient: vi.fn(),
-    enrichAttachments: vi.fn(async () => ({ blocks: [] })),
-    loadLatestTokenUsage: loadLatestTokenUsageMock,
-    loadSessionSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
-    ensureAgentSession: vi.fn(() => Promise.resolve()),
     getAgentSessionInfo: vi.fn(() => Promise.resolve({ agentSessionId: null, messagePath: null })),
-    isSessionTurnActive: vi.fn(() => Promise.resolve(false)),
+    session: {
+      sendMessage: sendMessageViaDaemonMock,
+      interrupt: vi.fn(() => Promise.resolve()),
+      respondToPermission: vi.fn(),
+      respondToInteractive: vi.fn(),
+      rewind: vi.fn(),
+      resyncFromNative: vi.fn(),
+      updateWorkingPath: vi.fn(() => Promise.resolve(null)),
+      touch: vi.fn(() => Promise.resolve()),
+      list: vi.fn(() => Promise.resolve([])),
+      listArchived: vi.fn(() => Promise.resolve([])),
+      enrichAttachments: vi.fn(async () => ({ blocks: [] })),
+      loadLatestTokenUsage: loadLatestTokenUsageMock,
+      loadSubagents: vi.fn(() => Promise.resolve({ subagents: [], timelines: {} })),
+      ensureAgent: vi.fn(() => Promise.resolve()),
+      isTurnActive: vi.fn(() => Promise.resolve(false)),
+    },
+    timeline: {
+      subscribe: subscribeSessionMock,
+      get: getTimelineMock,
+    },
+    project: {
+      list: vi.fn(() => Promise.resolve([])),
+    },
   },
   getDaemonClientInitError: vi.fn(() => null),
   resetDaemonClient: vi.fn(),

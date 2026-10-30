@@ -4,17 +4,19 @@ import { act, cleanup, render, renderHook, waitFor } from '@testing-library/reac
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CompanionStatus } from '../types/companion';
-import { companionViaDaemon } from '../lib/facades/daemon-facade';
+import { daemonFacade } from '../lib/facades/daemon-facade';
 import { resetCompanionStatusPollForTests } from '../lib/companionStatusPoll';
 import { useCompanionStatus } from './useCompanionStatus';
 
 vi.mock('../lib/facades/daemon-facade', () => ({
-  companionViaDaemon: {
-    getStatus: vi.fn(),
-    setEnabled: vi.fn(),
-    refreshPairingCode: vi.fn(),
-    setRelayEnabled: vi.fn(),
-    setRelayConfig: vi.fn(),
+  daemonFacade: {
+    companion: {
+      getStatus: vi.fn(),
+      setEnabled: vi.fn(),
+      refreshPairingCode: vi.fn(),
+      setRelayEnabled: vi.fn(),
+      setRelayConfig: vi.fn(),
+    },
   },
 }));
 
@@ -41,7 +43,7 @@ function companionStatus(partial: Partial<CompanionStatus> = {}): CompanionStatu
 }
 
 function getStatusMock() {
-  return vi.mocked(companionViaDaemon.getStatus);
+  return vi.mocked(daemonFacade.companion.getStatus);
 }
 
 /** 让请求 promise 落地,不推进假定时器。 */
@@ -70,7 +72,7 @@ describe('useCompanionStatus', () => {
   });
 
   it('展示错误时去掉 Error: 前缀', async () => {
-    vi.mocked(companionViaDaemon.getStatus).mockRejectedValue(
+    vi.mocked(daemonFacade.companion.getStatus).mockRejectedValue(
       new Error('Daemon request failed: 405'),
     );
 
@@ -80,8 +82,8 @@ describe('useCompanionStatus', () => {
   });
 
   it('开关响应直接成为新状态', async () => {
-    vi.mocked(companionViaDaemon.getStatus).mockResolvedValue(companionStatus());
-    vi.mocked(companionViaDaemon.setEnabled).mockResolvedValue(
+    vi.mocked(daemonFacade.companion.getStatus).mockResolvedValue(companionStatus());
+    vi.mocked(daemonFacade.companion.setEnabled).mockResolvedValue(
       companionStatus({ enabled: true, pairingCode: '123456' }),
     );
 
@@ -92,7 +94,7 @@ describe('useCompanionStatus', () => {
       await result.current.setEnabled(true);
     });
 
-    expect(companionViaDaemon.setEnabled).toHaveBeenCalledWith(true);
+    expect(daemonFacade.companion.setEnabled).toHaveBeenCalledWith(true);
     expect(result.current.status?.enabled).toBe(true);
     expect(result.current.status?.pairingCode).toBe('123456');
     expect(result.current.busy).toBe(false);
@@ -127,7 +129,7 @@ describe('useCompanionStatus 轮询单例', () => {
   });
 
   it('两个消费方共用一个节拍:一个节拍只发一次 getStatus', async () => {
-    vi.mocked(companionViaDaemon.getStatus).mockImplementation(async () => companionStatus());
+    vi.mocked(daemonFacade.companion.getStatus).mockImplementation(async () => companionStatus());
 
     const first = renderHook(() => useCompanionStatus({ pollIntervalMs: 15_000, polling: true }));
     const second = renderHook(() => useCompanionStatus({ pollIntervalMs: 12_000, polling: true }));
@@ -151,7 +153,7 @@ describe('useCompanionStatus 轮询单例', () => {
   it('内容相同的轮询结果不落状态,消费组件首帧之后零重渲染', async () => {
     const renderCount = { current: 0 };
     const seen: CompanionStatus[] = [];
-    vi.mocked(companionViaDaemon.getStatus).mockImplementation(async () => {
+    vi.mocked(daemonFacade.companion.getStatus).mockImplementation(async () => {
       // 每次都是新的对象引用,但内容完全相同(daemon 的真实行为)。
       const next = companionStatus();
       seen.push(next);
@@ -180,7 +182,7 @@ describe('useCompanionStatus 轮询单例', () => {
   });
 
   it('轮询是静默的:tick 期间 loading 不翻回 true', async () => {
-    vi.mocked(companionViaDaemon.getStatus).mockImplementation(async () => companionStatus());
+    vi.mocked(daemonFacade.companion.getStatus).mockImplementation(async () => companionStatus());
 
     const loadingTimeline: boolean[] = [];
     function LoadingProbe() {
@@ -204,7 +206,7 @@ describe('useCompanionStatus 轮询单例', () => {
   });
 
   it('document.hidden 时跳过该次轮询,恢复可见时补拉一次', async () => {
-    vi.mocked(companionViaDaemon.getStatus).mockImplementation(async () => companionStatus());
+    vi.mocked(daemonFacade.companion.getStatus).mockImplementation(async () => companionStatus());
 
     const { result } = renderHook(() => useCompanionStatus({ pollIntervalMs: 12_000, polling: true }));
     expect(getStatusMock()).toHaveBeenCalledTimes(1);

@@ -20,8 +20,10 @@ const openExternal = vi.fn();
 
 vi.mock('@/lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    readFile: (...args: unknown[]) => readFile(...args),
-    writeFile: vi.fn(),
+    workspace: {
+      read: (...args: unknown[]) => readFile(...args),
+      write: vi.fn(),
+    },
   },
 }));
 

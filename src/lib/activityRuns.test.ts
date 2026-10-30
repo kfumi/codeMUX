@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildConversationTurns } from '@/lib/conversationTurns';
+import { buildConversationTurns } from '@/lib/timeline/turns';
 import { buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
 import type { AgentMessage } from '@/stores/agentStore';
 

@@ -3,7 +3,7 @@ import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
-import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurns } from '../../../lib/timeline/turns';
 import { isAskUserQuestionToolName } from '../../../lib/askUserQuestionTools';
 import { extractToolResultMedia } from './toolResultMedia';
 

@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildConversationTurns } from '../../../lib/conversationTurns';
+import { buildConversationTurns } from '../../../lib/timeline/turns';
 import {
   LONG_SESSION_EVENTS_PER_TURN,
   buildLongSessionEvents,

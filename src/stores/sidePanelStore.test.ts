@@ -16,8 +16,10 @@ const browserApiMock = vi.hoisted(() => ({
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    readFile: fileApiMock.readFile,
-    writeFile: fileApiMock.writeFile,
+    workspace: {
+      read: fileApiMock.readFile,
+      write: fileApiMock.writeFile,
+    },
   },
 }));
 

@@ -21,9 +21,7 @@ const {
   deleteSessionMock,
   shutdownAgentMock,
   resetAgentSessionMock,
-  forkClaudeMock,
-  forkCodexMock,
-  forkOpenCodeMock,
+  forkSessionMock,
   clearEventsMock,
   patchSessionViaDaemonMock,
   listSessionsMock,
@@ -36,9 +34,7 @@ const {
   deleteSessionMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
   shutdownAgentMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
   resetAgentSessionMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
-  forkClaudeMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
-  forkCodexMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
-  forkOpenCodeMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
+  forkSessionMock: vi.fn<(...args: unknown[]) => Promise<Session>>(),
   clearEventsMock: vi.fn(),
   patchSessionViaDaemonMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
   listSessionsMock: vi.fn<(...args: unknown[]) => Promise<Session[]>>(),
@@ -56,21 +52,20 @@ vi.mock('./agentStore', () => ({
 
 vi.mock('../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    createSessionViaDaemon: createMock,
-    listSessions: listSessionsMock,
-    listArchivedSessions: vi.fn(() => Promise.resolve([])),
-    forkClaude: forkClaudeMock,
-    forkCodex: forkCodexMock,
-    forkOpenCode: forkOpenCodeMock,
-    forkPi: forkClaudeMock,
     shutdownAgent: shutdownAgentMock,
-    resetAgentSession: resetAgentSessionMock,
-    deleteSession: deleteSessionMock,
-    archiveViaDaemon: archiveMock,
-    unarchiveViaDaemon: unarchiveMock,
-    patchSessionViaDaemon: patchSessionViaDaemonMock,
-    updatePermissions: updatePermissionsMock,
-    touchSession: touchMock,
+    session: {
+      create: createMock,
+      list: listSessionsMock,
+      listArchived: vi.fn(() => Promise.resolve([])),
+      fork: forkSessionMock,
+      resetAgent: resetAgentSessionMock,
+      delete: deleteSessionMock,
+      archive: archiveMock,
+      unarchive: unarchiveMock,
+      patch: patchSessionViaDaemonMock,
+      updatePermissions: updatePermissionsMock,
+      touch: touchMock,
+    },
   },
 }));
 
@@ -133,14 +128,21 @@ describe('session store createSession', () => {
       title: '分支 · Parent',
       parent_session_id: 'parent',
     };
-    forkClaudeMock.mockResolvedValue(child);
+    forkSessionMock.mockResolvedValue(child);
 
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     const result = await useSessionStore.getState().forkSession('parent', 'assistant-1', 'provider-1');
 
     expect(result).toEqual(child);
-    expect(forkClaudeMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1');
+    expect(forkSessionMock).toHaveBeenCalledWith(
+      'parent',
+      'claude_code',
+      'assistant-1',
+      'provider-1',
+      undefined,
+      undefined,
+    );
     expect(useSessionStore.getState().activeSessionId).toBe('child');
     expect(useSessionStore.getState().sessions[0]).toEqual(child);
   });
@@ -163,13 +165,20 @@ describe('session store createSession', () => {
       title: '分支 · Codex Parent',
       parent_session_id: parent.id,
     };
-    forkCodexMock.mockResolvedValue(child);
+    forkSessionMock.mockResolvedValue(child);
 
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
 
-    expect(forkCodexMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
+    expect(forkSessionMock).toHaveBeenCalledWith(
+      parent.id,
+      'codex',
+      'assistant-2',
+      'item-2',
+      'turn-2',
+      1,
+    );
   });
 
   it('routes an OpenCode fork through the OpenCode session command', async () => {
@@ -190,13 +199,20 @@ describe('session store createSession', () => {
       title: '分支 · OpenCode Parent',
       parent_session_id: parent.id,
     };
-    forkOpenCodeMock.mockResolvedValue(child);
+    forkSessionMock.mockResolvedValue(child);
 
     useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-3', 'message-3');
 
-    expect(forkOpenCodeMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3');
+    expect(forkSessionMock).toHaveBeenCalledWith(
+      parent.id,
+      'opencode',
+      'assistant-3',
+      'message-3',
+      undefined,
+      undefined,
+    );
   });
 
   it('keeps the legacy createSession(title, mode, projectId) call shape', async () => {

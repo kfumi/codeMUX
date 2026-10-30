@@ -142,7 +142,7 @@ function createSessionAction(
         permissionConfig,
         resolvedInputPlanMode,
       );
-      const session = await daemonFacade.createSessionViaDaemon({
+      const session = await daemonFacade.session.create({
         title,
         agentKind,
         mode: mode ?? 'chat',
@@ -233,7 +233,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const rememberedPaths = useAgentStore.getState().sessionWorkingPaths;
-      const fetched = await daemonFacade.listSessions();
+      const fetched = await daemonFacade.session.list();
       const sessions = fetched.map((session) => {
         const remembered = rememberedPaths[session.id]?.trim();
         if (isValidWorkingPath(remembered) && remembered !== session.working_path) {
@@ -259,7 +259,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const requestGeneration = ++archivedSessionsRequestGeneration;
     set({ isArchivedLoading: true, error: null });
     try {
-      const archivedSessions = await daemonFacade.listArchivedSessions();
+      const archivedSessions = await daemonFacade.session.listArchived();
       if (requestGeneration !== archivedSessionsRequestGeneration) return;
       set({ archivedSessions, isArchivedLoading: false });
     } catch (error) {
@@ -279,19 +279,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const sourceSession = get().sessions.find((entry) => entry.id === sessionId)
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
-      const session = sourceSession?.agent_kind === 'codex'
-        ? await daemonFacade.forkCodex(
-          sessionId,
-          forkEventId,
-          forkProviderMessageId,
-          forkProviderTurnId,
-          forkProviderTurnOrdinal,
-        )
-        : sourceSession?.agent_kind === 'opencode'
-          ? await daemonFacade.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
-        : sourceSession?.agent_kind === 'pi'
-          ? await daemonFacade.forkPi(sessionId, forkEventId, forkProviderMessageId)
-        : await daemonFacade.forkClaude(sessionId, forkEventId, forkProviderMessageId);
+      const session = await daemonFacade.session.fork(
+        sessionId,
+        sourceSession?.agent_kind ?? 'claude_code',
+        forkEventId,
+        forkProviderMessageId,
+        forkProviderTurnId,
+        forkProviderTurnOrdinal,
+      );
       useAgentStore.getState().clearEvents(session.id);
       set((state) => ({
         sessions: [session, ...state.sessions.filter((entry) => entry.id !== session.id)],
@@ -313,7 +308,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (!deferLocalUpdate) {
         useAgentStore.getState().clearEvents(sessionId);
       }
-      await daemonFacade.deleteSession(sessionId);
+      await daemonFacade.session.delete(sessionId);
       if (deferLocalUpdate) {
         return true;
       }
@@ -360,7 +355,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   archiveSession: async (sessionId: string) => {
     try {
-      await daemonFacade.archiveViaDaemon(sessionId);
+      await daemonFacade.session.archive(sessionId);
       set((state) => {
         const session = state.sessions.find((entry) => entry.id === sessionId);
         const remainingSessions = state.sessions.filter((entry) => entry.id !== sessionId);
@@ -382,7 +377,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   unarchiveSession: async (sessionId: string) => {
     try {
-      await daemonFacade.unarchiveViaDaemon(sessionId);
+      await daemonFacade.session.unarchive(sessionId);
       set((state) => {
         const session = state.archivedSessions.find((entry) => entry.id === sessionId);
         if (!session) return state;
@@ -400,7 +395,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setSessionPinned: async (sessionId: string, pinned: boolean) => {
     try {
-      await daemonFacade.patchSessionViaDaemon(sessionId, { pinned });
+      await daemonFacade.session.patch(sessionId, { pinned });
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
         archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
@@ -411,7 +406,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   setSessionReadOnly: async (sessionId: string, readOnly: boolean) => {
     try {
-      await daemonFacade.patchSessionViaDaemon(sessionId, { readOnly });
+      await daemonFacade.session.patch(sessionId, { readOnly });
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
         archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
@@ -429,7 +424,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   updateSessionTitle: async (sessionId: string, title: string, options?: { titleLocked?: boolean }) => {
     try {
-      await daemonFacade.patchSessionViaDaemon(
+      await daemonFacade.session.patch(
         sessionId,
         options?.titleLocked ? { title, titleLocked: true } : { title },
       );
@@ -455,7 +450,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   updateSessionPermissions: async (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => {
     try {
-      await daemonFacade.updatePermissions(sessionId, permissionConfig, planMode);
+      await daemonFacade.session.updatePermissions(sessionId, permissionConfig, planMode);
       set((state) => ({
         sessions: state.sessions.map((session) => session.id === sessionId
           ? {
@@ -477,7 +472,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         .map((s) => s.id === sessionId ? { ...s, updated_at: now } : s)
         .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
     }));
-    daemonFacade.touchSession(sessionId).catch(() => {});
+    daemonFacade.session.touch(sessionId).catch(() => {});
   },
   markSessionRead: (sessionId: string) => {
     set((state) => withoutUnread(state, [sessionId]) ?? state);

@@ -33,6 +33,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { AgentMessage } from '../../../stores/agentStore';
+import { projectRootName } from '../../../lib/projectRoot';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
@@ -201,7 +202,7 @@ function flattenProjectRootTrees(rootTrees: RootFileTree[]): FileEntry[] {
   const seen = new Set<string>();
   for (const tree of ordered) {
     if (tree.unavailable) continue;
-    const rootName = tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root;
+    const rootName = projectRootName(tree.root);
     for (const entry of flattenFileTree(tree.nodes)) {
       const absolutePath = joinAbsolutePath(tree.root, entry.relativePath);
       const key = normalizeReferencePath(absolutePath).toLowerCase();

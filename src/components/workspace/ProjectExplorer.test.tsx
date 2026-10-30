@@ -15,7 +15,9 @@ const listDirectoryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    listDirectory: listDirectoryMock,
+    workspace: {
+      list: listDirectoryMock,
+    },
   },
 }));
 
@@ -91,6 +93,25 @@ describe('ProjectExplorer', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it('disambiguates same-named multi-roots by their parent directory', async () => {
+    listDirectoryMock.mockImplementation(async (root: string) => [
+      { name: 'file.txt', path: `${root}/file.txt`, is_dir: false },
+    ]);
+    const multiRootProject: Project = {
+      ...project,
+      roots: [
+        { path: 'D:/work/client/src', position: 0, isPrimary: true },
+        { path: 'D:/work/server/src', position: 1, isPrimary: false },
+      ],
+    };
+
+    render(<ProjectExplorer project={multiRootProject} onBack={vi.fn()} />);
+
+    await waitFor(() => expect(listDirectoryMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('client/src')).toBeTruthy();
+    expect(screen.getByText('server/src')).toBeTruthy();
   });
 
   it('lazy-loads children when expanding a directory past the initial depth', async () => {

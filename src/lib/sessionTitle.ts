@@ -37,7 +37,7 @@ export function buildSessionTitleFromUserContent(content: string): string {
 }
 
 async function loadTimelineUserEvents(sessionId: string, agentKind: AgentKind) {
-  const page = await daemonFacade.getTimeline(sessionId, { direction: 'tail', limit: 200 });
+  const page = await daemonFacade.timeline.get(sessionId, { direction: 'tail', limit: 200 });
   return (page.events ?? []).map((raw) => {
     const rawMsg = raw as Record<string, unknown>;
     return isCodeMuxPersistedTimelineEvent(rawMsg)

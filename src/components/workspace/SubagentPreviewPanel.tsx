@@ -21,7 +21,7 @@ import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agen
 import { useSettingsStore } from '@/stores/settingsStore';
 import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
  import { EMPTY_ACTIVITY_RUNS, buildActivityRuns } from '@/lib/activityRuns';
-import { buildConversationTurns } from '@/lib/conversationTurns';
+import { buildConversationTurns } from '../../lib/timeline/turns';
 import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
 import { subagentLiveTail } from '@/lib/subagentStreamingTail';

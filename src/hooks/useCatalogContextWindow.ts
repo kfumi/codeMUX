@@ -72,8 +72,7 @@ function lookupContextWindow(
   const existing = contextWindowInFlight.get(cacheKey);
   if (existing) return existing;
 
-  const request = daemonFacade
-    .lookupModelCatalog(model, provider)
+  const request = daemonFacade.provider.lookupCatalog(model, provider)
     .then((lookup) => {
       const contextWindow = lookup.found && typeof lookup.entry?.context_window === 'number'
         && lookup.entry.context_window > 0

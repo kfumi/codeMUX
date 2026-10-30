@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { usePreviewStore, type FileTreeNodeData } from '../../stores/previewStore';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { projectRootName } from '../../lib/projectRoot';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { TooltipHint } from '../ui/tooltip';
 
@@ -100,7 +101,7 @@ export function FileTree() {
             <TooltipHint content={tree.root}>
               <div className="flex items-center gap-1.5 px-2 py-1 text-ui-micro text-muted-foreground">
                 <Folder className="h-3 w-3 shrink-0" />
-                <span className="truncate">{tree.root.split(/[/\\]+/).filter(Boolean).at(-1) ?? tree.root}</span>
+                <span className="truncate">{projectRootName(tree.root)}</span>
                 {tree.unavailable ? <span className="ml-auto shrink-0 text-destructive">不可用</span> : null}
               </div>
             </TooltipHint>

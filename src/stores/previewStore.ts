@@ -187,7 +187,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
     // Load file content from disk
     try {
-      const content = await daemonFacade.readFile(normalizedPath, state.projectPath ?? undefined);
+      const content = await daemonFacade.workspace.read(normalizedPath, state.projectPath ?? undefined);
       if (isDiffMode) {
         set((s) => ({
           diffFiles: s.diffFiles.map((f) =>
@@ -330,7 +330,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     try {
       // 深度 5（Rust 侧上限）：消息里相对路径的链接化依赖树里能找到深层文件，
       // 如 `lnwlcs\docs\research\xxx.md` 位于根下第 4 层
-      const nodes = await daemonFacade.listDirectory(rootPath, 5, rootPath);
+      const nodes = await daemonFacade.workspace.list(rootPath, 5, rootPath);
       set({ treeRoot: convertTree(nodes), treeRootPath: rootPath, fileTreeLoading: false });
     } catch (error) {
       logger.error('Failed to load file tree', { rootPath }, serializeError(error));
@@ -348,7 +348,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     const ordered = [...roots].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
     const trees = await Promise.all(ordered.map(async (root): Promise<RootFileTree> => {
       try {
-        const nodes = await daemonFacade.listDirectory(root.path, 5, root.path);
+        const nodes = await daemonFacade.workspace.list(root.path, 5, root.path);
         return { root: root.path, isPrimary: root.isPrimary, nodes: convertTree(nodes), unavailable: false };
       } catch (error) {
         logger.error('Failed to load project root tree', { root: root.path }, serializeError(error));

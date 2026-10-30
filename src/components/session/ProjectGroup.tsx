@@ -4,12 +4,11 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, FolderTree, Folders, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
-import { Session } from '../../types/session';
-import { Project, getPrimaryProjectRoot } from '../../types/project';
+import type { Project } from '../../types/project';
+import { getPrimaryProjectRoot } from '../../lib/projectRoot';
+import type { ProjectSidebarSection } from '../../lib/sidebarProjection';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
-import { useProjectStore } from '../../stores/projectStore';
-import { useSessionStore } from '../../stores/sessionStore';
 import { SessionItem } from './SessionItem';
 import { ProjectEditorDialog } from './ProjectEditorDialog';
 import { Button } from '../ui/button';
@@ -20,17 +19,18 @@ import { FoldersOpenIcon } from '../ui/folders-open-icon';
 import { cn } from '../../lib/utils';
 import { resolveProjectDropPosition } from './projectReorder';
 
-const INITIAL_VISIBLE_PROJECT_SESSIONS = 5;
-const FIRST_EXPANDED_PROJECT_SESSIONS = 15;
-const PROJECT_SESSION_EXPAND_STEP = 10;
 // 与 --motion-duration-normal 对齐；easing 直接用令牌，避免手写曲线。
 const PROJECT_SORT_TRANSITION = { duration: 200, easing: 'var(--motion-ease-standard)' };
 
 interface ProjectGroupProps {
   project: Project;
-  sessions: Session[];
+  /** 由侧栏投影一次算好的项目分组：可见行、计数与展开态。 */
+  section: ProjectSidebarSection;
   activeSessionId: string | null;
   isActiveProject: boolean;
+  onToggleExpanded: () => void;
+  onShowMoreSessions: () => void;
+  onCollapseSessions: () => void;
   onSelectSession: (sessionId: string) => void;
   onArchiveSession: (sessionId: string) => void;
   onToggleSessionPinned: (sessionId: string, pinned: boolean) => void;
@@ -48,9 +48,12 @@ interface ProjectGroupProps {
 
 export function ProjectGroup({
   project,
-  sessions,
+  section,
   activeSessionId,
   isActiveProject,
+  onToggleExpanded,
+  onShowMoreSessions,
+  onCollapseSessions,
   onSelectSession,
   onArchiveSession,
   onToggleSessionPinned,
@@ -63,23 +66,15 @@ export function ProjectGroup({
   dragEnabled = false,
   onMoveProject,
 }: ProjectGroupProps) {
-  const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
-  const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
-  const projectSessionCount = useSessionStore((state) =>
-    [...state.sessions, ...state.archivedSessions]
-      .filter((session) => session.project_id === project.id)
-      .length,
-  );
   // 窄屏抽屉没有 hover:项目行操作按钮(更多/文件树/新建对话)常显,否则触屏上
   // 根本点不到;桌面保持 hover 展开不变。资源管理器入口按宿主能力隐藏。
   const isNarrow = useIsNarrowViewport();
   const canOpenExplorer = useHostCapabilities().has('shell.explorer');
-  const expanded = !collapsedProjects.has(project.id);
+  const expanded = section.expanded;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_VISIBLE_PROJECT_SESSIONS);
-  const visibleSessions = sessions.slice(0, visibleSessionLimit);
-  const hasHiddenSessions = visibleSessionLimit < sessions.length;
+  const visibleSessions = section.visibleSessions;
+  const hasHiddenSessions = section.hasHiddenSessions;
   const {
     listeners,
     setNodeRef,
@@ -98,26 +93,12 @@ export function ProjectGroup({
   const dropPosition = dragEnabled
     ? resolveProjectDropPosition(isOver, isDragging, activeIndex, index)
     : null;
-  const canCollapseSessions = sessions.length > INITIAL_VISIBLE_PROJECT_SESSIONS
-    && visibleSessionLimit > INITIAL_VISIBLE_PROJECT_SESSIONS;
+  const canCollapseSessions = section.canCollapseSessions;
   // 多根项目用叠放的文件夹图标区分；展开时换成打开版，单根同样切到 FolderOpen。
   const projectIconClass = cn(
     'h-3.5 w-3.5 shrink-0 transition-colors duration-normal',
     isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
   );
-
-  const handleExpandSessions = () => {
-    setVisibleSessionLimit((current) => {
-      const next = current <= INITIAL_VISIBLE_PROJECT_SESSIONS
-        ? FIRST_EXPANDED_PROJECT_SESSIONS
-        : current + PROJECT_SESSION_EXPAND_STEP;
-      return Math.min(next, sessions.length);
-    });
-  };
-
-  const handleCollapseSessions = () => {
-    setVisibleSessionLimit(INITIAL_VISIBLE_PROJECT_SESSIONS);
-  };
 
   return (
     <div
@@ -148,7 +129,7 @@ export function ProjectGroup({
           dragEnabled && 'touch-none',
           isDragging && 'cursor-grabbing',
         )}
-        onClick={() => toggleProjectExpanded(project.id)}
+        onClick={onToggleExpanded}
         {...(dragEnabled ? listeners : {})}
         onKeyDown={(event) => {
           if (!dragEnabled || !onMoveProject) return;
@@ -271,10 +252,10 @@ export function ProjectGroup({
           data-project-sessions={project.id}
           className={cn(
             'ml-2.5 mt-1 space-y-1 pl-1.5',
-            sessions.length > 0 && 'border-l border-[hsl(var(--sidebar-fg))]/12',
+            section.sessions.length > 0 && 'border-l border-[hsl(var(--sidebar-fg))]/12',
           )}
         >
-          {sessions.length === 0 ? (
+          {section.sessions.length === 0 ? (
             <p className="px-2.5 py-1 text-ui-compact text-[hsl(var(--sidebar-fg))]/64">
               暂无对话
             </p>
@@ -297,7 +278,7 @@ export function ProjectGroup({
                 <button
                   type="button"
                   aria-label={`展开显示项目 ${project.name} 的更多对话`}
-                  onClick={handleExpandSessions}
+                  onClick={onShowMoreSessions}
                   className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronDown className="h-3 w-3" />
@@ -308,7 +289,7 @@ export function ProjectGroup({
                 <button
                   type="button"
                   aria-label={`折叠显示项目 ${project.name} 的对话`}
-                  onClick={handleCollapseSessions}
+                  onClick={onCollapseSessions}
                   className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronUp className="h-3 w-3" />
@@ -330,7 +311,7 @@ export function ProjectGroup({
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="移除项目"
-        description={`确定要移除“${project.name}”吗？其名下 ${projectSessionCount} 条会话会被一并删除。`}
+        description={`确定要移除“${project.name}”吗？其名下 ${section.sessionCount} 条会话会被一并删除。`}
         confirmLabel="移除"
         variant="destructive"
         onConfirm={() => onDeleteProject(project.id)}

@@ -1007,9 +1007,9 @@ export async function buildLongSessionBenchmark(
   const commits = { total: 0 };
   const clock = installFrameClock();
   const restoreJsdomShims = installJsdomShims();
-  const originalRewindSession = daemonFacade.rewindSession;
+  const originalRewindSession = daemonFacade.session.rewind;
   // 回退会走真实 IPC：基准里换成确定性的空结果，只保留 store 侧的发布行为。
-  daemonFacade.rewindSession = (async () => ({})) as typeof daemonFacade.rewindSession;
+  daemonFacade.session.rewind = (async () => ({})) as typeof daemonFacade.session.rewind;
 
   let mounted: MountedTree | null = null;
   const previousActEnvironment = readActEnvironment();
@@ -1080,7 +1080,7 @@ export async function buildLongSessionBenchmark(
     setActEnvironment(previousActEnvironment);
     resetSmoothness();
     usePerfStore.getState().reset();
-    daemonFacade.rewindSession = originalRewindSession;
+    daemonFacade.session.rewind = originalRewindSession;
     restoreJsdomShims();
     clock.uninstall();
   }

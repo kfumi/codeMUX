@@ -41,7 +41,7 @@ describe('daemonFacade config patch keys', () => {
   });
 
   it('patches the computer-control config under the camelCase key', async () => {
-    await daemonFacade.setComputerUse(SETTINGS);
+    await daemonFacade.config.setComputerUse(SETTINGS);
 
     expect(patchAppConfig).toHaveBeenCalledTimes(1);
     const body = patchAppConfig.mock.calls[0][0];
@@ -50,7 +50,7 @@ describe('daemonFacade config patch keys', () => {
   });
 
   it('keeps the nested computer-use fields snake_case', async () => {
-    await daemonFacade.setComputerUse(SETTINGS);
+    await daemonFacade.config.setComputerUse(SETTINGS);
 
     const body = patchAppConfig.mock.calls[0][0] as { computerUse: Record<string, unknown> };
     expect(Object.keys(body.computerUse).sort()).toEqual([

@@ -379,7 +379,7 @@ export function AskUserQuestionCard({
           logger.warn('Failed to persist elevated permissions before tool response', { sessionId }, serializeError(err));
         });
       }
-      await daemonFacade.respondToInteractiveViaDaemon(sessionId, toolUseId, answers);
+      await daemonFacade.session.respondToInteractive(sessionId, toolUseId, answers);
       setSubmittedAnswers(displayAnswers);
       setSubmitted(true);
       onSubmitted?.();
@@ -396,7 +396,7 @@ export function AskUserQuestionCard({
     setSubmitting(true);
 
     try {
-      await daemonFacade.respondToInteractiveViaDaemon(sessionId, toolUseId, questions.map(() => '__cancelled__'));
+      await daemonFacade.session.respondToInteractive(sessionId, toolUseId, questions.map(() => '__cancelled__'));
       setSubmittedAnswers(questions.map(() => [IGNORED_ANSWER]));
       setSubmitted(true);
       onSubmitted?.();

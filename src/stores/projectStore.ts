@@ -4,28 +4,6 @@ import type { Project } from '../types/project';
 import { useSessionStore } from './sessionStore';
 import { useAgentStore } from './agentStore';
 
-const COLLAPSED_PROJECTS_KEY = 'codemux-collapsed-projects';
-
-function loadCollapsedProjects(): Set<string> {
-  try {
-    const stored = localStorage.getItem(COLLAPSED_PROJECTS_KEY);
-    if (stored) {
-      return new Set(JSON.parse(stored));
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return new Set();
-}
-
-function saveCollapsedProjects(collapsed: Set<string>): void {
-  try {
-    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...collapsed]));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
 interface ProjectState {
   projects: Project[];
   activeProjectId: string | null;
@@ -33,7 +11,6 @@ interface ProjectState {
   /** 见 sessionStore 的同名字段：区分「还没拉到」与「确实没有项目」。 */
   hasLoadedOnce: boolean;
   error: string | null;
-  collapsedProjects: Set<string>;
   fetchProjects: () => Promise<void>;
   createProject: (name: string, roots: string[], primaryRoot?: string) => Promise<Project>;
   deleteProject: (projectId: string) => Promise<void>;
@@ -46,10 +23,6 @@ interface ProjectState {
   /** 侧栏拖拽排序：ids 是用户期望的完整顺序，乐观更新失败回滚并重新拉取。 */
   reorderProjects: (ids: string[]) => Promise<void>;
   setActiveProject: (projectId: string | null) => void;
-  toggleProjectExpanded: (projectId: string) => void;
-  setProjectExpanded: (projectId: string, expanded: boolean) => void;
-  /** 侧边栏「项目」分区头部：一次展开或收起全部项目。 */
-  setAllProjectsExpanded: (expanded: boolean) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -58,45 +31,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isLoading: false,
   hasLoadedOnce: false,
   error: null,
-  collapsedProjects: loadCollapsedProjects(),
-  toggleProjectExpanded: (projectId: string) => {
-    set((state) => {
-      const newCollapsed = new Set(state.collapsedProjects);
-      if (newCollapsed.has(projectId)) {
-        newCollapsed.delete(projectId);
-      } else {
-        newCollapsed.add(projectId);
-      }
-      saveCollapsedProjects(newCollapsed);
-      return { collapsedProjects: newCollapsed };
-    });
-  },
-  setProjectExpanded: (projectId: string, expanded: boolean) => {
-    set((state) => {
-      const newCollapsed = new Set(state.collapsedProjects);
-      if (expanded) {
-        newCollapsed.delete(projectId);
-      } else {
-        newCollapsed.add(projectId);
-      }
-      saveCollapsedProjects(newCollapsed);
-      return { collapsedProjects: newCollapsed };
-    });
-  },
-  setAllProjectsExpanded: (expanded: boolean) => {
-    set((state) => {
-      // 展开时清空整张表:不在当前列表里的历史 id 也不该继续占用。
-      const newCollapsed = expanded
-        ? new Set<string>()
-        : new Set(state.projects.map((project) => project.id));
-      saveCollapsedProjects(newCollapsed);
-      return { collapsedProjects: newCollapsed };
-    });
-  },
   fetchProjects: async () => {
     set({ isLoading: true, error: null });
     try {
-      const projects = await daemonFacade.listProjects();
+      const projects = await daemonFacade.project.list();
       set({ projects, isLoading: false, hasLoadedOnce: true });
     } catch (error) {
       // 失败同样算「加载结束」,避免侧边栏骨架屏永远停住。
@@ -107,20 +45,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const project = primaryRoot
-        ? await daemonFacade.createProject(name, roots, primaryRoot)
-        : await daemonFacade.createProject(name, roots);
-      // Remove from collapsed list if somehow present (new projects should be expanded)
-      set((state) => {
-        const newCollapsed = new Set(state.collapsedProjects);
-        newCollapsed.delete(project.id);
-        saveCollapsedProjects(newCollapsed);
-        return {
-          projects: [project, ...state.projects],
-          activeProjectId: project.id,
-          collapsedProjects: newCollapsed,
-          isLoading: false,
-        };
-      });
+        ? await daemonFacade.project.create(name, roots, primaryRoot)
+        : await daemonFacade.project.create(name, roots);
+      set((state) => ({
+        projects: [project, ...state.projects],
+        activeProjectId: project.id,
+        isLoading: false,
+      }));
       return project;
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -141,7 +72,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
 
       // 删除 SQLite 中的项目及其下所有会话记录
-      await daemonFacade.deleteProject(projectId);
+      await daemonFacade.project.delete(projectId);
 
       // 从本地状态中移除该项目下的已归档 session
       useSessionStore.setState((state) => ({
@@ -159,7 +90,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   renameProject: async (projectId: string, name: string) => {
     try {
-      await daemonFacade.renameProject(projectId, name);
+      await daemonFacade.project.rename(projectId, name);
       set((state) => ({
         projects: state.projects.map((p) => p.id === projectId ? { ...p, name } : p),
       }));
@@ -171,7 +102,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     projectId: string,
     patch: { name?: string; roots?: string[]; primaryRoot?: string },
   ) => {
-    const project = await daemonFacade.updateProject(projectId, patch);
+    const project = await daemonFacade.project.update(projectId, patch);
     set((state) => ({
       projects: state.projects.map((entry) => (entry.id === projectId ? project : entry)),
     }));
@@ -197,7 +128,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set({ projects: ordered });
     try {
-      await daemonFacade.reorderProjects(ids);
+      await daemonFacade.project.reorder(ids);
     } catch (error) {
       set({ projects: previous, error: String(error) });
       await get().fetchProjects();

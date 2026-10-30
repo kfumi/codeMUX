@@ -21,15 +21,19 @@ const { codeMuxThreadRenderMock, ensureSessionMock, updateProviderMock, updateRe
 
 vi.mock('../../lib/facades/daemon-facade', () => ({
   daemonFacade: {
-    getTimeline: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),
-    patchSessionViaDaemon: vi.fn(() => Promise.resolve()),
-    sendMessageViaDaemon: vi.fn(() => Promise.resolve()),
-    interruptViaDaemon: vi.fn(() => Promise.resolve()),
-    updateWorkingPath: vi.fn(() => Promise.resolve()),
-    touchSession: vi.fn(() => Promise.resolve()),
-    ensureAgentSession: ensureSessionMock,
-    updateProvider: updateProviderMock,
-    updateReasoningEffort: updateReasoningEffortMock,
+    session: {
+      patch: vi.fn(() => Promise.resolve()),
+      sendMessage: vi.fn(() => Promise.resolve()),
+      interrupt: vi.fn(() => Promise.resolve()),
+      updateWorkingPath: vi.fn(() => Promise.resolve()),
+      touch: vi.fn(() => Promise.resolve()),
+      ensureAgent: ensureSessionMock,
+      updateProvider: updateProviderMock,
+      updateReasoningEffort: updateReasoningEffortMock,
+    },
+    timeline: {
+      get: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),
+    },
   },
   ensureDaemonClient: vi.fn(() => Promise.resolve({
     getTimeline: vi.fn(() => Promise.resolve({ events: [], hasMore: false })),

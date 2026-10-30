@@ -130,12 +130,7 @@ export function SessionItem({
   const sessionEvents = useAgentStore((state) => state.events[session.id] ?? EMPTY_EVENTS);
   const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[session.id] ?? null);
   const projects = useProjectStore((state) => state.projects);
-  const latestSession = useSessionStore((state) => (
-    state.sessions.find((entry) => entry.id === session.id)
-    ?? state.archivedSessions.find((entry) => entry.id === session.id)
-    ?? session
-  ));
-  const workingPath = resolveSessionWorkingPath(latestSession, projects, {
+  const workingPath = resolveSessionWorkingPath(session, projects, {
     events: sessionEvents,
     rememberedPath: rememberedWorkingPath,
   });
@@ -302,7 +297,7 @@ export function SessionItem({
           </ContextMenuContent>
         </ContextMenu>
         <HoverCardContent>
-          <SessionInfoCard session={latestSession} workingPath={workingPath} />
+          <SessionInfoCard session={session} workingPath={workingPath} />
         </HoverCardContent>
       </HoverCard>
 

@@ -300,7 +300,7 @@ function CodeMuxToolCallMessagePartImpl({
     let active = true;
     setPathImageLoadState({ path: pathImage, state: 'loading' });
     void import('@/lib/facades/daemon-facade')
-      .then(({ daemonFacade }) => daemonFacade.previewImageFile(pathImage))
+      .then(({ daemonFacade }) => daemonFacade.workspace.previewImage(pathImage))
       .then((src) => {
       if (!active) return;
       setLoadedPathImage({ path: pathImage, src });

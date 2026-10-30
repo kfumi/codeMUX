@@ -16,7 +16,7 @@ import {
 } from '../../hooks/useAgentModels';
 import { useCatalogContextWindow } from '../../hooks/useCatalogContextWindow';
 import type { ReasoningEffort } from '../../types/session';
-import { getPrimaryProjectRoot } from '../../types/project';
+import { getPrimaryProjectRoot } from '../../lib/projectRoot';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import type {
@@ -304,7 +304,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     ensuredSessionsRef.current.add(ensureKey);
-    daemonFacade.ensureAgentSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
+    daemonFacade.session.ensureAgent(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
   }, [
@@ -373,12 +373,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       )),
     }));
     try {
-      await daemonFacade.updateProvider(sessionId, providerId, suffixedModel);
+      await daemonFacade.session.updateProvider(sessionId, providerId, suffixedModel);
       // Re-ensure immediately so Codex resumes the same thread with the new
       // model before the next send, instead of waiting for startSession.
       if (!isRunning) {
         const effectiveCwd = workingPath ?? cwd;
-        await daemonFacade.ensureAgentSession(sessionId, effectiveCwd, undefined, reasoningEffort);
+        await daemonFacade.session.ensureAgent(sessionId, effectiveCwd, undefined, reasoningEffort);
       }
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
@@ -416,7 +416,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }));
 
     try {
-      await daemonFacade.updateReasoningEffort(sessionId, nextEffort);
+      await daemonFacade.session.updateReasoningEffort(sessionId, nextEffort);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
@@ -492,8 +492,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         showInfoDialog,
         createSession: async () => { await createSession('新对话', 'agent'); },
         clearEvents,
-        resetSession: () => { daemonFacade.resetAgentSession(sessionId); },
-        deleteClaudeSessionFiles: () => daemonFacade.deleteClaudeSessionFiles(sessionId),
+        resetSession: () => { daemonFacade.session.resetAgent(sessionId); },
+        deleteClaudeSessionFiles: () => daemonFacade.session.deleteNativeFiles(sessionId, 'claude_code'),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
       };

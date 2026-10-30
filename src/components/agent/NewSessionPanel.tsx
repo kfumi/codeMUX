@@ -299,8 +299,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         showInfoDialog: () => {},
         createSession: async () => {},
         clearEvents,
-        resetSession: () => { daemonFacade.resetAgentSession(NEW_SESSION_DRAFT_SESSION_ID); },
-        deleteClaudeSessionFiles: () => daemonFacade.deleteClaudeSessionFiles(NEW_SESSION_DRAFT_SESSION_ID),
+        resetSession: () => { daemonFacade.session.resetAgent(NEW_SESSION_DRAFT_SESSION_ID); },
+        deleteClaudeSessionFiles: () => daemonFacade.session.deleteNativeFiles(NEW_SESSION_DRAFT_SESSION_ID, 'claude_code'),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
       };
