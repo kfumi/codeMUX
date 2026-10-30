@@ -109,7 +109,7 @@ describe('UsageStatistics', () => {
   it('智能体分布展示 pi 的 Token 用量占比', async () => {
     render(<UsageStatistics />);
 
-    await waitFor(() => expect(screen.getByText('17.7K · 100.0%')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('1.8万 · 100.0%')).toBeTruthy());
     // pi 会话只统计一次，不会因为 token 与 session 两个数据源重复成两行。
     expect(screen.getAllByText('pi')).toHaveLength(1);
   });

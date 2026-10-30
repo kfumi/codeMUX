@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { DailyTokenBreakdown } from '@/types/usage';
 import { cn } from '@/lib/utils';
+import { formatTokenCount } from '@/lib/formatTokenCount';
 import {
   Tooltip,
   TooltipContent,
@@ -30,18 +31,6 @@ const MAX_BAR_WIDTH = 24;
 
 function formatFull(n: number): string {
   return new Intl.NumberFormat('en-US').format(n);
-}
-
-function formatAbbrev(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
-  }
-  return String(n);
 }
 
 function computeNiceScale(maxValue: number, ticks = 4): { niceMax: number; lines: number[] } {
@@ -180,7 +169,7 @@ export function UsageBarChart({ data }: UsageBarChartProps) {
                       dominantBaseline="middle"
                       className="fill-muted-foreground text-ui-micro"
                     >
-                      {formatAbbrev(v)}
+                      {formatTokenCount(v)}
                     </text>
                   </g>
                 );

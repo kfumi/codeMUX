@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '../../lib/utils';
+import { formatTokenCount } from '../../lib/formatTokenCount';
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '../ui/tooltip';
 import type { UsageHeatmapDay } from '../../types/usage';
 import { buildTokenThresholds, tokenLevel } from '../../lib/usageHeatmapScale';
@@ -74,18 +75,6 @@ function formatDateString(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
-  }
-  return String(n);
 }
 
 function fitCellSize(containerWidth: number, weekCount: number): number {

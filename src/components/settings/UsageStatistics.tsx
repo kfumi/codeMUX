@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
+import { formatTokenCount } from '../../lib/formatTokenCount';
 import { daemonFacade } from '../../lib/facades/daemon-facade';
 import { buildTokenThresholds } from '../../lib/usageHeatmapScale';
 import { describeKind } from '../../lib/agentKind';
@@ -61,15 +62,7 @@ const USAGE_REQUEST_DEBOUNCE_MS = 150;
 
 function formatTokenValue(n: number | null): string {
   if (n === null) return '—';
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
-  }
-  return String(n);
+  return formatTokenCount(n);
 }
 
 function formatPercent(rate: number | null): string {
