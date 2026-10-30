@@ -14,7 +14,7 @@ import {
 import {
   isTerminalAgentEvent,
   shouldProcessTerminalEvent,
-} from '../lib/timeline/terminality';
+} from './terminality';
 
 describe('interrupt marker detection', () => {
   it('only matches the canonical interrupt marker', () => {

@@ -44,7 +44,7 @@ import {
   mapPersistedClaudeMessage,
   shouldSuppressLiveEventWhileStopped,
   type SessionSummaryEvent,
-} from './agentEventParsing';
+} from '../lib/timeline/agentEventParsing';
 import { useSessionStore } from './sessionStore';
 import { useProjectStore } from './projectStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';

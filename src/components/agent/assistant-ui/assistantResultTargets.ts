@@ -1,5 +1,5 @@
 import type { AgentMessage } from '../../../stores/agentStore';
-import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
+import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../lib/timeline/agentEventParsing';
 
 export type AssistantResultTargetOptions = {
   allowImplicitResult?: boolean;

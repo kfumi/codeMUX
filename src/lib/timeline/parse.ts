@@ -8,7 +8,7 @@ import {
   mapCodexCompactedEvent,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
-} from '../../stores/agentEventParsing';
+} from './agentEventParsing';
 import {
   isCodeMuxAssistantMessageEvent,
   isCodeMuxDiagnosticEvent,

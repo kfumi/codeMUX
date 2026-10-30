@@ -63,7 +63,7 @@ import {
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/timeline/turns';
 import type { ConversationTurn, ConversationTurnStatus } from '../../../types/conversationTurn';
 
-import { isCodexCompactSummaryText, isInterruptMarker } from '../../../stores/agentEventParsing';
+import { isCodexCompactSummaryText, isInterruptMarker } from '../../../lib/timeline/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   CodeMuxDataMessagePart,

@@ -1,4 +1,4 @@
-import { parseSdkUserMessage, projectNativeSessionRebuiltData, type SessionSummaryEvent } from '@/stores/agentEventParsing';
+import { parseSdkUserMessage, projectNativeSessionRebuiltData, type SessionSummaryEvent } from './timeline/agentEventParsing';
 import type { AgentMessage } from '@/stores/agentStore';
 import type { AgentAssistantMessage, AgentPermissionRequest, AgentSystemMessage } from '@/types/agent';
 

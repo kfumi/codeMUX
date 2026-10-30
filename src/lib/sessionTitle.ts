@@ -1,6 +1,6 @@
 import { daemonFacade } from './facades/daemon-facade';
 import { isCodeMuxPersistedTimelineEvent } from './codeMuxProtocol';
-import { mapPersistedClaudeMessage } from '../stores/agentEventParsing';
+import { mapPersistedClaudeMessage } from './timeline/agentEventParsing';
 import { parseAgentEvent } from '../stores/agentStore';
 import type { AgentKind } from '../types/session';
 

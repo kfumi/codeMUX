@@ -14,7 +14,7 @@ import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCar
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { findSubagentIdByToolCallId } from '../../../lib/subagentActivity';
 import { useSubagentStore } from '../../../stores/subagentStore';
-import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
+import { INTERRUPT_MARKER } from '../../../lib/timeline/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { TodoToolList } from '../TodoToolList';

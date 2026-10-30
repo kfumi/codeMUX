@@ -1,5 +1,5 @@
 import { isEphemeralLiveStreamNarrationEvent, type AgentMessage } from '../../../stores/agentStore';
-import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
+import { isCodexCompactSummaryText } from '../../../lib/timeline/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';

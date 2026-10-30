@@ -10,7 +10,7 @@ import {
 } from '../../lib/shortcuts/keyboardShortcuts';
 import { getShortcutPlatform } from '../../lib/shortcuts/shortcutPlatform';
 import { cn } from '../../lib/utils';
-import { mapPersistedClaudeMessage } from '../../stores/agentEventParsing';
+import { mapPersistedClaudeMessage } from '../../lib/timeline/agentEventParsing';
 import { parseAgentEvent } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';

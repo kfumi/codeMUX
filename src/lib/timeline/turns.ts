@@ -1,4 +1,4 @@
-import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText, isInterruptMarker } from '../../stores/agentEventParsing';
+import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText, isInterruptMarker } from './agentEventParsing';
 import type { AgentMessage } from '../../stores/agentStore';
 import type {
   ConversationTurn,

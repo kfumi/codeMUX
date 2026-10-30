@@ -3,11 +3,11 @@ import type {
   AgentResultMessage,
   AgentToolResult,
   AgentUserMessageLocator,
-} from '../types/agent';
-import type { AgentKind } from '../types/session';
-import { formatPromptAsCommandDisplay } from '../lib/slashCommands';
-import type { UserAttachmentPreview } from '../types/agentInput';
-import { stripAttachmentEnrichmentContext } from '../lib/attachmentEnrichment';
+} from '../../types/agent';
+import type { AgentKind } from '../../types/session';
+import { formatPromptAsCommandDisplay } from '../slashCommands';
+import type { UserAttachmentPreview } from '../../types/agentInput';
+import { stripAttachmentEnrichmentContext } from '../attachmentEnrichment';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
