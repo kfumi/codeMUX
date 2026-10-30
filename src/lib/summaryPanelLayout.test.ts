@@ -157,9 +157,10 @@ describe('parseContentWidthToken', () => {
   });
 
   it('流式档的边距按 clamp(rem, vw, rem) 的当前取值算，不取上下限', () => {
-    // 窄屏取下限 2rem=32，宽屏按 6vw 放大，极宽时被上限 6rem=96 夹住。
-    expect(parseContentWidthToken('calc(100% - clamp(2rem, 6vw, 6rem))', 16, 400)).toBe(400 - 32);
-    expect(parseContentWidthToken('calc(100% - clamp(2rem, 6vw, 6rem))', 16, 1600)).toBe(1600 - 96);
+    // 下限 2rem=32；中段按 10vw 放大；极宽时被上限 12rem=192 夹住。
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 200)).toBe(200 - 32);
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1600)).toBeCloseTo(1600 - 166.4);
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 2560)).toBe(2560 - 192);
   });
 });
 

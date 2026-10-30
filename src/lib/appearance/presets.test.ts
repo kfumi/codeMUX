@@ -239,7 +239,7 @@ describe('appearance preferences', () => {
     // 不能再出现宽屏到 1024px 就停住的固定上限。
     applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'stream' }, false);
     expect(root.style.getPropertyValue('--content-width')).toBe(
-      'calc(100% - clamp(2rem, 6vw, 6rem))',
+      'calc(100% - clamp(2rem, 10vw, 12rem))',
     );
   });
 

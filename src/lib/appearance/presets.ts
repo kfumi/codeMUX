@@ -125,9 +125,9 @@ export const RADIUS_PREVIEW: Record<RadiusKey, string> = {
 
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
   fixed: '48rem',
-  // 流式档不再设固定上限：宽度跟随对话列，只从两侧让出安全边距，
+  // 流式档不设固定上限：宽度跟随对话列，只从两侧让出安全边距，
   // 给消息导航、滚动条和窗口边缘留出呼吸位。`vw` 让窄屏的边距同步收窄。
-  stream: 'calc(100% - clamp(2rem, 6vw, 6rem))',
+  stream: 'calc(100% - clamp(2rem, 10vw, 12rem))',
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {
