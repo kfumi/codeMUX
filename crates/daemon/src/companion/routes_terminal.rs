@@ -144,10 +144,13 @@ async fn handle_terminal_socket(mut socket: WebSocket, ctx: ServerContext, termi
         };
 
     if let Some(replay) = replay {
+        // replay=true 让客户端把这段缓冲当成「当前画面的完整快照」：先清屏再写，
+        // 否则重连会让同一段历史在 xterm 里再叠一遍。
         let payload = serde_json::json!({
             "type": "output",
             "terminalId": terminal_id,
             "data": replay,
+            "replay": true,
         });
         if socket
             .send(Message::Text(payload.to_string().into()))

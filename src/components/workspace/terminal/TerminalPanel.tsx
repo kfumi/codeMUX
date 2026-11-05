@@ -21,6 +21,28 @@ const INACTIVE_OUTPUT_MAX_CHARS = 128 * 1024;
 /** 缓冲区发生过截断时插在最前面的提示，让用户知道上面的内容不完整。 */
 const INACTIVE_OUTPUT_DROP_NOTICE = '\r\n[隐藏期间的早期输出已省略]\r\n';
 
+/**
+ * 把 PTY 尺寸同步给 daemon 前的稳定等待（毫秒）。
+ *
+ * 面板收起/展开走的是 300ms 宽度动画：动画期间 `ResizeObserver` 每帧都会回调，
+ * 如果每帧都 `resize` 一次 PTY，一次展开就能打出十几次尺寸变更（Windows ConPTY
+ * 每次都会重绘，慢的机器上肉眼可见）。视觉上的 fit 仍然每帧做，只有发给 daemon
+ * 的尺寸等尺寸稳定后补一次。
+ */
+const PTY_RESIZE_DEBOUNCE_MS = 120;
+
+/** 面板宽度过渡还在跑时的复查间隔（毫秒），用来看过渡有没有结束。 */
+const PANEL_TRANSITION_RECHECK_MS = 60;
+
+/**
+ * RIS（ESC c）：把屏幕和 scrollback 一起复位。
+ *
+ * 回放前要清屏，但直接调 `terminal.reset()` 是同步的——之前还排在 write 队列里的
+ * 旧输出会在 reset 之后才被解析，可能又叠到回放画面后面。把 RIS 作为一次普通 write
+ * 排在回放前面，顺序就有了保证。
+ */
+const TERMINAL_RESET_SEQUENCE = '\x1bc';
+
 function terminalTheme() {
   const isDark = document.documentElement.classList.contains('dark');
 
@@ -235,6 +257,8 @@ export function TerminalPanel({
   const lastSynchronizedSizeRef = useRef<{ terminalId: string; cols: number; rows: number } | null>(null);
   /** 标签不在前台时收到的输出先攒在这里，切回前台的那一帧一次性写入 xterm（见文件末尾的 layout effect）。 */
   const pendingOutputRef = useRef('');
+  /** 攒下的这段输出是不是 daemon 的重连回放；回放要先清屏，否则会在旧画面上再叠一遍历史。 */
+  const pendingOutputIsReplayRef = useRef(false);
   /** 尺寸同步回调由 terminal 创建时登记；切回前台要主动跑一次（见文件末尾的 layout effect）。 */
   const resizeHandlerRef = useRef<(() => void) | null>(null);
   const [viewport, setViewport] = useState<HTMLElement | null>(null);
@@ -276,6 +300,7 @@ export function TerminalPanel({
     // 这段 effect 会新建 xterm 并走一次 attach/start，也就是**换了一条 PTY**：上一轮攒下的
     // 缓冲属于旧会话，不能回放到新终端上（否则屏幕上会出现"新 shell banner + 旧会话尾部"）。
     pendingOutputRef.current = '';
+    pendingOutputIsReplayRef.current = false;
 
     const terminal = new XTerm({
       cursorBlink: true,
@@ -314,9 +339,24 @@ export function TerminalPanel({
      * 解析输出、推进 scrollback，即使根本没人看得见它。所以标签不在前台时只把输出攒起来，
      * 切回前台的那一帧再一次性写入。
      */
-    const writeOutput = (text: string) => {
+    const writeOutput = (text: string, isReplay = false) => {
       if (isActiveRef.current) {
+        if (isReplay) {
+          // 回放描述的是「这条终端现在的完整画面」，不是增量。重连/重挂载后直接写进去
+          // 会把同一条 shell 的启动输出再叠一遍；先清屏（含 scrollback）再写。
+          pendingOutputRef.current = '';
+          pendingOutputIsReplayRef.current = false;
+          terminal.write(TERMINAL_RESET_SEQUENCE + text);
+          return;
+        }
         terminal.write(text);
+        return;
+      }
+
+      if (isReplay) {
+        // 后台期间的重连回放同样覆盖而不是追加：它已经包含此时为止的全部输出。
+        pendingOutputRef.current = text;
+        pendingOutputIsReplayRef.current = true;
         return;
       }
 
@@ -341,7 +381,7 @@ export function TerminalPanel({
     const handleEvent = (event: TerminalEvent) => {
       if (disposed) return;
       if (event.type === 'output' && event.data != null) {
-        writeOutput(event.data);
+        writeOutput(event.data, event.replay === true);
       } else if (event.type === 'error') {
         setError(event.error ?? '终端错误');
       } else if (event.type === 'exit') {
@@ -351,25 +391,67 @@ export function TerminalPanel({
     const reportError = (error: unknown) => {
       if (!disposed) setError(String(error));
     };
-    const resizeConnectedTerminal = () => {
+    /** 只把视图 fit 到容器：每帧都可以跑，纯本地计算，不碰 PTY。 */
+    const fitTerminalView = () => {
+      if (!isActiveRef.current) return;
+      fit.fit();
+    };
+    /** 把当前 cols/rows 同步给 PTY；尺寸没变就不重复发。 */
+    const synchronizeTerminalSize = () => {
       if (!isActiveRef.current) return;
 
-      fit.fit();
       const terminalId = terminalIdRef.current;
-      if (connectedRef.current && terminalId) {
-        const size = { terminalId, cols: terminal.cols, rows: terminal.rows };
-        const lastSize = lastSynchronizedSizeRef.current;
-        if (lastSize?.terminalId === size.terminalId && lastSize.cols === size.cols && lastSize.rows === size.rows) {
-          return;
-        }
-        lastSynchronizedSizeRef.current = size;
-        void daemonFacade.terminal.resize(size.terminalId, size.cols, size.rows).catch((error) => {
-          if (lastSynchronizedSizeRef.current === size) {
-            lastSynchronizedSizeRef.current = null;
-          }
-          reportError(error);
-        });
+      if (!connectedRef.current || !terminalId) return;
+
+      const size = { terminalId, cols: terminal.cols, rows: terminal.rows };
+      const lastSize = lastSynchronizedSizeRef.current;
+      if (lastSize?.terminalId === size.terminalId && lastSize.cols === size.cols && lastSize.rows === size.rows) {
+        return;
       }
+      lastSynchronizedSizeRef.current = size;
+      void daemonFacade.terminal.resize(size.terminalId, size.cols, size.rows).catch((error) => {
+        if (lastSynchronizedSizeRef.current === size) {
+          lastSynchronizedSizeRef.current = null;
+        }
+        reportError(error);
+      });
+    };
+
+    // 面板开合/切换会话恢复宽度都会跑 300ms 的宽度过渡：过渡中的 cols/rows 只是中间态，
+    // 把它同步给 PTY 会让 PowerShell 在每次 SIGWINCH 时重画一遍 prompt（屏幕上多出几行
+    // `PS ...>`）。所以视觉上照常 fit，PTY 尺寸等过渡结束、且尺寸稳定后再补一次。
+    let resizeDebounceTimer: number | null = null;
+    const panelIsTransitioning = () => {
+      const panel = container.closest('aside');
+      if (!panel || typeof panel.getAnimations !== 'function') return false;
+      return panel.getAnimations().some((animation) => animation.playState === 'running');
+    };
+    const flushTerminalResize = () => {
+      resizeDebounceTimer = null;
+      if (!isActiveRef.current) return;
+      if (panelIsTransitioning()) {
+        resizeDebounceTimer = window.setTimeout(flushTerminalResize, PANEL_TRANSITION_RECHECK_MS);
+        return;
+      }
+      // 过渡结束：先按最终尺寸 fit（一次干净的重排），再把尺寸同步给 PTY。
+      fitTerminalView();
+      synchronizeTerminalSize();
+    };
+    const scheduleTerminalResize = () => {
+      if (resizeDebounceTimer !== null) window.clearTimeout(resizeDebounceTimer);
+      resizeDebounceTimer = window.setTimeout(flushTerminalResize, PTY_RESIZE_DEBOUNCE_MS);
+    };
+    const resizeConnectedTerminal = () => {
+      if (!isActiveRef.current) return;
+      // 面板宽度过渡期间 cols/rows 只是中间态：不 fit、不同步，等过渡结束一次做完。
+      // 提前 fit 会让 xterm 把 scrollback 在 2 列和真实列宽之间来回重排，既无意义又可能
+      // 留下断行；提前同步则会让 shell 在每次 SIGWINCH 时重画 prompt。
+      if (panelIsTransitioning()) {
+        scheduleTerminalResize();
+        return;
+      }
+      fitTerminalView();
+      scheduleTerminalResize();
     };
 
     resizeHandlerRef.current = resizeConnectedTerminal;
@@ -420,7 +502,8 @@ export function TerminalPanel({
           rows: terminal.rows,
         };
         setTerminalId(tabId, connectedTerminalId);
-        resizeConnectedTerminal();
+        fitTerminalView();
+        synchronizeTerminalSize();
 
         if (disposed) {
           if (!useSidePanelStore.getState().isTabPresent(tabId)) {
@@ -444,6 +527,7 @@ export function TerminalPanel({
 
     return () => {
       disposed = true;
+      if (resizeDebounceTimer !== null) window.clearTimeout(resizeDebounceTimer);
       dataDisposable.dispose();
       resizeObserver.disconnect();
       viewport?.removeEventListener('mousedown', stopScrollbarMousePropagation, true);
@@ -455,7 +539,11 @@ export function TerminalPanel({
           console.error('Terminal session cleanup failed', error);
         });
       }
+      // xterm.dispose() 只释放内部资源，不会移除 open() 时装进容器的元素；容器归 React
+      // 长期持有，不手动摘掉的话每次重建都会把旧终端留在面板里。
+      const terminalElement = terminal.element;
       terminal.dispose();
+      terminalElement?.remove();
       terminalRef.current = null;
       fitRef.current = null;
       terminalIdRef.current = null;
@@ -472,8 +560,10 @@ export function TerminalPanel({
     const terminal = terminalRef.current;
     const pending = pendingOutputRef.current;
     if (terminal && pending) {
+      const isReplay = pendingOutputIsReplayRef.current;
       pendingOutputRef.current = '';
-      terminal.write(pending);
+      pendingOutputIsReplayRef.current = false;
+      terminal.write(isReplay ? TERMINAL_RESET_SEQUENCE + pending : pending);
     }
 
     // 标签在后台时容器尺寸可能已经变过：`resizeConnectedTerminal` 在非前台时直接 return，

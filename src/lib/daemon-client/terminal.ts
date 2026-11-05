@@ -8,6 +8,11 @@ export interface TerminalEvent {
   data?: string;
   code?: number;
   error?: string;
+  /**
+   * 这条 output 是 attach 时 daemon 回放的历史缓冲，而不是新的实时输出。
+   * 消费方要先清屏再写，否则重连会把同一段历史再叠一遍。
+   */
+  replay?: boolean;
 }
 
 export function createTerminalMethods(
@@ -45,6 +50,16 @@ export function createTerminalMethods(
     wsUrl.searchParams.set('token', activeConfig.token);
     wsUrl.searchParams.set('terminalId', terminalId);
 
+    // 同一 terminalId 只保留一条活动通道：重复 attach（组件重挂载、竞态重连）时，
+    // 旧连接如果继续开着，daemon 的实时输出会被两条通道各投一次，同一段内容会写两遍。
+    const previous = sockets.get(terminalId);
+    if (previous) {
+      previous.onmessage = null;
+      previous.onclose = null;
+      previous.close();
+      sockets.delete(terminalId);
+    }
+
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(wsUrl.toString());
       socket.onopen = () => {
@@ -61,7 +76,10 @@ export function createTerminalMethods(
         }
       };
       socket.onclose = () => {
-        sockets.delete(terminalId);
+        // 只删自己：被替换掉的旧连接关闭时不能把新连接从 Map 里摘掉。
+        if (sockets.get(terminalId) === socket) {
+          sockets.delete(terminalId);
+        }
       };
     });
   };

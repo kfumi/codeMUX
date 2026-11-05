@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => {
     terminalBlurs: 0,
     terminalRefreshes: 0,
     fitCalls: 0,
+    /** 非 null 时，FitAddon.fit() 把 xterm 的行列改成这个值，用于模拟面板动画里的尺寸变化。 */
+    fitSize: null as { cols: number; rows: number } | null,
+    /** 模拟面板宽度过渡是否在跑（`aside.getAnimations()` 的返回值由它决定）。 */
+    animationsRunning: false,
     /** 测试可控的代码字号（`useAppearanceStore` 的 mock 读它）。 */
     codeFontSize: 14,
     /** xterm 实例表：用来断言"没有新建 xterm"以及字号确实写进了视图选项。 */
@@ -74,7 +78,9 @@ vi.mock('@xterm/xterm', () => ({
       mocks.terminalInstances.push(this);
     }
 
-    loadAddon() {}
+    loadAddon(addon?: { activate?: (terminal: unknown) => void }) {
+      addon?.activate?.(this);
+    }
       open(container: HTMLElement) {
         const xterm = document.createElement('div');
         xterm.className = 'xterm';
@@ -123,8 +129,18 @@ vi.mock('@xterm/xterm', () => ({
 
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
+    private terminal: { cols: number; rows: number } | null = null;
+
+    activate(terminal: { cols: number; rows: number }) {
+      this.terminal = terminal;
+    }
+
     fit() {
       mocks.fitCalls += 1;
+      if (this.terminal && mocks.fitSize) {
+        this.terminal.cols = mocks.fitSize.cols;
+        this.terminal.rows = mocks.fitSize.rows;
+      }
     }
   },
 }));
@@ -179,14 +195,21 @@ describe('TerminalPanel lifecycle', () => {
     mocks.terminalBlurs = 0;
     mocks.terminalRefreshes = 0;
     mocks.fitCalls = 0;
+    mocks.fitSize = null;
+    mocks.animationsRunning = false;
     mocks.terminalViewport = null;
     mocks.parentMouseDowns = 0;
     mocks.resizeObserverCallback = null;
+    Object.defineProperty(window.HTMLElement.prototype, 'getAnimations', {
+      configurable: true,
+      value: () => (mocks.animationsRunning ? [{ playState: 'running' }] : []),
+    });
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    Reflect.deleteProperty(window.HTMLElement.prototype, 'getAnimations');
   });
 
   it('keeps the terminal mounted while switching sessions', async () => {
@@ -622,5 +645,114 @@ describe('TerminalPanel lifecycle', () => {
     expect(mocks.attachMock.mock.calls.length).toBe(attachesBefore);
     // 字号变了行列数跟着变，所以必须重新 fit 一次（并把新尺寸同步给 daemon）。
     expect(mocks.fitCalls).toBe(fitsBefore + 1);
+  });
+
+  it('clears the view before writing a replayed buffer so reconnects do not duplicate history', async () => {
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      replay?: boolean;
+    }) => void;
+
+    handleEvent({ type: 'output', data: 'replayed history', replay: true });
+
+    // RIS 和回放拼成一次 write：保证清屏排在所有已缓冲输出之后、回放之前。
+    expect(mocks.terminalWrites).toEqual([`\x1bc${'replayed history'}`]);
+  });
+
+  it('replaces buffered output with the replay when it arrives while hidden', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    const handleEvent = mocks.attachMock.mock.calls[0][3] as (event: {
+      type: string;
+      data?: string;
+      replay?: boolean;
+    }) => void;
+
+    handleEvent({ type: 'output', data: 'live before replay' });
+    handleEvent({ type: 'output', data: 'replayed history', replay: true });
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+
+    expect(mocks.terminalWrites).toEqual([`\x1bc${'replayed history'}`]);
+  });
+
+  it('coalesces a burst of size changes into one PTY resize', async () => {
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    mocks.resizeMock.mockClear();
+
+    // 面板 300ms 宽度动画：ResizeObserver 每帧回调，行列数逐帧变化。
+    for (const [cols, rows] of [[2, 30], [10, 30], [24, 30], [48, 30], [72, 30]]) {
+      mocks.fitSize = { cols, rows };
+      mocks.resizeObserverCallback?.();
+    }
+
+    // 期间一个 resize 都不该发；等尺寸稳定后才补一次，且是最后一帧的尺寸。
+    expect(mocks.resizeMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.resizeMock).toHaveBeenCalledTimes(1));
+    expect(mocks.resizeMock).toHaveBeenCalledWith('terminal-a', 72, 30);
+  });
+
+  it('defers the PTY resize until the panel width transition finishes', async () => {
+    mocks.animationsRunning = true;
+    render(
+      <aside>
+        <TerminalPanel
+          tabId="session-a:terminal:D:/project/app"
+          terminalId="terminal-a"
+          projectPath="D:/project/app"
+        />
+      </aside>,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    mocks.resizeMock.mockClear();
+
+    mocks.fitSize = { cols: 40, rows: 30 };
+    mocks.resizeObserverCallback?.();
+
+    // 面板宽度过渡没结束：中间态的 40 列不能发给 PTY（每次 SIGWINCH 都会让 shell 重画 prompt）。
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mocks.resizeMock).not.toHaveBeenCalled();
+
+    // 过渡结束后的最后一帧：这时才把稳定尺寸补上。
+    mocks.animationsRunning = false;
+    mocks.fitSize = { cols: 72, rows: 30 };
+    mocks.resizeObserverCallback?.();
+
+    await waitFor(() => expect(mocks.resizeMock).toHaveBeenCalledTimes(1));
+    expect(mocks.resizeMock).toHaveBeenCalledWith('terminal-a', 72, 30);
   });
 });

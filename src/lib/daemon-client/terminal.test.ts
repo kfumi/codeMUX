@@ -5,9 +5,20 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DaemonConnectionConfig } from './client';
 import { createTerminalMethods, type TerminalEvent } from './terminal';
 
+interface StubSocket {
+  onopen: ((event?: unknown) => void) | null;
+  onerror: ((event?: unknown) => void) | null;
+  onmessage: ((event?: unknown) => void) | null;
+  onclose: ((event?: unknown) => void) | null;
+  OPEN: number;
+  readyState: number;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+}
+
 function stubWebSocket(): ReturnType<typeof vi.fn> {
   const ctor = vi.fn(function (this: unknown, _url: string) {
-    const socket = {
+    const socket: StubSocket = {
       onopen: null as ((event?: unknown) => void) | null,
       onerror: null as ((event?: unknown) => void) | null,
       onmessage: null as ((event?: unknown) => void) | null,
@@ -75,5 +86,32 @@ describe('createTerminalMethods (channel guards)', () => {
     const terminalId = await methods.terminalStart('/proj', 80, 24, onEvent);
     expect(terminalId).toBe('t1');
     expect(socketCtor).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces the previous socket on re-attach instead of feeding both channels', async () => {
+    const socketCtor = stubWebSocket();
+    const directConfig: DaemonConnectionConfig = {
+      baseUrl: 'http://127.0.0.1:9240',
+      token: 'tok',
+    };
+    const methods = createTerminalMethods(directConfig, fetch, async () => directConfig);
+    const first = vi.fn() as (event: TerminalEvent) => void;
+    const second = vi.fn() as (event: TerminalEvent) => void;
+
+    await methods.terminalAttach('t1', 80, 24, first);
+    await methods.terminalAttach('t1', 80, 24, second);
+
+    const firstSocket = socketCtor.mock.instances[0] as unknown as StubSocket;
+    const secondSocket = socketCtor.mock.instances[1] as unknown as StubSocket;
+
+    // 旧通道必须被关掉并摘掉回调：否则 daemon 的每段输出会被两条 WS 各投一次。
+    expect(firstSocket.close).toHaveBeenCalled();
+    expect(firstSocket.onmessage).toBeNull();
+
+    secondSocket.onmessage?.({
+      data: JSON.stringify({ type: 'output', terminalId: 't1', data: 'hi' }),
+    });
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
   });
 });
