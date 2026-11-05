@@ -565,4 +565,24 @@ describe('MainLayout', () => {
     expect(host.dataset.conversationFullViewHost).toBe('idle');
     expect(host.className).not.toContain('fixed');
   });
+
+  it('把底部终端挂在对话列内、对话宿主之后（不跨到右侧面板）', () => {
+    render(
+      <MainLayout
+        sidebar={<div>sidebar</div>}
+        terminalDock={<div data-testid="terminal-dock-marker">dock</div>}
+      >
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const dock = document.querySelector('[data-testid="terminal-dock-marker"]');
+    const host = document.querySelector('[data-conversation-full-view-host]');
+    const conversationPane = document.querySelector('[data-conversation-pane]');
+
+    expect(dock).toBeTruthy();
+    // 必须是对话列的兄弟节点，且在宿主之后 —— 终端只占对话列宽度，右侧面板保持全高。
+    expect(dock?.parentElement).toBe(conversationPane);
+    expect(host?.nextElementSibling).toBe(dock);
+  });
 });

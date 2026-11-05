@@ -4,6 +4,7 @@ import {
   Minus,
   Monitor,
   Moon,
+  SquareTerminalIcon,
   Sun,
   X,
 } from 'lucide-react';
@@ -14,6 +15,7 @@ import { shellFacade } from '../../lib/facades/shell-facade';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useShortcutAriaKeyshortcuts, useShortcutHint } from '../../hooks/useShortcutHint';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
+import { useTerminalDockStore } from '../../stores/terminalDockStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import type { TodoItem } from '../../types/agent';
@@ -82,6 +84,10 @@ export function TitleBar({
   // tooltip 与 aria-keyshortcuts 都跟着用户的改键走（写法与 MainLayout 一致）。
   const sidePanelHint = useShortcutHint('toggleSidePanel');
   const sidePanelAria = useShortcutAriaKeyshortcuts('toggleSidePanel');
+  const terminalDockOpen = useTerminalDockStore((state) => state.isOpen);
+  const toggleTerminalDock = useTerminalDockStore((state) => state.toggle);
+  const terminalDockHint = useShortcutHint('toggleTerminalDock');
+  const terminalDockAria = useShortcutAriaKeyshortcuts('toggleTerminalDock');
 
   const ThemeIcon = currentTheme === 'Dark' ? Moon : currentTheme === 'Light' ? Sun : Monitor;
 
@@ -144,6 +150,33 @@ export function TitleBar({
                 <GitEnvironmentPopover projectPath={projectOpenPath} todos={todos} />
               </>
             ) : null}
+            {sidePanelAvailable && projectOpenPath ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={terminalDockOpen ? '收起底部终端' : '展开底部终端'}
+                    aria-pressed={terminalDockOpen}
+                    aria-keyshortcuts={terminalDockAria ?? undefined}
+                    onClick={() => toggleTerminalDock(projectOpenPath)}
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-fast hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-35',
+                      // 选中态沿用 NavRail 的口径：只提亮按钮底，图标保持前景色。
+                      terminalDockOpen && 'bg-[hsl(var(--chrome-bg-hover))]',
+                    )}
+                  >
+                    <SquareTerminalIcon className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>
+                    {terminalDockOpen ? '收起底部终端' : '展开底部终端'}
+                    {terminalDockHint ? ` · ${terminalDockHint}` : ''}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+
             {sidePanelAvailable && (
               <Tooltip>
                 <TooltipTrigger asChild>

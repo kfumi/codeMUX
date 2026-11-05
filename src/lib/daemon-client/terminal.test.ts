@@ -83,8 +83,8 @@ describe('createTerminalMethods (channel guards)', () => {
     const methods = createTerminalMethods(directConfig, fetch, async () => directConfig);
     const onEvent = vi.fn() as (event: TerminalEvent) => void;
 
-    const terminalId = await methods.terminalStart('/proj', 80, 24, onEvent);
-    expect(terminalId).toBe('t1');
+    const result = await methods.terminalStart('/proj', 80, 24, onEvent);
+    expect(result.terminalId).toBe('t1');
     expect(socketCtor).toHaveBeenCalledTimes(1);
   });
 

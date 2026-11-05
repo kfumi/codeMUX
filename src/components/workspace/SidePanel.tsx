@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, MessageCircle, Minimize2, Plus, Terminal, X } from 'lucide-react';
+import { Bot, ChevronRight, FileSearch, FileCode, FileText, Globe, Maximize2, MessageCircle, Minimize2, Plus, SquareTerminalIcon, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
@@ -8,6 +8,7 @@ import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { cn } from '../../lib/utils';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
+import { terminalRegistry } from '../../lib/terminal/sessionRegistry';
 import { applyBrowserVisibility, hideAllBrowserHosts } from '../../lib/browserVisibility';
 import { TooltipHint } from '../ui/tooltip';
 import { ResizeOverlay } from '../ui/resize-overlay';
@@ -15,7 +16,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
-import { TerminalPanel } from './terminal/TerminalPanel';
+import { TerminalView } from './terminal/TerminalView';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 import { FileEditorPanel } from './FileEditorPanel';
 import { SubagentPreviewPanel } from './SubagentPreviewPanel';
@@ -164,6 +165,30 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
     if (projectPath) openTerminalTab(projectPath);
   }, [openTerminalTab, projectPath]);
 
+  /**
+   * 关闭标签 = 唯一销毁终端的路径。
+   *
+   * registry 的 `release` 对非终端标签是 no-op；`closeOtherTabs` / `closeAllTabs` 只作用于
+   * **当前 scope** 的标签，所以这里按 `tabs` 计算要释放的 id —— 不能用全局 predicate，
+   * 那会顺手杀掉其他会话仍在后台跑的终端。
+   */
+  const handleCloseTab = useCallback((tabId: string) => {
+    terminalRegistry.release(tabId);
+    closeTab(tabId);
+  }, [closeTab]);
+
+  const handleCloseOtherTabs = useCallback((tabId: string) => {
+    for (const tab of tabs) {
+      if (tab.id !== tabId) terminalRegistry.release(tab.id);
+    }
+    closeOtherTabs(tabId);
+  }, [closeOtherTabs, tabs]);
+
+  const handleCloseAllTabs = useCallback(() => {
+    for (const tab of tabs) terminalRegistry.release(tab.id);
+    closeAllTabs();
+  }, [closeAllTabs, tabs]);
+
   const openBrowser = useCallback(() => {
     openBrowserTab();
   }, [openBrowserTab]);
@@ -274,9 +299,9 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
                 tab={tab}
                 active={isPanelTabActive(tab.id)}
                 onClick={() => setActiveTab(tab.id)}
-                onClose={() => closeTab(tab.id)}
-                onCloseOther={() => closeOtherTabs(tab.id)}
-                onCloseAll={closeAllTabs}
+                onClose={() => handleCloseTab(tab.id)}
+                onCloseOther={() => handleCloseOtherTabs(tab.id)}
+                onCloseAll={handleCloseAllTabs}
               />
             ))}
           </div>
@@ -310,7 +335,7 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={!projectPath}
-                  icon={<Terminal className="h-3.5 w-3.5" />}
+                  icon={<SquareTerminalIcon className="h-3.5 w-3.5" />}
                   onClick={openTerminal}
                 >
                   终端
@@ -352,9 +377,8 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
                 )}
                 aria-hidden={!isActive}
               >
-                <TerminalPanel
-                  tabId={tab.id}
-                  terminalId={tab.terminalId}
+                <TerminalView
+                  sessionKey={tab.id}
                   projectPath={tab.projectPath ?? projectPath ?? ''}
                   isActive={isActive}
                 />
@@ -453,7 +477,7 @@ function TabButton({
   const Icon = tab.kind === 'review'
     ? FileSearch
     : tab.kind === 'terminal'
-      ? Terminal
+      ? SquareTerminalIcon
       : tab.kind === 'diff'
         ? FileCode
         : tab.kind === 'subagent'
@@ -587,7 +611,7 @@ function SidePanelEmpty({
           disabled={!projectPath}
           onClick={onOpenTerminal}
         >
-          <Terminal className="h-5 w-5" />
+          <SquareTerminalIcon className="h-5 w-5" />
           <span className="text-sm">终端</span>
         </button>
         {browserHostAvailable ? (

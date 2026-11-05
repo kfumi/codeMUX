@@ -2,6 +2,15 @@ import type { DaemonConnectionConfig } from './client';
 
 type Fetcher = <T>(config: DaemonConnectionConfig, path: string, init?: RequestInit) => Promise<T>;
 
+export interface TerminalStartResult {
+  terminalId: string;
+  /**
+   * daemon 实际使用的 shell 绝对路径。界面用它显示 shell 标签，
+   * 输出归一化（PowerShell 的 PSReadLine 重绘）也以它为准。
+   */
+  shell?: string;
+}
+
 export interface TerminalEvent {
   type: 'output' | 'exit' | 'error';
   terminalId: string;
@@ -90,13 +99,13 @@ export function createTerminalMethods(
       cols: number,
       rows: number,
       onEvent: (event: TerminalEvent) => void,
-    ) => {
-      const result = await fetch<{ terminalId: string }>(config, '/terminals', {
+    ): Promise<TerminalStartResult> => {
+      const result = await fetch<TerminalStartResult>(config, '/terminals', {
         method: 'POST',
         body: JSON.stringify({ projectPath, cols, rows }),
       });
       await connectSocket(result.terminalId, onEvent);
-      return result.terminalId;
+      return result;
     },
     terminalAttach: async (
       terminalId: string,

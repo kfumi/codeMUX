@@ -36,14 +36,16 @@ async fn start_terminal(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     authorize(&ctx, &headers, Some(peer))?;
     let terminal_state = ctx.daemon.terminal.clone();
-    let terminal_id = crate::terminal::start_terminal_for_companion(
+    let (terminal_id, shell) = crate::terminal::start_terminal_for_companion(
         &terminal_state,
         body.project_path,
         body.cols,
         body.rows,
     )
     .map_err(ApiError::bad_request)?;
-    Ok(Json(serde_json::json!({ "terminalId": terminal_id })))
+    Ok(Json(
+        serde_json::json!({ "terminalId": terminal_id, "shell": shell }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

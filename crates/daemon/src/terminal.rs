@@ -112,18 +112,110 @@ fn publish_event(output: &Arc<Mutex<TerminalOutputState>>, event: TerminalEvent)
     }
 }
 
-fn default_shell() -> (&'static str, Vec<&'static str>) {
+fn default_shell_candidates() -> Vec<String> {
     #[cfg(target_os = "windows")]
     {
-        ("powershell.exe", Vec::new())
+        let mut candidates = vec!["pwsh.exe".to_string(), "powershell.exe".to_string()];
+        if let Some(comspec) = std::env::var_os("ComSpec") {
+            candidates.push(comspec.to_string_lossy().into_owned());
+        }
+        candidates.push("cmd.exe".to_string());
+        candidates
     }
     #[cfg(target_os = "macos")]
     {
-        ("zsh", Vec::new())
+        let mut candidates = Vec::new();
+        if let Some(shell) = std::env::var_os("SHELL") {
+            candidates.push(shell.to_string_lossy().into_owned());
+        }
+        candidates.extend(["/bin/zsh", "/bin/bash", "/bin/sh"].map(str::to_string));
+        candidates
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        ("bash", Vec::new())
+        let mut candidates = Vec::new();
+        if let Some(shell) = std::env::var_os("SHELL") {
+            candidates.push(shell.to_string_lossy().into_owned());
+        }
+        candidates.extend(["/bin/bash", "/bin/zsh", "/bin/sh"].map(str::to_string));
+        candidates
+    }
+}
+
+/// 候选路径是否可执行：带分隔符的按路径判断，裸名字扫 PATH。
+fn is_executable_candidate(candidate: &str) -> bool {
+    let path = PathBuf::from(candidate);
+    if path.components().count() > 1 {
+        return is_executable_file(&path);
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| is_executable_file(&dir.join(candidate)))
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    path.is_file()
+}
+
+/// 纯选择逻辑：按顺序返回第一个通过校验的候选。可注入校验函数以便测试。
+fn pick_shell(
+    candidates: impl IntoIterator<Item = String>,
+    is_executable: impl Fn(&str) -> bool,
+) -> Option<String> {
+    candidates
+        .into_iter()
+        .find(|candidate| is_executable(candidate))
+}
+
+fn resolve_shell() -> Result<String, String> {
+    pick_shell(default_shell_candidates(), is_executable_candidate).ok_or_else(|| {
+        #[cfg(target_os = "windows")]
+        {
+            "No usable Windows shell found for terminal startup".to_string()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            "No usable shell found for terminal startup".to_string()
+        }
+    })
+}
+
+/// 变量缺失或为 `C`/`POSIX` 时补成 `C.UTF-8`；其它值保持原样。
+///
+/// 只有 Unix 的 `apply_terminal_env` 会调用它；Windows 上仅测试使用。
+#[cfg_attr(not(unix), allow(dead_code))]
+fn utf8_locale_override(current: Option<&str>) -> Option<&'static str> {
+    match current {
+        None | Some("") | Some("C") | Some("POSIX") => Some("C.UTF-8"),
+        Some(_) => None,
+    }
+}
+
+fn apply_terminal_env(command: &mut CommandBuilder) {
+    command.env("TERM", "xterm-256color");
+    if std::env::var_os("COLORTERM").is_none() {
+        command.env("COLORTERM", "truecolor");
+    }
+
+    #[cfg(unix)]
+    {
+        for variable in ["LANG", "LC_CTYPE"] {
+            let current = std::env::var(variable).ok();
+            if let Some(value) = utf8_locale_override(current.as_deref()) {
+                command.env(variable, value);
+            }
+        }
     }
 }
 
@@ -160,7 +252,7 @@ pub fn start_terminal_for_companion(
     project_path: String,
     cols: u16,
     rows: u16,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let cwd = normalize_windows_verbatim_path(PathBuf::from(&project_path));
     let canonical_cwd = cwd
         .canonicalize()
@@ -179,11 +271,9 @@ pub fn start_terminal_for_companion(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    let (program, args) = default_shell();
-    let mut command = CommandBuilder::new(program);
-    for arg in args {
-        command.arg(arg);
-    }
+    let shell = resolve_shell()?;
+    let mut command = CommandBuilder::new(&shell);
+    apply_terminal_env(&mut command);
     command.cwd(cwd);
 
     let child = pair
@@ -201,10 +291,12 @@ pub fn start_terminal_for_companion(
 
     let terminal_id = Uuid::new_v4().to_string();
     let output = Arc::new(Mutex::new(TerminalOutputState::new()));
+    let output_for_exit = output.clone();
+    let child_handle = Arc::new(Mutex::new(child));
     let session = TerminalSession {
         master: Arc::new(Mutex::new(pair.master)),
         writer: Arc::new(Mutex::new(writer)),
-        child: Arc::new(Mutex::new(child)),
+        child: child_handle.clone(),
         output: output.clone(),
     };
 
@@ -215,6 +307,10 @@ pub fn start_terminal_for_companion(
         .insert(terminal_id.clone(), session);
 
     let output_id = terminal_id.clone();
+    let child_for_wait = child_handle;
+    // 输出线程：只负责把 PTY 的输出转发出去。它在 EOF/错误时结束，但**不发 Exit**——
+    // ConPTY 下 shell 退出后输出管道不一定会 EOF（要等 master 释放），据此判断退出会
+    // 永远等不到事件。
     std::thread::spawn(move || {
         let mut buffer = [0u8; 4096];
         loop {
@@ -242,16 +338,48 @@ pub fn start_terminal_for_companion(
                 }
             }
         }
+    });
+
+    // 退出线程：以子进程真正被回收为准。拿不到退出码（例如被 close 杀掉）时保持
+    // `None`，前端仍按「已退出」处理。
+    //
+    // 这里**不能**用 `wait()`：child 锁在 session 里是共享的，`wait()` 会一直持锁到
+    // shell 退出，而 `close_terminal` 也要拿这把锁去 `kill()` —— 两者互相等待；更糟的是
+    // close 在 async handler 里同步阻塞 std Mutex，会把 tokio worker 一直占住，连带
+    // 控制面 WS 的 Ping/Pong 也停摆。改成短锁轮询，锁只在一次 `try_wait` 期间持有。
+    let exit_id = terminal_id.clone();
+    let exit_output = output_for_exit;
+    std::thread::spawn(move || {
+        let mut code = None;
+        loop {
+            let status = match child_for_wait.lock() {
+                Ok(mut child) => child.try_wait(),
+                Err(_) => break,
+            };
+
+            match status {
+                Ok(Some(status)) => {
+                    code = Some(status.exit_code());
+                    break;
+                }
+                Ok(None) => {}
+                // 已被 close 杀掉 / 句柄失效：不再轮询，直接报一个无退出码的结束事件。
+                Err(_) => break,
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+
         publish_event(
-            &output,
+            &exit_output,
             TerminalEvent::Exit {
-                terminal_id: output_id,
-                code: None,
+                terminal_id: exit_id,
+                code,
             },
         );
     });
 
-    Ok(terminal_id)
+    Ok((terminal_id, shell))
 }
 
 pub fn subscribe_terminal_for_companion(
@@ -354,8 +482,54 @@ pub fn close_terminal_for_companion(
 
 #[cfg(test)]
 mod tests {
-    use super::{publish_event, TerminalEvent, TerminalOutputBuffer, TerminalOutputState};
+    use super::{
+        pick_shell, publish_event, utf8_locale_override, TerminalEvent, TerminalOutputBuffer,
+        TerminalOutputState,
+    };
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn picks_the_first_executable_shell_candidate() {
+        let picked = pick_shell(
+            vec![
+                "pwsh.exe".to_string(),
+                "powershell.exe".to_string(),
+                "cmd.exe".to_string(),
+            ],
+            |candidate| candidate == "powershell.exe" || candidate == "cmd.exe",
+        );
+
+        assert_eq!(picked.as_deref(), Some("powershell.exe"));
+    }
+
+    #[test]
+    fn falls_back_through_the_candidate_list_in_order() {
+        let picked = pick_shell(
+            vec![
+                "$SHELL".to_string(),
+                "/bin/zsh".to_string(),
+                "/bin/bash".to_string(),
+            ],
+            |candidate| candidate == "/bin/bash",
+        );
+
+        assert_eq!(picked.as_deref(), Some("/bin/bash"));
+    }
+
+    #[test]
+    fn reports_when_no_shell_candidate_is_usable() {
+        let picked = pick_shell(vec!["a".to_string(), "b".to_string()], |_| false);
+        assert_eq!(picked, None);
+    }
+
+    #[test]
+    fn replaces_missing_or_c_locales_only() {
+        assert_eq!(utf8_locale_override(None), Some("C.UTF-8"));
+        assert_eq!(utf8_locale_override(Some("")), Some("C.UTF-8"));
+        assert_eq!(utf8_locale_override(Some("C")), Some("C.UTF-8"));
+        assert_eq!(utf8_locale_override(Some("POSIX")), Some("C.UTF-8"));
+        assert_eq!(utf8_locale_override(Some("en_US.UTF-8")), None);
+    }
 
     #[test]
     fn keeps_only_the_latest_output_within_the_byte_limit() {

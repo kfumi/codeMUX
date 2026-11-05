@@ -12,7 +12,6 @@ export interface SidePanelTab {
   kind: SidePanelTabKind;
   title: string;
   projectPath?: string;
-  terminalId?: string;
   planFilePath?: string;
   planContent?: string;
   diffFilePath?: string;
@@ -76,10 +75,8 @@ interface SidePanelState {
   closeAllTabs: () => void;
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
-  setTerminalId: (tabId: string, terminalId: string) => void;
   updateBrowserTabTitle: (tabId: string, title: string) => void;
   clearBrowserInitialUrl: (tabId: string) => void;
-  isTabPresent: (tabId: string) => boolean;
   restoreNavigation: (navigation: SidePanelNavigationState) => void;
   reset: () => void;
 }
@@ -545,12 +542,6 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
 
   setResizing: (isResizing: boolean) => set({ isResizing }),
 
-  setTerminalId: (tabId: string, terminalId: string) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, terminalId } : tab)),
-    }));
-  },
-
   updateBrowserTabTitle: (tabId: string, title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -571,14 +562,6 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           : tab
       )),
     }));
-  },
-
-  isTabPresent: (tabId: string) => {
-    const state = get();
-    return state.tabs.some((tab) => tab.id === tabId)
-      || Object.entries(state.scopes).some(([scopeId, snapshot]) =>
-        scopeId !== state.activeScopeId && snapshot.tabs.some((tab) => tab.id === tabId),
-      );
   },
 
   restoreNavigation: (navigation: SidePanelNavigationState) => {

@@ -16,7 +16,6 @@ const sidePanelState = vi.hoisted(() => ({
     kind: 'terminal' as const,
     title: '终端',
     projectPath: 'D:/project/app',
-    terminalId: 'terminal-a',
   }],
   scopes: {
     'session-b': {
@@ -29,7 +28,6 @@ const sidePanelState = vi.hoisted(() => ({
         kind: 'terminal' as const,
         title: '终端',
         projectPath: 'D:/project/app',
-        terminalId: 'terminal-b',
       }],
       activeTabId: 'session-b:terminal:D:/project/app',
     },
@@ -72,8 +70,8 @@ vi.mock('../../stores/sessionStore', () => ({
   useSessionStore: (selector: (state: typeof sessionStoreState) => unknown) => selector(sessionStoreState),
 }));
 
-vi.mock('./terminal/TerminalPanel', () => ({
-  TerminalPanel: (props: { terminalId?: string }) => terminalPanelMock(props),
+vi.mock('./terminal/TerminalView', () => ({
+  TerminalView: (props: { sessionKey?: string }) => terminalPanelMock(props),
 }));
 
 vi.mock('../browser/BrowserPanel', () => ({
@@ -164,7 +162,7 @@ describe('SidePanel', () => {
 
     expect(screen.queryByTestId('side-panel-conversation-tab')).toBeNull();
     expect(terminalPanelMock).toHaveBeenCalledWith(
-      expect.objectContaining({ terminalId: 'terminal-a', isActive: true }),
+      expect.objectContaining({ sessionKey: 'session-a:terminal:D:/project/app', isActive: true }),
     );
   });
 
@@ -187,7 +185,7 @@ describe('SidePanel', () => {
       const browserTabButton = screen.getByText('新标签页').closest('button');
       expect(browserTabButton?.className).toContain('border-transparent');
       expect(terminalPanelMock).toHaveBeenCalledWith(
-        expect.objectContaining({ terminalId: 'terminal-a', isActive: false }),
+        expect.objectContaining({ sessionKey: 'session-a:terminal:D:/project/app', isActive: false }),
       );
       expect(browserPanelMock).toHaveBeenCalledWith(
         expect.objectContaining({ isActive: false }),
@@ -200,14 +198,14 @@ describe('SidePanel', () => {
     }
   });
 
-  it('passes the persisted terminal id to the active terminal panel', () => {
+  it('passes a stable session key to every terminal tab', () => {
     render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
 
     expect(terminalPanelMock).toHaveBeenCalledWith(
-      expect.objectContaining({ terminalId: 'terminal-a' }),
+      expect.objectContaining({ sessionKey: 'session-a:terminal:D:/project/app' }),
     );
     expect(terminalPanelMock).toHaveBeenCalledWith(
-      expect.objectContaining({ terminalId: 'terminal-b', isActive: false }),
+      expect.objectContaining({ sessionKey: 'session-b:terminal:D:/project/app', isActive: false }),
     );
     expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
   });
@@ -216,7 +214,7 @@ describe('SidePanel', () => {
     render(<SidePanel projectPath="D:/project/app" scopeId="session-a" isVisible={false} />);
 
     expect(terminalPanelMock).toHaveBeenCalledWith(
-      expect.objectContaining({ terminalId: 'terminal-a', isActive: false }),
+      expect.objectContaining({ sessionKey: 'session-a:terminal:D:/project/app', isActive: false }),
     );
     expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
   });

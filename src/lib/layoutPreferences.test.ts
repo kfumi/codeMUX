@@ -17,11 +17,15 @@ describe('layout preferences', () => {
     updateLayoutPreferences({ sidebarWidth: 320 });
     updateLayoutPreferences({ sidebarRatio: 0.2 });
     updateLayoutPreferences({ sidePanelRatio: 0.3 });
+    updateLayoutPreferences({ terminalDockHeight: 280 });
+    updateLayoutPreferences({ terminalDockOpen: true });
 
     expect(readLayoutPreferences()).toEqual({
       sidebarWidth: 320,
       sidebarRatio: 0.2,
       sidePanelRatio: 0.3,
+      terminalDockHeight: 280,
+      terminalDockOpen: true,
     });
   });
 
@@ -30,6 +34,8 @@ describe('layout preferences', () => {
       sidebarWidth: -50,
       sidebarRatio: Number.NaN,
       sidePanelRatio: 0,
+      terminalDockHeight: 0,
+      terminalDockOpen: 'yes',
     }));
 
     expect(readLayoutPreferences()).toEqual({});

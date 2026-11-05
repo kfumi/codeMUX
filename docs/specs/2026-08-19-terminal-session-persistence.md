@@ -1,6 +1,6 @@
 # 会话终端保活与视图持久化
 
-**Status:** implemented-in-workspace
+**Status:** implemented-in-workspace — 生命周期目标（可见性切换不杀 PTY、只在显式关闭时销毁、有界回放兜底）仍然有效；**实现口径**已由 [`2026-11-06-terminal-dock-registry.md`](2026-11-06-terminal-dock-registry.md) 取代：xterm 与 PTY 改由模块级 registry 持有（[ADR 0022](../adr/0022-terminal-session-registry-ownership.md)），底部 dock 的终端按项目归属，`attach` 不再是常规路径。
 
 ## Problem Statement
 

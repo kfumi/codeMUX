@@ -139,6 +139,7 @@
 | [2026-10-22-project-multi-root.md](specs/2026-10-22-project-multi-root.md) | 项目关联多源文件夹 |
 | [2026-10-24-side-panel-full-view.md](specs/2026-10-24-side-panel-full-view.md) | 侧面板完整视图：主对话固定为首个标签 |
 | [2026-10-26-project-ordering.md](specs/2026-10-26-project-ordering.md) | 侧栏项目拖拽排序：桌面 / PC 浏览器持久化与键盘重排，移动端不启用手势 |
+| [2026-11-06-terminal-dock-registry.md](specs/2026-11-06-terminal-dock-registry.md) | 终端系统重构：registry 所有权与底部 Dock（取代 2026-08-19 的实现口径） |
 
 ### plans
 
@@ -179,6 +180,7 @@
 | [2026-09-18-rewind-stream-render-perf-batch2.md](plans/2026-09-18-rewind-stream-render-perf-batch2.md) | 长线程 rewind / 流式渲染性能优化(第二批) |
 | [2026-09-19-pi-message-display-alignment.md](plans/2026-09-19-pi-message-display-alignment.md) | pi 桌面对话消息展示对齐(工具/思考分组/计时/状态/间距/Markdown) |
 | [2026-09-28-pi-agent-integration-optimizations.md](plans/2026-09-28-pi-agent-integration-optimizations.md) | pi 接入优化(codeg 对照走查与本机实测):思考档位静默失效、视觉附件被丢弃、项目信任显式化 |
+| [2026-11-06-terminal-dock-registry.md](plans/2026-11-06-terminal-dock-registry.md) | 终端系统重构实施计划：registry + 底部 Dock，分 6 票 |
 
 ### tickets(按 feature 分组)
 
@@ -205,12 +207,13 @@
 | [project-ordering](tickets/project-ordering/) | 2 | [2026-10-26](specs/2026-10-26-project-ordering.md) |
 | [side-panel-full-view](tickets/side-panel-full-view/) | 2 | [2026-10-24](specs/2026-10-24-side-panel-full-view.md) |
 | [rewind-any-message](tickets/rewind-any-message/) | 3 | [2026-08-23](specs/2026-08-23-rewind-to-any-user-message.md) |
+| [terminal-dock](tickets/terminal-dock/) | 6 | [2026-11-06](specs/2026-11-06-terminal-dock-registry.md) + [ADR 0022](adr/0022-terminal-session-registry-ownership.md) |
 | [turn-artifact-summary](tickets/turn-artifact-summary/) | 3 | [2026-09-30](specs/2026-09-30-turn-artifact-summary-v2.md)(取代 [2026-09-01](specs/2026-09-01-turn-artifact-summary.md)) |
 | [unified-frontend](tickets/unified-frontend/) | 4 | [2026-09-13](specs/2026-09-13-unified-frontend.md) |
 
 ### adr
 
-架构决策记录见 [adr/](adr/),当前 0002–0019,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
+架构决策记录见 [adr/](adr/),当前 0002–0022,格式与编号规则见 [domain-modeling skill 的 ADR-FORMAT](../.agents/skills/domain-modeling/ADR-FORMAT.md)。
 
 近期记录:
 
@@ -225,6 +228,7 @@
 - [0019 — 电脑控制审批口径（严格/本会话/持久）与提示条 30s 空闲回收](adr/0019-computer-use-approval-modes-and-idle-reclaim.md)
 - [0020 — 项目多根目录只经提示词声明，不启用各运行时的原生多目录能力](adr/0020-multi-root-via-prompt-only.md)
 - [0021 — `projects.path` 删除，主根只存在于 `project_roots`](adr/0021-project-roots-replace-project-path.md)
+- [0022 — 终端会话与 xterm 实例由模块级 registry 持有，组件只挂载 DOM 宿主](adr/0022-terminal-session-registry-ownership.md)
 
 ### agents
 

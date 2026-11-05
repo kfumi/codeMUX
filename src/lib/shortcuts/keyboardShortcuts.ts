@@ -33,6 +33,7 @@ export const SHORTCUT_COMMAND_IDS = [
   'openSearch',
   'toggleSidebar',
   'toggleSidePanel',
+  'toggleTerminalDock',
   'zoomIn',
   'zoomOut',
   'resetZoom',
@@ -108,6 +109,14 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommand[] = [
     label: '折叠/展开侧面板',
     description: '打开或收起右侧面板',
     defaultBinding: 'Mod+J',
+  },
+  {
+    id: 'toggleTerminalDock',
+    group: 'layout',
+    label: '开合底部终端',
+    description: '在对话列下方打开或收起终端',
+    // VS Code 的惯例是 Ctrl+`；Mod+J 已经被右侧面板占用。
+    defaultBinding: 'Mod+Backquote',
   },
   {
     id: 'zoomIn',

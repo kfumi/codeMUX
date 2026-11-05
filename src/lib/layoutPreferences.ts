@@ -5,6 +5,10 @@ export interface LayoutPreferences {
   sidebarWidth?: number;
   sidebarRatio?: number;
   sidePanelRatio?: number;
+  /** 底部终端面板高度（px）；只在用户拖过之后才有值。 */
+  terminalDockHeight?: number;
+  /** 底部终端面板上次是否展开；启动时据此恢复。 */
+  terminalDockOpen?: boolean;
 }
 
 function getStorage(): Storage | null {
@@ -21,6 +25,10 @@ function getStorage(): Storage | null {
 
 function finitePositiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 export function readLayoutPreferences(storage: Storage | null = getStorage()): LayoutPreferences {
@@ -44,6 +52,8 @@ export function readLayoutPreferences(storage: Storage | null = getStorage()): L
       sidebarWidth: finitePositiveNumber(value.sidebarWidth),
       sidebarRatio: finitePositiveNumber(value.sidebarRatio),
       sidePanelRatio: finitePositiveNumber(value.sidePanelRatio),
+      terminalDockHeight: finitePositiveNumber(value.terminalDockHeight),
+      terminalDockOpen: booleanValue(value.terminalDockOpen),
     };
   } catch {
     return {};

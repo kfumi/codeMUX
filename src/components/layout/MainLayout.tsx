@@ -55,6 +55,13 @@ interface MainLayoutProps {
   sidePanelProjectPath?: string | null;
   sidePanelScopeId?: string;
   todos?: TodoItem[];
+  /**
+   * 对话列底部的终端面板（由 App 按视图与项目决定是否给）。
+   *
+   * 放在对话列内部、而不是内容区下方：这样它只占对话列宽度，右侧面板保持全高
+   * （与 ZCode 的 workspace terminal 同一口径）。
+   */
+  terminalDock?: ReactNode;
   /** 导航栏当前高亮项与切换回调（缺省时不渲染导航栏）。 */
   navRailTarget?: NavRailTarget;
   onNavRailSelect?: (target: NavRailTarget) => void;
@@ -71,6 +78,7 @@ export function MainLayout({
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
   todos,
+  terminalDock,
   navRailTarget,
   onNavRailSelect,
 }: MainLayoutProps) {
@@ -397,6 +405,7 @@ export function MainLayout({
                     {children}
                     <SummaryPanelSurface projectPath={projectOpenPath} todos={todos} />
                   </ConversationFullViewHost>
+                  {terminalDock}
                 </div>
                 <SidePanel
                   projectPath={sidePanelProjectPath}

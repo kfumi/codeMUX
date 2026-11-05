@@ -241,7 +241,7 @@ describe('side panel store', () => {
     ]);
   });
 
-  it('recognizes tabs preserved in inactive scopes but not explicitly closed tabs', () => {
+  it('keeps a terminal tab in its scope snapshot until it is explicitly closed', () => {
     const store = useSidePanelStore.getState();
 
     store.setScope('session-a');
@@ -249,11 +249,13 @@ describe('side panel store', () => {
     const terminalTabId = useSidePanelStore.getState().activeTabId!;
 
     store.setScope('session-b');
-    expect(useSidePanelStore.getState().isTabPresent(terminalTabId)).toBe(true);
+    expect(useSidePanelStore.getState().scopes['session-a'].tabs).toEqual([
+      expect.objectContaining({ id: terminalTabId, kind: 'terminal' }),
+    ]);
 
     store.setScope('session-a');
     store.closeTab(terminalTabId);
-    expect(useSidePanelStore.getState().isTabPresent(terminalTabId)).toBe(false);
+    expect(useSidePanelStore.getState().tabs.some((tab) => tab.id === terminalTabId)).toBe(false);
   });
 
   it('assigns a new instance id when reopening a closed terminal', () => {

@@ -8,6 +8,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { navTargetForView, type NavRailTarget } from './components/layout/NavRail';
 import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
+import { TerminalDock } from './components/workspace/terminal/TerminalDock';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { prefetchOpenCodeFreeModels } from './hooks/useAgentModels';
 import { useUnreadBadge } from './hooks/useUnreadBadge';
@@ -32,6 +33,7 @@ import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSe
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useSidePanelStore } from './stores/sidePanelStore';
+import { useTerminalDockStore } from './stores/terminalDockStore';
 import { useChatSearchStore } from './stores/chatSearchStore';
 import { useShellLayoutStore } from './stores/shellLayoutStore';
 import { runShortcutCommand, useShortcutCommandStore } from './stores/shortcutCommandStore';
@@ -383,6 +385,11 @@ function App() {
         if (panel.isOpen) panel.closePanel();
         else panel.openPanel();
       },
+      toggleTerminalDock: () => {
+        // 底部终端同样只属于 app 视图；没有项目时没有可用的 cwd，不动作。
+        if (activeView !== 'app' || !sidePanelProjectPath) return;
+        useTerminalDockStore.getState().toggle(sidePanelProjectPath);
+      },
       abort: () => {
         const sessionId = useSessionStore.getState().activeSessionId;
         if (sessionId) void useAgentStore.getState().interrupt(sessionId);
@@ -403,7 +410,7 @@ function App() {
         void resetAppZoom();
       },
     });
-  }, [activeView, handleBack, handleForward, handleNewSession, handleOpenSettings, isNarrowViewport]);
+  }, [activeView, handleBack, handleForward, handleNewSession, handleOpenSettings, isNarrowViewport, sidePanelProjectPath]);
 
   // 全应用唯一的窗口 keydown 监听（见 ADR 0013）
   useKeyboardShortcuts(runShortcutCommand);
@@ -542,6 +549,9 @@ function App() {
           sidePanelAvailable={activeView === 'app'}
           sidePanelProjectPath={sidePanelProjectPath}
           sidePanelScopeId={sidePanelScopeId}
+          terminalDock={activeView === 'app' && sidePanelProjectPath ? (
+            <TerminalDock projectPath={sidePanelProjectPath} />
+          ) : undefined}
           projectOpenPath={activeView === 'app' && activeSessionId ? sidePanelProjectPath : null}
           todos={activeView === 'app' ? activeTodos : EMPTY_TODOS}
           titleBarNavigation={{
