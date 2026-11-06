@@ -2301,6 +2301,92 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('keeps the full live thinking buffer instead of windowing it to the tail', async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameMock = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 16));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((handle: number) => clearTimeout(handle));
+
+    // 超过实时正文的 16K 尾部窗口：展开的实时思考必须还能看到开头。
+    const head = 'A'.repeat(20_000);
+    const tail = 'B'.repeat(5_000);
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'thinking' } },
+      }));
+      for (const chunk of [head, tail]) {
+        onEvent(JSON.stringify({
+          type: 'stream_event',
+          session_id: sessionId,
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: chunk },
+          },
+        }));
+      }
+    });
+
+    try {
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'long stream thinking', 'D:\\project\\ai-code\\codeMUX');
+
+      // Leading edge 立即可见，且没有被裁成尾部。
+      expect(useAgentStore.getState().streamingThinking[session.id]).toBe(head);
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(useAgentStore.getState().streamingThinking[session.id]).toBe(head + tail);
+    } finally {
+      requestAnimationFrameMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('still windows the live answer text preview to its tail', async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameMock = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 16));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((handle: number) => clearTimeout(handle));
+
+    const text = 'C'.repeat(20_000);
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'text' } },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text },
+        },
+      }));
+    });
+
+    try {
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'long stream text', 'D:\\project\\ai-code\\codeMUX');
+
+      // 正文仍按 16K 尾部窗口保存（Streamdown 的重解析成本边界），完整正文
+      // 由最终 assistant event 保存。
+      expect(useAgentStore.getState().streamingText[session.id]).toBe(text.slice(-16_384));
+    } finally {
+      requestAnimationFrameMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('clears committed thinking from the live buffer before following tools arrive', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       onEvent(JSON.stringify({

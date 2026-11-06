@@ -24,6 +24,12 @@ export function thinkingSummaryLine(text: string): string {
 }
 
 /**
+ * 流式摘要只需要尾部一小段参与归一化：摘要压成单行，流式时还会横向跟随尾部。
+ * 否则实时思考每 50ms 一次 flush，都要对整段积累文本跑两遍全文正则。
+ */
+const SUMMARY_SOURCE_MAX_CHARS = 2_048;
+
+/**
  * 思考步骤行。行壳与工具行同形（图标 + 动作词 + 摘要 + 箭头），展开后是这段思考的
  * Markdown；`data-slot="reasoning-trigger*"` 与既有断言、既有测试保持同名。
  * 动作词与摘要放在同一个按**基线**对齐的内层（两截字号不同、ascent/descent 比例也不同，
@@ -51,7 +57,11 @@ export function ActivityStepThinking({
   const summaryViewportRef = useRef<HTMLSpanElement>(null);
   const open = userOpen ?? false;
   const isNarrow = useIsNarrowViewport();
-  const summary = thinkingSummaryLine(streaming ? (previewText ?? text) : text);
+  // 展开时摘要不渲染，也就不必计算（实时思考现在保留全文，全文正则不再免费）。
+  const summarySource = streaming
+    ? (previewText ?? text).slice(-SUMMARY_SOURCE_MAX_CHARS)
+    : text;
+  const summary = open ? '' : thinkingSummaryLine(summarySource);
 
   // 流开始或结束都重置当前展开选择：新思考默认收起，正在查看的实时思考结束后也收起。
   // useLayoutEffect 在浏览器绘制前同步关闭面板，避免结束瞬间闪出已完成的展开内容。

@@ -271,6 +271,9 @@ const STREAMING_FLUSH_THROTTLE_MS = 50;
 const CLAUDE_STREAMING_FLUSH_THROTTLE_MS = 100;
 // 实时预览只需要展示最新内容，完整 thinking 由最终 assistant event 保存。
 const STREAMING_PREVIEW_MAX_CHARS = 16_384;
+// 实时思考不设尾部窗口：展开后渲染的是纯文本 `<pre>`，没有 Markdown 重解析成本，
+// 而用户展开实时思考就是要读全文。设窗口会让超过上限后开头随每次 flush 一点点消失。
+const UNBOUNDED_STREAMING_PREVIEW = Number.POSITIVE_INFINITY;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
@@ -504,22 +507,36 @@ function logStreamingTelemetry(sessionId: string, reason: string) {
   logger.debug('Streaming flush telemetry', { sessionId, reason, ...stats });
 }
 
-function appendStreamingPreview(previous: string, chunk: string): string {
-  if (!previous) {
-    return chunk.length > STREAMING_PREVIEW_MAX_CHARS
-      ? chunk.slice(-STREAMING_PREVIEW_MAX_CHARS)
-      : chunk;
-  }
-
-  if (previous.length + chunk.length <= STREAMING_PREVIEW_MAX_CHARS) {
+/**
+ * 把一批实时增量并入预览缓冲。
+ *
+ * `maxChars` 是尾部窗口：正文由 Streamdown 渲染，长度直接决定每次提交的重解析
+ * 成本，所以只保留尾部（完整正文由最终 assistant event 保存）。思考传
+ * `UNBOUNDED_STREAMING_PREVIEW` —— 展开后的实时思考渲染全文，窗口化会让开头
+ * 随流式输出一点点消失。
+ */
+function appendStreamingPreview(
+  previous: string,
+  chunk: string,
+  maxChars: number = STREAMING_PREVIEW_MAX_CHARS,
+): string {
+  if (!Number.isFinite(maxChars)) {
     return previous + chunk;
   }
 
-  if (chunk.length >= STREAMING_PREVIEW_MAX_CHARS) {
-    return chunk.slice(-STREAMING_PREVIEW_MAX_CHARS);
+  if (!previous) {
+    return chunk.length > maxChars ? chunk.slice(-maxChars) : chunk;
   }
 
-  return `${previous.slice(-(STREAMING_PREVIEW_MAX_CHARS - chunk.length))}${chunk}`;
+  if (previous.length + chunk.length <= maxChars) {
+    return previous + chunk;
+  }
+
+  if (chunk.length >= maxChars) {
+    return chunk.slice(-maxChars);
+  }
+
+  return `${previous.slice(-(maxChars - chunk.length))}${chunk}`;
 }
 
 function applyStreamingBuffer(
@@ -539,7 +556,11 @@ function applyStreamingBuffer(
     if (buffer.thinking) {
       updates.streamingThinking = {
         ...state.streamingThinking,
-        [sessionId]: appendStreamingPreview(state.streamingThinking[sessionId] || '', buffer.thinking),
+        [sessionId]: appendStreamingPreview(
+          state.streamingThinking[sessionId] || '',
+          buffer.thinking,
+          UNBOUNDED_STREAMING_PREVIEW,
+        ),
       };
     }
 
@@ -2112,7 +2133,11 @@ function createSessionEventHandler(
               set((s) => ({
                 streamingThinking: {
                   ...s.streamingThinking,
-                  [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
+                  [sessionId]: appendStreamingPreview(
+                    s.streamingThinking[sessionId] || '',
+                    misrouted,
+                    UNBOUNDED_STREAMING_PREVIEW,
+                  ),
                 },
                 streamingText: { ...s.streamingText, [sessionId]: '' },
                 streamingVersion: {
@@ -2137,7 +2162,11 @@ function createSessionEventHandler(
                 set((s) => ({
                   streamingThinking: {
                     ...s.streamingThinking,
-                    [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
+                    [sessionId]: appendStreamingPreview(
+                      s.streamingThinking[sessionId] || '',
+                      misrouted,
+                      UNBOUNDED_STREAMING_PREVIEW,
+                    ),
                   },
                   streamingText: { ...s.streamingText, [sessionId]: '' },
                   streamingVersion: {
