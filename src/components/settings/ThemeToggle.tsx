@@ -266,7 +266,7 @@ export function ThemeToggle() {
             description={
               prefs.contentWidth === 'fixed'
                 ? '对话消息与发送框定宽居中'
-                : '随窗口流式铺开，两侧保留安全间距'
+                : '随对话列铺开，两侧保留安全间距'
             }
             control={
               <Select

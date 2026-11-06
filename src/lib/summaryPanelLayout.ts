@@ -70,8 +70,12 @@ export type SummaryPanelSurface = 'inline' | 'popover' | null;
  * 结论碰巧和按真实宽度算出来的一样（两侧让出的边距远小于 180px 阈值），
  * 但**理由**是错的：改宽流式档的边距时，面板不会跟着响应。
  *
- * `gutter` 支持 `rem` 与 `clamp(<min>, <vw>, <max>)` —— 当前流式档就是后者，
- * 按 `vw` 在给定宽度下的实际取值算，不取上下限，否则宽屏会算窄、窄屏会算宽。
+ * `gutter` 支持 `rem` / `px`，以及 `clamp(<min>, <preferred>, <max>)` —— 当前流式档
+ * 就是后者。`preferred` 认三种写法：
+ * - `<n>%`  —— 对话列宽的百分比；
+ * - `<n>vw` —— 视口宽的百分比；
+ * - `calc(<n>% - <m>px)` —— 百分比减偏移（当前流式档的「两点定线」就在这里）。
+ * 三种都按给定宽度算出实际取值，不取上下限，否则宽屏会算窄、窄屏会算宽。
  */
 export function parseContentWidthToken(
   token: string,
@@ -94,7 +98,7 @@ export function parseContentWidthToken(
   return null;
 }
 
-/** 解析流式档让出的边距。`clamp()` 按 `vw` 在当前宽度下的实际值算。 */
+/** 解析流式档让出的边距。`clamp()` 里的百分比按当前宽度算出实际值。 */
 function parseGutter(raw: string, rootFontSize: number, availableWidth: number): number | null {
   const token = raw.trim();
   const remMatch = /^([\d.]+)rem$/.exec(token);
@@ -109,12 +113,39 @@ function parseGutter(raw: string, rootFontSize: number, availableWidth: number):
   if (parts.length !== 3) return null;
   const min = parseGutter(parts[0], rootFontSize, availableWidth);
   const max = parseGutter(parts[2], rootFontSize, availableWidth);
-  const vw = /^([\d.]+)vw$/.exec(parts[1]);
-  if (min === null || max === null || !vw) return null;
-  // 视口宽 ≈ 对话列宽 + 两侧边距；用列宽本身算 vw 会让边距偏大，
-  // 但面板档位只关心量级，且列宽通常是视口的绝大部分。
-  const preferred = (Number.parseFloat(vw[1]) / 100) * (availableWidth + 2 * min);
+  if (min === null || max === null) return null;
+  // `vw` 分支拿「列宽 + 两侧最小边距」当视口代理。
+  const preferred = parsePreferred(parts[1], availableWidth, availableWidth + 2 * min);
+  if (preferred === null) return null;
   return Math.min(max, Math.max(min, preferred));
+}
+
+/**
+ * 解析 `clamp()` 中段的「首选值」。
+ *
+ * `%` 的基宽就是对话列本身；`vw` 的基宽是视口 ≈ 列宽 + 两侧边距（后者用列宽算
+ * 会让边距偏大，但面板档位只关心量级）。`calc(<n>% - <m>px)` 是流式档的两点定线：
+ * 宽列近 10%、窄列垮到下限，单靠百分比没法同时满足。
+ */
+function parsePreferred(
+  raw: string,
+  availableWidth: number,
+  viewportProxy: number,
+): number | null {
+  const ratio = /^([\d.]+)(vw|%)$/.exec(raw);
+  if (ratio) {
+    const base = ratio[2] === '%' ? availableWidth : viewportProxy;
+    return (Number.parseFloat(ratio[1]) / 100) * base;
+  }
+
+  const offset = /^calc\(([\d.]+)%\s*([+-])\s*([\d.]+)px\)$/.exec(raw);
+  if (offset) {
+    const scaled = (Number.parseFloat(offset[1]) / 100) * availableWidth;
+    const shift = Number.parseFloat(offset[3]);
+    return offset[2] === '+' ? scaled + shift : scaled - shift;
+  }
+
+  return null;
 }
 
 export interface SummaryPanelSurfaceState {

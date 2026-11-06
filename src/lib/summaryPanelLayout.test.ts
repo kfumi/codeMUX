@@ -156,11 +156,35 @@ describe('parseContentWidthToken', () => {
     expect(parseContentWidthToken('100%', 16, 800)).toBe(800);
   });
 
-  it('流式档的边距按 clamp(rem, vw, rem) 的当前取值算，不取上下限', () => {
-    // 下限 2rem=32；中段按 10vw 放大；极宽时被上限 12rem=192 夹住。
-    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 200)).toBe(200 - 32);
-    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1600)).toBeCloseTo(1600 - 166.4);
+  it('流式档的边距按 clamp(rem, calc(percent - offset), rem) 的当前取值算', () => {
+    // 下限 1rem=16（极窄列）；中段 13.1% - 50px；极宽被上限 12rem=192 夹住。
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 200)).toBe(200 - 16);
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1600)).toBeCloseTo(1600 - 159.6);
     expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 2560)).toBe(2560 - 192);
+  });
+
+  it('两个锚点：宽列保持 160px，窄列垮到 1rem', () => {
+    // 宽窗锚点不能动 —— 165da59 特意把边距放宽到 160px（1600px 列）。
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1600)).toBeCloseTo(1440.4);
+    // 窄列锚点：侧栏/标签页把对话列压到 ~500px 时，只让出 16px。
+    expect(parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 504)).toBeCloseTo(504 - 16, 0);
+    // 中间的过渡是线性的，不会在某个宽度上突然跳一档。
+    const mid = parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 1000) as number;
+    expect(mid).toBeCloseTo(1000 - 81);
+  });
+
+  it('窄列让位远小于固定 10% —— 曾经压到正文只剩七成', () => {
+    // 回归用例：曾用 `10vw`（只看视口），后又改 `10%`。两者在 504px 的列上都
+    // 让出 50px，叠加 40px 内边距后正文只剩列宽的 ~71%。两点定线压到 16px。
+    const narrow = parseContentWidthToken(CONTENT_WIDTHS.stream, 16, 504) as number;
+    expect(narrow).toBeCloseTo(488, 0);
+    const withFlatPercent = parseContentWidthToken(
+      'calc(100% - clamp(2rem, 10%, 12rem))',
+      16,
+      504,
+    ) as number;
+    expect(withFlatPercent).toBe(504 - 50.4);
+    expect(narrow).toBeGreaterThan(withFlatPercent);
   });
 });
 

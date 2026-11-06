@@ -235,11 +235,11 @@ describe('appearance preferences', () => {
     applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'fixed' }, false);
     expect(root.style.getPropertyValue('--content-width')).toBe('48rem');
 
-    // 流式档必须继续跟随可用宽度；两侧只留随视口收放的安全边距，
-    // 不能再出现宽屏到 1024px 就停住的固定上限。
+    // 流式档必须继续跟随可用宽度；两侧安全边距按**对话列**两点定线：
+    // 宽列保持 160px（165da59 的观感），窄列垮到 1rem。
     applyAppearance({ ...DEFAULT_PREFS, contentWidth: 'stream' }, false);
     expect(root.style.getPropertyValue('--content-width')).toBe(
-      'calc(100% - clamp(2rem, 10vw, 12rem))',
+      'calc(100% - clamp(1rem, calc(13.1% - 50px), 12rem))',
     );
   });
 

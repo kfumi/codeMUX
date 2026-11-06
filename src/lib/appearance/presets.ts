@@ -126,8 +126,15 @@ export const RADIUS_PREVIEW: Record<RadiusKey, string> = {
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
   fixed: '48rem',
   // 流式档不设固定上限：宽度跟随对话列，只从两侧让出安全边距，
-  // 给消息导航、滚动条和窗口边缘留出呼吸位。`vw` 让窄屏的边距同步收窄。
-  stream: 'calc(100% - clamp(2rem, 10vw, 12rem))',
+  // 给消息导航、滚动条和窗口边缘留出呼吸位。
+  //
+  // 边距随**对话列**收放，且是「两点定线」而不是固定百分比：
+  // - 列宽 1600px → 160px（沿用 165da59 收窄后的宽窗观感，正文 1440）
+  // - 列宽 504px  → 16px（侧栏/标签页压窄时垮到底，正文回到列宽的 ~86%）
+  // 中间按 13.1% - 50px 线性过渡，2560px 以上仍被 12rem 封顶。
+  // 固定百分比做不到这件事：10% 在 504px 上会让出 50px（连同内边距吃掉 29%），
+  // 要被压到 1rem 就得整体降到 2%，那样宽窗也会跟着塌成 32px。
+  stream: 'calc(100% - clamp(1rem, calc(13.1% - 50px), 12rem))',
 };
 
 export const DEFAULT_PREFS: AppearancePrefs = {
