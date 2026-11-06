@@ -2319,7 +2319,7 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
 }, areAssistantRowPropsEqual);
 
 /**
- * 流式页脚的"正在执行"状态行。
+ * 流式页脚的"工作中"状态行。
  *
  * 单独抽成 `memo` 组件，是为了让它彻底脱离分帧绘制的重渲染路径：
  * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的 `DotMatrix`
@@ -2361,11 +2361,11 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 py-1 text-ui-body text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
+        'flex items-center gap-2.5 pt-2 pb-1 text-ui-body text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
       )}
     >
-      <DotMatrix state="loading" className="size-4" label="正在执行" />
-      <RunningElapsedTimer startTime={startTime} label="正在执行" />
+      <DotMatrix state="loading" className="size-4" label="工作中" />
+      <RunningElapsedTimer startTime={startTime} label="工作中" />
       <StreamingTokenSpeedIndicator
         key={`${sessionId}:${startTime ?? 'initial'}`}
         sessionId={sessionId}

@@ -33,7 +33,7 @@ type RunningElapsedTimerProps = {
 };
 
 export function RunningElapsedTimer({
-  label = '正在执行',
+  label = '工作中',
   startTime,
 }: RunningElapsedTimerProps) {
   const mountTime = useRef(Date.now());

@@ -48,17 +48,17 @@ describe('RunningElapsedTimer', () => {
 
     render(<RunningElapsedTimer />);
 
-    expect(screen.getAllByText('正在执行 · 0s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('工作中 · 0s').length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(screen.getAllByText('正在执行 · 30s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('工作中 · 30s').length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(40_000);
     });
-    expect(screen.getAllByText('正在执行 · 1m 10s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('工作中 · 1m 10s').length).toBeGreaterThan(0);
   });
   it('空 label 只渲染时长，不留下孤立的分隔符', () => {
     vi.useFakeTimers();
@@ -74,7 +74,7 @@ describe('RunningElapsedTimer', () => {
     const { container } = render(<RunningElapsedTimer />);
 
     // 旧实现会把同一段文字叠一层 shimmer 副本；现在文字必须只有一份、对比度恒定。
-    expect(screen.getAllByText('正在执行 · 0s')).toHaveLength(1);
+    expect(screen.getAllByText('工作中 · 0s')).toHaveLength(1);
     expect(container.querySelector('.shimmer')).toBeNull();
     // 「还在跑」由每秒跳动的秒数表达，那枚 warning 色呼吸点已去掉。
     expect(container.querySelector('[data-slot="running-elapsed-marker"]')).toBeNull();
