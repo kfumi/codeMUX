@@ -16,6 +16,11 @@ const GEOMETRY_PROPERTIES = ['left', 'top', 'width', 'height'] as const;
  *
  * 层叠：宿主 z 序高于展开面板（z-30），但几何上只覆盖 slot（tab 栏下方），
  * 面板头与 tab 栏保持可见可点。
+ *
+ * 浮起时宿主**自带不透明表面底色**。面板内容只是「让位」（`invisible`），并不是
+ * 卸载：只要后台标签里有内容能绕开继承的 `visibility`（Monaco 的 diff editor 会
+ * 在自己的子编辑器上写 inline `visibility: visible`），它就会继续绘制在宿主下面。
+ * 盖住别人的面必须自己铺底，否则透明宿主会把两层的画面混成一团。
  */
 export function ConversationFullViewHost({
   active,
@@ -62,7 +67,7 @@ export function ConversationFullViewHost({
       data-conversation-full-view-host={floating ? 'active' : 'idle'}
       className={cn(
         'relative flex min-h-0 flex-1 flex-col',
-        floating && 'fixed z-40 overflow-hidden',
+        floating && 'fixed z-40 overflow-hidden bg-[hsl(var(--background))]',
       )}
     >
       {children}

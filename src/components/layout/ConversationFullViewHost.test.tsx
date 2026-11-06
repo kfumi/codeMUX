@@ -69,6 +69,8 @@ describe('ConversationFullViewHost', () => {
     const host = hostElement();
     expect(host.dataset.conversationFullViewHost).toBe('idle');
     expect(host.className).not.toContain('fixed');
+    // 普通形态照旧由对话列自己的底色承担,宿主不额外铺底。
+    expect(host.className).not.toContain('bg-[hsl(var(--background))]');
     expect(host.querySelector('[data-testid="conversation-body"]')).toBeTruthy();
     expect(host.style.left).toBe('');
   });
@@ -95,6 +97,9 @@ describe('ConversationFullViewHost', () => {
     const host = hostElement();
     expect(host.dataset.conversationFullViewHost).toBe('active');
     expect(host.className).toContain('fixed');
+    // 盖住面板内容的面必须自己铺底:后台 diff 标签会绕过父级 `invisible` 继续绘制
+    // (Monaco diff editor 在子编辑器上写 inline `visibility: visible`)。
+    expect(host.className).toContain('bg-[hsl(var(--background))]');
     expect(host.style.left).toBe('560px');
     expect(host.style.top).toBe('88px');
     expect(host.style.width).toBe('800px');

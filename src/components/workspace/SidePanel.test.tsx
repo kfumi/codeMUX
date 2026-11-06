@@ -198,6 +198,26 @@ describe('SidePanel', () => {
     }
   });
 
+  it('对话 surface 激活时面板内容让位:内容区 inert,退出后恢复', () => {
+    // `invisible` 挡不住 Monaco diff editor(子编辑器上有 inline visibility: visible),
+    // 所以让位还要靠 inert 把后台内容移出命中测试/焦点/无障碍树。
+    const { rerender } = render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+    const slot = () => document.querySelector('[data-side-panel-content-slot]') as HTMLElement;
+
+    expect(slot().hasAttribute('inert')).toBe(false);
+
+    sidePanelState.isExpanded = true;
+    sidePanelState.conversationActive = true;
+    rerender(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(slot().hasAttribute('inert')).toBe(true);
+
+    sidePanelState.conversationActive = false;
+    rerender(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
+
+    expect(slot().hasAttribute('inert')).toBe(false);
+  });
+
   it('passes a stable session key to every terminal tab', () => {
     render(<SidePanel projectPath="D:/project/app" scopeId="session-a" />);
 

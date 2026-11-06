@@ -365,7 +365,19 @@ export function SidePanel({ projectPath, scopeId, isVisible = true, contentSlotR
           </div>
         </div>
 
-        <div ref={contentSlotRef} data-side-panel-content-slot="" className="relative min-h-0 flex-1">
+        <div
+          ref={contentSlotRef}
+          data-side-panel-content-slot=""
+          className="relative min-h-0 flex-1"
+          /*
+            对话 surface 激活时面板内容只「让位」不卸载（保留滚动位置与实例）。
+            `invisible` 挡不住所有内容：Monaco 的 diff editor 会给自己的子编辑器写
+            inline `visibility: visible`，父级继承的 hidden 被它覆盖，于是后台 diff
+            仍会绘制并参与键盘焦点。`inert` 按元素作用、没有继承可绕，正好补上
+            命中测试 / 焦点 / 无障碍这一层；视觉遮挡由浮起宿主的底色负责。
+          */
+          {...(conversationSurface ? { inert: '' } : {})}
+        >
           {terminalTabs.map((tab) => {
             const isActive = isPanelTabActive(tab.id);
             return (
