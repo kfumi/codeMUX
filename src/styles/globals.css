@@ -508,6 +508,21 @@ input[type='password']::-ms-reveal {
   -webkit-app-region: no-drag;
 }
 
+/* 浮层必须从窗口拖拽区里挖出来。拖拽区是**窗口级**命中测试:Chromium 只按
+   app-region 区域的叠加结果决定这一下是拖窗口还是给页面,浮层 z-index 再高也
+   不参与。任务详情这类高弹窗顶到视口上沿时,右上角关闭按钮正好落在标题栏
+   48px 拖拽带里,表现就是「点不了、没反应」。Radix 的弹窗/popper 与 sonner
+   的 toast 都叠在标题栏之上,统一声明 no-drag(no-drag 按矩形相减,所以
+   portal 的零高度包装层不够,必须落在真正有盒子尺寸的浮层元素上)。 */
+[role='dialog'],
+[role='alertdialog'],
+[data-radix-popper-content-wrapper],
+[data-dialog-scrim],
+[data-sonner-toaster],
+.app-drag-none {
+  -webkit-app-region: no-drag;
+}
+
 /* 面板拖拽改宽期间(拖拽逻辑见 SidePanel):内置浏览器是独立 guest,指针移到
    网页上时宿主 document 收不到 mouse 事件。同步禁用 webview 的指针事件,让
    拖拽全程的事件都落在宿主文档里;ResizeOverlay 是第二重保险。 */
