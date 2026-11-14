@@ -1,6 +1,7 @@
+import { builtinMcpToolSegment } from '@/lib/builtinMcp';
 import { isToolResultOnlyUserEvent } from '@/components/agent/assistant-ui/assistantCollapse';
 import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
-import { getToolDisplayName, getToolHeaderSummary } from '@/components/agent/toolHeaderSummary';
+import { getToolDisplayName, getToolHeaderSummary, normalizeToolName } from '@/components/agent/toolHeaderSummary';
 import { isSubagentToolName } from '@/lib/subagentTools';
 import { isEphemeralLiveStreamNarrationEvent, type AgentMessage } from '@/stores/agentStore';
 import type { ConversationTurn } from '@/types/conversationTurn';
@@ -10,10 +11,18 @@ import type { ConversationTurn } from '@/types/conversationTurn';
  * 文本片段与问询卡片等「非过程」事件切断分段。
  *
  * 这是展示层的纯投影：不改变事件顺序、不改变消息转换语义。渲染侧把同一段里的
- * 每个事件都画成缩进的步骤行，只有段首那一行画组头（图标 + 处理中/已处理 · 时间 + N 个步骤）。
+ * 每个事件都画成缩进的步骤行，段首那一行画组头（折叠组的摘要 / 分类统计）。
  */
 
 export type ActivityStepKind = 'thinking' | 'tool';
+
+/** 一次普通工具调用的投影身份：段级分类统计与活动摘要都按它去重、取参。 */
+export type ActivityToolCallRef = {
+  /** 提供方按调用生成的 `tool_use_id`；缺失记 `''`（无法跨事件跟踪，各算一次）。 */
+  toolUseId: string;
+  toolName: string;
+  toolArgs?: Record<string, unknown>;
+};
 
 export type ActivityRun = {
   /** `${turnId}-${段首事件下标}`，段内稳定、跨渲染稳定。 */
@@ -28,13 +37,25 @@ export type ActivityRun = {
    * `tool_use_id` 的重复投影只算一步，与渲染出来的行数一一对应。
    */
   stepCount: number;
+  /**
+   * 段内的普通工具调用（委派工具也在内，但委派段整体走独立卡片，不进分类统计）。
+   * 同一 `tool_use_id` 只出现一次（回合级去重），参数取**最新**一次投影——OpenCode 的
+   * pending 帧 `input: {}` 之后跟着补全 input 的 running 帧，统计要用补全后的参数。
+   */
+  toolCalls: ActivityToolCallRef[];
+  /** 段内非空思考块总数（纯思考组的「N 段」口径）。 */
+  thinkingBlocks: number;
   startedAt?: number;
   endedAt?: number;
   /** 该段是「仍在运行的尾回合」的最后一段：未结束。 */
   live: boolean;
   /** 整段只有思考，没有工具调用——决定组头用「思考」还是「处理」措辞。 */
   onlyThinking: boolean;
-  /** 段末步骤的单行摘要，用作运行中收起状态下的尾预览。 */
+  /**
+   * 段内最后一个**尚未拿到结果**的普通工具调用（按整段事件流的最新参数解析）。
+   * 只有运行中的尾段会消费它；已完成段永远没有活动工具。
+   */
+  activeTool?: { toolName: string; toolArgs?: Record<string, unknown> };
   /**
    * 整段都是委派（Task/Agent）调用：委派事件自成一段（像正文一样隔开左右两边的步骤组），
    * 段头画委派卡片而不是「已处理 N 个步骤」组头。
@@ -65,10 +86,12 @@ export const EMPTY_ACTIVITY_RUNS: ActivityRuns = {
 
 type EventSteps = {
   kind: ActivityStepKind;
-  /** 该事件每个 `tool_use` 块的 id（缺失记 `''`）：段级计数据此按身份去重。 */
-  toolUseIds: string[];
+  /** 该事件里的普通工具调用（含委派工具；按块序）。 */
+  toolCalls: ActivityToolCallRef[];
   /** 非空 thinking 块数：每块一步，与渲染出来的思考行一一对应。 */
   thinkingBlocks: number;
+  /** 按块序，最后一个可见步骤是否是工具调用（段尾预览取它而不是「第一个工具」）。 */
+  tailIsTool: boolean;
   /**
    * 该事件同时含非空文本：文本**结束**这一段——分段循环在这里 flush，段后面的事件开新一段。
    * 参考实现里同一个消息的文本会被推成独立的文本气泡（`assistant-turns.ts` 的 `appendMessage`），
@@ -76,8 +99,6 @@ type EventSteps = {
    * 文本后面的过程行会被并进同一段，那一段的组头就永远不会出现。
    */
   endsRun: boolean;
-  toolName?: string;
-  toolArgs?: Record<string, unknown>;
   /**
    * 该事件里有委派（Task/Agent）工具调用。委派自成一类处理段：它既不开在普通步骤段里，
    * 也不接在普通步骤段后面，而是像正文那样把相邻的步骤组切开。
@@ -110,10 +131,9 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
   let hasTool = false;
   let delegates = false;
   let hasText = false;
-  let toolName: string | undefined;
-  let toolArgs: Record<string, unknown> | undefined;
   let thinkingText: string | undefined;
-  const toolUseIds: string[] = [];
+  let tailIsTool = false;
+  const toolCalls: ActivityToolCallRef[] = [];
   let thinkingBlocks = 0;
 
   for (const block of content) {
@@ -133,21 +153,30 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
         stepCount += 1;
         thinkingBlocks += 1;
         thinkingText = block.thinking;
+        tailIsTool = false;
       }
       continue;
     }
 
     if (block.type === 'tool_use') {
+      const name = typeof block.name === 'string' ? block.name : '';
+      // 问询工具是 Interactive Request：不并入过程段、不进统计（spec 边界）。
+      // 它由问询卡片承载且恒可见（渲染层豁免）；只含问询块的事件没有过程步骤，
+      // 会作为非过程事件切断分段。
+      if (isAskUserQuestionToolName(name)) {
+        continue;
+      }
       stepCount += 1;
-      toolUseIds.push(typeof block.id === 'string' ? block.id : '');
       hasTool = true;
-      if (typeof block.name === 'string' && isSubagentToolName(block.name)) {
+      tailIsTool = true;
+      if (isSubagentToolName(name)) {
         delegates = true;
       }
-      if (toolName === undefined) {
-        toolName = typeof block.name === 'string' ? block.name : undefined;
-        toolArgs = isRecord(block.input) ? block.input : undefined;
-      }
+      toolCalls.push({
+        toolUseId: typeof block.id === 'string' ? block.id : '',
+        toolName: name,
+        ...(isRecord(block.input) ? { toolArgs: block.input } : {}),
+      });
     }
   }
 
@@ -160,11 +189,10 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
     kind: hasTool ? 'tool' : 'thinking',
     delegates,
     endsRun: hasText,
-    toolName,
-    toolArgs,
     thinkingText,
-    toolUseIds,
+    toolCalls,
     thinkingBlocks,
+    tailIsTool,
   };
 }
 
@@ -296,7 +324,7 @@ function positiveTimestamp(value: unknown): number | undefined {
 }
 
 /** 思考步骤的单行摘要：取最后一行，去掉标题与强调标记（对齐参考实现的尾预览）。 */
-function thinkingTailLine(text: string): string {
+export function thinkingTailLine(text: string): string {
   const lines = text
     .split('\n')
     .map((line) => line.replace(/^#+\s*|\*\*/g, '').trim())
@@ -305,43 +333,29 @@ function thinkingTailLine(text: string): string {
 }
 
 function stepsTailText(steps: EventSteps): string {
-  if (steps.kind === 'tool' && steps.toolName) {
-    const summary = getToolHeaderSummary(steps.toolName, steps.toolArgs ?? {});
-    return summary.text ?? getToolDisplayName(steps.toolName);
+  // 段尾兜底摘要取**最后一个可见步骤**（按块序）：最后一块是思考就用思考尾行，
+  // 是工具就用最后一个工具调用——而不是无脑取段末事件的第一个工具。
+  if (!steps.tailIsTool) {
+    return steps.thinkingText ? thinkingTailLine(steps.thinkingText) : '';
+  }
+  const call = steps.toolCalls[steps.toolCalls.length - 1];
+  if (call && call.toolName) {
+    const summary = getToolHeaderSummary(call.toolName, call.toolArgs ?? {});
+    return summary.text ?? getToolDisplayName(call.toolName);
   }
   return steps.thinkingText ? thinkingTailLine(steps.thinkingText) : '';
 }
 
 /**
- * 段内实际会渲染出来的步骤数。
- *
- * 渲染层把「同一个 `tool_use_id` 的重复投影」认成同一次工具调用的**输入刷新**：
- * `convertAgentEventsToAssistantMessages` 的 `resolveExistingToolCallPart` 命中已有卡片就
- * 刷新参数、不再多画一行。OpenCode 的 `tool_started` 正是这样一对帧（侧车先发
- * `input: {}` 的 pending 帧、再发补全 input 的 running 帧，各自新 `event_id`），所以计数
- * 必须同一口径：同一个 `tool_use_id` 只算一步（计入首见的那一段），否则段头 / 卡片的数字
- * 会比行数大一倍。缺 id 的块无法辨认同一次调用，按块各算一步。
- *
- * `countedToolUseIds` 由调用方按**回合**持有并在段之间复用：同一对帧被文本切开、落进两段时，
- * 段仍按「首见」计一次，与渲染层在全量消息里找已有卡片的行为一致。
+ * 活动工具的单行摘要：动作词 + 参数摘要（读起来像工具行，例如「读取 src/App.tsx」）。
+ * 没有参数摘要时退回工具显示名。
  */
-function countRunSteps(runSteps: EventSteps[], countedToolUseIds: Set<string>): number {
-  let stepCount = 0;
-  for (const steps of runSteps) {
-    for (const toolUseId of steps.toolUseIds) {
-      if (toolUseId.length === 0) {
-        stepCount += 1;
-        continue;
-      }
-      if (countedToolUseIds.has(toolUseId)) {
-        continue;
-      }
-      countedToolUseIds.add(toolUseId);
-      stepCount += 1;
-    }
-    stepCount += steps.thinkingBlocks;
+export function activityToolCallSummary(call: { toolName: string; toolArgs?: Record<string, unknown> }): string {
+  if (!call.toolName) {
+    return '';
   }
-  return stepCount;
+  const summary = getToolHeaderSummary(call.toolName, call.toolArgs ?? {});
+  return summary.text ? `${getToolDisplayName(call.toolName)} ${summary.text}` : getToolDisplayName(call.toolName);
 }
 
 export function buildActivityRuns(
@@ -352,6 +366,8 @@ export function buildActivityRuns(
 ): ActivityRuns {
   const isRunning = options.isRunning ?? false;
   const lastTurnId = turns[turns.length - 1]?.id;
+  // 已经拿到结果的工具身份（整段事件流一次性扫出）：还没拿到结果的才是「活动工具」。
+  const settledToolUseIds = collectSettledToolUseIds(events);
   const runs: ActivityRun[] = [];
   const runByKey = new Map<string, ActivityRun>();
   const placementByEventIndex = new Map<number, ActivityRunPlacement>();
@@ -367,6 +383,10 @@ export function buildActivityRuns(
     // 本回合已经计过步的 `tool_use` 身份：同一身份的后续事件是输入刷新，渲染层不再多画
     // 一行，计数也必须只算一步。id 由提供方按调用生成，不跨回合复用，所以逐回合重置。
     const countedToolUseIds = new Set<string>();
+    // 同一工具身份的**最新**一次投影：OpenCode 先发 `input: {}` 的 pending 帧、再发补全
+    // input 的 running 帧，段级统计与活动摘要要取补全后的参数。
+    const latestToolCallById = new Map<string, ActivityToolCallRef>();
+    const turnRunStart = runs.length;
 
     // 段末的结束时间取「段后第一个事件」的时间戳——那才是这一步真正做完的时刻；
     // 段后没有事件时，未结束的尾段保持开放式计时，其余用回合末事件兜底。
@@ -407,13 +427,39 @@ export function buildActivityRuns(
         ? Math.max(startedAt, rawEndedAt)
         : undefined;
 
+      // 段内普通工具调用：回合级去重（同 id 的输入刷新不重复计），参数取最新投影。
+      // stepCount 与 toolCalls 必须同遍构建：去重集合只能消费一次，否则先建的工具列表
+      // 会把计数全部判重掉。
+      const runToolCalls: ActivityToolCallRef[] = [];
+      let thinkingBlocks = 0;
+      let stepCount = 0;
+      for (const steps of runSteps) {
+        thinkingBlocks += steps.thinkingBlocks;
+        stepCount += steps.thinkingBlocks;
+        for (const call of steps.toolCalls) {
+          if (call.toolUseId.length > 0) {
+            if (countedToolUseIds.has(call.toolUseId)) {
+              continue;
+            }
+            countedToolUseIds.add(call.toolUseId);
+            stepCount += 1;
+            runToolCalls.push(latestToolCallById.get(call.toolUseId) ?? call);
+            continue;
+          }
+          stepCount += 1;
+          runToolCalls.push(call);
+        }
+      }
+
       const runKey = `${turn.id}-${runEventIndices[0]}`;
       const run: ActivityRun = {
         runKey,
         turnId: turn.id,
         eventIndices: runEventIndices,
         kinds: runSteps.map((steps) => steps.kind),
-        stepCount: countRunSteps(runSteps, countedToolUseIds),
+        stepCount,
+        toolCalls: runToolCalls,
+        thinkingBlocks,
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(endedAt !== undefined ? { endedAt } : {}),
         live,
@@ -449,6 +495,12 @@ export function buildActivityRuns(
       const event = events[turnEventIndices[pos]];
       const steps = classifyProcessEvent(event);
       if (steps !== null) {
+        // 记录每个工具身份的最新参数（pending 帧之后会被补全 input 的帧覆盖）。
+        for (const call of steps.toolCalls) {
+          if (call.toolUseId.length > 0) {
+            latestToolCallById.set(call.toolUseId, call);
+          }
+        }
         // 委派事件自成一段：它像正文一样把左右两边的步骤组切开，不并进普通步骤段——否则
         // 段头画成委派卡片时，段内别的工具/思考会被一起收进那张卡片里。
         if (runPositions.length > 0 && steps.delegates !== runIsDelegation) {
@@ -471,9 +523,61 @@ export function buildActivityRuns(
       flushRun();
     }
     flushRun();
+
+    // 回合构建完成后，为每段解析「活动工具」：段内最后一个还没拿到结果的普通工具调用。
+    // 只有运行中的尾段会消费它；缺 id 的调用无法跨事件跟踪，交给尾预览兜底。
+    for (let index = turnRunStart; index < runs.length; index += 1) {
+      const run = runs[index]!;
+      for (let callIndex = run.toolCalls.length - 1; callIndex >= 0; callIndex -= 1) {
+        const call = run.toolCalls[callIndex]!;
+        if (call.toolUseId.length === 0 || settledToolUseIds.has(call.toolUseId)) {
+          continue;
+        }
+        run.activeTool = {
+          toolName: call.toolName,
+          ...(call.toolArgs ? { toolArgs: call.toolArgs } : {}),
+        };
+        break;
+      }
+    }
   }
 
   return { runs, runByKey, placementByEventIndex };
+}
+
+/**
+ * 收集整段事件流里已经拿到结果的工具身份：独立 `tool_result` 事件与只含结果的
+ * user 消息两种投影。还没出现在这个集合里的 `tool_use_id` 才是「仍在运行」。
+ */
+function collectSettledToolUseIds(events: AgentMessage[]): Set<string> {
+  const settled = new Set<string>();
+  for (const event of events) {
+    if (event.kind === 'tool_result') {
+      const id = (event.data as unknown as Record<string, unknown>).tool_use_id;
+      if (typeof id === 'string' && id.length > 0) {
+        settled.add(id);
+      }
+      continue;
+    }
+    if (event.kind !== 'user') {
+      continue;
+    }
+    const content = (event.data as { message?: { content?: unknown } }).message?.content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const block of content) {
+      if (
+        isRecord(block)
+        && block.type === 'tool_result'
+        && typeof block.tool_use_id === 'string'
+        && block.tool_use_id.length > 0
+      ) {
+        settled.add(block.tool_use_id);
+      }
+    }
+  }
+  return settled;
 }
 
 export type ActivityRunOptions = {
@@ -521,4 +625,220 @@ export function rowRunContinues(
     }
   }
   return lastStepInRow >= 0 && lastStepInRow < run.eventIndices.length - 1;
+}
+
+/**
+ * 完成态组头的分类统计口径：四个固定类别，覆盖四个 Agent Kind 的内置工具与 MCP 工具。
+ * 分类依据**规范化工具身份**（内置 MCP 先还原工具段），不依据中文显示名；未识别的一律
+ * 归「其他」，既不打断分段，也不会从统计中消失。
+ *
+ * 这里的身份表与 `toolHeaderSummary.ts` 的显示名表各管一件事（分类 vs 展示名），刻意
+ * 不互相引用：新增工具时两处各加一行，避免分类口径被显示名文案牵动。
+ */
+export type ActivityToolCategory = 'explore' | 'execute' | 'change' | 'other';
+
+const EXPLORE_TOOL_NAMES = new Set([
+  'Read',
+  'NotebookRead',
+  'LS',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+  'view_image',
+]);
+
+const EXECUTE_TOOL_NAMES = new Set([
+  'Bash',
+  'shell_command',
+  'shell',
+  'exec_command',
+  'exec',
+  'write_stdin',
+  'js',
+  'js_repl',
+  'js_repl_reset',
+  // 内置浏览器
+  'browser_open',
+  'browser_navigate',
+  'browser_list',
+  'browser_eval',
+  'browser_screenshot',
+  'browser_input',
+  'browser_cdp',
+  'browser_snapshot',
+  'browser_click',
+  'browser_type',
+  'browser_scroll',
+  'browser_select',
+  // 电脑控制
+  'computer_windows',
+  'computer_screenshot',
+  'computer_save_screenshot',
+  'computer_active_window',
+  'computer_apps',
+  'computer_elements',
+  'computer_wait',
+  'computer_click',
+  'computer_type',
+  'computer_key',
+  'computer_paste',
+  'computer_scroll',
+  'computer_drag',
+  'computer_set_value',
+  'computer_launch',
+]);
+
+const CHANGE_TOOL_NAMES = new Set([
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'apply_patch',
+]);
+
+export function classifyToolCategory(toolName: string): ActivityToolCategory {
+  const segment = builtinMcpToolSegment(toolName);
+  const name = segment ?? normalizeToolName(toolName);
+  if (CHANGE_TOOL_NAMES.has(name)) return 'change';
+  if (EXPLORE_TOOL_NAMES.has(name)) return 'explore';
+  if (EXECUTE_TOOL_NAMES.has(name)) return 'execute';
+  return 'other';
+}
+
+/** 修改类工具的目标路径参数键：按命中顺序取第一个字符串值。 */
+const CHANGE_PATH_ARG_KEYS = ['file_path', 'filePath', 'notebook_path', 'notebookPath', 'path'];
+
+/**
+ * 从修改类工具的参数中提取目标路径。常规写入/编辑取路径参数；`apply_patch` 从补丁
+ * 文本里解析 `*** Add/Update/Delete File:` 目标（一次补丁可触及多个文件）。
+ * 只读参数与结构化结果，不猜自然语言，也不访问文件系统。
+ */
+export function extractActivityChangePaths(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string[] {
+  const segment = builtinMcpToolSegment(toolName);
+  const name = segment ?? normalizeToolName(toolName);
+  if (!CHANGE_TOOL_NAMES.has(name)) {
+    return [];
+  }
+
+  if (name === 'apply_patch') {
+    const patchText = typeof args?.input === 'string'
+      ? args.input
+      : typeof args?.patch === 'string' ? args.patch : '';
+    if (!patchText) {
+      return [];
+    }
+    const paths: string[] = [];
+    for (const match of patchText.matchAll(/^\*\*\*\s+(?:Add|Update|Delete)\s+File:\s*(.+)$/gim)) {
+      const path = match[1]?.trim();
+      if (path) {
+        paths.push(path);
+      }
+    }
+    return paths;
+  }
+
+  for (const key of CHANGE_PATH_ARG_KEYS) {
+    const value = args?.[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return [value.trim()];
+    }
+  }
+  return [];
+}
+
+/**
+ * 修改路径的**纯词法**规范化：统一分隔符、处理 `.` / `..`，保留 Windows 盘符、UNC、
+ * POSIX 根与相对路径语义。不要求文件在本机存在，规范化结果只用于去重。
+ */
+export function normalizeActivityFilePath(path: string): string {
+  const joined = path.replace(/\\/g, '/');
+  const rootMatch = joined.match(/^(\/\/[^/]+\/[^/]+|\/|[A-Za-z]:\/)/);
+  // 根统一带尾分隔符：UNC 根（`//server/share`）本身不带，拼接时会丢掉那道斜线。
+  const root = rootMatch
+    ? (rootMatch[1].endsWith('/') ? rootMatch[1] : rootMatch[1] + '/')
+    : '';
+  const parts: string[] = [];
+  for (const part of joined.slice(root.length).split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') {
+        parts.pop();
+      } else if (!root) {
+        parts.push('..');
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+  // 绝对路径带尾分隔符，保证 `C:/a` 与 `C:/a/`（以及 `/a` 与 `/a/`）归并为同一个键。
+  return root + parts.join('/') + (root && parts.length > 0 ? '/' : '');
+}
+
+export type ActivityRunCategoryCounts = {
+  explore: number;
+  execute: number;
+  other: number;
+  /** 规范化去重后的修改文件数。 */
+  changeFiles: number;
+  /** 无法识别路径的修改调用次数（补充显示，不伪造文件数）。 */
+  changeUnresolvedCalls: number;
+};
+
+export function getActivityRunCategoryCounts(run: Pick<ActivityRun, 'toolCalls'>): ActivityRunCategoryCounts {
+  const counts: ActivityRunCategoryCounts = {
+    explore: 0,
+    execute: 0,
+    other: 0,
+    changeFiles: 0,
+    changeUnresolvedCalls: 0,
+  };
+  const changePaths = new Set<string>();
+  for (const call of run.toolCalls) {
+    const category = classifyToolCategory(call.toolName);
+    if (category === 'change') {
+      const paths = extractActivityChangePaths(call.toolName, call.toolArgs);
+      if (paths.length === 0) {
+        counts.changeUnresolvedCalls += 1;
+        continue;
+      }
+      for (const path of paths) {
+        changePaths.add(normalizeActivityFilePath(path));
+      }
+      continue;
+    }
+    if (category === 'explore') {
+      counts.explore += 1;
+      continue;
+    }
+    if (category === 'execute') {
+      counts.execute += 1;
+      continue;
+    }
+    counts.other += 1;
+  }
+  counts.changeFiles = changePaths.size;
+  return counts;
+}
+
+/**
+ * 完成态组头的标题文案：工具段显示「已处理 · 分类统计」，纯思考段显示「已思考 · N 段」。
+ * 顺序固定为「探索 → 执行 → 修改 → 其他」，零值省略；不显示耗时，不显示失败标记。
+ */
+export function activityRunCompletedText(run: Pick<ActivityRun, 'toolCalls' | 'thinkingBlocks'>): string {
+  if (run.toolCalls.length === 0) {
+    const blocks = Math.max(run.thinkingBlocks, 1);
+    return `已思考 · ${blocks} 段`;
+  }
+  const counts = getActivityRunCategoryCounts(run);
+  const parts: string[] = [];
+  if (counts.explore > 0) parts.push(`探索 ${counts.explore}`);
+  if (counts.execute > 0) parts.push(`执行 ${counts.execute}`);
+  if (counts.changeFiles > 0) parts.push(`修改 ${counts.changeFiles} 个文件`);
+  if (counts.changeUnresolvedCalls > 0) parts.push(`未定位修改 ${counts.changeUnresolvedCalls} 次`);
+  if (counts.other > 0) parts.push(`其他 ${counts.other}`);
+  return parts.length > 0 ? `已处理 · ${parts.join(' · ')}` : '已处理';
 }

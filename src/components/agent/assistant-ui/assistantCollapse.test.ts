@@ -150,7 +150,7 @@ function textAndToolAssistant(text: string, id: string, name = 'bash'): AgentMes
   } as unknown as AgentMessage;
 }
 
-describe('buildAssistantCollapseInfoMap 的步骤数与异常标记', () => {
+describe('buildAssistantCollapseInfoMap 的步骤数与失败口径', () => {
   it('数出思考与工具步骤，文本片段不算步骤', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
@@ -165,10 +165,9 @@ describe('buildAssistantCollapseInfoMap 的步骤数与异常标记', () => {
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
     expect(info?.stepCount).toBe(2);
-    expect(info?.hasError).toBe(false);
   });
 
-  it('本轮工具拿到 is_error 结果时标记异常', () => {
+  it('本轮工具拿到 is_error 结果时：失败只留在工具卡，标题只计步骤不派生异常', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
       toolAssistant('tool-1', 'bash'),
@@ -180,10 +179,10 @@ describe('buildAssistantCollapseInfoMap 的步骤数与异常标记', () => {
 
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
-    expect(info?.hasError).toBe(true);
+    expect(info?.stepCount).toBe(1);
   });
 
-  it('error 事件折进工具卡：标记异常但不额外算一步', () => {
+  it('error 事件折进工具卡：不额外算一步', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
       toolAssistant('tool-1', 'bash'),
@@ -195,11 +194,10 @@ describe('buildAssistantCollapseInfoMap 的步骤数与异常标记', () => {
 
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
-    expect(info?.hasError).toBe(true);
     expect(info?.stepCount).toBe(1);
   });
 
-  it('上一轮工具的失败不算到这一轮头上', () => {
+  it('上一轮工具的失败不影响这一轮的步骤计数', () => {
     const events = [
       { kind: 'user', data: { content: 'first' } },
       toolAssistant('tool-old', 'bash'),
@@ -216,8 +214,8 @@ describe('buildAssistantCollapseInfoMap 的步骤数与异常标记', () => {
 
     const map = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true });
 
-    expect(map.get(1)?.hasError).toBe(true);
-    expect(map.get(6)?.hasError).toBe(false);
+    expect(map.get(1)?.stepCount).toBe(1);
+    expect(map.get(6)?.stepCount).toBe(1);
   });
 });
 
@@ -253,7 +251,7 @@ describe('buildAssistantCollapseInfoMap 的步骤数口径', () => {
     expect(info?.stepCount).toBe(1);
   });
 
-  it('结果内容里只有 exit_code 非 0 时也算异常（与工具卡同一判据）', () => {
+  it('结果内容里只有 exit_code 非 0 时：失败仍只留在工具卡，标题不派生异常', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
       toolAssistant('tool-1', 'bash'),
@@ -265,10 +263,10 @@ describe('buildAssistantCollapseInfoMap 的步骤数口径', () => {
 
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
-    expect(info?.hasError).toBe(true);
+    expect(info?.stepCount).toBe(1);
   });
 
-  it('只含结果的 user 消息投影里的失败同样标记异常', () => {
+  it('只含结果的 user 消息投影里的失败同样不冒泡到标题', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
       toolAssistant('tool-1', 'bash'),
@@ -280,7 +278,7 @@ describe('buildAssistantCollapseInfoMap 的步骤数口径', () => {
 
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
-    expect(info?.hasError).toBe(true);
+    expect(info?.stepCount).toBe(1);
   });
 
   it('没有待结果工具时，error 事件自己画一行并算一步', () => {
@@ -295,7 +293,6 @@ describe('buildAssistantCollapseInfoMap 的步骤数口径', () => {
     const info = buildAssistantCollapseInfoMap(events, timestamps, { allowImplicitResult: true }).get(1);
 
     expect(info?.stepCount).toBe(1);
-    expect(info?.hasError).toBe(true);
   });
 
   it('同一个 tool_use_id 的重复投影（输入刷新）只算一步', () => {

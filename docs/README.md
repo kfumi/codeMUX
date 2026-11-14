@@ -140,6 +140,7 @@
 | [2026-10-24-side-panel-full-view.md](specs/2026-10-24-side-panel-full-view.md) | 侧面板完整视图：主对话固定为首个标签 |
 | [2026-10-26-project-ordering.md](specs/2026-10-26-project-ordering.md) | 侧栏项目拖拽排序：桌面 / PC 浏览器持久化与键盘重排，移动端不启用手势 |
 | [2026-11-06-terminal-dock-registry.md](specs/2026-11-06-terminal-dock-registry.md) | 终端系统重构：registry 所有权与底部 Dock（取代 2026-08-19 的实现口径） |
+| [2026-11-14-activity-run-collapsible-groups.md](specs/2026-11-14-activity-run-collapsible-groups.md) | 连续思考与工具的 Activity Run 折叠分组 |
 
 ### plans
 
@@ -187,6 +188,7 @@
 | Feature | 工单数 | 对应 spec |
 |---|---|---|
 | [add-usage-statistics](tickets/add-usage-statistics/) | 2 | [2026-07-23](specs/2026-07-23-add-usage-statistics.md) |
+| [activity-run-collapsible-groups](tickets/activity-run-collapsible-groups/) | 8 | [2026-11-14](specs/2026-11-14-activity-run-collapsible-groups.md) |
 | [agent-task-board](tickets/agent-task-board/) | 4 | [2026-09-21](specs/2026-09-21-agent-task-board.md) |
 | [codemux-managed-sdk-runtime](tickets/codemux-managed-sdk-runtime/) | 7 | [2026-08-05](specs/2026-08-05-codemux-managed-sdk-runtime.md) |
 | [codex-app-server-migration](tickets/codex-app-server-migration/) | 13 | [2026-08-22](specs/2026-08-22-codex-app-server-migration.md) |

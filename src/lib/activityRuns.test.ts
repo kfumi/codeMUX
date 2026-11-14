@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildConversationTurns } from '@/lib/timeline/turns';
-import { buildActivityRuns, rowRunContinues } from '@/lib/activityRuns';
+import {
+  activityRunCompletedText,
+  buildActivityRuns,
+  classifyToolCategory,
+  extractActivityChangePaths,
+  getActivityRunCategoryCounts,
+  normalizeActivityFilePath,
+  rowRunContinues,
+} from '@/lib/activityRuns';
 import type { AgentMessage } from '@/stores/agentStore';
 
 function user(content: string): AgentMessage {
@@ -595,5 +603,187 @@ describe('delegation runs', () => {
     // 首见的那一段计这一步；后一段那一帧在渲染层不画行（同一次调用的参数刷新），计 0。
     expect(runs.map((run) => run.stepCount)).toEqual([1, 0]);
     expect(runs.map((run) => run.eventIndices)).toEqual([[1], [3]]);
+  });
+});
+
+describe('run tool calls & active tool', () => {
+  it('run.toolCalls 回合级去重并取最新参数；最后一个未决调用是活动工具', () => {
+    const events = [
+      user('go'),
+      tool('call-1', 'Read', {}),
+      tool('call-1', 'Read', { file_path: 'src/App.tsx' }),
+      tool('call-2', 'Bash', { command: 'npm run build' }),
+      toolResult('call-2'),
+      tool('call-3', 'Glob', { pattern: 'src/**' }),
+    ];
+
+    const { runs } = runsFor(events, true);
+
+    expect(runs).toHaveLength(1);
+    // 同一次调用的两帧去重成一条，参数取补全后的那一帧。
+    expect(runs[0]!.toolCalls).toEqual([
+      { toolUseId: 'call-1', toolName: 'Read', toolArgs: { file_path: 'src/App.tsx' } },
+      { toolUseId: 'call-2', toolName: 'Bash', toolArgs: { command: 'npm run build' } },
+      { toolUseId: 'call-3', toolName: 'Glob', toolArgs: { pattern: 'src/**' } },
+    ]);
+    // call-2 已拿到结果；call-1 / call-3 未决——活动工具取最后一个。
+    expect(runs[0]!.activeTool).toEqual({ toolName: 'Glob', toolArgs: { pattern: 'src/**' } });
+    expect(runs[0]!.thinkingBlocks).toBe(0);
+  });
+
+  it('拿到结果后活动工具消失', () => {
+    const events = [
+      user('go'),
+      tool('call-1', 'Bash', { command: 'pwd' }),
+      toolResult('call-1'),
+    ];
+
+    const { runs } = runsFor(events, true);
+
+    expect(runs[0]!.activeTool).toBeUndefined();
+  });
+
+  it('纯思考段带思考块数', () => {
+    const events = [user('go'), thinking('第一段'), thinking('第二段'), text('答')];
+
+    const { runs } = runsFor(events);
+
+    expect(runs[0]!.thinkingBlocks).toBe(2);
+    expect(runs[0]!.toolCalls).toHaveLength(0);
+    expect(runs[0]!.onlyThinking).toBe(true);
+  });
+
+  it('问询工具块不计步也不进统计；含问询块的事件按 Interactive Request 切断分段', () => {
+    const events = [
+      user('go'),
+      tool('read-1', 'Read', { file_path: 'a.ts' }),
+      tool('ask-1', 'AskUserQuestion', {}),
+      tool('bash-1', 'Bash', { command: 'pwd' }),
+      text('答'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    // 问询是 Interactive Request：切断分段，问询块不算步骤也不进统计。
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.stepCount).toBe(1);
+    expect(runs[0]!.toolCalls.map((call) => call.toolName)).toEqual(['Read']);
+    expect(runs[1]!.stepCount).toBe(1);
+    expect(runs[1]!.toolCalls.map((call) => call.toolName)).toEqual(['Bash']);
+  });
+
+  it('段尾兜底摘要取最后一个可见步骤（按块序）', () => {
+    // 末事件块序 [思考, 工具]：最后一个可见步骤是工具。
+    const mixedToolLast = blocksEvent('mixed-1', [
+      { type: 'thinking', thinking: '先想一下' },
+      { type: 'tool_use', id: 'm-1', name: 'Read', input: { file_path: 'src/App.tsx' } },
+    ]);
+    const { runs } = runsFor([user('go'), mixedToolLast], true);
+    expect(runs[0]!.tail).toBe('App.tsx');
+
+    // 末事件块序 [工具, 思考]：最后一个可见步骤是思考的尾行。
+    const mixedThinkingLast = blocksEvent('mixed-2', [
+      { type: 'tool_use', id: 'm-2', name: 'Read', input: { file_path: 'src/App.tsx' } },
+      { type: 'thinking', thinking: '第一段\n## 收尾这句' },
+    ]);
+    const thinkingLast = runsFor([user('go'), mixedThinkingLast], true);
+    expect(thinkingLast.runs[0]!.tail).toBe('收尾这句');
+  });
+});
+
+describe('tool classification & completed stats', () => {
+  it('classifyToolCategory：内置别名、内置 MCP 段与未知工具', () => {
+    expect(classifyToolCategory('bash')).toBe('execute');
+    expect(classifyToolCategory('Read')).toBe('explore');
+    expect(classifyToolCategory('MultiEdit')).toBe('change');
+    expect(classifyToolCategory('WebFetch')).toBe('explore');
+    expect(classifyToolCategory('view_image')).toBe('explore');
+    expect(classifyToolCategory('js_repl')).toBe('execute');
+    expect(classifyToolCategory('mcp__codemux-control__browser_click')).toBe('execute');
+    expect(classifyToolCategory('mcp__codemux-browser__computer_click')).toBe('execute');
+    expect(classifyToolCategory('codemux_control_browser_snapshot')).toBe('execute');
+    // 第三方 MCP 未命中映射：归「其他」，不 guesses、不消失。
+    expect(classifyToolCategory('mcp__vendor__search_docs')).toBe('other');
+    expect(classifyToolCategory('Skill')).toBe('other');
+    expect(classifyToolCategory('TodoWrite')).toBe('other');
+    expect(classifyToolCategory('EnterPlanMode')).toBe('other');
+  });
+
+  it('extractActivityChangePaths：路径参数与补丁文本目标', () => {
+    expect(extractActivityChangePaths('Write', { file_path: 'a.ts' })).toEqual(['a.ts']);
+    expect(extractActivityChangePaths('NotebookEdit', { notebook_path: 'n.ipynb' })).toEqual(['n.ipynb']);
+    expect(extractActivityChangePaths('Edit', { filePath: 'b.ts' })).toEqual(['b.ts']);
+    expect(extractActivityChangePaths('apply_patch', {
+      input: '*** Begin Patch\n*** Update File: x/a.ts\n+line\n*** Add File: y/b.ts\n',
+    })).toEqual(['x/a.ts', 'y/b.ts']);
+    // 非修改类工具一律没有路径。
+    expect(extractActivityChangePaths('read', { file_path: 'a.ts' })).toEqual([]);
+    expect(extractActivityChangePaths('Write', {})).toEqual([]);
+  });
+
+  it('normalizeActivityFilePath：纯词法归并盘符 / UNC / POSIX / 相对路径', () => {
+    expect(normalizeActivityFilePath('docs\\a.ts')).toBe(normalizeActivityFilePath('docs/a.ts'));
+    expect(normalizeActivityFilePath('C:/x/../y/a.ts')).toBe('C:/y/a.ts/');
+    expect(normalizeActivityFilePath('/a/b/../c/')).toBe('/a/c/');
+    expect(normalizeActivityFilePath('//server/share/a/../b')).toBe('//server/share/b/');
+    expect(normalizeActivityFilePath('a/../b')).toBe('b');
+    expect(normalizeActivityFilePath('../keep')).toBe('../keep');
+    expect(normalizeActivityFilePath('C:/a')).toBe(normalizeActivityFilePath('C:/a/'));
+  });
+
+  it('完成态统计文本：分类计数、修改按词法去重、未知工具归其他', () => {
+    const events = [
+      user('go'),
+      tool('t1', 'Read', { file_path: 'a.ts' }),
+      tool('t2', 'Glob', {}),
+      tool('t3', 'Bash', { command: 'pwd' }),
+      tool('t4', 'Write', { file_path: 'docs\\a.ts' }),
+      tool('t5', 'Edit', { file_path: 'docs/a.ts' }),
+      tool('t6', 'Write', { file_path: 'docs/b.md' }),
+      tool('t7', 'TodoWrite', {}),
+      tool('t8', 'mcp__vendor__do_thing', {}),
+      text('完成'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(runs[0]!.toolCalls).toHaveLength(8);
+    expect(getActivityRunCategoryCounts(runs[0]!)).toEqual({
+      explore: 2,
+      execute: 1,
+      other: 2,
+      changeFiles: 2,
+      changeUnresolvedCalls: 0,
+    });
+    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 探索 2 · 执行 1 · 修改 2 个文件 · 其他 2');
+  });
+
+  it('一次补丁触及多文件按目标计数', () => {
+    const events = [
+      user('go'),
+      tool('p1', 'apply_patch', { input: '*** Begin Patch\n*** Update File: src/a.ts\n*** Add File: src/b.ts\n' }),
+      text('done'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(getActivityRunCategoryCounts(runs[0]!)).toMatchObject({ changeFiles: 2, changeUnresolvedCalls: 0 });
+    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 修改 2 个文件');
+  });
+
+  it('无法识别路径的修改按调用次数补足', () => {
+    const events = [user('go'), tool('w1', 'Write', {}), tool('w2', 'Write', {}), text('done')];
+
+    const { runs } = runsFor(events);
+
+    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 未定位修改 2 次');
+  });
+
+  it('纯思考段显示思考段数', () => {
+    const events = [user('go'), thinking('第一段'), thinking('第二段'), text('答')];
+
+    const { runs } = runsFor(events);
+
+    expect(activityRunCompletedText(runs[0]!)).toBe('已思考 · 2 段');
   });
 });

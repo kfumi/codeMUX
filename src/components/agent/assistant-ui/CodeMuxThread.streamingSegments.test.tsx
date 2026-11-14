@@ -7,6 +7,7 @@ import { cleanup, render, act, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../../stores/agentStore';
+import { useActivityGroupStore } from '../../../stores/activityGroupStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import type { Session } from '../../../types/session';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -94,6 +95,8 @@ function Harness() {
 describe('CodeMuxThread multi-segment streaming visibility', () => {
   beforeEach(async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    // 过程组展开状态是应用运行期 store：逐测试重置，避免用例间点击串味。
+    useActivityGroupStore.setState({ openByKey: {} });
     class MockResizeObserver {
       observe() {}
       unobserve() {}
@@ -210,12 +213,22 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     await flush();
     expectLiveReasoning(container, false);
 
-    // Segment 2: fresh thinking stream — must stay visible even though segment
-    // 1 already committed (OpenCode multi-segment turn).
+    // Segment 2: fresh thinking stream — 并入运行尾段（已提交 1 步 + 实时 1 步 = 成组）：
+    // 实时面板不再直接显示，组头出现并跟随 SEG2 的尾部摘要（默认收起）。
     send({ type: 'content_started', event_id: 'e3', index: 1, content_kind: 'reasoning' });
     send({ type: 'reasoning_delta', event_id: 'e4', index: 1, text: 'SEG2 brand new thinking' });
     await flush();
-    expectLiveReasoning(container, true);
+    expectLiveReasoning(container, false);
+    const header = container.querySelector('[data-slot="activity-run-trigger"]');
+    expect(header).not.toBeNull();
+    expect(header?.getAttribute('data-live')).toBe('true');
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    expect(header?.getAttribute('aria-label')).toContain('SEG2 brand new thinking');
+
+    // 展开组：已提交的 SEG1 思考与 SEG2 实时思考都可见。
+    fireEvent.click(header!);
+    expect(container.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(2);
+    expect(container.querySelector('[data-streaming-reasoning="true"]')).not.toBeNull();
   }, 30000);
 
   it('keeps committed segments in the timeline across a full two-segment turn', async () => {

@@ -1,13 +1,12 @@
 import { useId } from 'react';
 
-import { ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import type { AgentMessage } from '@/stores/agentStore';
 import { isEphemeralLiveStreamNarrationEvent } from '@/stores/agentStore';
 
 import { buildAssistantResultTargetMap, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
-import { hasExplicitFailureSignal } from './convertAgentEvents';
 import { formatElapsed } from './RunningElapsed';
 
 export type AssistantCollapseInfo = {
@@ -17,8 +16,6 @@ export type AssistantCollapseInfo = {
   hideReasoningOnly?: boolean;
   /** 这一轮的过程步骤数：展开后能数出来的过程行（思考 / 工具 / 问询 / 异常…各算一步）。 */
   stepCount: number;
-  /** 这一轮步骤里有工具异常：标题步骤数前的警示图标据此出现。 */
-  hasError: boolean;
 };
 
 export function buildAssistantCollapseInfoMap(
@@ -70,12 +67,6 @@ export function buildAssistantCollapseInfoMap(
     )) ?? collapsibleEventIndices[0];
     const durationMs = getTurnDurationMs(events, timestamps, userIndex, finalAssistantIndex, resultIndex);
     const stepCount = countCollapsibleSteps(events, collapsibleEventIndices);
-    const hasError = turnHasStepError(
-      events,
-      userIndex,
-      Math.max(finalAssistantIndex, resultIndex),
-      collapsibleEventIndices,
-    );
 
     for (const eventIndex of collapsibleEventIndices) {
       collapseInfoByEventIndex.set(eventIndex, {
@@ -84,7 +75,6 @@ export function buildAssistantCollapseInfoMap(
         durationMs,
         hideReasoningOnly: eventIndex === finalAssistantIndex && finalAssistantHasReasoningAndText,
         stepCount,
-        hasError,
       });
     }
   }
@@ -162,23 +152,20 @@ export function AssistantCollapseToggle({
   expanded,
   durationMs,
   stepCount,
-  hasError = false,
   onClick,
 }: {
   expanded: boolean;
   durationMs?: number;
   stepCount?: number;
-  hasError?: boolean;
   onClick: () => void;
 }) {
   // 按钮带了 aria-label（动作名），按钮里的文字不再进入可访问名：状态改用 aria-describedby
-  // 播报，否则读屏用户既听不到时长与步骤数，也听不到异常。
+  // 播报，否则读屏用户既听不到时长与步骤数。
   const statusId = useId();
   const durationText = durationMs != null ? formatCompactDuration(durationMs) : '';
   const statusText = [
     durationText ? `已处理 ${durationText}` : '已处理',
     stepCount != null && stepCount > 0 ? `${stepCount} 个步骤` : '',
-    hasError ? '过程步骤里有异常' : '',
   ].filter(Boolean).join('，');
 
   return (
@@ -217,9 +204,6 @@ export function AssistantCollapseToggle({
             </span>
           ) : null}
         </span>
-        {hasError ? (
-          <CircleAlert aria-hidden className="size-3.5 shrink-0 text-destructive" />
-        ) : null}
         {stepCount != null && stepCount > 0 ? (
           <span
             data-slot="assistant-collapse-steps"
@@ -466,105 +450,12 @@ function countCollapsibleSteps(events: AgentMessage[], collapsibleEventIndices: 
   return stepCount;
 }
 
-/**
- * 这一轮的步骤里是否有异常——标题上那个警示图标据此出现。
- *
- * 判据与渲染层同一套（工具卡是红的，标题就必须带图标）：
- * - 轮内带文本的 `error` 事件（提供方把工具失败折成错误文本时也在内）；
- * - 本轮工具调用拿到的失败结果：`is_error`，或 `hasExplicitFailureSignal` 认出的
- *   `exit_code` 非 0 / `success:false` 这类「内容即失败」的信号；
- * - 回合 `result` 报错：转换层会把它的文本贴到最后一个尚无结果的工具卡上。
- *
- * 结果必须按 `tool_use_id` 认领，否则会把上一轮工具的失败算到这一轮头上。
- */
-function turnHasStepError(
-  events: AgentMessage[],
-  userIndex: number,
-  lastIndex: number,
-  collapsibleEventIndices: number[],
-): boolean {
-  const collapsibleToolUseIds = new Set<string>();
-  for (const eventIndex of collapsibleEventIndices) {
-    const content = assistantContentBlocks(events[eventIndex]);
-    if (!content) {
-      continue;
-    }
-    for (const block of content) {
-      if (block?.type === 'tool_use' && typeof block.id === 'string' && block.id.length > 0) {
-        collapsibleToolUseIds.add(block.id);
-      }
-    }
-  }
-
-  for (let index = userIndex + 1; index <= lastIndex; index += 1) {
-    const event = events[index];
-    if (!event) {
-      continue;
-    }
-    if (event.kind === 'error') {
-      if (typeof event.data.error === 'string' && event.data.error.trim().length > 0) {
-        return true;
-      }
-      continue;
-    }
-    if (event.kind === 'result' && event.data.is_error === true) {
-      if (typeof event.data.result === 'string' && event.data.result.trim().length > 0) {
-        return true;
-      }
-      continue;
-    }
-    for (const result of getToolResultSignals(event)) {
-      if (result.isError && collapsibleToolUseIds.has(result.toolUseId)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 function assistantContentBlocks(event: AgentMessage | undefined) {
   if (event?.kind !== 'assistant') {
     return undefined;
   }
   const content = event.data.message?.content;
   return Array.isArray(content) ? content : undefined;
-}
-
-/**
- * 工具结果的几处落地形态（独立 `tool_result` 事件、只含结果的 user 消息）里的失败信号。
- * 失败判据与渲染层共用，避免出现「卡片红、标题无图标」。
- */
-function getToolResultSignals(event: AgentMessage): Array<{ toolUseId: string; isError: boolean }> {
-  if (event.kind !== 'tool_result' && event.kind !== 'user') {
-    return [];
-  }
-
-  const data = event.data as unknown as Record<string, unknown>;
-  const signals: Array<{ toolUseId: string; isError: boolean }> = [];
-
-  const message = data.message;
-  if (isRecord(message) && Array.isArray(message.content)) {
-    for (const block of message.content) {
-      if (isRecord(block) && block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        signals.push({
-          toolUseId: block.tool_use_id,
-          isError: block.is_error === true || hasExplicitFailureSignal(block.content),
-        });
-      }
-    }
-  }
-
-  const toolUseResult = data.tool_use_result;
-  if (isRecord(toolUseResult) && typeof toolUseResult.tool_use_id === 'string') {
-    const rawResult = toolUseResult.content ?? toolUseResult.result;
-    signals.push({
-      toolUseId: toolUseResult.tool_use_id,
-      isError: toolUseResult.is_error === true || hasExplicitFailureSignal(rawResult),
-    });
-  }
-
-  return signals;
 }
 
 /** `error` 有文本、且前面还有没拿到结果的工具调用：转换层把它贴进那张工具卡，这个事件一行都不画。 */

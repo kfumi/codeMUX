@@ -18,7 +18,11 @@ import { Streamdown, parseMarkdownIntoBlocks } from 'streamdown';
 import { createIncrementalBlockParser } from '@/lib/incrementalMarkdownBlocks';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
-import { ActivityStepThinking } from '@/components/assistant-ui/activity-run';
+import {
+  ACTIVITY_RUN_STEP_INDENT_CLASS,
+  ActivityRunGroupHead,
+  ActivityStepThinking,
+} from '@/components/assistant-ui/activity-run';
 import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
 import {
   EMPTY_ACTIVITY_RUNS,
@@ -27,6 +31,8 @@ import {
   type ActivityRunPlacement,
   type ActivityRuns,
 } from '@/lib/activityRuns';
+import { deriveActivityRunGroup, readActivityGroupDisclosure, useActivityGroupStore } from '@/stores/activityGroupStore';
+import { resolveLiveStreamContent } from './liveStreamContent';
 import {
   buildRunSubagentActivity,
   runSubagentActivityEqual,
@@ -106,10 +112,15 @@ type CodeMuxThreadRenderContextValue = {
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
-  /** 处理段投影（连续思考+工具）：分组头已移除，仅用于锚定委派卡片。 */
+  /**
+   * 处理段投影（连续思考+工具）：段首承载折叠组头，收起时只藏过程步骤。
+   * 委派段仍由独立活动卡表达。
+   */
   activityRuns: ActivityRuns;
-  expandedRunKeys: Set<string>;
-  claimedRunKeys: Set<string>;
+  /** 过程组展开状态（应用运行期 store）：`${scopeKey}:${runKey}` → 接管后的开合。 */
+  activityGroups: Record<string, boolean>;
+  /** 主线程实时思考缓冲是否有内容（粗粒度布尔，只在开始/结束翻转，不随 flush 抖动）。 */
+  hasLiveThinkingBuffer: boolean;
   onToggleRun: (runKey: string, currentlyOpen: boolean) => void;
   /** 处理段里的委派：段 key → 该段的子智能体拓扑（含委派的段才有条目）。 */
   subagentRunActivity: Map<string, SubagentActivity>;
@@ -137,10 +148,10 @@ const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
  */
 const LONG_THREAD_EVENT_THRESHOLD = 120;
 /**
- * 分组头已移除：「处理段」组节点只作为渲染管线的**稳定边界**保留——组把连续的
- * 思考/工具收成一个 key 稳定的子树，流式更新（事件追加、part 状态变化）时工具卡等
- * 部分级组件的实例状态（如展开的工具详情）不会被打掉重挂。渲染层对组**直接透传
- * children**：视觉上完全平铺，没有组头、没有缩进、没有段级开合。
+ * 「处理段」组节点是渲染管线的**稳定边界**——组把连续的思考/工具收成一个 key 稳定的子树，
+ * 流式更新（事件追加、part 状态变化）时工具卡等部分级组件的实例状态（如展开的工具详情）
+ * 不会被打掉重挂。段首行在组节点之外画折叠组头；收起时组节点整体不渲染（只藏过程步骤，
+ * 正文、问询卡等非过程部分照常可见），展开时步骤缩进呈现。
  */
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-activity-run'],
@@ -311,16 +322,16 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   }, [storedWindowSize, viewportRef]);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
-  // 处理段的展开状态：未被用户点过的段跟随 live 自动开合（运行中展开、结束后收起），
-  // 用户点过一次之后由用户接管（对齐参考实现的 useAutomaticDisclosure）。
-  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
-  const [claimedRunKeys, setClaimedRunKeys] = useState<Set<string>>(() => new Set());
+  // 过程组的展开状态在应用运行期的 store 里（跨会话切换、尾部窗口卸载与整轮折叠保留；
+  // 未接管的组一律默认折叠）。这里只订阅整张表：点击是低频事件，表身份变化后由
+  // 行比较器决定哪些行真的重画。
+  const activityGroups = useActivityGroupStore((state) => state.openByKey);
+  const setActivityRunOpen = useActivityGroupStore((state) => state.setRunOpen);
   const [showMessageNav, setShowMessageNav] = useState(true);
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
-    setExpandedRunKeys(new Set());
-    setClaimedRunKeys(new Set());
+    // 注意：过程组的手动状态不随设置切换重置（工单 06：切换「精简 AI 输出」只改外层显隐）。
   }, [sessionId, compactAiOutput]);
 
   useEffect(() => {
@@ -373,19 +384,11 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     });
   }, []);
 
-  /** `currentlyOpen` 是这一行当前生效的开合状态：自动展开的段首次被点击要能收起来。 */
+  /** `currentlyOpen` 是这一行当前生效的开合状态：自动折叠的组首次点击要能展开。
+   * 写入即接管：之后流式追加、段完成都不再自动翻转（store 的语义）。 */
   const toggleRun = useCallback((runKey: string, currentlyOpen: boolean) => {
-    setClaimedRunKeys((current) => (current.has(runKey) ? current : new Set(current).add(runKey)));
-    setExpandedRunKeys((current) => {
-      const next = new Set(current);
-      if (currentlyOpen) {
-        next.delete(runKey);
-      } else {
-        next.add(runKey);
-      }
-      return next;
-    });
-  }, []);
+    setActivityRunOpen(sessionId, runKey, !currentlyOpen);
+  }, [sessionId, setActivityRunOpen]);
 
   // Incremental tool duration calculation - only use event-reported durations
   const toolDurationCacheRef = useRef<{ events: AgentMessage[]; result: Record<string, number> }>({ events: [], result: {} });
@@ -456,6 +459,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
       (state.streamingText[sessionId]?.length ?? 0) > 0
       || (state.streamingThinking[sessionId]?.length ?? 0) > 0,
   );
+  // 过程组的「实时思考附加步骤」粗判：只认思考缓冲、不认正文缓冲——正文缓冲在回答阶段
+  // 长期非空，把它算成思考步骤会把运行中的工具误判成组员并默认收起。误路由到正文缓冲的
+  // 思考不参与成组（保守方向的偏差：宁可少收，不可误藏）。急停时实时内容整体让位。
+  const hasLiveThinkingBuffer = useAgentStore((state) => {
+    if (state.forceStopped[sessionId] ?? false) {
+      return false;
+    }
+    return (state.streamingThinking[sessionId]?.length ?? 0) > 0;
+  });
   // Children all terminal but the parent's summary turn has not settled yet:
   // the flow is still running from the user's point of view.
   const continuationPending = useSubagentStore((state) => state.continuationPending[sessionId] ?? false);
@@ -512,8 +524,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           && prev.isToggleMessage === info.isToggleMessage
           && prev.durationMs === info.durationMs
           && prev.hideReasoningOnly === info.hideReasoningOnly
-          && prev.stepCount === info.stepCount
-          && prev.hasError === info.hasError;
+          && prev.stepCount === info.stepCount;
       })
     ) {
       collapseCacheRef.current = { events, timestamps: eventTimestamps, flags, map: cache.map };
@@ -554,6 +565,30 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return next;
   }, [activityRuns, events, sessionSubagents]);
 
+  // 运行中的尾段：实时思考作为它的附加可见步骤参与折叠组的开合（工单 05）。
+  // runs 数组每次追加都重建，但 live 段同屏最多一个，这里取它的引用与开合语义。
+  const tailRun = useMemo(() => {
+    for (let index = activityRuns.runs.length - 1; index >= 0; index -= 1) {
+      const run = activityRuns.runs[index]!;
+      if (run.live) {
+        return run;
+      }
+    }
+    return undefined;
+  }, [activityRuns]);
+  const tailGroup = useMemo(() => {
+    if (!tailRun || tailRun.delegation) {
+      return undefined;
+    }
+    const group = deriveActivityRunGroup({
+      run: tailRun,
+      disclosure: readActivityGroupDisclosure(activityGroups, sessionId, tailRun.runKey),
+      // 实时思考并入运行尾段（tailRun.live 恒真）。
+      liveThinkingAttached: hasLiveThinkingBuffer,
+    });
+    return { runKey: tailRun.runKey, eligible: group.eligible, open: group.open };
+  }, [tailRun, activityGroups, sessionId, hasLiveThinkingBuffer]);
+
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
@@ -562,8 +597,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     expandedTurnKeys,
     onToggleExpandedTurn: toggleExpandedTurn,
     activityRuns,
-    expandedRunKeys,
-    claimedRunKeys,
+    activityGroups,
+    hasLiveThinkingBuffer,
     onToggleRun: toggleRun,
     toolDurations,
     turnByEventIndex,
@@ -578,8 +613,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     expandedTurnKeys,
     toggleExpandedTurn,
     activityRuns,
-    expandedRunKeys,
-    claimedRunKeys,
+    activityGroups,
+    hasLiveThinkingBuffer,
     toggleRun,
     toolDurations,
     turnByEventIndex,
@@ -620,7 +655,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
                 <CodeMuxThreadMessages />
               </CodeMuxThreadRenderContext.Provider>
               {stopped ? <InterruptBanner /> : null}
-              <StreamingContent sessionId={sessionId} events={events} />
+              <StreamingContent sessionId={sessionId} events={events} tailGroup={tailGroup} />
               {isRunning && !stopped ? <StreamingStatusFooter sessionId={sessionId} /> : null}
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
@@ -851,8 +886,8 @@ function CodeMuxAssistantMessage() {
     isRunning,
     collapseInfoByEventIndex,
     expandedTurnKeys,
-    expandedRunKeys,
-    claimedRunKeys,
+    activityGroups,
+    hasLiveThinkingBuffer,
     onToggleExpandedTurn,
     onToggleRun,
     activityRuns,
@@ -869,14 +904,15 @@ function CodeMuxAssistantMessage() {
    * 必须在这里派生一次再传进去，比较器才有东西可比（见 `deriveAssistantRowBindings` 的注释）。
    */
   const bindings = deriveAssistantRowBindings({
+    sessionId,
     message,
     isLastMessage,
     compactAiOutput,
     isRunning,
     collapseInfoByEventIndex,
     expandedTurnKeys,
-    expandedRunKeys,
-    claimedRunKeys,
+    activityGroups,
+    hasLiveThinkingBuffer,
     activityRuns,
     subagentRunActivity,
     toolDurations,
@@ -1823,7 +1859,6 @@ export type AssistantRowBindings = {
     turnKey: string;
     durationMs: AssistantCollapseInfo['durationMs'];
     stepCount: AssistantCollapseInfo['stepCount'];
-    hasError: AssistantCollapseInfo['hasError'];
   } | undefined;
   collapseExpanded: boolean;
   hideCollapsedContent: boolean;
@@ -1832,6 +1867,18 @@ export type AssistantRowBindings = {
   runLive: boolean;
   runHead: boolean;
   runOpen: boolean;
+  /** 本段是否渲染为折叠组（≥2 个有效步骤、非委派；实时思考计入有效步骤）。 */
+  runGroupEligible: boolean;
+  /** 段内已提交步骤数（组头再叠加实时思考粗判）。 */
+  runStepCount: number | undefined;
+  /** 段内过程步骤是否可见：未成组恒可见，成组后跟随开合。 */
+  runPartsVisible: boolean;
+  /** 完成态组头的分类统计文案（仅成组且已闭合时非空）。 */
+  runCompletedText: string | undefined;
+  /** 实时组头的未决工具摘要（投影按最新参数解析）。 */
+  runActiveToolSummary: string | undefined;
+  /** 实时组头无活动项时的兜底：段尾步骤单行摘要。 */
+  runTail: string | undefined;
   hasDelegation: boolean;
   delegationRunning: boolean;
   delegationNodeCount: number;
@@ -1869,14 +1916,17 @@ type AssistantRowProps = {
 };
 
 type DeriveAssistantRowInput = {
+  sessionId: string;
   message: MessageState;
   isLastMessage: boolean;
   compactAiOutput: boolean;
   isRunning: boolean;
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
-  expandedRunKeys: Set<string>;
-  claimedRunKeys: Set<string>;
+  /** 过程组展开状态（store 表）：`${scopeKey}:${runKey}` → 接管后的开合。 */
+  activityGroups: Record<string, boolean>;
+  /** 主线程实时思考缓冲粗判（见组件内的选择器注释）。 */
+  hasLiveThinkingBuffer: boolean;
   activityRuns: ActivityRuns;
   subagentRunActivity: Map<string, SubagentActivity>;
   toolDurations: Record<string, number>;
@@ -1920,17 +1970,20 @@ function deriveAssistantRowBindings(input: DeriveAssistantRowInput): AssistantRo
   const run = runPlacement ? input.activityRuns.runByKey.get(runPlacement.runKey) : undefined;
   const activity = run ? input.subagentRunActivity.get(run.runKey) : undefined;
   const delegationRunning = activity != null && activity.summary.running > 0;
-  const runOpen = run
-    ? (input.claimedRunKeys.has(run.runKey)
-      ? input.expandedRunKeys.has(run.runKey)
-      : run.live || delegationRunning)
-    : true;
+  // 过程组语义（工单 04/05）：实时思考并入**运行中尾段**，作为附加可见步骤参与
+  // 成组（≥2 步）与开合；正文一落地该段即闭合（run.live 随 endsWithText 翻 false）。
+  const liveThinkingAttached = run != null && run.live === true && input.hasLiveThinkingBuffer;
+  const runGroup = deriveActivityRunGroup({
+    run,
+    disclosure: readActivityGroupDisclosure(input.activityGroups, input.sessionId, run?.runKey ?? ''),
+    hasDelegationCard: activity != null,
+    delegationRunning,
+    liveThinkingAttached,
+  });
   const delegationCardVisible = runPlacement?.isHead === true
     && (collapseInfo == null || collapseExpanded)
     && activity != null
     && activity.nodes.length > 0;
-  const partsVisible = !hideCollapsedContent
-    && (activity == null || delegationCardVisible || runOpen);
 
   const sourceRole = message.metadata.custom?.sourceRole === 'system' ? 'system' : 'assistant';
   const turn = getSourceEventIndices(message)
@@ -1965,17 +2018,31 @@ function deriveAssistantRowBindings(input: DeriveAssistantRowInput): AssistantRo
   }
   const used = collectUsedDurations(content, input.toolDurations);
 
+  // 行内是否有不属于过程组的部分（正文 / 问询卡 / data 卡 / 委派工具卡）：这些不随组收起。
+  const rowHasNonRunParts = parts.some((part) => !part.activityRunPart);
+  const runGroupEligible = runGroup.eligible;
+  const runPartsVisible = runGroup.partsVisible;
+  const partsVisible = !hideCollapsedContent
+    && (rowHasNonRunParts || runPartsVisible || delegationCardVisible);
+  const runCompletedText = runGroup.completedText;
+  const runActiveToolSummary = runGroup.activeToolSummary;
+
   return {
     render: message.content.length === 0 && !compactToggle
       ? 'empty'
-      : (compactToggle || delegationCardVisible || partsVisible || footerVisible ? 'content' : 'hidden'),
+      : (compactToggle
+        || delegationCardVisible
+        || partsVisible
+        || footerVisible
+        // 段首行即使过程步骤全部收起，也必须渲染（它承载折叠组头）。
+        || (runGroupEligible && runPlacement?.isHead === true && !hideCollapsedContent)
+        ? 'content' : 'hidden'),
     compactToggle,
     collapse: collapseInfo
       ? {
         turnKey: collapseInfo.turnKey,
         durationMs: collapseInfo.durationMs,
         stepCount: collapseInfo.stepCount,
-        hasError: collapseInfo.hasError,
       }
       : undefined,
     collapseExpanded,
@@ -1984,7 +2051,13 @@ function deriveAssistantRowBindings(input: DeriveAssistantRowInput): AssistantRo
     runKey: run?.runKey,
     runLive: run?.live === true,
     runHead: runPlacement?.isHead === true,
-    runOpen,
+    runOpen: runGroup.open,
+    runGroupEligible,
+    runStepCount: run?.stepCount,
+    runPartsVisible,
+    runCompletedText,
+    runActiveToolSummary,
+    runTail: run?.tail || undefined,
     hasDelegation: activity != null,
     delegationRunning,
     delegationNodeCount: activity?.nodes.length ?? 0,
@@ -2069,6 +2142,12 @@ export function assistantRowBindingsEqual(
     || a.runLive !== b.runLive
     || a.runHead !== b.runHead
     || a.runOpen !== b.runOpen
+    || a.runGroupEligible !== b.runGroupEligible
+    || a.runStepCount !== b.runStepCount
+    || a.runPartsVisible !== b.runPartsVisible
+    || a.runCompletedText !== b.runCompletedText
+    || a.runActiveToolSummary !== b.runActiveToolSummary
+    || a.runTail !== b.runTail
     || a.hasDelegation !== b.hasDelegation
     || a.delegationRunning !== b.delegationRunning
     || a.delegationNodeCount !== b.delegationNodeCount
@@ -2099,8 +2178,7 @@ export function assistantRowBindingsEqual(
     if (!collapseA || !collapseB
       || collapseA.turnKey !== collapseB.turnKey
       || collapseA.durationMs !== collapseB.durationMs
-      || collapseA.stepCount !== collapseB.stepCount
-      || collapseA.hasError !== collapseB.hasError) {
+      || collapseA.stepCount !== collapseB.stepCount) {
       return false;
     }
   }
@@ -2255,7 +2333,6 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
             expanded={bindings.collapseExpanded}
             durationMs={bindings.collapse.durationMs}
             stepCount={bindings.collapse.stepCount}
-            hasError={bindings.collapse.hasError}
             onClick={() => onToggleExpandedTurn(bindings.collapse!.turnKey)}
           />
         ) : null}
@@ -2275,15 +2352,45 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
             ))}
           </SubagentActivityCard>
         ) : null}
+        {bindings.runGroupEligible && bindings.runHead && bindings.runKey && !bindings.hideCollapsedContent ? (
+          <ActivityRunGroupHead
+            stepCount={bindings.runStepCount ?? 0}
+            live={bindings.runLive}
+            open={bindings.runOpen}
+            onToggle={() => onToggleRun(bindings.runKey!, bindings.runOpen)}
+            completedText={bindings.runCompletedText ?? ''}
+            activeToolSummary={bindings.runActiveToolSummary}
+            fallbackTail={bindings.runTail ?? ''}
+            sessionId={sessionId}
+            controlsId={`activity-run-steps-${bindings.runKey}`}
+          />
+        ) : null}
         {bindings.partsVisible ? (
           <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
             {({ part, children }) => {
               switch (part.type) {
                 case 'group-activity-run':
-                  // 分组头已移除：组节点只作为稳定边界，步骤按源码顺序直接透传（平铺）。
-                  // 委派卡片所在行是例外：卡片已画出过程步骤，这里只透传正文等非过程部分。
+                  // 委派卡片所在行：卡片已画出过程步骤，这里只透传正文等非过程部分。
                   if (bindings.delegationCardVisible) {
                     return null;
+                  }
+                  // 收起的过程组：整块不渲染（组头已经表达在段首行）。
+                  if (!bindings.runPartsVisible) {
+                    return null;
+                  }
+                  // 成组的段：步骤缩进呈现；未成组的段（单步骤）保持平铺。
+                  if (bindings.runGroupEligible) {
+                    return (
+                      <div
+                        data-slot="activity-run-steps"
+                        {...(bindings.runHead && bindings.runKey
+                          ? { id: `activity-run-steps-${bindings.runKey}` }
+                          : {})}
+                        className={ACTIVITY_RUN_STEP_INDENT_CLASS}
+                      >
+                        {children}
+                      </div>
+                    );
                   }
                   return children;
                 case 'text':
@@ -2384,51 +2491,23 @@ const StreamingStatusFooter = memo(function StreamingStatusFooter({
 function StreamingContent({
   sessionId,
   events,
+  tailGroup,
 }: {
   sessionId: string;
   events: AgentMessage[];
+  /** 运行尾段的折叠组语义：实时思考作为它的附加可见步骤参与开合（工单 05）。 */
+  tailGroup?: { eligible: boolean; open: boolean };
 }) {
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
   const thinkingEpoch = useAgentStore((state) => state.streamingThinkingStartEventCount[sessionId] ?? 0);
-  const lastAssistantText = useMemo(() => getLastAssistantText(events), [events]);
-  const lastAssistantThinking = useMemo(() => getLastAssistantThinking(events), [events]);
-  const lastCommittedThinkingIndex = useMemo(() => getLastCommittedThinkingEventIndex(events), [events]);
-  const duplicateLiveText = Boolean(
-    text
-    && lastAssistantText
-    && (
-      text === lastAssistantText
-      || text.startsWith(lastAssistantText)
-      || lastAssistantText.startsWith(text)
-    ),
+  // 可见性判定与过程组的活动组头共用同一份纯函数（残留副本 / 误路由 / 重复正文的去重口径）。
+  const { visibleThinking, visibleText } = useMemo(
+    () => resolveLiveStreamContent(events, { thinking, text, thinkingEpoch, stopped }),
+    [events, thinking, text, thinkingEpoch, stopped],
   );
-  // If text is actually a mis-routed thinking stream, keep it out of the markdown area.
-  const textIsMisroutedThinking = Boolean(
-    text
-    && (
-      (thinking && (thinking.startsWith(text) || text.startsWith(thinking) || thinking.includes(text)))
-      || (lastAssistantThinking && (
-        lastAssistantThinking === text
-        || lastAssistantThinking.startsWith(text)
-        || text.startsWith(lastAssistantThinking)
-      ))
-    ),
-  );
-  // OpenCode 一回合会产出多段"思考→正文"。实时思考流开始于最近一次 thinking
-  // 提交之后 → 是下一段落的新思考，必须显示；流开始后时间线里又提交了
-  // thinking → 缓冲区只是已提交内容的残留副本，让位给时间线气泡。
-  const liveThinkingIsStaleCopy = lastCommittedThinkingIndex >= thinkingEpoch;
-  // Prefer reasoning panel: never show live thinking content as answer markdown.
-  const visibleThinking = liveThinkingIsStaleCopy
-    ? ''
-    : (thinking || (textIsMisroutedThinking ? text : ''));
-  const visibleText = (
-    duplicateLiveText
-    || textIsMisroutedThinking
-  ) ? '' : text;
 
   // 分帧绘制：到达只决定目标，真正画多少由 backlog 推导，使批次大小在一个回合内
   // 相差一个数量级时也不会表现为"一跳一跳"。可见性判定仍用全文，只有渲染切片被
@@ -2449,9 +2528,18 @@ function StreamingContent({
    */
   const blockParser = useMemo(() => createIncrementalBlockParser(parseMarkdownIntoBlocks), []);
 
+  // 实时思考并入尾段折叠组：段未成组时保持独立单行；成组且收起时整行让位给组头摘要，
+  // 展开时按步骤缩进渲染。
+  const thinkingInGroup = Boolean(visibleThinking && tailGroup?.eligible);
+  const hideThinkingInGroup = thinkingInGroup && !(tailGroup?.open ?? false);
+
   // 状态行已提到外层，这里只负责实时内容本身。没有可见内容时不留空壳：空壳的
   // `mb-2` 会和上一行的行尾间距叠加，让状态行的上间距又变成另一种值。
   if (stopped || (!visibleThinking && !visibleText)) {
+    return null;
+  }
+  if (hideThinkingInGroup && !visibleText) {
+    // 实时思考整体让位给组头摘要：不留空壳（空壳的 `mb-2` 会叠加出额外间距）。
     return null;
   }
 
@@ -2473,8 +2561,11 @@ function StreamingContent({
   return (
     <div className="mb-2 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-1 text-ui-body leading-relaxed">
-        {isThinking ? (
-          <div data-streaming-reasoning="true" className="w-full min-w-0">
+        {isThinking && !hideThinkingInGroup ? (
+          <div
+            data-streaming-reasoning="true"
+            className={cn('w-full min-w-0', thinkingInGroup ? ACTIVITY_RUN_STEP_INDENT_CLASS : '')}
+          >
             {liveThinkingStep}
           </div>
         ) : null}
@@ -2496,70 +2587,6 @@ function StreamingContent({
       </div>
     </div>
   );
-}
-
-function getLastAssistantText(events: AgentMessage[]): string {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind !== 'assistant') {
-      continue;
-    }
-
-    const text = event.data.message.content
-      .filter((block): block is { type: 'text'; text: string } =>
-        block?.type === 'text' && typeof block.text === 'string',
-      )
-      .map((block) => block.text)
-      .join('')
-      .trim();
-    if (text) {
-      return text;
-    }
-  }
-
-  return '';
-}
-
-function getLastAssistantThinking(events: AgentMessage[]): string {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind !== 'assistant') {
-      continue;
-    }
-
-    const thinking = event.data.message.content
-      .filter((block): block is { type: 'thinking'; thinking: string } =>
-        block?.type === 'thinking' && typeof block.thinking === 'string',
-      )
-      .map((block) => block.thinking)
-      .join('')
-      .trim();
-    if (thinking) {
-      return thinking;
-    }
-  }
-
-  return '';
-}
-
-/** 最新一条带非空 thinking 的 assistant 事件下标（没有则 -1）。 */
-function getLastCommittedThinkingEventIndex(events: AgentMessage[]): number {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind !== 'assistant') {
-      continue;
-    }
-    const hasThinking = event.data.message.content.some((block) => (
-      isRecord(block)
-      && block.type === 'thinking'
-      && typeof block.thinking === 'string'
-      && block.thinking.length > 0
-    ));
-    if (hasThinking) {
-      return index;
-    }
-  }
-  return -1;
 }
 
 function getMessageText(message: MessageState) {

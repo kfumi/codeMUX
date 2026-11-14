@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useAgentStore } from '@/stores/agentStore';
+import { useActivityGroupStore } from '@/stores/activityGroupStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSubagentStore } from '@/stores/subagentStore';
 import type { AppConfig } from '@/types/provider';
@@ -93,6 +94,8 @@ const completedProcessEvents = [
 
 describe('SubagentPreviewPanel', () => {
   beforeEach(() => {
+    // 过程组展开状态在应用运行期 store 里：逐测试重置，避免用例间点击串味。
+    useActivityGroupStore.setState({ openByKey: {} });
     useSubagentStore.setState({ sessions: {} });
     useSettingsStore.setState({ config: compactConfig(false) });
   });
@@ -476,6 +479,34 @@ describe('SubagentPreviewPanel', () => {
       expect(tail?.querySelector('[data-streaming-reasoning="true"]')).toBeTruthy();
       expect(tail?.querySelector('[data-streaming-text="markdown"]')).toBeNull();
     });
+
+    it('未提交思考并入运行尾段：与已提交步骤合成折叠组并默认收起', () => {
+      seedStore({
+        status: 'running',
+        events: [
+          prompt,
+          { type: 'tool_started', tool_use_id: 'c1', name: 'Grep', input: { pattern: 'a' }, event_id: 'e1', timestamp: '2026-08-29T05:47:20.000Z' },
+          { type: 'reasoning_delta', index: 0, text: '先看入口文件', event_id: 'd0', timestamp: '2026-08-29T05:47:20.100Z' },
+        ],
+      });
+
+      const { container } = renderPanel();
+
+      // 已提交工具 + 未提交思考 = 两个可见步骤：成组并默认收起，组头是实时态、
+      // 摘要跟随实时思考尾部；组内工具卡与实时思考面板都让位给组头。
+      const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+      expect(header).not.toBeNull();
+      expect(header.getAttribute('data-live')).toBe('true');
+      expect(header.getAttribute('aria-expanded')).toBe('false');
+      expect(header.getAttribute('aria-label')).toContain('先看入口文件');
+      expect(container.querySelector('[data-slot="tool-fallback-trigger"]')).toBeNull();
+      expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+
+      // 展开组：工具步骤与实时思考都可见（实时思考按步骤缩进渲染）。
+      fireEvent.click(header);
+      expect(container.querySelector('[data-slot="tool-fallback-trigger"]')).not.toBeNull();
+      expect(container.querySelector('[data-streaming-reasoning="true"]')).not.toBeNull();
+    });
   });
 
   it('工具调用使用主会话同一套工具卡片', () => {    seedStore({
@@ -505,7 +536,7 @@ describe('SubagentPreviewPanel', () => {
     expect(screen.getByRole('button', { name: /搜索文本/ })).toBeTruthy();
   });
 
-  it('连续工具调用按源码顺序平铺成各工具卡片', () => {
+  it('连续工具调用收成折叠组，展开后按源码顺序平铺', () => {
     seedStore({
       status: 'completed',
       events: [
@@ -552,15 +583,106 @@ describe('SubagentPreviewPanel', () => {
 
     const { container } = renderPanel();
 
-    // 没有段组头：两个工具卡片按源码顺序直接平铺。
-    expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(0);
+    // 与主会话同款：两次工具调用收成一个折叠组，默认收起，组头是分类统计。
+    const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(header).not.toBeNull();
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+    expect(header.getAttribute('aria-label')).toBe('已处理 · 探索 2');
+    expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
+    fireEvent.click(header);
+
+    // 展开后两个工具卡片按源码顺序缩进平铺（仍是主会话那一套工具卡）。
     const toolTriggers = Array.from(container.querySelectorAll('[data-slot="tool-fallback-trigger"]'));
     expect(toolTriggers).toHaveLength(2);
     expect(toolTriggers[0]!.getAttribute('aria-label')).toContain('搜索');
     expect(toolTriggers[1]!.getAttribute('aria-label')).toContain('读取');
     expect(toolTriggers[0]!.textContent).toContain('AgentPanel');
     expect(toolTriggers[1]!.textContent).toContain('App.tsx');
+  });
+
+  it('过程组的展开状态按子智能体身份隔离', () => {
+    const events = [
+      {
+        type: 'tool_started',
+        tool_use_id: 'c1',
+        name: 'Grep',
+        input: { pattern: 'AgentPanel' },
+        event_id: 'e1',
+        timestamp: '2026-08-29T05:47:21.000Z',
+      },
+      {
+        type: 'tool_started',
+        tool_use_id: 'c2',
+        name: 'Read',
+        input: { file_path: 'src/App.tsx' },
+        event_id: 'e2',
+        timestamp: '2026-08-29T05:47:22.000Z',
+      },
+      {
+        type: 'tool_finished',
+        tool_use_id: 'c1',
+        content: 'matches',
+        is_error: false,
+        event_id: 'e2b',
+        timestamp: '2026-08-29T05:47:22.100Z',
+      },
+      {
+        type: 'tool_finished',
+        tool_use_id: 'c2',
+        content: 'ok',
+        is_error: false,
+        event_id: 'e2c',
+        timestamp: '2026-08-29T05:47:22.200Z',
+      },
+      {
+        type: 'assistant_message',
+        content: [{ type: 'text', text: '完成' }],
+        event_id: 'e3',
+        timestamp: '2026-08-29T05:47:23.000Z',
+      },
+    ];
+    // 同一会话两个子智能体轨道，时间线同形：组状态必须按轨道隔离。
+    const makeDescriptor = (subagentId: string) => ({
+      subagentId,
+      provider: 'claude',
+      title: 'Explore',
+      description: '探索前端技术栈',
+      status: 'completed' as const,
+      toolCallId: subagentId,
+      subtitle: '',
+      updatedAt: 0,
+    });
+    useSubagentStore.setState({
+      sessions: {
+        'session-1': {
+          order: ['toolu_1', 'toolu_other'],
+          descriptors: {
+            toolu_1: makeDescriptor('toolu_1'),
+            toolu_other: makeDescriptor('toolu_other'),
+          },
+          events: { toolu_1: events, toolu_other: events },
+          seenEventIds: {
+            toolu_1: new Set(events.map((event) => String(event.event_id))),
+            toolu_other: new Set(events.map((event) => String(event.event_id))),
+          },
+        },
+      },
+    });
+
+    const first = renderPanel('session-1', 'toolu_1');
+    const header = first.container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(header).not.toBeNull();
+    fireEvent.click(header);
+    expect(first.container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(2);
+    first.unmount();
+
+    // 另一个子智能体（同 runKey 形态、不同轨道）：状态不串，仍是默认折叠。
+    const other = renderPanel('session-1', 'toolu_other');
+    const otherHeader = other.container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
+    expect(otherHeader).not.toBeNull();
+    expect(otherHeader.getAttribute('aria-expanded')).toBe('false');
+    expect(other.container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
   });
 
   it('超长任务提示默认折叠，点击查看更多后展开', () => {

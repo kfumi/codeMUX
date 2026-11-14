@@ -76,36 +76,24 @@ describe('AssistantCollapseToggle', () => {
     expect(duration?.className ?? '').not.toContain('text-muted-foreground');
   });
 
-  it('步骤里有工具异常时，警示图标排在步骤数前面', () => {
+  it('失败只在工具条目上：整轮标题永不出现异常图标与异常播报', () => {
     const { container } = render(
       <AssistantCollapseToggle
         expanded={false}
         durationMs={30000}
         stepCount={12}
-        hasError
         onClick={() => {}}
       />,
     );
 
-    const toggle = container.querySelector('button');
-    const icon = toggle?.querySelector('.lucide-circle-alert');
-    const steps = toggle?.querySelector('[data-slot="assistant-collapse-steps"]');
-
-    expect(icon).toBeTruthy();
-    expect(icon?.getAttribute('class')).toContain('text-destructive');
-    expect(comesFirst(icon, steps)).toBe(true);
+    // 聚合标题不再派生子项失败：即使这一轮里有失败工具，标题也不画警示图标、不播报异常。
+    expect(container.querySelector('.lucide-circle-alert')).toBeNull();
 
     // 按钮的可访问名是动作名（aria-label），状态得靠 aria-describedby 播报。
+    const toggle = container.querySelector('button');
     const status = document.getElementById(toggle?.getAttribute('aria-describedby') ?? '');
-    expect(status?.textContent).toBe('已处理 30s，12 个步骤，过程步骤里有异常');
-  });
-
-  it('没有异常时不出现警示图标', () => {
-    const { container } = render(
-      <AssistantCollapseToggle expanded={false} durationMs={30000} stepCount={12} onClick={() => {}} />,
-    );
-
-    expect(container.querySelector('.lucide-circle-alert')).toBeNull();
+    expect(status?.textContent).toBe('已处理 30s，12 个步骤');
+    expect(status?.textContent).not.toContain('异常');
   });
 
   it('没有步骤与时长时只留开关名', () => {
@@ -130,7 +118,7 @@ describe('AssistantCollapseToggle', () => {
 
   it('步骤数行高盒与主文字等高：盒居中即基线对齐，图标保持几何居中', () => {
     const { container } = render(
-      <AssistantCollapseToggle expanded durationMs={30000} stepCount={12} hasError onClick={() => {}} />,
+      <AssistantCollapseToggle expanded durationMs={30000} stepCount={12} onClick={() => {}} />,
     );
 
     const toggle = container.querySelector('button');
@@ -142,8 +130,6 @@ describe('AssistantCollapseToggle', () => {
 
     expect(toggle?.className).toContain('items-center');
     expect(toggle?.className).not.toContain('items-baseline');
-    expect(container.querySelector('.lucide-circle-alert')?.getAttribute('class'))
-      .not.toContain('self-center');
     expect(container.querySelector('.lucide-chevron-down')?.getAttribute('class'))
       .not.toContain('self-center');
   });

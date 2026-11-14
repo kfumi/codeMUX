@@ -3,13 +3,19 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 
 import {
+  ACTIVITY_RUN_STEP_INDENT_CLASS,
+  ActivityRunGroupHead,
   ActivityStepThinking,
 } from '@/components/assistant-ui/activity-run';
+import {
+  isActivityRunPart,
+  type ActivityRun,
+  type ActivityRunPlacement,
+} from '@/lib/activityRuns';
 import { MessageFooter, type MessageFooterStats, type MessageFooterVariant } from '@/components/assistant-ui/message-footer';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { SubagentActivityCard } from '@/components/assistant-ui/subagent-activity';
-import { isActivityRunPart, type ActivityRun, type ActivityRunPlacement } from '@/lib/activityRuns';
 import { buildSubagentActivity } from '@/lib/subagentActivity';
 import { computeBrowserStepContext, type BrowserStepInfo } from '@/lib/browserToolShots';
 import { useSubagentStore } from '@/stores/subagentStore';
@@ -41,12 +47,26 @@ export type TranscriptMessageRenderInput = {
   collapseInfo?: AssistantCollapseInfo;
   collapseExpanded?: boolean;
   onToggleCollapse?: () => void;
-  /** 这一行所属的处理段（连续思考 + 工具）：分组头已移除，仅用于锚定委派卡片。 */
+  /** 这一行所属的处理段（连续思考 + 工具）：段首承载折叠组头，段内只画缩进的步骤行。 */
   run?: ActivityRun;
   runPlacement?: ActivityRunPlacement;
   /** 委派卡片当前是否展开。 */
   runOpen?: boolean;
   onToggleRun?: () => void;
+  /** 本段是否渲染为折叠组（≥2 个有效步骤、非委派；实时思考计入，由面板算好传入）。 */
+  runGroupEligible?: boolean;
+  /** 段内过程步骤是否可见：未成组恒可见（省略），成组后跟随开合。 */
+  runPartsVisible?: boolean;
+  /** 完成态组头的分类统计文案（由面板按投影算好）。 */
+  runCompletedText?: string;
+  /** 实时组头的未决工具摘要。 */
+  runActiveToolSummary?: string;
+  /** 段尾步骤单行摘要（实时组头兜底）。 */
+  runTail?: string;
+  /** 未提交实时思考是否并入本段（仅运行尾段为真）。 */
+  liveThinkingPresent?: boolean;
+  /** 未提交实时思考的单行摘要。 */
+  liveThinkingSummary?: string;
 };
 
 const TRANSCRIPT_COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
@@ -74,8 +94,8 @@ export function isLongTranscriptUserMessage(text: string): boolean {
 }
 
 /**
- * 只读副本的消息行：思考 / 工具 / 正文按源码顺序平铺（分组头已移除，
- * 整轮折叠由「已处理」开关负责）；含委派的行把过程步骤画进委派卡片。
+ * 只读副本的消息行：与主线程同一套过程组语义——段首承载折叠组头，收起只藏过程步骤
+ * （正文 / 问询卡 / data 卡照常）；含委派的行把过程步骤画进委派卡片。
  */
 export function CodeMuxTranscriptMessage({
   message,
@@ -96,6 +116,13 @@ export function CodeMuxTranscriptMessage({
   runPlacement,
   runOpen = true,
   onToggleRun,
+  runGroupEligible = false,
+  runPartsVisible = true,
+  runCompletedText,
+  runActiveToolSummary,
+  runTail,
+  liveThinkingPresent = false,
+  liveThinkingSummary,
 }: TranscriptMessageRenderInput) {
   const subagentSession = useSubagentStore((state) => state.sessions[sessionId]);
   const openSubagentInSidePanel = useSubagentStore((state) => state.openInSidePanel);
@@ -130,9 +157,20 @@ export function CodeMuxTranscriptMessage({
     && runPlacement?.isHead === true
     && (collapseInfo == null || collapseExpanded)
     && subagentActivity != null;
-  // 普通步骤行恒可见；只有委派卡片所在的行在卡片收起时让位（步骤归属卡片）。
+  // 过程步骤的可见性：未成组的段恒可见，成组后跟随开合；非过程部分（正文 / 问询卡）恒可见。
+  const rowHasNonRunParts = message.content.some((part) => !(
+    isActivityRunPart(part) && !(part.type === 'tool-call' && isSubAgentTool(part.toolName))
+  ));
   const partsVisible = !shouldHideCollapsedContent
-    && (subagentActivity == null || delegationCardVisible || runOpen !== false);
+    && (rowHasNonRunParts || delegationCardVisible || runPartsVisible);
+  const stepIndent = runGroupEligible && runPartsVisible ? ACTIVITY_RUN_STEP_INDENT_CLASS : undefined;
+  // 过程组组头只锚定在段首行（整轮收起时随整块隐藏）。
+  const groupHeadVisible = runGroupEligible
+    && runPlacement?.isHead === true
+    && run != null
+    && !shouldHideCollapsedContent;
+  // 组头与步骤区的无障碍关联：段首行的内容容器即受控区域。
+  const groupStepsId = groupHeadVisible && run ? `activity-run-steps-${run.runKey}` : undefined;
   const footerVisible = showFooter && !shouldHideCollapsedContent;
 
   const browserStepByIndex = useMemo<(BrowserStepInfo | null)[]>(() => {
@@ -174,7 +212,7 @@ export function CodeMuxTranscriptMessage({
     return null;
   }
 
-  if (!compactToggle && !delegationCardVisible && !partsVisible && !footer) {
+  if (!compactToggle && !delegationCardVisible && !groupHeadVisible && !partsVisible && !footer) {
     return null;
   }
 
@@ -207,8 +245,21 @@ export function CodeMuxTranscriptMessage({
           expanded={collapseExpanded}
           durationMs={collapseInfo.durationMs}
           stepCount={collapseInfo.stepCount}
-          hasError={collapseInfo.hasError}
           onClick={onToggleCollapse}
+        />
+      ) : null}
+      {groupHeadVisible ? (
+        <ActivityRunGroupHead
+          stepCount={run!.stepCount}
+          live={run!.live}
+          open={runOpen}
+          onToggle={() => onToggleRun?.()}
+          completedText={runCompletedText ?? ''}
+          activeToolSummary={runActiveToolSummary}
+          fallbackTail={runTail ?? run!.tail}
+          liveThinkingPresent={liveThinkingPresent}
+          liveThinkingSummary={liveThinkingSummary}
+          controlsId={groupStepsId}
         />
       ) : null}
       {delegationCardVisible && run && subagentActivity ? (
@@ -234,10 +285,16 @@ export function CodeMuxTranscriptMessage({
         </SubagentActivityCard>
       ) : null}
       {partsVisible ? (
-        <div className="space-y-0.5">
+        <div {...(groupStepsId ? { id: groupStepsId } : {})} className="space-y-0.5">
           {message.content.map((part, index) => {
             // 委派卡片所在行：卡片已画出过程步骤，这里只补卡片外的部分（正文 / 问询卡片）。
             if (delegationCardVisible && isActivityRunPart(part)) {
+              return null;
+            }
+            const isRunPart = isActivityRunPart(part)
+              && !(part.type === 'tool-call' && isSubAgentTool(part.toolName));
+            // 收起的过程组：组内步骤不渲染（组头已表达在段首行）；正文等非过程部分照常。
+            if (isRunPart && !runPartsVisible) {
               return null;
             }
             if (part.type === 'text') {
@@ -250,10 +307,18 @@ export function CodeMuxTranscriptMessage({
             if (part.type === 'reasoning') {
               return shouldHideCollapsedReasoning
                 ? null
-                : <ActivityStepThinking key={index} text={part.text} />;
+                : (
+                  <div key={index} className={stepIndent}>
+                    <ActivityStepThinking text={part.text} />
+                  </div>
+                );
             }
             if (part.type === 'tool-call') {
-              return renderToolCall(part, index);
+              return (
+                <div key={index} className={stepIndent}>
+                  {renderToolCall(part, index)}
+                </div>
+              );
             }
             return null;
           })}

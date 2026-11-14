@@ -153,3 +153,125 @@ describe('ActivityStepThinking', () => {
     expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
   });
 });
+
+import { useAgentStore } from '@/stores/agentStore';
+import { ActivityRunGroupHead } from './activity-run';
+
+describe('ActivityRunGroupHead', () => {
+  it('完成态：两个步骤起渲染组头（分类统计），单步骤不渲染', () => {
+    const { container, rerender } = render(
+      <ActivityRunGroupHead
+        stepCount={2}
+        live={false}
+        open={false}
+        onToggle={() => {}}
+        completedText="已处理 · 探索 2"
+        fallbackTail=""
+      />,
+    );
+    const header = container.querySelector('[data-slot="activity-run-trigger"]');
+    expect(header).not.toBeNull();
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    expect(header?.getAttribute('aria-label')).toBe('已处理 · 探索 2');
+    expect(container.querySelector('[data-slot="activity-run-pulse"]')).toBeNull();
+
+    rerender(
+      <ActivityRunGroupHead
+        stepCount={1}
+        live={false}
+        open={false}
+        onToggle={() => {}}
+        completedText="已处理 · 探索 1"
+        fallbackTail=""
+      />,
+    );
+    expect(container.querySelector('[data-slot="activity-run-trigger"]')).toBeNull();
+  });
+
+  it('实时态：无已提交步骤且无实时思考时未达门槛，不渲染', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      streamingThinking: { 'session-head-live': '' },
+      streamingText: { 'session-head-live': '' },
+      forceStopped: {},
+    }));
+    const { container } = render(
+      <ActivityRunGroupHead
+        stepCount={0}
+        live
+        open={false}
+        onToggle={() => {}}
+        completedText=""
+        fallbackTail=""
+        sessionId="session-head-live"
+      />,
+    );
+    expect(container.querySelector('[data-slot="activity-run-trigger"]')).toBeNull();
+  });
+
+  it('实时态：有实时思考时显示尾部摘要（阈值跨过成组）', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      streamingThinking: { 'session-head-live-2': '正在核对任务入口' },
+      streamingText: { 'session-head-live-2': '' },
+      streamingThinkingStartEventCount: { 'session-head-live-2': 0 },
+      events: { 'session-head-live-2': [] },
+      forceStopped: {},
+    }));
+    const { container } = render(
+      <ActivityRunGroupHead
+        stepCount={1}
+        live
+        open={false}
+        onToggle={() => {}}
+        completedText=""
+        fallbackTail="package.json"
+        sessionId="session-head-live-2"
+      />,
+    );
+    const header = container.querySelector('[data-slot="activity-run-trigger"]');
+    expect(header).not.toBeNull();
+    expect(header?.getAttribute('data-live')).toBe('true');
+    expect(header?.getAttribute('aria-label')).toBe('正在核对任务入口');
+    // 组头不画装饰动画（运行状态由实时摘要与「工作中」状态行表达）。
+    expect(container.querySelector('.animate-pulse')).toBeNull();
+  });
+
+  it('实时态：没有实时思考时回退未决工具摘要，再回退段尾摘要', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      streamingThinking: { 'session-head-live-3': '' },
+      streamingText: { 'session-head-live-3': '' },
+      events: { 'session-head-live-3': [] },
+      forceStopped: {},
+    }));
+    const { container } = render(
+      <ActivityRunGroupHead
+        stepCount={2}
+        live
+        open={false}
+        onToggle={() => {}}
+        completedText="已处理 · 探索 2"
+        activeToolSummary="读取 package.json"
+        fallbackTail="App.tsx"
+        sessionId="session-head-live-3"
+      />,
+    );
+    expect(container.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('aria-label'))
+      .toBe('读取 package.json');
+
+    const { container: fallbackContainer } = render(
+      <ActivityRunGroupHead
+        stepCount={2}
+        live
+        open={false}
+        onToggle={() => {}}
+        completedText="已处理 · 探索 2"
+        fallbackTail="App.tsx"
+        sessionId="session-head-live-3"
+      />,
+    );
+    expect(fallbackContainer.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('aria-label'))
+      .toBe('App.tsx');
+  });
+});

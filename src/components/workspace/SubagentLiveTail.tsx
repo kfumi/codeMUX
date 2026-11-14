@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 import { Streamdown, parseMarkdownIntoBlocks } from 'streamdown';
 
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
-import { ActivityStepThinking } from '@/components/assistant-ui/activity-run';
+import { ACTIVITY_RUN_STEP_INDENT_CLASS, ActivityStepThinking } from '@/components/assistant-ui/activity-run';
 import { useStreamingTextReveal } from '@/components/agent/assistant-ui/useStreamingTextReveal';
 import { createIncrementalBlockParser } from '@/lib/incrementalMarkdownBlocks';
 import type { SubagentLiveTail } from '@/lib/subagentStreamingTail';
+import { cn } from '@/lib/utils';
 
 /**
  * 子智能体的**未提交正文尾部**：它已经到达、但 provider 的 `assistant_message` 信封
@@ -25,10 +26,16 @@ import type { SubagentLiveTail } from '@/lib/subagentStreamingTail';
 export function SubagentLiveTailView({
   tail,
   streaming,
+  thinkingInGroup,
 }: {
   tail: SubagentLiveTail;
   /** 子智能体是否仍在运行；终态时立刻补全全文，不留残缺的最后一帧。 */
   streaming: boolean;
+  /**
+   * 运行尾段的折叠组语义：未提交实时思考作为尾段的附加步骤参与开合（与主线程同款）。
+   * 成组且收起时思考行让位给组头摘要；展开时按步骤缩进渲染。
+   */
+  thinkingInGroup?: { eligible: boolean; open: boolean };
 }) {
   // 增量分块：只重解析尾部那一块，避免每次提交都对累积全文重新分块。
   const blockParser = useMemo(() => createIncrementalBlockParser(parseMarkdownIntoBlocks), []);
@@ -39,10 +46,20 @@ export function SubagentLiveTailView({
     return null;
   }
 
+  const thinkingInCollapsedGroup = Boolean(tail.thinking && thinkingInGroup?.eligible && !thinkingInGroup.open);
+  if (thinkingInCollapsedGroup && !tail.text) {
+    // 实时思考整体让位给组头摘要：不留空壳（空壳的行距会叠加出额外间距）。
+    return null;
+  }
+  const thinkingStepIndent = thinkingInGroup?.eligible ? ACTIVITY_RUN_STEP_INDENT_CLASS : '';
+
   return (
     <div data-slot="subagent-live-tail" className="w-full min-w-0 space-y-1 text-ui-body leading-relaxed">
-      {tail.thinking ? (
-        <div data-streaming-reasoning="true" className="w-full min-w-0">
+      {tail.thinking && !thinkingInCollapsedGroup ? (
+        <div
+          data-streaming-reasoning="true"
+          className={cn('w-full min-w-0', thinkingStepIndent)}
+        >
           <ActivityStepThinking
             text={tail.thinking}
             streaming={streaming}

@@ -18,9 +18,20 @@ import { RunningElapsedTimer, formatElapsed } from '@/components/agent/assistant
 import { TooltipHint } from '@/components/ui/tooltip';
 import { useTranscriptFollowLatest } from '@/hooks/useTranscriptFollowLatest';
 import { parseAgentEvent, useAgentStore, type AgentMessage } from '@/stores/agentStore';
+import {
+  activityGroupScopeKey,
+  deriveActivityRunGroup,
+  readActivityGroupDisclosure,
+  useActivityGroupStore,
+} from '@/stores/activityGroupStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { subagentTabTitle, useSubagentStore } from '@/stores/subagentStore';
- import { EMPTY_ACTIVITY_RUNS, buildActivityRuns } from '@/lib/activityRuns';
+ import {
+  EMPTY_ACTIVITY_RUNS,
+  buildActivityRuns,
+  thinkingTailLine,
+  type ActivityRun,
+} from '@/lib/activityRuns';
 import { buildConversationTurns } from '../../lib/timeline/turns';
 import { subagentModelFromEvents, subagentStatusLabel } from '@/lib/subagentActivity';
 import { supplementSubagentMessagesWithParentSummary } from '@/lib/subagentParentSummary';
@@ -47,9 +58,11 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
   const parentEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_PARENT_EVENTS);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
-  // 处理段的展开状态：未被点过的段跟随 live 自动开合，点过一次后由用户接管。
-  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
-  const [claimedRunKeys, setClaimedRunKeys] = useState<Set<string>>(() => new Set());
+  // 过程组的展开状态在应用运行期 store 里：按「会话 + 子智能体」分作用域，
+  // 切换子智能体 / 会话 / 精简设置都不清除；未接管的组一律默认折叠。
+  const activityGroups = useActivityGroupStore((state) => state.openByKey);
+  const setActivityRunOpen = useActivityGroupStore((state) => state.setRunOpen);
+  const activityScopeKey = activityGroupScopeKey(sessionId, subagentId);
 
   const isRunning = descriptor?.status === 'running';
   const eventCount = rawEvents?.length ?? 0;
@@ -72,8 +85,7 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
-    setExpandedRunKeys(new Set());
-    setClaimedRunKeys(new Set());
+    // 过程组的手动状态不随设置/切换重置（工单 06：切换「精简 AI 输出」只改外层显隐）。
   }, [sessionId, subagentId, compactAiOutput]);
 
   const toggleExpandedTurn = useCallback((turnKey: string) => {
@@ -88,19 +100,10 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
     });
   }, []);
 
-  /** `currentlyOpen` 是这一行当前生效的开合状态：自动展开的段首次被点击要能收起来。 */
+  /** `currentlyOpen` 是这一行当前生效的开合状态：写入即接管（store 的语义）。 */
   const toggleRun = useCallback((runKey: string, currentlyOpen: boolean) => {
-    setClaimedRunKeys((current) => (current.has(runKey) ? current : new Set(current).add(runKey)));
-    setExpandedRunKeys((current) => {
-      const next = new Set(current);
-      if (currentlyOpen) {
-        next.delete(runKey);
-      } else {
-        next.add(runKey);
-      }
-      return next;
-    });
-  }, []);
+    setActivityRunOpen(activityScopeKey, runKey, !currentlyOpen);
+  }, [activityScopeKey, setActivityRunOpen]);
 
   const { messages, timestampsByMessage, parsedEvents, timestamps } = useMemo(() => {
     // parseAgentEvent accepts the raw object directly; the old
@@ -170,6 +173,31 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
    * 出现 —— 也就是这条消息结束的那一刻。信封一到，尾部清空、文字挪进已提交消息。
    */
   const liveTail = useMemo(() => subagentLiveTail(parsedEvents), [parsedEvents]);
+
+  // 运行尾段：未提交实时思考作为它的附加可见步骤参与成组与开合（与主线程同款）。
+  const tailRun = useMemo(() => {
+    for (let index = activityRuns.runs.length - 1; index >= 0; index -= 1) {
+      const run = activityRuns.runs[index]!;
+      if (run.live) {
+        return run;
+      }
+    }
+    return undefined;
+  }, [activityRuns]);
+  const liveThinkingPresent = Boolean(liveTail.thinking);
+  const liveThinkingSummary = liveThinkingPresent ? thinkingTailLine(liveTail.thinking) : '';
+  const tailGroup = useMemo(() => {
+    if (!tailRun || tailRun.delegation) {
+      return undefined;
+    }
+    const group = deriveActivityRunGroup({
+      run: tailRun,
+      disclosure: readActivityGroupDisclosure(activityGroups, activityScopeKey, tailRun.runKey),
+      // 实时思考并入运行尾段（tailRun.live 恒真）。
+      liveThinkingAttached: liveThinkingPresent,
+    });
+    return { eligible: group.eligible, open: group.open };
+  }, [tailRun, activityGroups, activityScopeKey, liveThinkingPresent]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useTranscriptFollowLatest({
@@ -275,13 +303,28 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                   },
                 )
                 : undefined;
-              // 这一行属于哪个处理段（连续思考 + 工具）：段首画组头，段内只画缩进的步骤行。
+              // 这一行属于哪个处理段（连续思考 + 工具）：段首画折叠组头，段内只画缩进的步骤行。
               const runPlacement = activityRuns.placementByEventIndex.get(message.metadata.sourceEventIndex);
-              const run = runPlacement ? activityRuns.runByKey.get(runPlacement.runKey) : undefined;
-              // 未被用户点过的段跟随 live 自动开合：运行中展开、结束后收起；用户点过之后由用户接管。
-              const runOpen = run
-                ? (claimedRunKeys.has(run.runKey) ? expandedRunKeys.has(run.runKey) : run.live)
-                : true;
+              const run: ActivityRun | undefined = runPlacement
+                ? activityRuns.runByKey.get(runPlacement.runKey)
+                : undefined;
+              // 折叠组语义与主线程同款（单一真源 deriveActivityRunGroup）：实时思考并入
+              // 运行尾段参与成组；未接管的组一律默认折叠，委派段跟随卡片开合。
+              const liveThinkingAttached = run != null
+                && run.live
+                && run === tailRun
+                && liveThinkingPresent;
+              const runGroup = deriveActivityRunGroup({
+                run,
+                disclosure: readActivityGroupDisclosure(activityGroups, activityScopeKey, run?.runKey ?? ''),
+                hasDelegationCard: true,
+                liveThinkingAttached,
+              });
+              const runOpen = runGroup.open;
+              const runGroupEligible = runGroup.eligible;
+              const runPartsVisible = runGroup.partsVisible;
+              const runCompletedText = runGroup.completedText;
+              const runActiveToolSummary = runGroup.activeToolSummary;
 
               return (
                 <CodeMuxTranscriptMessage
@@ -300,6 +343,13 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                   runPlacement={runPlacement}
                   runOpen={runOpen}
                   onToggleRun={run ? () => toggleRun(run.runKey, runOpen) : undefined}
+                  runGroupEligible={runGroupEligible}
+                  runPartsVisible={runPartsVisible}
+                  runCompletedText={runCompletedText}
+                  runActiveToolSummary={runActiveToolSummary}
+                  runTail={run?.tail}
+                  liveThinkingPresent={liveThinkingAttached}
+                  liveThinkingSummary={liveThinkingAttached ? liveThinkingSummary : undefined}
                   collapseInfo={collapseInfo}
                   collapseExpanded={collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false}
                   onToggleCollapse={collapseInfo
@@ -313,7 +363,11 @@ export function SubagentPreviewPanel({ sessionId, subagentId }: SubagentPreviewP
                 有竞态），此时正文只存在于 delta 里，按运行态过滤会把这段直接弄丢。
                 `streaming` 只影响光标与分帧绘制，不影响内容。 */}
             {liveTail.streaming ? (
-              <SubagentLiveTailView tail={liveTail} streaming={isRunning} />
+              <SubagentLiveTailView
+                tail={liveTail}
+                streaming={isRunning}
+                thinkingInGroup={tailGroup}
+              />
             ) : null}
           </div>
         )}

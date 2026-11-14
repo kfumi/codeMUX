@@ -50,6 +50,7 @@ import { useProjectStore } from './projectStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import { useSubagentStore } from './subagentStore';
+import { useActivityGroupStore } from './activityGroupStore';
 import { countDiffLines } from '../lib/diffStats';
 import { isCodeMuxPersistedTimelineEvent } from '../lib/codeMuxProtocol';
 import type {
@@ -3362,6 +3363,8 @@ function createSessionEventHandler(
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
     useSubagentStore.getState().clearSession(sessionId);
+    // 过程组的展开状态随会话数据一起清理（子智能体轨道键以会话为前缀，一并覆盖）。
+    useActivityGroupStore.getState().pruneScope(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
