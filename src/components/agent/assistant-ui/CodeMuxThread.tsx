@@ -621,6 +621,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               </CodeMuxThreadRenderContext.Provider>
               {stopped ? <InterruptBanner /> : null}
               <StreamingContent sessionId={sessionId} events={events} />
+              {isRunning && !stopped ? <StreamingStatusFooter sessionId={sessionId} /> : null}
               <ThreadPrimitive.ViewportFooter
                 data-testid="thread-viewport-footer"
                 className="sticky bottom-0 mt-auto z-10 flex flex-col gap-2 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-1 pb-3"
@@ -2321,6 +2322,11 @@ const AssistantLikeMessage = memo(function AssistantLikeMessage({
 /**
  * 流式页脚的"工作中"状态行。
  *
+ * 它是正文列的直接子项，而不是 `StreamingContent` 内 `space-y-1` 容器的一员：那层容器
+ * 里实时思考/正文与状态行相邻时只贡献 4px 兄弟间距，而状态行跟在已提交消息行后面时
+ * 拿到的是行尾的 `mb-2`，两种来源叠出来的间距不一致。提到外层后，前面不管是实时思考、
+ * 流式正文还是工具行，间距一律是"上一项自己的行尾 8px + 这里的 `mt-3`"。
+ *
  * 单独抽成 `memo` 组件，是为了让它彻底脱离分帧绘制的重渲染路径：
  * `StreamingContent` 会随绘制节奏反复重渲染，而这一行里的 `DotMatrix`
  * 是**绘制类**动画（SVG `opacity` 闪烁），无法卸载到合成线程。让它跟着每帧
@@ -2353,15 +2359,15 @@ const StreamingTokenSpeedIndicator = memo(function StreamingTokenSpeedIndicator(
 
 const StreamingStatusFooter = memo(function StreamingStatusFooter({
   sessionId,
-  startTime,
 }: {
   sessionId: string;
-  startTime?: number;
 }) {
+  const startTime = useAgentStore((state) => state.queryStartTime[sessionId]);
   return (
     <div
+      data-testid="streaming-status-footer"
       className={cn(
-        'flex items-center gap-2.5 pt-2 pb-1 text-ui-body text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
+        'flex items-center gap-2.5 mt-3 mb-2 pb-1 text-ui-body text-muted-foreground animate-in fade-in fill-mode-forwards duration-slow ease-motion-out',
       )}
     >
       <DotMatrix state="loading" className="size-4" label="工作中" />
@@ -2384,7 +2390,6 @@ function StreamingContent({
 }) {
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
-  const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
   const thinkingEpoch = useAgentStore((state) => state.streamingThinkingStartEventCount[sessionId] ?? 0);
@@ -2444,7 +2449,9 @@ function StreamingContent({
    */
   const blockParser = useMemo(() => createIncrementalBlockParser(parseMarkdownIntoBlocks), []);
 
-  if (stopped || (!isRunning && !thinking && !visibleText)) {
+  // 状态行已提到外层，这里只负责实时内容本身。没有可见内容时不留空壳：空壳的
+  // `mb-2` 会和上一行的行尾间距叠加，让状态行的上间距又变成另一种值。
+  if (stopped || (!visibleThinking && !visibleText)) {
     return null;
   }
 
@@ -2486,8 +2493,6 @@ function StreamingContent({
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
-
-        {isRunning ? <StreamingStatusFooter sessionId={sessionId} startTime={queryStartTime} /> : null}
       </div>
     </div>
   );

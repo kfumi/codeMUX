@@ -295,4 +295,36 @@ describe('CodeMuxThread multi-segment streaming visibility', () => {
     await flush();
     expect(container.textContent).not.toContain('tok/s');
   });
+
+  it('「工作中」状态行自带固定上间距，紧跟任何类型的上一项都不改变', async () => {
+    const { container } = render(<Harness />);
+    const { send, flush } = await startTurnWithUserMessage();
+    await flush();
+
+    const footer = () => container.querySelector('[data-testid="streaming-status-footer"]');
+
+    // 没有实时内容：状态行直接跟在最后一条消息行后面，中间不留会叠加 margin 的空壳。
+    expect(footer()).toBeTruthy();
+    expect(footer()!.previousElementSibling?.hasAttribute('data-message-row')).toBe(true);
+
+    // 实时思考出现：状态行仍在实时内容容器之外，间距只由它自己的 mt-3 承担。
+    send({ type: 'content_started', event_id: 'gap-e1', index: 0, content_kind: 'reasoning' });
+    send({ type: 'reasoning_delta', event_id: 'gap-e2', index: 0, text: 'GAP thinking' });
+    await flush();
+    expect(footer()).toBeTruthy();
+    expect(footer()!.closest('[data-streaming-reasoning="true"]')).toBeNull();
+    expect(
+      footer()!.previousElementSibling?.querySelector('[data-streaming-reasoning="true"]'),
+    ).toBeTruthy();
+
+    // 思考提交后实时内容消失，状态行前面换回消息行 —— 间距来源不变。
+    send({ type: 'assistant_message', event_id: 'gap-em1', content: [{ type: 'thinking', thinking: 'GAP thinking' }], provider_message_id: 'msg-gap' });
+    await flush();
+    expect(footer()).toBeTruthy();
+    expect(footer()!.previousElementSibling?.hasAttribute('data-message-row')).toBe(true);
+
+    // 三种前置形态共用同一份类名（自己承担的上间距），不再依赖上一项的行尾 margin。
+    expect(footer()!.className).toContain('mt-3');
+    expect(footer()!.className).not.toContain('pt-2');
+  }, 30000);
 });
