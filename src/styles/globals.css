@@ -902,6 +902,15 @@ html.cmx-panel-resizing webview {
   background: transparent;
 }
 
+/*
+ * 对话正文的滚动条比全局默认粗一档：正文列很长、拖动频繁，而默认 8px 的槽
+ * 再被滑块的 2px 透明边框各内缩一次，视觉上只剩 4px，太细不好抓。
+ * 12px 槽 → 视觉 8px 滑块；工具输出、输入框、侧栏等其余滚动区域保持原样。
+ */
+[data-testid="thread-viewport"]::-webkit-scrollbar {
+  width: 12px;
+}
+
 .aui-tool-command-scroll {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
