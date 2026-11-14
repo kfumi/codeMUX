@@ -1,6 +1,6 @@
 import { DiffViewer } from '@/components/assistant-ui/diff-viewer';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
-import { countDiffLines } from '@/lib/diffStats';
+import { countDiffLines, parseUnifiedDiffPatch } from '@/lib/diffStats';
 import { cn } from '@/lib/utils';
 
 interface ToolCodeDiffProps {
@@ -31,6 +31,18 @@ type EditsDiff = {
   edits: EditHunk[];
 };
 
+/** Codex app-server 的 `file_change`：一次工具调用可包含多个文件的改动。 */
+type ChangesDiff = {
+  kind: 'changes';
+  files: ChangeFile[];
+};
+
+type ChangeFile = {
+  filePath: string;
+  oldFile: string;
+  newFile: string;
+};
+
 type PatchFile = {
   operation: 'add' | 'update' | 'delete';
   path: string;
@@ -41,6 +53,11 @@ export function getCodeChangeFilePath(input: Record<string, unknown>): string | 
   const filePath = input.file_path ?? input.filePath ?? input.path;
   if (typeof filePath === 'string' && filePath.trim()) {
     return getFileName(normalizePath(filePath));
+  }
+
+  const changeFiles = getChangeFiles(input);
+  if (changeFiles.length) {
+    return changeFiles.map((file) => file.filePath).join(', ');
   }
 
   const patchFiles = getApplyPatchFiles(input);
@@ -54,7 +71,7 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | EditsDiff | null {
+export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | EditsDiff | ChangesDiff | null {
   const filePath = getCodeChangeFilePath(input);
   const oldString = input.old_string ?? input.oldString;
   const newString = input.new_string ?? input.newString;
@@ -67,6 +84,11 @@ export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff |
     return { kind: 'content', filePath, oldFile: '', newFile: content };
   }
 
+  const changeFiles = getChangeFiles(input);
+  if (changeFiles.length) {
+    return { kind: 'changes', files: changeFiles };
+  }
+
   const edits = getEditHunks(input);
   if (filePath && edits.length) {
     return { kind: 'edits', filePath, edits };
@@ -76,6 +98,58 @@ export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff |
   if (patchFiles.length) return { kind: 'patch', files: patchFiles };
 
   return null;
+}
+
+/**
+ * Codex app-server 的 `file_change` 工具参数：`{ changes: [{ kind, path, diff }] }`。
+ * `diff` 在 add/delete 时是整份文件内容；update（该版本的 `kind` 可能是空串）则是
+ * 一段不带 `---`/`+++` 头的 unified diff，只有 `@@` 和 +/- 行。
+ * sidecar 侧（`turnArtifactSummary.ts`）与 daemon 侧（`turn_artifact_summary.rs`）
+ * 对同一形状的解读一致，这里保持同一条判定。
+ */
+function getChangeFiles(input: Record<string, unknown>): ChangeFile[] {
+  const changes = input.changes;
+  if (!Array.isArray(changes)) return [];
+
+  const files: ChangeFile[] = [];
+  for (const entry of changes) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const path = record.path;
+    const diff = record.diff;
+    if (typeof path !== 'string' || !path.trim() || typeof diff !== 'string' || !diff.trim()) {
+      continue;
+    }
+
+    const filePath = getFileName(normalizePath(path));
+    const kind = typeof record.kind === 'string' ? record.kind.toLowerCase() : '';
+    if (kind === 'delete') {
+      files.push({ filePath, oldFile: diff, newFile: '' });
+      continue;
+    }
+    if (kind === 'add') {
+      files.push({ filePath, oldFile: '', newFile: diff });
+      continue;
+    }
+
+    const parsed = parseUnifiedDiffPatch(diff);
+    files.push(parsed
+      ? {
+        filePath,
+        // hunk 里的每一行按约定都以换行结尾。补上末尾换行后再交给行级 diff，
+        // 否则末行没有换行符时会被当成"整行被替换"，把未改动的行也标成 +/-。
+        oldFile: terminateLines(parsed.oldContent),
+        newFile: terminateLines(parsed.newContent),
+      }
+      : { filePath, oldFile: '', newFile: diff });
+  }
+
+  return files;
+}
+
+function terminateLines(text: string): string {
+  if (text === '') return '';
+  return text.endsWith('\n') ? text : `${text}\n`;
 }
 
 /**
@@ -116,6 +190,16 @@ export function getCodeChangeStats(input: Record<string, unknown>): { additions:
     }
     return { additions, deletions };
   }
+  if (diff.kind === 'changes') {
+    let additions = 0;
+    let deletions = 0;
+    for (const file of diff.files) {
+      const stats = countDiffLines(file.oldFile, file.newFile);
+      additions += stats.additions;
+      deletions += stats.deletions;
+    }
+    return { additions, deletions };
+  }
   let additions = 0;
   let deletions = 0;
   for (const file of diff.files) {
@@ -137,6 +221,27 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
         files={diff.files}
         className="max-h-90 overflow-auto rounded-md border border-border/45 bg-background/70 text-code"
       />
+    );
+  }
+
+  if (diff.kind === 'changes') {
+    return (
+      <div className="space-y-2">
+        {diff.files.map((file, index) => (
+          <DiffViewer
+            key={`${file.filePath}-${index}`}
+            oldFile={file.oldFile}
+            newFile={file.newFile}
+            oldFileName={file.filePath}
+            newFileName={file.filePath}
+            viewMode="unified"
+            showIcon={false}
+            showHunkHeaders={false}
+            showNoNewlineMarker={false}
+            className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
+          />
+        ))}
+      </div>
     );
   }
 
@@ -162,7 +267,7 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
   );
 }
 
-const CODE_CHANGE_TOOL_NAMES = new Set(['write', 'edit']);
+const CODE_CHANGE_TOOL_NAMES = new Set(['write', 'edit', 'apply_patch', 'applypatch']);
 
 export function isCodeChangeTool(toolName: string, input?: Record<string, unknown>) {
   if (CODE_CHANGE_TOOL_NAMES.has(toolName.toLowerCase())) return true;
@@ -330,7 +435,8 @@ function extractApplyPatchText(input: Record<string, unknown>): string | undefin
 }
 
 function getCommandText(input: Record<string, unknown>): string | undefined {
-  for (const key of ['command', 'cmd', 'script']) {
+  // `input` 是 Codex freeform apply_patch 的补丁正文所在键。
+  for (const key of ['command', 'cmd', 'script', 'input']) {
     const value = input[key];
     if (typeof value === 'string' && value.includes('*** Begin Patch')) {
       return value;

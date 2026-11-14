@@ -463,6 +463,34 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(path.compareDocumentPosition(chevron!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it('Codex file_change 工具按 diff 展示，而不是原始 changes JSON', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="apply_patch"
+        args={{
+          changes: [
+            { kind: '', path: 'D:\\project\\a.ts', diff: '@@ -1,1 +1,1 @@\n-const a = 1;\n+const a = 2;' },
+            { kind: '', path: 'D:\\project\\b.ts', diff: '@@ -2,1 +2,2 @@\n const b = 1;\n+const c = 3;' },
+          ],
+        }}
+        result="Patch completed"
+      />,
+    );
+
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]')!;
+    expect(trigger.textContent).toContain('a.ts, b.ts');
+    expect(trigger.textContent).toMatch(/\+\d+/);
+    expect(trigger.textContent).toMatch(/-\d+/);
+
+    fireEvent.click(trigger);
+
+    expect(container.querySelectorAll('[data-slot="diff-viewer-line"][data-type="del"]')[0]?.textContent)
+      .toContain('const a = 1;');
+    expect(container.querySelectorAll('[data-slot="diff-viewer-line"][data-type="add"]')).toHaveLength(2);
+    expect(container.textContent).not.toContain('"changes"');
+    expect(container.textContent).not.toContain('Patch completed');
+  });
+
   it('终端的长参数仍可在最大宽度内截断展示', () => {
     const command = 'cd /d/project/ai-code/codeMUX && git diff --stat HEAD | head -40 && npm run build -- --mode production';
     const { container } = renderWithTooltip(

@@ -114,6 +114,86 @@ describe('ToolCodeDiff', () => {
     expect(container.textContent).not.toContain('No newline at end of file');
   });
 
+  // Codex app-server 的 file_change 形状：一次编辑多个文件，kind 在 update 时可能是空串，
+  // diff 是不带 ---/+++ 头的 unified diff。
+  const CODEX_CHANGES_INPUT = {
+    changes: [
+      {
+        kind: '',
+        path: 'D:\\project\\ai-code\\codeMUX\\apps\\desktop\\scripts\\verify-node-runtime.cjs',
+        diff: "@@ -49,4 +49,4 @@\n missing.map((file) => file).join('\\n') +\n-        '\\n检查 win.extraResources 是否把 ',\n+        '\\n检查 extraResources 配置，确保完整 ',\n     );",
+      },
+      {
+        kind: '',
+        path: 'D:\\project\\ai-code\\codeMUX\\apps\\desktop\\test\\verify-node-runtime.test.ts',
+        diff: "@@ -88,2 +88,12 @@\n \n+  it('gives platform-neutral guidance', async () => {\n+    expect(true).toBe(true);\n+  });\n \n   it('looks inside the .app bundle', async () => {",
+      },
+    ],
+  };
+
+  it('renders codex file_change changes (multi-file, unified diff) as inline diffs', () => {
+    const { container } = render(
+      <ToolCodeDiff toolName="apply_patch" input={CODEX_CHANGES_INPUT} />,
+    );
+
+    const deleted = Array.from(
+      container.querySelectorAll('[data-slot="diff-viewer-line"][data-type="del"]'),
+    ).map((line) => line.textContent);
+    const added = Array.from(
+      container.querySelectorAll('[data-slot="diff-viewer-line"][data-type="add"]'),
+    ).map((line) => line.textContent);
+
+    // 两个文件各出一块 diff，且不把 `@@` 或整段 JSON 当正文渲染。
+    expect(container.querySelectorAll('[data-slot="diff-viewer"]')).toHaveLength(2);
+    expect(deleted.some((text) => text?.includes('win.extraResources'))).toBe(true);
+    expect(added.some((text) => text?.includes('extraResources 配置'))).toBe(true);
+    expect(added.some((text) => text?.includes('platform-neutral guidance'))).toBe(true);
+    expect(container.textContent).not.toContain('"changes"');
+  });
+
+  it('counts codex file_change stats across all changed files', () => {
+    expect(getCodeChangeStats(CODEX_CHANGES_INPUT)).toEqual({ additions: 4, deletions: 1 });
+  });
+
+  it('shows codex file_change file names and hides raw changes JSON in the tool card', () => {
+    const { container } = renderWithTooltip(
+      <ToolCallCard
+        toolName="apply_patch"
+        input={CODEX_CHANGES_INPUT}
+        result="Patch completed"
+        status="done"
+      />,
+    );
+
+    expect(screen.getByText('verify-node-runtime.cjs, verify-node-runtime.test.ts')).toBeTruthy();
+
+    fireEvent.click(within(container).getByRole('button'));
+
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent)
+      .toContain('extraResources 配置');
+    expect(container.textContent).not.toContain('"changes"');
+    expect(container.textContent).not.toContain('"diff"');
+  });
+
+  it('renders codex file_change add and delete kinds from their full file content', () => {
+    const { container } = render(
+      <ToolCodeDiff
+        toolName="apply_patch"
+        input={{
+          changes: [
+            { kind: 'add', path: 'src/new-file.ts', diff: 'export const added = true;' },
+            { kind: 'delete', path: 'src/old-file.ts', diff: 'export const removed = true;' },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent)
+      .toContain('export const added = true;');
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="del"]')?.textContent)
+      .toContain('export const removed = true;');
+  });
+
   it('renders codex apply_patch shell commands as an inline patch diff', () => {
     const command = `apply_patch <<'PATCH'
 *** Begin Patch
