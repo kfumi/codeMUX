@@ -21,8 +21,11 @@ publish:
   provider: github
   owner: kfumi
   repo: codeMUX
-# daemon 二进制签名钩子(应用本体由 electron-builder 原生签名)。
-afterPack: scripts/sign-daemon.cjs
+# afterPack 钩子(应用本体由 electron-builder 原生签名):
+#   1. scripts/verify-node-runtime.cjs 校验随包 Node 运行时完整(缺 npm 直接失败);
+#   2. scripts/sign-daemon.cjs 给 extraResources 的 daemon 二进制补签名。
+# 入口见 scripts/after-pack.cjs —— electron-builder 只接受单个 afterPack。
+afterPack: scripts/after-pack.cjs
 directories:
   output: release
   buildResources: build
@@ -72,6 +75,17 @@ extraResources:
 win:
   # 应用/安装包/桌面快捷方式图标(≥256×256)。extraResources 里的图标只服务运行时/托盘。
   icon: build/icons/icon.ico
+  # electron-builder 的 extraResources 会无条件丢弃根级 `node_modules`
+  # (app-builder-lib/out/util/filter.js 的 createFilter:relative === "node_modules"
+  # 直接返回 false)。Windows 的官方 Node 发行包把 npm 本体放在
+  # `node-runtime/node_modules/npm/`,于是 `from: node-runtime → to: node` 只剩
+  # node.exe 和 npm.cmd —— npm.cmd 会找不到 `npm-cli.js`,托管 Runtime 报
+  # 「Node.js 运行时不可用」。这里把同一份 node_modules 再映射一次,显式落在
+  # `node/node_modules`,绕开根级过滤。unix 布局是 `lib/node_modules`,不在
+  # 根级,不受影响(见下方 linux/mac 配置)。
+  extraResources:
+    - from: node-runtime/node_modules
+      to: node/node_modules
   target:
     - target: nsis
       arch:

@@ -364,6 +364,8 @@ export function RuntimeSettingsPanel() {
     [clearOperation],
   );
 
+  const runtimeBlocker = checkResult ? describeRuntimeBlocker(checkResult.node) : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -379,13 +381,10 @@ export function RuntimeSettingsPanel() {
         </Button>
       </div>
 
-      {checkResult && !canInstallManagedRuntime(checkResult.node) && (
+      {runtimeBlocker !== null && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-ui-compact text-destructive">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            {checkResult.node.error
-              ?? 'Node.js 运行时不可用，托管 Runtime 暂时无法安装；随包运行时缺失时请重新安装 CodeMUX。'}
-          </p>
+          <p>{runtimeBlocker}</p>
         </div>
       )}
 
@@ -435,6 +434,40 @@ function describeOperation(kind: OperationKind): string {
 
 function canInstallManagedRuntime(node: ManagedNodeInfo): boolean {
   return node.satisfiesMinimum && node.npm.available && node.npm.matchesNode;
+}
+
+/**
+ * 说明「为什么托管 Runtime 装不了」。
+ *
+ * 后端只有 Node 检测失败时才会填 `node.error`;npm 缺失或与 Node 不同源时
+ * `node.error` 是 null,旧代码于是统一显示「Node.js 运行时不可用」——把随包
+ * npm 被裁掉的问题指成了 Node 的问题。这里按真实失败点分别说明。
+ *
+ * 返回 null 表示可以安装。
+ */
+export function describeRuntimeBlocker(node: ManagedNodeInfo): string | null {
+  if (canInstallManagedRuntime(node)) return null;
+  if (node.error) {
+    return `${node.error}。请安装或升级到 Node.js 18+ 后重新检测。`;
+  }
+  if (!node.satisfiesMinimum) {
+    return node.version
+      ? `Node.js ${node.version} 版本过低，托管 Runtime 需要 18 及以上。请升级到 Node.js 18+ 后重新检测。`
+      : '未检测到可用的 Node.js。请安装 Node.js 18+ 后重新检测。';
+  }
+  if (!node.npm.available) {
+    return (
+      node.npm.error ??
+      '随包 npm 不可用，托管 Runtime 暂时无法安装；随包运行时缺失时请重新安装 CodeMUX。'
+    );
+  }
+  if (!node.npm.matchesNode) {
+    return (
+      node.npm.error ??
+      'npm 与当前 Node.js 不在同一安装目录，托管 Runtime 暂时无法安装；请重新安装 CodeMUX。'
+    );
+  }
+  return null;
 }
 
 /* --------------------------- Provider Runtime 卡片 --------------------------- */

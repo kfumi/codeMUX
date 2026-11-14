@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatCheckedAt, formatElapsed, knownNumber } from './RuntimeSettings';
+import type { ManagedNodeInfo } from '@/lib/runtimeTypes';
+
+import {
+  describeRuntimeBlocker,
+  formatCheckedAt,
+  formatElapsed,
+  knownNumber,
+} from './RuntimeSettings';
 
 describe('formatCheckedAt', () => {
   it('formats legacy Unix-second timestamps instead of displaying the raw number', () => {
@@ -49,5 +56,89 @@ describe('formatElapsed', () => {
 
   it('never renders a negative duration from clock skew', () => {
     expect(formatElapsed(-5_000)).toBe('0 秒');
+  });
+});
+
+function nodeInfo(overrides: Partial<ManagedNodeInfo> = {}): ManagedNodeInfo {
+  return {
+    available: true,
+    satisfiesMinimum: true,
+    version: 'v22.20.0',
+    executablePath: 'node.exe',
+    error: null,
+    npm: {
+      available: true,
+      version: '10.9.3',
+      executablePath: 'npm.cmd',
+      matchesNode: true,
+      error: null,
+    },
+    ...overrides,
+  };
+}
+
+describe('describeRuntimeBlocker', () => {
+  it('reports nothing when Node and npm are both usable', () => {
+    expect(describeRuntimeBlocker(nodeInfo())).toBeNull();
+  });
+
+  it('includes backend detail and recovery guidance when Node is unavailable', () => {
+    const node = nodeInfo({
+      available: false,
+      satisfiesMinimum: false,
+      version: null,
+      error: 'PATH 中未找到 node 可执行文件',
+    });
+    expect(describeRuntimeBlocker(node)).toBe(
+      'PATH 中未找到 node 可执行文件。请安装或升级到 Node.js 18+ 后重新检测。',
+    );
+  });
+
+  it('recommends installing Node 18+ when detection has no backend error', () => {
+    const node = nodeInfo({
+      available: false,
+      satisfiesMinimum: false,
+      version: null,
+      error: null,
+    });
+    expect(describeRuntimeBlocker(node)).toBe('未检测到可用的 Node.js。请安装 Node.js 18+ 后重新检测。');
+  });
+
+  it('blames npm rather than Node when only the bundled npm is broken', () => {
+    // 回归：随包 node.exe 在、npm.cmd 在,但 npm.cmd 找不到 npm-cli.js 时,
+    // 后端 node.error 是 null。旧代码于是显示「Node.js 运行时不可用」,
+    // 把打包丢失 node_modules 的问题指成了 Node 的问题。
+    const node = nodeInfo({
+      npm: {
+        available: false,
+        version: null,
+        executablePath: 'npm.cmd',
+        matchesNode: false,
+        error: null,
+      },
+    });
+    const message = describeRuntimeBlocker(node);
+    expect(message).toContain('npm');
+    expect(message).not.toContain('Node.js 运行时不可用');
+  });
+
+  it('surfaces the npm error verbatim when the daemon provides one', () => {
+    const node = nodeInfo({
+      npm: {
+        available: false,
+        version: null,
+        executablePath: null,
+        matchesNode: false,
+        error: 'npm --version 执行失败：退出码 Some(1)',
+      },
+    });
+    expect(describeRuntimeBlocker(node)).toBe('npm --version 执行失败：退出码 Some(1)');
+  });
+
+  it('explains an outdated Node instead of claiming it is missing', () => {
+    const node = nodeInfo({ satisfiesMinimum: false, version: 'v16.20.2' });
+    expect(describeRuntimeBlocker(node)).toContain('v16.20.2');
+    expect(describeRuntimeBlocker(node)).toContain('版本过低');
+    expect(describeRuntimeBlocker(node)).toContain('升级到 Node.js 18+ 后重新检测');
   });
 });

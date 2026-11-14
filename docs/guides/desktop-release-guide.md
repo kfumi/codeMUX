@@ -50,6 +50,15 @@ daemon release 二进制 → 仓库根 `vite build`(渲染层 dist/;类型检查
 | `icons/icon.ico` | `extraResources` ← `crates/daemon/icons/` | 托盘无图标 |
 | `app.asar` 内 `renderer-dist/` | `files` ← 脚本从根 `dist/` 拷入 | 桌面窗口白屏 |
 
+### 随包 Node 运行时必须带 `node_modules`
+
+`resources/node/` 是 daemon 的 Node 运行时（sidecar 启动、托管 Runtime 的 npm 安装、设置页检测都优先用它）。它有两个容易漏掉的点：
+
+- **Windows 的 npm 本体在 `node_modules/npm/`。** electron-builder 的 `extraResources` 会无条件丢弃根级 `node_modules`（`app-builder-lib/out/util/filter.js` 的 `createFilter` 对 `relative === "node_modules"` 直接返回 `false`）。所以 `from: node-runtime → to: node` 只会落下 `node.exe` 和 `npm.cmd`，`npm.cmd` 找不到 `npm-cli.js`，用户侧表现为设置页报「Node.js 运行时不可用」、托管 Runtime 无法安装。`win.extraResources` 里额外把 `node-runtime/node_modules` 映射到 `node/node_modules` 就是为了绕开这条过滤。
+- **unix 布局是 `lib/node_modules`，不在根级**，不受上述过滤影响；不要为 mac/linux 复制这条映射。
+
+打包链路有 `afterPack` 钩子兜底：`scripts/verify-node-runtime.cjs` 会在生成安装包前检查落盘的 `node.exe` 与 `npm-cli.js`，缺任何一个直接让打包失败。手工验证已装应用时，直接跑 `resources/node/npm.cmd --version`——报 `MODULE_NOT_FOUND ... npm-cli.js` 就是这个缺陷。
+
 `sidecar/package.json` 只标记 ESM(`"type": "module"`);`node_modules` 不随包
 分发,sidecar 运行时从托管 Runtime 目录(`%LOCALAPPDATA%/CodeMUX/runtimes`)动态
 加载 provider SDK。修改 sidecar 源码后务必让打包链路重跑 `npm run build:sidecar`
