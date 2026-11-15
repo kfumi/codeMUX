@@ -165,14 +165,14 @@ describe('ActivityRunGroupHead', () => {
         live={false}
         open={false}
         onToggle={() => {}}
-        completedText="已处理 · 探索 2"
+        completedText="已探索 2 次"
         fallbackTail=""
       />,
     );
     const header = container.querySelector('[data-slot="activity-run-trigger"]');
     expect(header).not.toBeNull();
     expect(header?.getAttribute('aria-expanded')).toBe('false');
-    expect(header?.getAttribute('aria-label')).toBe('已处理 · 探索 2');
+    expect(header?.getAttribute('aria-label')).toBe('已探索 2 次');
     expect(container.querySelector('[data-slot="activity-run-pulse"]')).toBeNull();
 
     rerender(
@@ -181,7 +181,7 @@ describe('ActivityRunGroupHead', () => {
         live={false}
         open={false}
         onToggle={() => {}}
-        completedText="已处理 · 探索 1"
+        completedText="已探索 1 次"
         fallbackTail=""
       />,
     );
@@ -251,7 +251,7 @@ describe('ActivityRunGroupHead', () => {
         live
         open={false}
         onToggle={() => {}}
-        completedText="已处理 · 探索 2"
+        completedText="已探索 2 次"
         activeToolSummary="读取 package.json"
         fallbackTail="App.tsx"
         sessionId="session-head-live-3"
@@ -266,7 +266,7 @@ describe('ActivityRunGroupHead', () => {
         live
         open={false}
         onToggle={() => {}}
-        completedText="已处理 · 探索 2"
+        completedText="已探索 2 次"
         fallbackTail="App.tsx"
         sessionId="session-head-live-3"
       />,

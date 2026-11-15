@@ -173,7 +173,7 @@ export type ActivityRunGroupHeadProps = {
   live: boolean;
   open: boolean;
   onToggle: () => void;
-  /** 完成态标题：分类统计（`已处理 · 探索 2 · …` / `已思考 · N 段`）。 */
+  /** 完成态标题：动宾短句统计（`已探索 2 次，已执行 11 命令，已修改 1 文件` / `已思考 N 段`）。 */
   completedText: string;
   /** 实时态的活动工具摘要（未决调用，投影已按最新参数解析）；无未决调用时为空。 */
   activeToolSummary?: string;

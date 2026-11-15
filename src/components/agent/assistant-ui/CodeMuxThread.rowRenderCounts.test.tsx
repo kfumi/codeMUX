@@ -346,7 +346,7 @@ function sampleBindings(): AssistantRowBindings {
     runGroupEligible: true,
     runStepCount: 3,
     runPartsVisible: false,
-    runCompletedText: '已处理 · 探索 2',
+    runCompletedText: '已探索 2 次',
     runActiveToolSummary: '读取 package.json',
     runTail: 'App.tsx',
     hasDelegation: true,

@@ -587,7 +587,7 @@ describe('SubagentPreviewPanel', () => {
     const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
     expect(header).not.toBeNull();
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(header.getAttribute('aria-label')).toBe('已处理 · 探索 2');
+    expect(header.getAttribute('aria-label')).toBe('已探索 2 次');
     expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
     fireEvent.click(header);

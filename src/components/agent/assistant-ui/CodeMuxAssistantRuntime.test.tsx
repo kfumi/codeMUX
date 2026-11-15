@@ -1989,7 +1989,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const header = container.querySelector('[data-slot="activity-run-trigger"]');
     expect(header).not.toBeNull();
     expect(header?.getAttribute('aria-expanded')).toBe('false');
-    expect(header?.getAttribute('aria-label')).toBe('已处理 · 探索 2');
+    expect(header?.getAttribute('aria-label')).toBe('已探索 2 次');
     expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
     fireEvent.click(header!);
@@ -2016,7 +2016,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     // 步骤按普通工具卡平铺；两个单步思考段不成组、直接可见。
     expect(container.querySelectorAll('[data-slot="activity-run-trigger"]')).toHaveLength(1);
     const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
-    expect(header.getAttribute('aria-label')).toBe('已处理 · 探索 1');
+    expect(header.getAttribute('aria-label')).toBe('已探索 1 次');
     const visibleSteps = () => Array.from(
       container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'),
     ).map((step) => step.getAttribute('aria-label'));
@@ -2117,7 +2117,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const headers = Array.from(container.querySelectorAll('[data-slot="activity-run-trigger"]'));
     expect(headers).toHaveLength(2);
     expect(headers.map((header) => header.getAttribute('aria-label')))
-      .toEqual(['已处理 · 探索 1', '已处理 · 探索 1']);
+      .toEqual(['已探索 1 次', '已探索 1 次']);
     expect(container.querySelectorAll('[data-slot="reasoning-trigger"], [data-slot="tool-fallback-trigger"]'))
       .toHaveLength(0);
 
@@ -2142,7 +2142,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     // 读取 / 写入 / 运行三步合成一个折叠组（默认收起）；正文永远可见。
     const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
-    expect(header.getAttribute('aria-label')).toBe('已处理 · 探索 1 · 执行 1 · 修改 1 个文件');
+    expect(header.getAttribute('aria-label')).toBe('已探索 1 次，已执行 1 命令，已修改 1 文件');
     expect(screen.getByText('文件已写好。')).toBeTruthy();
     expect(container.querySelectorAll('[data-slot="tool-fallback-trigger"]')).toHaveLength(0);
 
@@ -3848,7 +3848,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     // 连续过程合成一个折叠组：默认收起，组头是完成态分类统计；正文永远可见。
     const header = container.querySelector('[data-slot="activity-run-trigger"]') as HTMLElement;
     expect(header).not.toBeNull();
-    expect(header.getAttribute('aria-label')).toBe('已处理 · 探索 1 · 执行 1');
+    expect(header.getAttribute('aria-label')).toBe('已探索 1 次，已执行 1 命令');
     expect(screen.getByText('架构已摸清。')).toBeTruthy();
 
     fireEvent.click(header);

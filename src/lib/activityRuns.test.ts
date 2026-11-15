@@ -755,7 +755,7 @@ describe('tool classification & completed stats', () => {
       changeFiles: 2,
       changeUnresolvedCalls: 0,
     });
-    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 探索 2 · 执行 1 · 修改 2 个文件 · 其他 2');
+    expect(activityRunCompletedText(runs[0]!)).toBe('已探索 2 次，已执行 1 命令，已修改 2 文件，已处理 2 项');
   });
 
   it('一次补丁触及多文件按目标计数', () => {
@@ -768,7 +768,7 @@ describe('tool classification & completed stats', () => {
     const { runs } = runsFor(events);
 
     expect(getActivityRunCategoryCounts(runs[0]!)).toMatchObject({ changeFiles: 2, changeUnresolvedCalls: 0 });
-    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 修改 2 个文件');
+    expect(activityRunCompletedText(runs[0]!)).toBe('已修改 2 文件');
   });
 
   it('无法识别路径的修改按调用次数补足', () => {
@@ -776,7 +776,20 @@ describe('tool classification & completed stats', () => {
 
     const { runs } = runsFor(events);
 
-    expect(activityRunCompletedText(runs[0]!)).toBe('已处理 · 未定位修改 2 次');
+    expect(activityRunCompletedText(runs[0]!)).toBe('已修改 2 次');
+  });
+
+  it('有路径与无路径的修改并存时合成一句', () => {
+    const events = [
+      user('go'),
+      tool('w1', 'Write', { file_path: 'src/a.ts' }),
+      tool('w2', 'Write', {}),
+      text('done'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(activityRunCompletedText(runs[0]!)).toBe('已修改 1 文件、1 次');
   });
 
   it('纯思考段显示思考段数', () => {
@@ -784,6 +797,6 @@ describe('tool classification & completed stats', () => {
 
     const { runs } = runsFor(events);
 
-    expect(activityRunCompletedText(runs[0]!)).toBe('已思考 · 2 段');
+    expect(activityRunCompletedText(runs[0]!)).toBe('已思考 2 段');
   });
 });

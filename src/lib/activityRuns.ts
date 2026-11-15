@@ -825,20 +825,28 @@ export function getActivityRunCategoryCounts(run: Pick<ActivityRun, 'toolCalls'>
 }
 
 /**
- * 完成态组头的标题文案：工具段显示「已处理 · 分类统计」，纯思考段显示「已思考 · N 段」。
- * 顺序固定为「探索 → 执行 → 修改 → 其他」，零值省略；不显示耗时，不显示失败标记。
+ * 完成态组头的标题文案，动宾短句用全角逗号串接（对齐 ZCode：已探索 2 次，已执行 11 命令，
+ * 已修改 1 文件）。顺序固定为「探索 → 执行 → 修改 → 其他」，零值省略；纯思考段显示
+ * 「已思考 N 段」。不显示耗时，不显示失败标记。
  */
 export function activityRunCompletedText(run: Pick<ActivityRun, 'toolCalls' | 'thinkingBlocks'>): string {
   if (run.toolCalls.length === 0) {
     const blocks = Math.max(run.thinkingBlocks, 1);
-    return `已思考 · ${blocks} 段`;
+    return `已思考 ${blocks} 段`;
   }
   const counts = getActivityRunCategoryCounts(run);
   const parts: string[] = [];
-  if (counts.explore > 0) parts.push(`探索 ${counts.explore}`);
-  if (counts.execute > 0) parts.push(`执行 ${counts.execute}`);
-  if (counts.changeFiles > 0) parts.push(`修改 ${counts.changeFiles} 个文件`);
-  if (counts.changeUnresolvedCalls > 0) parts.push(`未定位修改 ${counts.changeUnresolvedCalls} 次`);
-  if (counts.other > 0) parts.push(`其他 ${counts.other}`);
-  return parts.length > 0 ? `已处理 · ${parts.join(' · ')}` : '已处理';
+  if (counts.explore > 0) parts.push(`已探索 ${counts.explore} 次`);
+  if (counts.execute > 0) parts.push(`已执行 ${counts.execute} 命令`);
+  // 无路径的修改按调用次数补记，不伪造文件数，也不显示「（路径未知）」——那对读者
+  // 没有行动价值；与有路径的修改并存时合成一句，避免出现两个「已修改」。
+  if (counts.changeFiles > 0 && counts.changeUnresolvedCalls > 0) {
+    parts.push(`已修改 ${counts.changeFiles} 文件、${counts.changeUnresolvedCalls} 次`);
+  } else if (counts.changeFiles > 0) {
+    parts.push(`已修改 ${counts.changeFiles} 文件`);
+  } else if (counts.changeUnresolvedCalls > 0) {
+    parts.push(`已修改 ${counts.changeUnresolvedCalls} 次`);
+  }
+  if (counts.other > 0) parts.push(`已处理 ${counts.other} 项`);
+  return parts.length > 0 ? parts.join('，') : '已处理';
 }
