@@ -1,5 +1,10 @@
 import { builtinMcpToolSegment } from '@/lib/builtinMcp';
 import { isToolResultOnlyUserEvent } from '@/components/agent/assistant-ui/assistantCollapse';
+import { isHiddenAssistantThreadUserEvent } from '@/components/agent/assistant-ui/assistantResultTargets';
+import {
+  isCodexCompactSummaryAssistantEvent,
+  visibleEventKinds,
+} from '@/components/agent/assistant-ui/convertAgentEvents';
 import { isAskUserQuestionToolName } from '@/lib/askUserQuestionTools';
 import { getToolDisplayName, getToolHeaderSummary, normalizeToolName } from '@/components/agent/toolHeaderSummary';
 import { isSubagentToolName } from '@/lib/subagentTools';
@@ -205,8 +210,11 @@ function classifyProcessEvent(event: AgentMessage | undefined): EventSteps | nul
  * 按事件切段会让同一个处理段凭空断成两段、各画一个组头（步骤数之和还等于全部步骤，
  * 读者却以为分了两波）。
  *
- * 判据取自 `convertAgentEventsToAssistantMessages` 的实际行为：只有 `user`、
- * `assistant`、`ask_user_question` 与 `visibleEventKinds` 里那几种事件会产出消息行。
+ * 判据与 `convertAgentEventsToAssistantMessages` 的分派互为镜像，且默认走白名单：只有
+ * `user`（真用户消息）、`assistant`（转得出消息部分）、`ask_user_question` 与
+ * `visibleEventKinds` 里那几种系统事件会产出消息行，**其余 kind 一律不画行**。逐个枚举
+ * 「不画行」的 kind 追不上新增事件——漏掉一个（如 `file_snapshot`，Claude Code 每次文件
+ * 修改后都发一个）就会把连续的工具调用切成一个个小段。
  *
  * 少数事件是否落地成一行还取决于流的状态：`error` 会被折进上一个尚无结果的工具卡，
  * 由 `computeNoRowFlags` 按回合前向扫描后逐位覆盖。
@@ -245,29 +253,47 @@ function rendersNoRow(event: AgentMessage | undefined): boolean {
   if (event.kind === 'result' || event.kind === 'ask_user_question_timeout') {
     return true;
   }
-  if (event.kind !== 'assistant') {
-    return false;
-  }
-
-  const content = event.data.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return true;
-  }
-  return content.every((block) => {
-    if (!block) {
+  if (event.kind === 'user') {
+    // user 行只在「真用户消息」时落地：工具结果载体、隐藏元数据事件（任务通知、
+    // compact 摘要、命令回显等）与空消息都不画行。
+    if (isHiddenAssistantThreadUserEvent(event)) {
       return true;
     }
-    if (block.type === 'text') {
-      return typeof block.text !== 'string' || block.text.trim().length === 0;
+    const text = typeof event.data.content === 'string' ? event.data.content.trim() : '';
+    return text.length === 0 && (event.data.attachments?.length ?? 0) === 0;
+  }
+  if (event.kind === 'assistant') {
+    // Codex 的 compact 摘要助手事件整个不落地成行（转换分派直接 return）。
+    if (isCodexCompactSummaryAssistantEvent(event)) {
+      return true;
     }
-    if (block.type === 'thinking') {
-      return typeof block.thinking !== 'string' || block.thinking.length === 0;
+    const content = event.data.message?.content;
+    if (!Array.isArray(content) || content.length === 0) {
+      return true;
     }
-    if (block.type === 'tool_use') {
-      return false;
-    }
-    return true;
-  });
+    return content.every((block) => {
+      if (!block) {
+        return true;
+      }
+      if (block.type === 'text') {
+        return typeof block.text !== 'string' || block.text.trim().length === 0;
+      }
+      if (block.type === 'thinking') {
+        return typeof block.thinking !== 'string' || block.thinking.length === 0;
+      }
+      if (block.type === 'tool_use') {
+        return false;
+      }
+      return true;
+    });
+  }
+  // 其余 kind 走白名单：转换分派只为 `ask_user_question` 与 `visibleEventKinds` 里的系统
+  // 事件产出消息行。`file_snapshot`、`todo_list`、`permission`、`system`、`ready`、`done`、
+  // `mcp_status`、`proxy_status`、`resume_failed` 等一律不画行——尤其 `file_snapshot`，
+  // Claude Code 每次文件修改后都会发一个，把它当行会把每个编辑工具都切成独立小段
+  // （真实会话实测：108 步的回合被切成 15 段、每两步一个组头）。
+  return event.kind !== 'ask_user_question'
+    && !(visibleEventKinds as readonly AgentMessage['kind'][]).includes(event.kind);
 }
 
 /**

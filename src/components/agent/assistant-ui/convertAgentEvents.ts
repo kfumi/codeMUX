@@ -50,7 +50,12 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['additional_directories_unavailable', 'api_retry', 'compact', 'error', 'native_session_rebuilt', 'permission_update_deferred', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
+/**
+ * 会作为独立系统事件行落地的 kind 白名单（与下方转换分派一一对应）。分段投影
+ * （`activityRuns` 的 `rendersNoRow`）以此为「画行 → 切断分段」的判据源，新 kind
+ * 落地成行时在这里登记即可，两处不会漂移。
+ */
+export const visibleEventKinds = ['additional_directories_unavailable', 'api_retry', 'compact', 'error', 'native_session_rebuilt', 'permission_update_deferred', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
@@ -420,7 +425,8 @@ function updatePreviousApiRetryMessage(
   return true;
 }
 
-function isCodexCompactSummaryAssistantEvent(
+/** Codex 的 compact 摘要助手事件整个不落地成行（转换分派直接 return）。 */
+export function isCodexCompactSummaryAssistantEvent(
   event: Extract<AgentMessage, { kind: 'assistant' }>,
 ): boolean {
   return event.data.message.content.some((block) => (

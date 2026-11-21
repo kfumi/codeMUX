@@ -416,6 +416,93 @@ describe('buildActivityRuns', () => {
     expect(placementByEventIndex.has(2)).toBe(false);
   });
 
+  it('bridges file_snapshot events, which render no row (Claude Code file snapshots)', () => {
+    // 真实会话回归：Claude Code 每次文件修改后都发一个 file_snapshot，转换分派对它
+    // 不产出任何消息行。把它当行会把连续的编辑工具切成一个个小段（线上实例：108 步
+    // 的回合被切成 15 段、每两步一个组头）。
+    const snapshot = (path: string, toolUseId: string) => ({
+      kind: 'file_snapshot',
+      data: { type: 'file_snapshot', file_path: path, original_content: '', is_new: false, tool_use_id: toolUseId },
+    } as unknown as AgentMessage);
+    const events = [
+      user('go'),
+      tool('e1', 'Edit', { file_path: 'src/a.ts' }),
+      snapshot('src/a.ts', 'e1'),
+      toolResult('e1'),
+      thinking('核对一下'),
+      tool('w1', 'Write', { file_path: 'src/b.ts' }),
+      snapshot('src/b.ts', 'w1'),
+      toolResult('w1'),
+      text('完成'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.eventIndices).toEqual([1, 4, 5]);
+    expect(runs[0]!.stepCount).toBe(3);
+    expect(activityRunCompletedText(runs[0]!)).toBe('已修改 2 文件');
+  });
+
+  it('bridges todo / permission / system metadata kinds, which render no row either', () => {
+    // 其余「不产出消息行」的 kind 走白名单默认值：转换分派只为 ask_user_question 与
+    // visibleEventKinds 产出行，这里抽几个代表锁定默认值不回退成「未知 kind 切段」。
+    const events = [
+      user('go'),
+      tool('t1', 'Bash', { command: 'npm test' }),
+      { kind: 'todo_list', data: { todos: [] } } as unknown as AgentMessage,
+      { kind: 'permission', data: { request_id: 'p1', permission_type: 'bash' } } as unknown as AgentMessage,
+      { kind: 'system', data: {} } as unknown as AgentMessage,
+      { kind: 'ready', data: {} } as unknown as AgentMessage,
+      { kind: 'done', data: {} } as unknown as AgentMessage,
+      { kind: 'mcp_status', data: { servers: {}, status: {} } } as unknown as AgentMessage,
+      toolResult('t1'),
+      tool('t2', 'Bash', { command: 'npm run build' }),
+      text('完成'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.stepCount).toBe(2);
+  });
+
+  it('still splits on visible system event kinds, which render as rows', () => {
+    // 白名单的正面控制：visibleEventKinds 里的系统事件会落地成行，仍按边界切断分段。
+    const events = [
+      user('go'),
+      tool('t1', 'Bash', { command: 'npm test' }),
+      { kind: 'api_retry', data: { attempt: 1, max_attempts: 3 } } as unknown as AgentMessage,
+      toolResult('t1'),
+      tool('t2', 'Bash', { command: 'npm run build' }),
+      text('完成'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.eventIndices).toEqual([1]);
+    expect(runs[1]!.eventIndices).toEqual([4]);
+  });
+
+  it('bridges hidden user events (compact summaries), which render no row', () => {
+    // compact 摘要以 user 事件投影时整个被转换分派跳过：不是真用户消息、也不画行，
+    // 夹在工具调用之间不能把段切开。
+    const events = [
+      user('go'),
+      tool('t1', 'Bash', { command: 'npm test' }),
+      { kind: 'user', data: { content: '已压缩上下文', isCompactSummary: true } } as unknown as AgentMessage,
+      toolResult('t1'),
+      tool('t2', 'Bash', { command: 'npm run build' }),
+      text('完成'),
+    ];
+
+    const { runs } = runsFor(events);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.stepCount).toBe(2);
+  });
+
   it('bridges an error that gets absorbed by a pending tool card instead of splitting the run', () => {
     // convertAgentEvents 会把错误文本当成最近一个尚无结果的工具的结果贴上去
     // （attachLatestPendingToolError）：这时错误事件一行都画不出来，两次调用仍属同一段（各自一行）。
