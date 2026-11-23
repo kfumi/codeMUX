@@ -41,7 +41,6 @@ const updatedCargoToml = cargoToml.replace(
   /^(\s*version\s*=\s*)".*"$/m,
   `$1"${normalizedVersion}"`
 );
-writeFileSync(cargoTomlPath, updatedCargoToml, "utf8");
 
 const cargoLock = readFileSync(cargoLockPath, "utf8");
 const updatedCargoLock = cargoLock.replace(
