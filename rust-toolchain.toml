@@ -1,0 +1,7 @@
+[toolchain]
+# 固定编译器版本:CI 的 clippy 带 `-D warnings`,上游每次 stable 发版新增的
+# lint 都会让「本地绿、推上去红」重演(1.100.0 的 needless_bool 就是实例)。
+# 升级步骤:改这里的 channel 与 .github/workflows/{ci,release}.yml 的 action ref,
+# 然后在 crates/daemon 跑 fmt --check / clippy -D warnings / test 并修干净。
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]

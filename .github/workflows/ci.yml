@@ -78,7 +78,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        # 版本与根目录 rust-toolchain.toml 保持一致;不要改回 @stable —— 浮动
+        # stable 会让上游新增的 clippy lint 在 -D warnings 下无故判红。
+        uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: clippy, rustfmt
 
@@ -129,7 +131,8 @@ jobs:
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        # 与 rust-check job 及根目录 rust-toolchain.toml 保持同一版本。
+        uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

@@ -165,7 +165,8 @@ jobs:
             apps/desktop/package-lock.json
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        # 与 CI 和根目录 rust-toolchain.toml 保持同一版本,保证发布产物可复现。
+        uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

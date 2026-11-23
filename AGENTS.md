@@ -50,6 +50,12 @@ All project documents live under `docs/`. Whatever agent you are (pi, trae, zcod
 - `cd crates/daemon && cargo check --all-targets --all-features` checks Rust compilation.
 - `npx vitest run` runs root TypeScript/React tests; run the same command in `apps/sidecar/` for sidecar tests.
 
+### Rust toolchain is pinned
+
+The Rust compiler version is pinned in the repo-root `rust-toolchain.toml` (`channel`), and the CI/release workflows use the matching `dtolnay/rust-toolchain@<same version>` ref — do not change either back to a floating `stable`. `clippy` runs with `-D warnings`, so every new stable release that adds a lint would otherwise turn CI red on untouched code (Rust 1.100.0's `needless_bool` did exactly that).
+
+To upgrade: bump `channel` in `rust-toolchain.toml` **and** the three `dtolnay/rust-toolchain@…` refs in `.github/workflows/{ci,release}.yml` in the same commit, then run `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-features` in `crates/daemon` and fix whatever the new lints flag. `rustup` picks the file up automatically for any `cargo` command run anywhere in the repo, so the local and CI compilers stay in sync.
+
 ### Rust daemon changes — always rebuild
 
 After any change under `crates/daemon/` (Rust source or `Cargo.toml`), run `npm run build:daemon` as the finishing step of the change — do not leave it to the user.
