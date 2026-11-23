@@ -198,14 +198,9 @@ pub(crate) fn is_targetable_rewind_user_value(
 
     let text = extract_user_text_for_rewind(value);
     let trimmed = text.trim_start();
-    if trimmed.starts_with("Base directory for this skill: ")
+    !(trimmed.starts_with("Base directory for this skill: ")
         || (trimmed.starts_with("# AGENTS.md instructions for ")
-            && trimmed.contains("<INSTRUCTIONS>"))
-    {
-        return false;
-    }
-
-    true
+            && trimmed.contains("<INSTRUCTIONS>")))
 }
 
 fn rewind_target_matches(
