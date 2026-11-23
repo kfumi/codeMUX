@@ -266,19 +266,18 @@ fn read_skill_metadata(path: &Path) -> Result<(Option<String>, Option<String>), 
 }
 
 fn is_link_like(path: &Path) -> bool {
-    if fs::symlink_metadata(path)
+    // 读不到元数据时按链接处理:删除时保守,不跟进目标目录。
+    let is_symlink = fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(true)
-    {
-        return true;
-    }
+        .unwrap_or(true);
 
+    // Windows 的 junction 是 reparse point,但 `is_symlink()` 不认,要单独探测。
     #[cfg(windows)]
-    if junction::exists(path).unwrap_or(false) {
-        return true;
-    }
+    let is_junction = junction::exists(path).unwrap_or(false);
+    #[cfg(not(windows))]
+    let is_junction = false;
 
-    false
+    is_symlink || is_junction
 }
 
 #[cfg(test)]
