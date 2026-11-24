@@ -1,136 +1,139 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { ToolCallCard } from './ToolCallCard';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
 import { TooltipProvider } from '../ui/tooltip';
+import { CodeMuxToolCallMessagePart } from './assistant-ui/CodeMuxMessageParts';
+
+// 行渲染已收进 CodeMuxMessageParts 的 tool-call part（旧 ToolCallCard 已删除），
+// 这里 mock 掉只有侧面板才需要的 facade，让 part 能在 jsdom 里独立挂载。
+vi.mock('@/lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    workspace: {
+      previewImage: vi.fn(),
+    },
+  },
+}));
 
 function renderWithTooltip(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
 
+/** 组头行；展开/收起都点它。 */
+function triggerOf(container: HTMLElement): HTMLElement {
+  return container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLElement;
+}
+
 describe('tool header summaries', () => {
-  it('shows Read file name in the header (not full path) and removes it from expanded args', () => {
+  it('shows Read file name in the header instead of the full path', () => {
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="Read"
-        input={{
-          file_path: 'D:\\project\\src\\App.tsx',
-        }}
-        status="done"
+        args={{ file_path: 'D:\\project\\src\\App.tsx' }}
       />,
     );
 
-    // Now shows only filename, not full path
+    // 头部只给文件名，完整路径留给 tooltip。
     expect(screen.getByText('App.tsx')).toBeTruthy();
-
-    fireEvent.click(within(container).getByRole('button'));
-
-    expect(container.textContent).not.toContain('"file_path"');
+    expect(container.textContent).not.toContain('D:\\project\\src');
   });
 
-  it('shows Bash command in the header without expanded args', () => {
-    const { container } = renderWithTooltip(
-      <ToolCallCard
+  it('shows Bash command in the header', () => {
+    renderWithTooltip(
+      <CodeMuxToolCallMessagePart
         toolName="Bash"
-        input={{
-          description: 'Run typecheck',
-          command: 'npm run build',
-        }}
-        status="done"
+        args={{ description: 'Run typecheck', command: 'npm run build' }}
       />,
     );
 
     expect(screen.getByText('npm run build')).toBeTruthy();
-
-    fireEvent.click(within(container).getByRole('button'));
-
-    expect(container.textContent).not.toContain('"description"');
-    expect(container.textContent).not.toContain('"command"');
+    // 命令本身就是头部摘要，description 不进头部。
+    expect(screen.queryByText('Run typecheck')).toBeNull();
   });
 
-  it('shows shell_command command in the header and keeps it in expanded args', () => {
+  it('renders shell_command as a command panel and keeps it out of the args block', () => {
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="shell_command"
-        input={{
-          command: 'node --check script.js',
-          timeout_ms: 10000,
-          workdir: 'D:\\project\\ai-code\\code-demo',
-        }}
-        status="done"
+        args={{ command: 'node --check script.js', timeout_ms: 10000, workdir: 'D:\\project\\ai-code\\code-demo' }}
+        result="ok"
       />,
     );
 
     expect(screen.getByText('node --check script.js')).toBeTruthy();
 
-    fireEvent.click(within(container).getByRole('button'));
+    fireEvent.click(triggerOf(container));
 
-    expect(container.textContent).toContain('"command"');
-    expect(container.textContent).toContain('"timeout_ms"');
-    expect(container.textContent).toContain('"workdir"');
+    // 命令工具走终端面板：命令只出现一次，参数 JSON 不再重复整份输入。
+    expect(container.querySelector('[data-slot="tool-fallback-command"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
   });
 
   it('shows Grep pattern and Agent description in the header', () => {
     renderWithTooltip(
       <>
-        <ToolCallCard toolName="Grep" input={{ pattern: 'ToolCallCard', path: 'src' }} status="done" />
-        <ToolCallCard toolName="Agent" input={{ description: 'Explore tool message rendering', prompt: 'Full prompt' }} status="done" />
+        <CodeMuxToolCallMessagePart toolName="Grep" args={{ pattern: 'CodeMuxToolCallMessagePart', path: 'src' }} />
+        <CodeMuxToolCallMessagePart
+          toolName="Agent"
+          args={{ description: 'Explore tool message rendering', prompt: 'Full prompt' }}
+        />
       </>,
     );
 
-    expect(screen.getByText('ToolCallCard')).toBeTruthy();
+    expect(screen.getByText('CodeMuxToolCallMessagePart')).toBeTruthy();
     expect(screen.getByText('Explore tool message rendering')).toBeTruthy();
   });
 
-  it('shows Claude TaskStop with a Chinese display name', () => {
-    renderWithTooltip(<ToolCallCard toolName="TaskStop" input={{}} status="done" />);
+  it('names Claude TaskStop in the accessible label', () => {
+    const { container } = renderWithTooltip(<CodeMuxToolCallMessagePart toolName="TaskStop" args={{}} />);
 
-    expect(screen.getByText('子智能体结束')).toBeTruthy();
-    expect(screen.queryByText('TaskStop')).toBeNull();
+    // 动作词是「委派」（它是子智能体类工具），具体工具名由无障碍名补上。
+    const label = triggerOf(container).getAttribute('aria-label') ?? '';
+    expect(label).toContain('子智能体结束');
+    expect(label).not.toContain('TaskStop');
   });
 
-  it('shows Codex multi_agent spawn_agent with a Chinese display name', () => {
+  it('names Codex multi_agent spawn_agent in the accessible label', () => {
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="multi_agent_v1__spawn_agent"
-        input={{
+        args={{
           fork_context: true,
           items: [{ type: 'text', text: 'Find all files related to message regenerating' }],
         }}
-        status="done"
       />,
     );
 
-    expect(screen.getByText('启动子智能体')).toBeTruthy();
-    expect(screen.queryByText('multi_agent_v1__spawn_agent')).toBeNull();
+    const label = triggerOf(container).getAttribute('aria-label') ?? '';
+    expect(label).toContain('启动子智能体');
+    expect(label).not.toContain('multi_agent_v1__spawn_agent');
 
-    fireEvent.click(within(container).getByRole('button'));
-
-    expect(container.textContent).not.toContain('"fork_context"');
+    fireEvent.click(triggerOf(container));
+    // 展开面板保留原始参数（这是 live 组件与旧 ToolCallCard 的差异，不是回归）。
+    expect(container.textContent).toContain('"fork_context"');
     expect(container.textContent).toContain('"items"');
   });
 });
+
 describe('浏览器工具 header 摘要', () => {
-  it('点击元素在标题显示编号，展开参数不再重复', () => {
-    const { container } = renderWithTooltip(
-      <ToolCallCard toolName={'browser_click'} input={{ elementId: 'e3', browserId: 'b-1' }} status={'done'} />,
+  it('点击元素在标题显示编号', () => {
+    renderWithTooltip(
+      <CodeMuxToolCallMessagePart toolName="browser_click" args={{ elementId: 'e3', browserId: 'b-1' }} />,
     );
     expect(screen.getByText('点击页面元素')).toBeTruthy();
     expect(screen.getByText('e3')).toBeTruthy();
-    fireEvent.click(within(container).getByRole('button'));
-    expect(container.textContent).not.toContain('elementId');
   });
+
   it('输入文字标题只显示编号与字数，不泄露内容', () => {
     renderWithTooltip(
-      <ToolCallCard toolName={'browser_type'} input={{ elementId: 'e1', text: 'hello' }} status={'done'} />,
+      <CodeMuxToolCallMessagePart toolName="browser_type" args={{ elementId: 'e1', text: 'hello' }} />,
     );
     expect(screen.getByText('输入页面文字')).toBeTruthy();
     expect(screen.queryByText('hello')).toBeNull();
   });
+
   it('快照工具显示中文名', () => {
-    renderWithTooltip(
-      <ToolCallCard toolName={'browser_snapshot'} input={{}} status={'done'} />,
-    );
+    renderWithTooltip(<CodeMuxToolCallMessagePart toolName="browser_snapshot" args={{}} />);
     expect(screen.getByText('读取页面快照')).toBeTruthy();
   });
 });

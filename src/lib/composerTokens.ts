@@ -11,10 +11,14 @@
  *   `--surface-1`）上，而 `--muted` / `--surface-3` 那几档是相对**表面种子**算的，
  *   深色下比 composer 还暗，悬停会变成「按下去」。
  * - 焦点环取不透明主色 + 2px 外偏移，外偏移底色就是 composer 自己的表面色。
+ *
+ * 字号取**正文档**（`text-sm` = `--text-ui-body`），与同一排的模型名、上下文用量环
+ * 一致。原先这里是 `text-xs`（= `--text-ui-meta`，比正文低两档），底排因此左半边
+ * 12px、右半边 14px，看起来像权限选项「小一号」。
  */
 export const COMPOSER_BAR_CONTROL_CLASS = [
   'inline-flex h-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2',
-  'text-xs font-medium text-muted-foreground outline-none transition-colors duration-fast',
+  'text-sm font-medium text-muted-foreground outline-none transition-colors duration-fast',
   'hover:bg-foreground/8 hover:text-foreground',
   'data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground',
   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--surface-1))]',

@@ -173,7 +173,7 @@ export type ActivityRunGroupHeadProps = {
   live: boolean;
   open: boolean;
   onToggle: () => void;
-  /** 完成态标题：动宾短句统计（`已探索 2 次，已执行 11 命令，已修改 1 文件` / `已思考 N 段`）。 */
+  /** 汇总统计文案：完成态的段，以及**展开中的实时段**都用它（展开时组内已有实时步骤）。 */
   completedText: string;
   /** 实时态的活动工具摘要（未决调用，投影已按最新参数解析）；无未决调用时为空。 */
   activeToolSummary?: string;
@@ -189,8 +189,13 @@ export type ActivityRunGroupHeadProps = {
 };
 
 /**
- * 过程组组头：段首承载唯一一行。完成态显示分类统计；实时态显示最近活动项摘要
- * （实时思考 → 未决工具 → 段尾步骤兜底），两个可见步骤起才有组头。
+ * 过程组组头：段首承载唯一一行。两个可见步骤起才有组头。
+ *
+ * 组头文案按「组是否展开」取，与 ZCode 的 `ConsecutiveSummaryGroup` 同口径：
+ * - 展开 → 分类统计汇总（`已探索 2 次，已执行 11 命令`）：组内步骤已经实时铺开，
+ *   组头再滚一遍「正在读取 xx」既重复又抢注意力；
+ * - 收起 → 实时段显示最近活动项摘要（实时思考 → 未决工具 → 段尾步骤兜底），
+ *   完成段显示同一份分类统计。
  *
  * 实时态拆成独立子组件：只有运行中的尾段组头会订阅实时缓冲（每条 flush 重渲染的
  * 只有这一个叶子），历史组的组头不吃任何流式订阅。
@@ -223,9 +228,12 @@ function LiveActivityRunGroupHead(props: ActivityRunGroupHeadProps) {
     // 还不满足成组门槛（比如只有一个已提交步骤、实时思考也还没来）：保持单行现状。
     return null;
   }
-  const label = thinkingPresent && thinkingSummary
-    ? thinkingSummary
-    : props.activeToolSummary || props.fallbackTail;
+  // 展开的组只报汇总：组内正在跑什么，步骤行自己会讲。
+  const label = props.open
+    ? props.completedText
+    : thinkingPresent && thinkingSummary
+      ? thinkingSummary
+      : props.activeToolSummary || props.fallbackTail;
   return (
     <ActivityRunHeader
       open={props.open}

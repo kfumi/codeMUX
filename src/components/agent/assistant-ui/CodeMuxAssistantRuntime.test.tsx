@@ -2761,6 +2761,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       .toBe('正在读取 · 读取');
     expect(container.querySelector('[data-streaming-reasoning="true"]')).not.toBeNull();
     expect(useAgentStore.getState().streamingThinking[sessionId]).toBe('正在确认项目入口');
+    // 展开后组头换成汇总统计（与结束后同一口径）：步骤行已经实时铺开，
+    // 组头不再重复一遍「正在思考什么」。
+    expect(container.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('aria-label'))
+      .toBe('已探索 1 次');
   });
 
   it('keeps the in-turn bottom rhythm on the last message row while the turn is streaming', () => {

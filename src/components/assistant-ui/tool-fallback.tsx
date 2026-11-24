@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { AlertCircleIcon, ChevronDownIcon, XCircleIcon } from 'lucide-react';
 import {
   type ToolCallMessagePart,
@@ -8,7 +8,6 @@ import {
   type ToolCallMessagePartStatus,
   type ToolCallMessagePartComponent,
 } from '@assistant-ui/react';
-import { useCollapsibleScrollLock } from '@/hooks/useCollapsibleScrollLock';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsNarrowViewport } from '@/hooks/useIsNarrowViewport';
 import { cn } from '@/lib/utils';
@@ -18,8 +17,6 @@ import remarkGfm from 'remark-gfm';
 
 import { getToolActionLabel, getToolDisplayName } from '@/components/agent/toolHeaderSummary';
 import { ToolActionIcon } from '@/components/assistant-ui/tool-action-icon';
-
-const ANIMATION_DURATION = 200;
 
 export type ToolFallbackRootProps = Omit<
   React.ComponentProps<typeof Collapsible>,
@@ -38,30 +35,25 @@ function ToolFallbackRoot({
   children,
   ...props
 }: ToolFallbackRootProps) {
-  const collapsibleRef = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const lockScroll = useCollapsibleScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
-      lockScroll();
       if (!isControlled) setUncontrolledOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [lockScroll, isControlled, controlledOnOpenChange],
+    [isControlled, controlledOnOpenChange],
   );
 
   return (
     <Collapsible
-      ref={collapsibleRef}
       data-slot="tool-fallback-root"
       open={isOpen}
       onOpenChange={handleOpenChange}
       className={cn('aui-tool-fallback-root group/tool-fallback-root group/tool-row w-full', className)}
-      style={{ '--animation-duration': `${ANIMATION_DURATION}ms` } as React.CSSProperties}
       {...props}
     >
       {children}
@@ -183,8 +175,8 @@ function ToolFallbackTrigger({
         data-slot="tool-fallback-trigger-chevron"
         className={cn(
           'size-3.5 shrink-0 text-muted-foreground',
-          'transition-[transform,opacity]',
-          'duration-(--animation-duration) ease-motion-standard motion-reduce:transition-none',
+          // 箭头旋转是 transform 动画（不动布局），与思考行同一条令牌；展开/收起的内容本身是瞬时的。
+          'transition-transform duration-normal ease-motion-standard motion-reduce:transition-none',
           isNarrow
             ? 'opacity-100'
             : 'opacity-0 group-hover/trigger:opacity-100 group-hover/tool-row:opacity-100 group-focus-visible/trigger:opacity-100',
@@ -203,29 +195,23 @@ function ToolFallbackContent({
   children,
   ...props
 }: React.ComponentProps<typeof CollapsibleContent> & { bodyClassName?: string; scrollable?: boolean }) {
+  // 展开/收起是**瞬间切换**，与思考行（`ActivityStepThinking` 的 `{open ? <div/> : null}`）
+  // 同一口径：对话界面里两类过程步骤的交互必须一致，不一边动一边不动。
+  // 代价也一致 —— 高度动画是全应用唯一会改布局的动画（每帧重排，长会话里尤其贵），
+  // 而且它连带 Radix `Presence` 的卸载握手、滚动锁与 `--animation-duration` 变量。
   return (
     <CollapsibleContent
       data-slot="tool-fallback-content"
       className={cn(
         'relative overflow-hidden text-sm outline-none',
-        'group/collapsible-content',
-        'ease-motion-standard motion-reduce:animate-none',
-        'data-closed:animate-collapsible-up',
-        'data-open:animate-collapsible-down',
-        'data-closed:fill-mode-forwards',
         'data-closed:pointer-events-none',
-        'data-open:duration-(--animation-duration)',
-        'data-closed:duration-(--animation-duration)',
         className,
       )}
       {...props}
     >
       <div
         className={cn(
-          'mt-0.5 flex flex-col gap-1.5 text-xs scrollbar-gutter-stable ease-motion-standard motion-reduce:animate-none',
-          'group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1',
-          'group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1',
-          'group-data-open/collapsible-content:duration-(--animation-duration) group-data-closed/collapsible-content:duration-(--animation-duration)',
+          'mt-0.5 flex flex-col gap-1.5 text-xs scrollbar-gutter-stable',
           scrollable ? 'max-h-40 overflow-y-auto pr-1' : 'overflow-visible',
           bodyClassName,
         )}

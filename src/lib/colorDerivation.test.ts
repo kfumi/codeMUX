@@ -162,6 +162,15 @@ function lightnessOf(triplet: string): number {
   return Number(triplet.split(' ')[2].replace('%', ''));
 }
 
+/**
+ * 感知用的 8bit 灰度（0–255）—— 用户眼里「这块和那块差多少」就是这个刻度。
+ * HSL 的百分比差值在近白/近黑两端会被压缩（242 与 245 只差 1.2%），
+ * 断言用百分比会误判「看不出差别」。
+ */
+function gray8(triplet: string): number {
+  return Math.round((lightnessOf(triplet) / 100) * 255);
+}
+
 /* ------------------------------------------------------------------ */
 
 const SEED_GRID: ThemeSeeds[] = [
@@ -274,26 +283,60 @@ describe('colorDerivation', () => {
     }
   });
 
-  it('keeps the three shell planes apart: chrome, sidebar surface, content surface', () => {
-    // 顶栏+图标轨（窗口面）、侧栏、内容面是外壳的三道平面。Codex 实测：
-    //   浅色 窗框 245 / 侧栏 252 / 内容 253；深色 窗框 14 / 侧栏 16 / 内容 17。
-    // 两套都是「窗框比面板更深，面板之间只差 1 级」—— 任两者塌到同一个值上，
-    // 整扇窗就成了一块平的；反过来把面板之间拉开几十级（比如深色下侧栏纯黑、
-    // 内容面用抬高档），侧栏就会读成面板上的一个洞。这两种毛病都实测出现过。
+  it('keeps the four shell planes apart: chrome, sidebar, content, side panel', () => {
+    // 顶栏+图标轨（窗口面）、侧栏、内容面、右侧预览面板是外壳的四道平面。
+    //
+    // 此前的口径是「面板之间只差 1 级」（照 Codex 实测），结果浅色下侧栏与内容面
+    // 同为 252、深色下侧栏/内容面/右侧面板同为 17 —— 整扇窗读成一块平的。现在按
+    // ZCode 的结构 token 分法把四道平面各拉开一档：
+    //   浅色 窗口面 228 < 侧栏 241 < 右侧面板 246 < 内容面 252
+    //   深色 窗口面 12  < 内容面 17 < 右侧面板 28 < 侧栏 32
+    //
+    // 注意两套主题里「侧栏 vs 右侧面板」的相对顺序是**反的**：浅色下内容面接近
+    // 纯白，两者都只能往深走（侧栏 241 比面板 246 更深）；深色下都只能往亮走
+    // （侧栏 32 比面板 28 更亮）。所以这里只钉「两两分得开 + 窗口面最深」，
+    // 不钉具体方向。
     const light = deriveThemeTokens(CODEX_LIGHT_SEEDS, false);
-    expect(lightnessOf(light['--chrome-bg'])).toBeLessThan(lightnessOf(light['--background']));
-    // 侧栏与内容面同属面板档：同为表面种子，差值不该超过一两级。
-    expect(Math.abs(lightnessOf(light['--sidebar-bg']) - lightnessOf(light['--background']))).toBeLessThan(1);
+    const lightChrome = gray8(light['--chrome-bg']);
+    const lightSidebar = gray8(light['--sidebar-bg']);
+    const lightContent = gray8(light['--background']);
+    const lightCanvas = gray8(light['--surface-canvas']);
+    // 窗口面永远最深：侧栏与内容面都浮在它上面。
+    expect(lightChrome).toBeLessThan(lightSidebar);
+    expect(lightChrome).toBeLessThan(lightContent);
+    // 内容面接近纯白，侧栏与右侧面板都往深走。用户前后反馈过两次「边界不明显」，
+    // 浅色下窗口面与侧栏的落差因此钉在 10 级以上（当前 13），侧栏与内容面 8 级
+    // 以上（当前 11）。
+    expect(lightContent - lightSidebar).toBeGreaterThanOrEqual(8);
+    expect(lightSidebar - lightChrome).toBeGreaterThanOrEqual(10);
+    expect(lightContent - lightCanvas).toBeGreaterThanOrEqual(4);
+    expect(Math.abs(lightCanvas - lightSidebar)).toBeGreaterThanOrEqual(4);
     // 窗口面上的悬停档还要再深一点，否则导航栏的选中态压在窗口面上看不出来。
     expect(lightnessOf(light['--chrome-bg-hover'])).toBeLessThan(lightnessOf(light['--chrome-bg']));
     // 抬高档（composer 那类浮起控件）必须比内容面亮，否则控件浮不起来。
-    expect(lightnessOf(light['--surface-1'])).toBeGreaterThan(lightnessOf(light['--background']));
+    expect(gray8(light['--surface-1'])).toBeGreaterThan(lightContent);
 
     const dark = deriveThemeTokens(CODEX_DARK_SEEDS, true);
-    expect(lightnessOf(dark['--chrome-bg'])).toBeLessThan(lightnessOf(dark['--background']));
+    const darkChrome = gray8(dark['--chrome-bg']);
+    const darkSidebar = gray8(dark['--sidebar-bg']);
+    const darkContent = gray8(dark['--background']);
+    const darkCanvas = gray8(dark['--surface-canvas']);
+    // 深色下窗口面仍是最深的一条，其余三道平面都往上浮。
+    expect(darkChrome).toBeLessThan(darkContent);
+    expect(darkContent).toBeLessThan(darkSidebar);
+    expect(darkContent).toBeLessThan(darkCanvas);
+    // 深色下侧栏与内容面的差值必须够大（用户反馈「深色模式左侧面板颜色还不够」）。
+    expect(darkSidebar - darkContent).toBeGreaterThanOrEqual(10);
+    expect(darkCanvas - darkContent).toBeGreaterThanOrEqual(6);
+    expect(Math.abs(darkSidebar - darkCanvas)).toBeGreaterThanOrEqual(2);
     expect(lightnessOf(dark['--chrome-bg-hover'])).toBeGreaterThan(lightnessOf(dark['--chrome-bg']));
-    expect(Math.abs(lightnessOf(dark['--sidebar-bg']) - lightnessOf(dark['--background']))).toBeLessThan(1);
-    expect(lightnessOf(dark['--surface-1'])).toBeGreaterThan(lightnessOf(dark['--background']));
+    expect(gray8(dark['--surface-1'])).toBeGreaterThan(darkSidebar);
+    // 设置页侧栏与主侧栏同档：它们都是「侧栏」这道平面。
+    expect(dark['--settings-sidebar-bg']).toBe(dark['--sidebar-bg']);
+    expect(light['--settings-sidebar-bg']).toBe(light['--sidebar-bg']);
+    // 侧栏的悬停/选中面必须与侧栏底色同向：浅色更深、深色更亮。
+    expect(gray8(light['--sidebar-muted'])).toBeLessThan(lightSidebar);
+    expect(gray8(dark['--sidebar-muted'])).toBeGreaterThan(darkSidebar);
   });
 
   it('keeps the composer context bar off both the page and the input surface', () => {
@@ -378,13 +421,13 @@ describe('colorDerivation', () => {
       '--card': '0 0% 99.22%',
       '--card-foreground': '0 0% 5.1%',
       '--card-opaque': '0 0% 99.22%',
-      '--chrome-bg': '0 0% 94.9%',
-      '--chrome-bg-hover': '0 0% 86.27%',
+      '--chrome-bg': '0 0% 89.41%',
+      '--chrome-bg-hover': '0 0% 81.18%',
       '--codemux-directive-accent': '216.83 92.2% 59.8%',
       '--codemux-directive-bg': '215 75% 93.73%',
       '--codemux-directive-border': '0 0% 91.37%',
       '--codemux-link': '216.83 92.2% 59.8%',
-      '--composer-action-bar-bg': '0 0% 94.9%',
+      '--composer-action-bar-bg': '0 0% 89.41%',
       '--destructive': '1.19 68.33% 43.33%',
       '--destructive-foreground': '0 0% 98.82%',
       '--destructive-vivid': '0 72.22% 50.59%',
@@ -409,20 +452,20 @@ describe('colorDerivation', () => {
       '--secondary': '0 0% 98.82%',
       '--secondary-foreground': '0 0% 5.1%',
       '--secondary-opaque': '0 0% 98.82%',
-      '--settings-sidebar-bg': '0 0% 98.82%',
+      '--settings-sidebar-bg': '0 0% 94.51%',
       '--shell-bg': '0 0% 98.82%',
       '--sidebar-accent': '216.83 92.2% 59.8%',
-      '--sidebar-bg': '0 0% 98.82%',
+      '--sidebar-bg': '0 0% 94.51%',
       '--sidebar-border': '0 0% 91.37%',
       '--sidebar-fg': '0 0% 5.1%',
       '--sidebar-glow': '216.83 92.2% 59.8%',
-      '--sidebar-muted': '0 0% 94.12%',
+      '--sidebar-muted': '0 0% 90.59%',
       '--success': '145.79 78.1% 26.86%',
       '--success-vivid': '144.09 55.92% 51.96%',
       '--surface-1': '0 0% 99.22%',
       '--surface-2': '0 0% 98.82%',
       '--surface-3': '0 0% 94.12%',
-      '--surface-canvas': '0 0% 96.86%',
+      '--surface-canvas': '0 0% 96.47%',
       '--surface-edge': '0 0% 87.84%',
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',
@@ -444,8 +487,8 @@ describe('colorDerivation', () => {
       '--card': '0 0% 17.25%',
       '--card-foreground': '0 0% 92.94%',
       '--card-opaque': '0 0% 17.65%',
-      '--chrome-bg': '0 0% 5.49%',
-      '--chrome-bg-hover': '0 0% 11.37%',
+      '--chrome-bg': '0 0% 4.71%',
+      '--chrome-bg-hover': '0 0% 10.59%',
       '--codemux-directive-accent': '217.04 92% 75.49%',
       '--codemux-directive-bg': '217.02 62.67% 14.71%',
       '--codemux-directive-border': '0 0% 13.73%',
@@ -475,20 +518,20 @@ describe('colorDerivation', () => {
       '--secondary': '0 0% 9.41%',
       '--secondary-foreground': '0 0% 92.94%',
       '--secondary-opaque': '0 0% 12.55%',
-      '--settings-sidebar-bg': '0 0% 6.67%',
+      '--settings-sidebar-bg': '0 0% 12.55%',
       '--shell-bg': '0 0% 6.67%',
       '--sidebar-accent': '217.04 92% 75.49%',
-      '--sidebar-bg': '0 0% 6.67%',
+      '--sidebar-bg': '0 0% 12.55%',
       '--sidebar-border': '0 0% 13.73%',
       '--sidebar-fg': '0 0% 92.94%',
       '--sidebar-glow': '216.83 92.2% 59.8%',
-      '--sidebar-muted': '0 0% 13.73%',
+      '--sidebar-muted': '0 0% 16.08%',
       '--success': '144.09 55.92% 51.96%',
       '--success-vivid': '144.09 55.92% 51.96%',
       '--surface-1': '0 0% 17.65%',
       '--surface-2': '0 0% 12.55%',
       '--surface-3': '0 0% 13.73%',
-      '--surface-canvas': '0 0% 6.67%',
+      '--surface-canvas': '0 0% 10.98%',
       '--surface-edge': '0 0% 20%',
       '--surface-glow': '216.83 92.2% 59.8%',
       '--surface-shadow': '0 0% 0%',

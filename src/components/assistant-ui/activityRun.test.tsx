@@ -274,4 +274,48 @@ describe('ActivityRunGroupHead', () => {
     expect(fallbackContainer.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('aria-label'))
       .toBe('App.tsx');
   });
+
+  it('实时态展开时组头换成分类统计（实时摘要只在收起时显示）', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      streamingThinking: { 'session-head-live-4': '正在核对任务入口' },
+      streamingText: { 'session-head-live-4': '' },
+      streamingThinkingStartEventCount: { 'session-head-live-4': 0 },
+      events: { 'session-head-live-4': [] },
+      forceStopped: {},
+    }));
+
+    const { container, rerender } = render(
+      <ActivityRunGroupHead
+        stepCount={2}
+        live
+        open={false}
+        onToggle={() => {}}
+        completedText="已探索 2 次"
+        activeToolSummary="读取 package.json"
+        fallbackTail="App.tsx"
+        sessionId="session-head-live-4"
+      />,
+    );
+    const label = () => container.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('aria-label');
+    // 收起：实时摘要（组内步骤还没铺开，组头是唯一的活动窗口）。
+    expect(label()).toBe('正在核对任务入口');
+
+    // 展开：组内步骤已经实时铺开，组头改报汇总统计 —— 与结束后同一种描述方式。
+    rerender(
+      <ActivityRunGroupHead
+        stepCount={2}
+        live
+        open
+        onToggle={() => {}}
+        completedText="已探索 2 次"
+        activeToolSummary="读取 package.json"
+        fallbackTail="App.tsx"
+        sessionId="session-head-live-4"
+      />,
+    );
+    expect(label()).toBe('已探索 2 次');
+    // 仍标记为实时态（组头的视觉与无障碍语义不随展开变化）。
+    expect(container.querySelector('[data-slot="activity-run-trigger"]')?.getAttribute('data-live')).toBe('true');
+  });
 });

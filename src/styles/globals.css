@@ -298,18 +298,18 @@
      * 保住窄列的呼吸位。
      */
     --thread-inline-padding: clamp(1.25rem, 4%, 2.5rem);
-    --chrome-bg: 0 0% 94.9%;
-    --chrome-bg-hover: 0 0% 86.27%;
+    --chrome-bg: 0 0% 89.41%;
+    --chrome-bg-hover: 0 0% 81.18%;
     /* 输入区顶部上下文条的底（Codex 的 --color-background-composer-action-bar）。 */
-    --composer-action-bar-bg: 0 0% 94.9%;
-    --surface-canvas: 0 0% 96.86%;
-    --sidebar-bg: 0 0% 98.82%;
+    --composer-action-bar-bg: 0 0% 89.41%;
+    --surface-canvas: 0 0% 96.47%;
+    --sidebar-bg: 0 0% 94.51%;
     --sidebar-fg: 0 0% 5.1%;
     --sidebar-border: 0 0% 91.37%;
-    --sidebar-muted: 0 0% 94.12%;
+    --sidebar-muted: 0 0% 90.59%;
     --sidebar-accent: 216.83 92.2% 59.8%;
     --sidebar-glow: 216.83 92.2% 59.8%;
-    --settings-sidebar-bg: 0 0% 98.82%;
+    --settings-sidebar-bg: 0 0% 94.51%;
     --shell-bg: 0 0% 98.82%;
     --surface-1: 0 0% 99.22%;
     --surface-2: 0 0% 98.82%;
@@ -363,20 +363,20 @@
     --input: 0 0% 20%;
     --ring: 217.24 41.63% 59.02%;
     --glow: 216.83 92.2% 59.8%;
-    --sidebar-bg: 0 0% 6.67%;
+    --sidebar-bg: 0 0% 12.55%;
     --sidebar-fg: 0 0% 92.94%;
     --sidebar-border: 0 0% 13.73%;
-    --sidebar-muted: 0 0% 13.73%;
+    --sidebar-muted: 0 0% 16.08%;
     --sidebar-accent: 217.04 92% 75.49%;
     --sidebar-glow: 216.83 92.2% 59.8%;
-    --settings-sidebar-bg: 0 0% 6.67%;
+    --settings-sidebar-bg: 0 0% 12.55%;
     --shell-bg: 0 0% 6.67%;
-    --chrome-bg: 0 0% 5.49%;
-    --chrome-bg-hover: 0 0% 11.37%;
+    --chrome-bg: 0 0% 4.71%;
+    --chrome-bg-hover: 0 0% 10.59%;
     /* 深色下与窗口面不同档：取 `elevatedSecondaryOpaque`，夹在内容面（17）与
        输入框（17.65%）之间偏下，实测 Codex 是 33。 */
     --composer-action-bar-bg: 0 0% 12.55%;
-    --surface-canvas: 0 0% 6.67%;
+    --surface-canvas: 0 0% 10.98%;
     --surface-1: 0 0% 17.65%;
     --surface-2: 0 0% 12.55%;
     --surface-3: 0 0% 13.73%;
@@ -567,6 +567,20 @@ html.cmx-panel-resizing webview {
 .content-surface-root[data-floats='true'] {
   --content-radius-start: var(--radius-content);
   --content-radius-end: 0px;
+}
+
+/*
+ * 侧栏展开、内容面与它**共边**时，这条边只由侧栏的 `border-r` 一条线表达。
+ *
+ * 此前内容面在这里仍带 `shadow-elevation-content`，于是同一条 x 上叠了两道线
+ * （侧栏 1px 实线 + 内容面 0.5px 描边，浅色 233 / 224 各画一半像素）外加一层
+ * 20px 软阴影糊在侧栏右缘 —— 放大看就是「重线 + 重影」。
+ *
+ * 只在 `data-sidebar-docked='true'`（侧栏展开、桌面形态）时关掉：侧栏收起后内容面
+ * 左边是窗框，elevation 要留着把内容面从窗框上托起来。
+ */
+.content-surface-root[data-sidebar-docked='true'] {
+  box-shadow: none;
 }
 
 .content-surface {
@@ -1155,58 +1169,11 @@ html.cmx-panel-resizing webview {
     animation-duration: 2.4s !important;
     animation-iteration-count: infinite !important;
   }
-
-  /*
-   * 折叠内容的高度动画**必须保留一个真实时长**。
-   *
-   * `collapsible-down/up` 是全应用**唯一会改变布局**的动画（它动的是 `height`；
-   * 其余动效都只动 opacity / transform / filter，与布局无关）。而 Radix 的
-   * `CollapsibleContent` 由 `Presence` 包裹，`Presence` 按计算后的 `animation-name`
-   * 决定"是否等动画结束再挂载/卸载内容"。
-   *
-   * 源序问题确实存在：`.animate-collapsible-up`（产物偏移 246318）**晚于**
-   * `.motion-reduce\:animate-none`（231988），特异性都是 (0,1,0) ⇒ 关闭时仍带动画名，
-   * 只是被上面的通配规则把时长压成 0.01ms，成为一个退化状态。
-   *
-   * **但上一版的处置是错的**：那时把 animation-name 置为 `none`，等于抽掉了
-   * "把高度收到 0"的那一步 —— Radix 真正卸载之前的若干帧里，内容仍停在自然高度，
-   * 布局先涨后缩，反而制造了闪动。已由实测确认：系统「动画效果」打开（即关闭
-   * reduce）时几乎不闪；关闭动效开启 reduce 时就闪，说明差异就出在这段动画上。
-   *
-   * 正确做法是**保留动画、只恢复真实时长**：高度从自然值收到 0 的 200ms 变化属于
-   * 尺寸过渡，不是会引起前庭不适的位移类动画；这样 Radix 的挂载/卸载握手回到正常
-   * 路径，也顺带让 reduce 下的观感与「动画效果打开」时一致。
-   * （`--animation-duration` 由组件内联设为 200ms，这里留兜底值。）
-   */
-  html [data-slot='tool-fallback-content'],
-  html [data-slot='reasoning-content'] {
-    animation-duration: var(--animation-duration, 200ms) !important;
-    animation-iteration-count: 1 !important;
-  }
 }
 
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
-
-@theme inline {
-  @keyframes collapsible-down {
-  from {
-    height: 0;
-    }
-  to {
-    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
-    }
-  }
-  @keyframes collapsible-up {
-  from {
-    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
-    }
-  to {
-    height: 0;
-    }
-  }
-}
 
 
 /*
@@ -1307,13 +1274,16 @@ html.cmx-panel-resizing webview {
 }
 
 
+/*
+ * 展开区是**瞬时**切换（与思考行 / 工具行同一口径）：对话界面里所有「展开/收起」
+ * 都不做动画。这里原先是 grid-template-rows 0fr→1fr 过渡 —— 那和 height 动画一样
+ * 每帧触发重排（全应用最贵的一类），换来的只是一次 200ms 的观感。
+ * 收起态仍用 0fr + overflow:hidden 藏内容，节点因此不必卸载（保留展开区状态）。
+ */
 .subagent-activity-collapse {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition:
-    grid-template-rows var(--motion-duration-normal) var(--motion-ease-out),
-    opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .subagent-activity-collapse.open {

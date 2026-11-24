@@ -74,7 +74,7 @@ export function MessageFooter({
     return (
       <div
         data-message-footer
-        className={cn('mt-1 flex items-center gap-1.5 text-ui-body text-muted-foreground/68', revealClass, className)}
+        className={cn('mt-1 flex items-center gap-1.5 text-ui-compact text-muted-foreground/68', revealClass, className)}
       >
         {actions}
       </div>
@@ -86,8 +86,8 @@ export function MessageFooter({
       data-message-footer
       className={cn(
         isMinimal
-          ? 'mt-1 flex items-center gap-1.5 text-ui-body text-muted-foreground/68'
-          : 'mt-2 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-body text-muted-foreground/68',
+          ? 'mt-1 flex items-center gap-1.5 text-ui-compact text-muted-foreground/68'
+          : 'mt-2 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-compact text-muted-foreground/68',
         revealClass,
         className,
       )}

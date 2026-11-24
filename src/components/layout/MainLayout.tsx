@@ -23,7 +23,10 @@ import { NarrowNavSwitcher } from './NarrowNavSwitcher';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
 import { TitleBar, type TitleBarNavigation } from './TitleBar';
 
-const SIDEBAR_MIN = 200;
+// 下限对齐 ZCode 的侧栏口径（`WORKSPACE_SIDEBAR_MIN_WIDTH_PX` = 264，且它把
+// 默认宽度也取同一个值）：再窄下去会话标题/分支名只剩省略号，已经换不来可用的
+// 内容宽度。旧版本持久化的更窄宽度会在读取时被 clamp 上来。
+const SIDEBAR_MIN = 264;
 const SIDEBAR_MAX = 500;
 const SIDEBAR_DEFAULT = 300;
 
@@ -117,9 +120,15 @@ export function MainLayout({
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
+    // 用「按下时的指针位置 + 宽度」做增量，而不是直接拿 clientX 当宽度：
+    // 侧栏左边还隔着图标轨，clientX 里含着那段偏移，按下后第一次移动分割线
+    // 会瞬间右跳一个图标轨的宽度（拖拽起点与指针脱节）。
+    const startX = event.clientX;
+    const startWidth = sidebarWidthRef.current;
+
     const onMove = (moveEvent: MouseEvent) => {
       if (!sidebarDragging.current) return;
-      const width = clampSidebarWidth(moveEvent.clientX);
+      const width = clampSidebarWidth(startWidth + (moveEvent.clientX - startX));
       sidebarWidthRef.current = width;
       setSidebarWidth(width);
     };
@@ -132,10 +141,13 @@ export function MainLayout({
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
     };
 
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    // 拖拽中窗口失焦同样收尾，避免回到窗口后还黏着 col-resize。
+    window.addEventListener('blur', onUp);
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -371,6 +383,14 @@ export function MainLayout({
           <section
             data-content-surface
             data-floats={String(contentFloats)}
+            /*
+              侧栏展开时内容面与侧栏**共边**：这条边只由侧栏的 `border-r` 一条线表达，
+              内容面不再投影（`globals.css` 里 `[data-sidebar-docked='true']` 关掉
+              `shadow-elevation-content`）。此前两处都画 —— 侧栏 1px 实线 + 内容面
+              0.5px 描边叠在同一条 x 上，再加一层 20px 软阴影糊在侧栏右缘，读作
+              「重线 + 重影」。
+            */
+            data-sidebar-docked={String(sidebarDocked)}
             /*
               内容面 = **表面种子本身**（`--background`），不是抬高档。Codex 的
               `_MainContentSurface_[data-app-shell-main-surface=default]` 取的就是

@@ -280,7 +280,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
 
   return (
     <div role="main" aria-label="设置" className="flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--background))]">
-      <aside className="flex w-[275px] shrink-0 flex-col bg-[hsl(var(--sidebar-bg))]">
+      <aside className="flex w-[275px] shrink-0 flex-col bg-[hsl(var(--settings-sidebar-bg))]">
         <SettingsSidebar activeTab={activeTab} onTabChange={setActiveTab} onBack={onBack} />
       </aside>
       <SettingsContent activeTab={activeTab} />

@@ -71,7 +71,9 @@ describe('SettingsView', () => {
     const sidebar = settingsMain.querySelector('aside');
     const content = settingsMain.querySelector('section');
 
-    expect(sidebar?.className).toContain('bg-[hsl(var(--sidebar-bg))]');
+    // 设置页侧栏走自己的 token（值派生自同一条 `sidebarSurface` 公式，
+    // 与主侧栏同档），这样以后调整结构分层时两处一起动，不会一处跟一处不跟。
+    expect(sidebar?.className).toContain('bg-[hsl(var(--settings-sidebar-bg))]');
     expect(sidebar?.className).toContain('w-[275px]');
     expect(content?.className).toContain('bg-[hsl(var(--background))]');
   });

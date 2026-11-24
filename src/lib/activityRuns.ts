@@ -851,14 +851,20 @@ export function getActivityRunCategoryCounts(run: Pick<ActivityRun, 'toolCalls'>
 }
 
 /**
- * 完成态组头的标题文案，动宾短句用全角逗号串接（对齐 ZCode：已探索 2 次，已执行 11 命令，
+ * 组头的分类统计文案，动宾短句用全角逗号串接（对齐 ZCode：已探索 2 次，已执行 11 命令，
  * 已修改 1 文件）。顺序固定为「探索 → 执行 → 修改 → 其他」，零值省略；纯思考段显示
  * 「已思考 N 段」。不显示耗时，不显示失败标记。
+ *
+ * `extraThinkingBlocks` 计入尚未提交的实时思考：运行中的段展开时组头要报这份统计，
+ * 实时那段思考也得算进去，否则「已思考 N 段」会永远慢半拍。
  */
-export function activityRunCompletedText(run: Pick<ActivityRun, 'toolCalls' | 'thinkingBlocks'>): string {
+export function activityRunCompletedText(
+  run: Pick<ActivityRun, 'toolCalls' | 'thinkingBlocks'>,
+  extraThinkingBlocks = 0,
+): string {
+  const thinkingBlocks = run.thinkingBlocks + Math.max(extraThinkingBlocks, 0);
   if (run.toolCalls.length === 0) {
-    const blocks = Math.max(run.thinkingBlocks, 1);
-    return `已思考 ${blocks} 段`;
+    return `已思考 ${Math.max(thinkingBlocks, 1)} 段`;
   }
   const counts = getActivityRunCategoryCounts(run);
   const parts: string[] = [];

@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildConversationTurns,
-  isTerminalAgentEvent,
-  parseAgentEvent,
-  shouldProcessTerminalEvent,
-} from './index';
+// 直接引各模块：`timeline/index.ts` 这个 barrel 没有任何消费者，已删除。
+import { parseAgentEvent } from './parse';
+import { isTerminalAgentEvent, shouldProcessTerminalEvent } from './terminality';
+import { buildConversationTurns } from './turns';
 import type { AgentMessage } from '../../stores/agentStore';
 
 describe('timeline module', () => {

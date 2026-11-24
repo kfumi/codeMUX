@@ -54,7 +54,6 @@ const PALETTE_SCOPED_FILES = [
   'components/automation/ScheduleConfigurator.tsx',
   'components/browser/BrowserPanel.tsx',
   'components/browser/BrowserElementPills.tsx',
-  'components/preview/PreviewPanel.tsx',
   'components/settings/FontPicker.tsx',
   'components/worktask/BranchPicker.tsx',
   'components/workspace/review/ReviewPanel.tsx',

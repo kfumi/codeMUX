@@ -296,9 +296,12 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(resultBlock?.querySelector('strong')).toBeNull();
     expect(resultBlock?.textContent).toContain('结果包含 **not bold**');
     expect(resultBlock?.textContent).toContain('结果：');
-    expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('200ms');
-    expect(toolContent.className).toContain('animate-collapsible-down');
-    expect(toolContent.className).toContain('duration-(--animation-duration)');
+    // 展开/收起是瞬时切换：与思考行同口径，工具行不带动画（高度动画每帧重排，
+    // 而且会和思考行的「无动画」观感分裂）。
+    expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('');
+    expect(toolContent.className).not.toContain('animate-collapsible');
+    expect(toolContent.className).not.toContain('animate-in');
+    expect(toolContent.className).not.toContain('animate-out');
   });
 
   it('待办工具展开后渲染成一行行待办，不再展示参数 JSON', () => {

@@ -250,7 +250,7 @@ describe('MainLayout', () => {
     expect(sidebar?.className).toContain('border-[hsl(var(--layout-divider))]');
   });
 
-  it('三道平面各就各位：窗框(窗口面) < 侧栏 ≈ 内容面 < 抬高档', () => {
+  it('四道平面各就各位：窗框(窗口面) 最深 < 侧栏 < 右侧面板 < 抬高档', () => {
     render(
       <MainLayout sidebar={<div>sidebar</div>}>
         <div>content</div>
@@ -262,15 +262,45 @@ describe('MainLayout', () => {
     // 内容面外面那层「空气」：圆角缺口与四边留白露出来的就是它。
     const gutter = section?.parentElement;
 
-    // 窗框最深，侧栏与内容面同属「面板」那一档 —— Codex 实测（深色）窗框 14 /
-    // 侧栏 16 / 内容 17，面板之间只差 1 级，差出十几级就会读成「侧栏是个洞」。
-    // 内容面因此取**表面种子**（`--background`），抬高的 `--surface-1` 留给
-    // composer 这类真正浮在内容面之上的控件。
+    // 窗框最深，侧栏与内容面各取**自己的** token（不再共用 `--background`）——
+    // 四道平面的具体差值由 colorDerivation.test.ts 的灰度断言守住，这里只钉住
+    // 「谁用哪个 token」，避免有人图省事把侧栏改回 `--background` 让两块重新塌成一块。
+    // 内容面仍取表面种子；抬高的 `--surface-1` 留给 composer 这类真正浮起的控件。
     expect(shell?.className).toContain('bg-[hsl(var(--chrome-bg))]');
     expect(gutter?.className).toContain('bg-[hsl(var(--chrome-bg))]');
     expect(section?.className).toContain('bg-[hsl(var(--background))]');
     expect(section?.className).not.toContain('bg-[hsl(var(--surface-1))]');
     expect(section?.className).not.toContain('bg-[hsl(var(--chrome-bg))]');
+    // 侧栏走自己的 `--sidebar-bg`，与内容面分开。
+    const sidebar = document.querySelector('aside');
+    expect(sidebar?.className).toContain('bg-[hsl(var(--sidebar-bg))]');
+    expect(sidebar?.className).not.toContain('bg-[hsl(var(--background))]');
+  });
+
+  it('keeps the title bar and the nav rail on one continuous window face', () => {
+    // 顶栏与图标轨**共用** `.app-shell` 的那块窗口面底色，各自一点底色都不画 ——
+    // 它们连成一个 L 形。任何一处自己加 `bg-*`，顶部和侧边就会裂成两个颜色。
+    // 这条用源码级契约钉住：两者的根元素都不许带背景工具类。
+    const rootTagOf = (relativePath: string, anchor: string): string => {
+      const source = readFileSync(join(process.cwd(), relativePath), 'utf8');
+      const anchorIndex = source.indexOf(anchor);
+      expect(anchorIndex, `${relativePath} 里找不到根元素锚点 ${anchor}`).toBeGreaterThan(-1);
+      const open = source.lastIndexOf('<', anchorIndex);
+      const close = source.indexOf('>', anchorIndex);
+      // 注释里允许解释「为什么不画底色」，检查前先摘掉注释行。
+      return source
+        .slice(open, close)
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('//'))
+        .join('\n');
+    };
+
+    const titleBarRoot = rootTagOf('src/components/layout/TitleBar.tsx', 'data-app-drag-region');
+    const navRailRoot = rootTagOf('src/components/layout/NavRail.tsx', 'aria-label="主导航"');
+
+    for (const [name, tag] of [['TitleBar', titleBarRoot], ['NavRail', navRailRoot]] as const) {
+      expect(tag, `${name} 的根元素不该自己画底色`).not.toMatch(/\bbg-/);
+    }
   });
 
   // 有意的源码级契约：className 断言只覆盖渲染出来的那个值，只有钉住源码文本才能在评审前拦住
@@ -316,6 +346,38 @@ describe('MainLayout', () => {
     expect(clipped).toBeTruthy();
     // 旧的「圆角缺口 + 手写 SVG 弧线」整套已经删除，源码里不该再有那段 SVG。
     expect(section?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(0);
+  });
+
+  it('侧栏展开时这条边只画一条线：内容面不投影（避免与侧栏 border-r 叠成重线）', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const sidebar = document.querySelector('aside');
+    const section = document.querySelector('section');
+
+    // 侧栏自己带一条 1px 分隔线。
+    expect(sidebar?.className).toContain('border-r');
+    expect(sidebar?.className).toContain('border-[hsl(var(--layout-divider))]');
+    // 内容面此时**共边**，它的 elevation（0.5px 描边 + 20px 软阴影）会把同一条边
+    // 再加粗一遍并糊出一圈重影 —— 由 globals.css 的
+    // `.content-surface-root[data-sidebar-docked='true'] { box-shadow: none }` 关掉。
+    // 这里钉住那个属性真的被写出来了，否则那条 CSS 规则永远不会命中。
+    expect(section?.dataset.sidebarDocked).toBe('true');
+  });
+
+  it('侧栏收起后内容面重新投影（左边是窗框，需要 elevation 托起来）', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    fireEvent.click(document.querySelector('button[aria-label="收起侧栏"]')!);
+
+    expect(document.querySelector('section')?.dataset.sidebarDocked).toBe('false');
   });
 
   it('侧栏收起后内容面左边是窗口面，这时才切左角', () => {
@@ -460,6 +522,32 @@ describe('MainLayout', () => {
     expect(sidebar.style.width).toBe(initialWidth);
 
     unmount();
+  });
+
+  it('resizes the sidebar by pointer delta, so the divider never jumps on drag start', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>} navRailTarget="app" onNavRailSelect={vi.fn()}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const sidebar = document.querySelector('aside') as HTMLElement;
+    expect(sidebar.style.width).toBe('300px');
+
+    // 侧栏左边隔着 56px 图标轨：指针落在分隔线上时 clientX ≈ 356，而不是 300。
+    // 拖拽按增量计算，按下不移动时宽度必须纹丝不动（旧实现直接拿 clientX 当宽度，
+    // 第一次 mousemove 就把侧栏顶宽 ~56px）。
+    const handle = sidebar.querySelector('.cursor-col-resize') as HTMLElement;
+    fireEvent.mouseDown(handle, { clientX: 356 });
+    fireEvent.mouseMove(document, { clientX: 356 });
+    expect(sidebar.style.width).toBe('300px');
+
+    fireEvent.mouseMove(document, { clientX: 396 });
+    expect(sidebar.style.width).toBe('340px');
+
+    fireEvent.mouseUp(document);
+    fireEvent.mouseMove(document, { clientX: 500 });
+    expect(sidebar.style.width).toBe('340px');
   });
 
   it('keeps the side panel mounted while settings only hide it', () => {

@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { ToolCallCard } from './ToolCallCard';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { CodeMuxToolCallMessagePart } from './assistant-ui/CodeMuxMessageParts';
 import { ToolCodeDiff, getCodeChangeStats } from './ToolCodeDiff';
 import { TooltipProvider } from '../ui/tooltip';
+
+// 行渲染已收进 CodeMuxMessageParts 的 tool-call part（旧 ToolCallCard 已删除），
+// 这里 mock 掉只有侧面板才需要的 facade，让 part 能在 jsdom 里独立挂载。
+vi.mock('@/lib/facades/daemon-facade', () => ({
+  daemonFacade: {
+    workspace: {
+      previewImage: vi.fn(),
+    },
+  },
+}));
 
 function renderWithTooltip(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
@@ -90,15 +100,14 @@ describe('ToolCodeDiff', () => {
 
   it('shows write and edit file names (not full paths) on the tool block without making them clickable', () => {
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="Edit"
-        input={{
+        args={{
           file_path: 'D:\\project\\index.html',
           old_string: 'old',
           new_string: 'new',
         }}
         result="Done"
-        status="done"
       />,
     );
 
@@ -106,7 +115,7 @@ describe('ToolCodeDiff', () => {
     expect(screen.getAllByText('index.html').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'index.html' })).toBeNull();
 
-    fireEvent.click(within(container).getByRole('button'));
+    fireEvent.click(container.querySelector('[data-slot="tool-fallback-trigger"]')!);
 
     expect(container.textContent).not.toContain('"file_path"');
     expect(container.textContent).not.toContain('Done');
@@ -157,17 +166,16 @@ describe('ToolCodeDiff', () => {
 
   it('shows codex file_change file names and hides raw changes JSON in the tool card', () => {
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="apply_patch"
-        input={CODEX_CHANGES_INPUT}
+        args={CODEX_CHANGES_INPUT}
         result="Patch completed"
-        status="done"
       />,
     );
 
     expect(screen.getByText('verify-node-runtime.cjs, verify-node-runtime.test.ts')).toBeTruthy();
 
-    fireEvent.click(within(container).getByRole('button'));
+    fireEvent.click(container.querySelector('[data-slot="tool-fallback-trigger"]')!);
 
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent)
       .toContain('extraResources 配置');
@@ -205,14 +213,13 @@ describe('ToolCodeDiff', () => {
 PATCH`;
 
     const { container } = renderWithTooltip(
-      <ToolCallCard
+      <CodeMuxToolCallMessagePart
         toolName="Bash"
-        input={{
+        args={{
           command,
           description: 'Update app title',
         }}
         result="Done"
-        status="done"
       />,
     );
 
@@ -220,7 +227,7 @@ PATCH`;
     expect(screen.getByText('App.tsx')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'App.tsx' })).toBeNull();
 
-    fireEvent.click(within(container).getByRole('button'));
+    fireEvent.click(container.querySelector('[data-slot="tool-fallback-trigger"]')!);
 
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="del"]')?.textContent).toContain("const title = 'old';");
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain("const title = 'new';");

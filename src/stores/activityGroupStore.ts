@@ -99,9 +99,9 @@ export type ActivityRunGroupSemantics = {
   open: boolean;
   /** 段内过程步骤是否可见：未成组恒可见，成组后跟随开合；无卡片承载的委派段恒可见。 */
   partsVisible: boolean;
-  /** 完成态组头的分类统计文案（仅成组且已闭合时非空）。 */
+  /** 组头的分类统计文案（成组时非空：完成段，以及展开中的实时段）。 */
   completedText?: string;
-  /** 实时组头的未决工具摘要（投影按最新参数解析）。 */
+  /** 实时组头收起时的未决工具摘要（投影按最新参数解析）。 */
   activeToolSummary?: string;
 };
 
@@ -141,7 +141,12 @@ export function deriveActivityRunGroup(input: {
     eligible,
     open,
     partsVisible,
-    completedText: eligible && !run.live ? activityRunCompletedText(run) : undefined,
+    // 统计文案对成组段恒可算：完成态组头用它，展开中的实时段组头也用它
+    // （组内步骤已经铺开，组头再重复「正在读取 xx」既冗余又抢注意力）。
+    // 实时思考尚未提交时按一个额外思考块计入，否则「已思考 N 段」会慢半拍。
+    completedText: eligible
+      ? activityRunCompletedText(run, liveThinkingAttached && run.live ? 1 : 0)
+      : undefined,
     activeToolSummary: run.live && run.activeTool ? activityToolCallSummary(run.activeTool) : undefined,
   };
 }

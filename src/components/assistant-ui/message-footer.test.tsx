@@ -47,10 +47,12 @@ describe('MessageFooter', () => {
     ['actions only', {}],
     ['full', { timestamp: TIMESTAMP }],
     ['minimal', { timestamp: TIMESTAMP, variant: 'minimal' as const }],
-  ])('uses the configured UI body size for %s footers', (_label, props) => {
+  ])('uses the configured UI compact size for %s footers', (_label, props) => {
     const { container } = render(<MessageFooter copyText="message" {...props} />);
 
-    expect(container.querySelector('[data-message-footer]')?.className).toContain('text-ui-body');
+    // 页脚是消息的从属信息，比正文低一档（`--ui-font-size - 1px`），
+    // 与正文同号会让「复制/时间/耗时」读成正文的一部分。
+    expect(container.querySelector('[data-message-footer]')?.className).toContain('text-ui-compact');
   });
 
   it('scales action icons with the configured footer font size', () => {

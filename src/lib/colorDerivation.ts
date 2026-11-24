@@ -285,30 +285,69 @@ export interface DerivedPalette {
 /**
  * 窗口面（顶栏 + 左侧图标轨连成的那块底）—— Codex 的 `surfaceUnder`
  * （`Fba` = `Yba[variant] + (contrast - Kba[variant]) * Xba[variant]`）：
- * 浅色往 ink 混 4%，深色往黑混 16%，两套都是「比表面**再深**一档」。
+ * 两套主题都是「比表面**再深**一档」。
  *
- * 这一档的意义是让侧栏与内容面「浮」在窗框之上：实测 Codex 深色（surface `#111111`）
- * 是 窗框 14 / 侧栏 16 / 内容 17，浅色是 窗框 245 / 侧栏 252 / 内容 253 —— 都是
- * 「窗框最深、面板更亮」。Codex 的窗口面本来还有 Mica 半透明背板这一层，
- * 我们把它归并进同一个公式：两套主题下它都是一个实心色，与面板的相对关系一致。
+ * 这一档的意义是让侧栏与内容面「浮」在窗框之上。Codex 原值是浅色往 ink 混 4%
+ * （242），与内容面只差 10 级 —— 在近白端几乎读不出边界（用户两次反馈「不够明显」）。
+ * 这里把它压到 10%（⇒ 228）：窗框成为整窗唯一一条明显的深色带，L 形（顶栏 + 图标轨）
+ * 与侧栏之间因此有 13 级落差。
+ * 深色同理从 16% 压到 28%（⇒ 12），与内容面 17 拉开 5 级。
  */
 function surfaceUnder(surface: Rgb, ink: Rgb, c: number, isDark: boolean): Rgb {
   return isDark
-    ? mixRgb(surface, BLACK, 0.16 + (c - 0.6) * 0.0015)
-    : mixRgb(surface, ink, 0.04 + (c - 0.45) * 0.0012);
+    ? mixRgb(surface, BLACK, 0.28 + (c - 0.6) * 0.0015)
+    : mixRgb(surface, ink, 0.10 + (c - 0.45) * 0.0012);
 }
 
 /**
- * 凹面（画布）—— Codex 的 `--color-surface-canvas`：
- * `color-mix(in srgb, var(--color-surface) 98%, var(--black))`，即表面往黑走 2%。
+ * 侧栏面 —— 结构布局的四个平面之一（顶栏/图标轨 = 窗口面，侧栏，内容面，右侧面板）。
  *
- * 用途是**给浮起的卡片当底**：Codex 的右侧面板主体就是它（浅色实测 250），
- * 面板里的卡片与标签页回到表面档（255），于是「卡片浮在面板上」读得出来。
- * 深色下 98% 只差不到 1 级（17 → 16.66，8bit 取整后仍是 17），与 Codex 深色一致 ——
- * 那一侧的分层靠描边与抬高档，不靠凹面。
+ * 与内容面**必须分得开**：此前两者都取表面种子（浅色同为 252、深色同为 17），
+ * 整扇窗读成一块平的。参考 ZCode 的结构 token 分法（`--color-sidebar` /
+ * `--color-panel` 各占一档），方向按本仓库的「窗框最深、面板浮起」模型取：
+ *
+ * - **浅色**：内容面 252 已接近纯白，侧栏只能往 ink 走（否则只剩纯白 255，
+ *   侧栏会变成整窗最亮的一块，与「浮在窗框上」的读数相反）。往 ink 混 4.6% ⇒ 241，
+ *   与窗框（228）差 13 级、与内容面差 11 级 —— 两侧边界都读得出来。
+ * - **深色**：内容面 17，侧栏往 ink（亮极）混 6.8% ⇒ 32，与内容面差 15 级。
+ *
+ * 浅色最终顺序 窗框 228 < 侧栏 241 < 右侧面板 246 < 内容面 252；
+ * 深色 窗框 12 < 内容面 17 < 右侧面板 28 < 侧栏 32。两套的「谁更亮」不同向，
+ * 但各自都读得出四道边界 —— 浅色下近白端只能靠变深区分，深色下靠变亮。
  */
-function surfaceCanvas(surface: Rgb): Rgb {
-  return mixRgb(surface, BLACK, 0.02);
+function sidebarSurface(surface: Rgb, ink: Rgb, isDark: boolean): Rgb {
+  return isDark
+    ? mixRgb(surface, ink, 0.068)
+    : mixRgb(surface, ink, 0.046);
+}
+
+/**
+ * 侧栏上的悬停/选中面 —— 必须从**侧栏自己的底色**再走一档，不能沿用表面的
+ * `hoverSurface`：侧栏已经离开表面种子（浅色 238、深色 32），若悬停档仍按表面算
+ * （浅色 240、深色 36），浅色下悬停会比侧栏底色**更亮**，方向反了。
+ */
+function sidebarMutedSurface(sidebar: Rgb, ink: Rgb): Rgb {
+  return mixRgb(sidebar, ink, 0.045);
+}
+
+/**
+ * 凹面（画布）—— 右侧面板的主体底。
+ *
+ * 浅色沿用 Codex 的 `surfaceCanvas`（表面往黑 2%，实测 250），比内容面略深，
+ * 面板里的卡片与标签页回到抬高档（255）浮在它上面。
+ *
+ * 深色下 Codex 原公式只差不到 1 级（17 → 16.66，8bit 取整后仍是 17），等于
+ * 右侧面板与内容面同色 —— 那正是「每块背景太接近」的一半来源。这里改成往 ink
+ * 混 5%（⇒ 28），比内容面亮 11 级，且仍比侧栏（6.8% ⇒ 32）暗一档，
+ * 于是深色四道平面依次是 窗口面 12 < 内容面 17 < 右侧面板 28 < 侧栏 32。
+ *
+ * 浅色从 2% 收到 2.4%（⇒ 246）：与内容面拉开 6 级，右侧面板读成一块独立的
+ * 内凹工作区，而不是内容面的延伸。
+ */
+function surfaceCanvas(surface: Rgb, ink: Rgb, isDark: boolean): Rgb {
+  return isDark
+    ? mixRgb(surface, ink, 0.05)
+    : mixRgb(surface, BLACK, 0.024);
 }
 
 /**
@@ -396,7 +435,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
       iconSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
       iconTertiary: rgbToHex(overlayRgb(surface, ink, 0.45 + c * 0.1)),
       simpleScrim: rgbToHex(overlayRgb(surface, ink, 0.08 + c * 0.04)),
-      surfaceCanvas: rgbToHex(surfaceCanvas(surface)),
+      surfaceCanvas: rgbToHex(surfaceCanvas(surface, ink, true)),
       textAccent: rgbToHex(accentLift),
       textForeground: rgbToHex(ink),
       textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
@@ -435,7 +474,7 @@ export function derivePalette(seeds: ThemeSeeds, isDark: boolean): DerivedPalett
     iconSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
     iconTertiary: rgbToHex(overlayRgb(surface, ink, 0.45 + c * 0.1)),
     simpleScrim: rgbToHex(overlayRgb(surface, BLACK, 0.08 + c * 0.04)),
-    surfaceCanvas: rgbToHex(surfaceCanvas(surface)),
+    surfaceCanvas: rgbToHex(surfaceCanvas(surface, ink, false)),
     textAccent: rgbToHex(accent),
     textForeground: rgbToHex(ink),
     textForegroundSecondary: rgbToHex(overlayRgb(surface, ink, 0.65 + c * 0.1)),
@@ -557,17 +596,19 @@ export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<st
     0.08 + normalizeContrast(seeds.contrast) * 0.04,
   );
 
-  set('--sidebar-bg', surface);
+  // 侧栏是四道结构平面之一，必须与内容面（`--background`）分得开，
+  // 见 `sidebarSurface` 的方向说明。设置页侧栏与它同档：两者都是「侧栏」。
+  const sidebar = sidebarSurface(surface, ink, isDark);
+  set('--sidebar-bg', sidebar);
   set('--sidebar-fg', ink);
   set('--sidebar-border', hexToRgb(palette.border));
-  // 侧栏的「选中 / 悬停」面用 ink 方向的加色（hoverSurface），**不是**
-  // elevatedSecondary —— 浅色下后者与 surface 混到同一个 8bit 值，选中态会
-  // 完全看不见。这是实测发现的：Codex 的 hover 公式（ink 的 .04+c*.02）在
-  // 近白表面上才留得住差异。
-  set('--sidebar-muted', hexToRgb(palette.hoverSurface));
+  // 侧栏的「选中 / 悬停」面从**侧栏自己的底色**再走一档（`sidebarMutedSurface`）。
+  // 沿用表面的 `hoverSurface` 会翻向：侧栏已经比表面暗（浅色 238 < 252），
+  // 按表面算出来的 240 反而比侧栏底色更亮，悬停看着像浮起来。
+  set('--sidebar-muted', sidebarMutedSurface(sidebar, ink));
   set('--sidebar-glow', accent);
   set('--surface-glow', accent);
-  set('--settings-sidebar-bg', surface);
+  set('--settings-sidebar-bg', sidebar);
   set('--shell-bg', surface);
 
   // 主按钮：浅色是墨底反白字（Codex 的 buttonPrimaryBackground = ink）；
