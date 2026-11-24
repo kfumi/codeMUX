@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, ChevronUp, Download, Folder, FolderOpen, Fol
 
 import type { Project } from '../../types/project';
 import { getPrimaryProjectRoot } from '../../lib/projectRoot';
+import { useSessionStore } from '../../stores/sessionStore';
 import type { ProjectSidebarSection } from '../../lib/sidebarProjection';
 import { useHostCapabilities } from '../../hooks/useHostCapabilities';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
@@ -71,6 +72,11 @@ export function ProjectGroup({
   const isNarrow = useIsNarrowViewport();
   const canOpenExplorer = useHostCapabilities().has('shell.explorer');
   const expanded = section.expanded;
+  // 项目折叠后，子会话整行都不可见——把「已完成但未读」的绿点提升到项目名旁，
+  // 收起状态也能看出该项目里有待查看的对话。
+  const hasUnreadSessions = useSessionStore((state) =>
+    section.sessions.some((session) => state.unreadSessions.has(session.id)),
+  );
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const visibleSessions = section.visibleSessions;
@@ -167,7 +173,20 @@ export function ProjectGroup({
             ? <FolderOpen className={projectIconClass} />
             : <Folder className={projectIconClass} />
         )}
-        <span className="flex-1 truncate text-sm font-medium">{project.name}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="min-w-0 truncate text-sm font-medium">{project.name}</span>
+          {/* 折叠时子会话不可见，未读绿点改挂在项目名右侧；展开时仍由会话行自己
+              展示，避免同一个状态在层级里出现两次。 */}
+          {!expanded && hasUnreadSessions ? (
+            <span className="flex shrink-0 items-center" data-project-unread-dot>
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 rounded-full bg-[hsl(var(--success-vivid))]"
+              />
+              <span className="sr-only">有未读对话</span>
+            </span>
+          ) : null}
+        </span>
         {project.roots.length > 1 ? (
           <span className="sr-only">{project.roots.length} 个源文件夹</span>
         ) : null}

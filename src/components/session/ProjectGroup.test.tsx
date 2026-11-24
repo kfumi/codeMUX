@@ -19,6 +19,7 @@ vi.mock('../../hooks/useHostCapabilities', () => ({
 import { TooltipProvider } from '../ui/tooltip';
 import { ProjectGroup } from './ProjectGroup';
 import { buildSidebarProjection, type ProjectSidebarSection } from '../../lib/sidebarProjection';
+import { useSessionStore } from '../../stores/sessionStore';
 import type { Project } from '../../types/project';
 import type { Session } from '../../types/session';
 
@@ -75,6 +76,7 @@ describe('ProjectGroup', () => {
     vi.clearAllMocks();
     narrowState.value = false;
     hostCaps.hasExplorer = true;
+    useSessionStore.setState({ unreadSessions: new Set<string>(), autoMarkedUnreadSessions: new Set<string>() });
   });
 
   afterEach(() => {
@@ -265,5 +267,30 @@ describe('ProjectGroup', () => {
     renderProjectGroup(makeProject(), [], { collapsed: true });
 
     expect(screen.queryByText('暂无对话')).toBeNull();
+  });
+
+  it('shows an unread dot beside a collapsed project name', () => {
+    useSessionStore.setState({ unreadSessions: new Set(['session-1']) });
+    const { container } = renderProjectGroup(makeProject(), [makeSession()], { collapsed: true });
+
+    const row = container.querySelector('[data-project-row="project-1"]');
+    expect(row?.querySelector('[data-project-unread-dot]')).toBeTruthy();
+    expect(screen.getByText('有未读对话')).toBeTruthy();
+  });
+
+  it('keeps the unread dot on the session row instead when the project is expanded', () => {
+    useSessionStore.setState({ unreadSessions: new Set(['session-1']) });
+    const { container } = renderProjectGroup(makeProject(), [makeSession()]);
+
+    const row = container.querySelector('[data-project-row="project-1"]');
+    expect(row?.querySelector('[data-project-unread-dot]')).toBeNull();
+    expect(screen.queryByText('有未读对话')).toBeNull();
+  });
+
+  it('shows no project-level dot without unread sessions', () => {
+    const { container } = renderProjectGroup(makeProject(), [makeSession()], { collapsed: true });
+
+    const row = container.querySelector('[data-project-row="project-1"]');
+    expect(row?.querySelector('[data-project-unread-dot]')).toBeNull();
   });
 });
