@@ -249,8 +249,10 @@ export interface CodemuxDesktopBridge {
   syncUnreadBadgeCount(count: number): Promise<void>;
 
   // 应用内更新器(工单 06;进度事件经 onUpdaterEvent 转发)
+  // 下载与安装分两步:downloadUpdate 只把安装包落盘;quitAndInstall 才退出应用
+  // 并把包交给 NSIS 安装向导(用户按向导完成安装)。
   checkForUpdates(): Promise<DesktopUpdaterCheckResult>;
-  downloadAndInstall(): Promise<{ version: string | null }>;
+  downloadUpdate(): Promise<{ version: string | null }>;
   quitAndInstall(): Promise<void>;
   currentVersion(): Promise<string>;
 

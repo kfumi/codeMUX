@@ -4,6 +4,7 @@ import { ExternalLink, Github } from 'lucide-react';
 import { desktopBridge } from '@/lib/desktop-bridge';
 import { shellFacade } from '@/lib/facades/shell-facade';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
+import { UpdateInstallGuideDialog } from '@/features/update/components/UpdateInstallGuideDialog';
 import { getUpdateEntryView, getUpdatePercent, formatBytes } from '@/features/update/updateDisplay';
 import { useHostCapabilities } from '@/hooks/useHostCapabilities';
 import { cn } from '@/lib/utils';
@@ -36,17 +37,17 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 export function AboutSettings() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
+  const [installGuideOpen, setInstallGuideOpen] = useState(false);
   const [latestDialogOpen, setLatestDialogOpen] = useState(false);
   const [updateErrorDialogOpen, setUpdateErrorDialogOpen] = useState(false);
-  const { stage, version, progress, error: updateError, checkForUpdates, startUpdate } = useUpdaterContext();
+  const { stage, version, progress, error: updateError, checkForUpdates, startUpdate, installUpdate } = useUpdaterContext();
   // 自动更新是壳独占能力(与 UpdateEntry 同一判据):浏览器/移动形态隐藏入口。
   const capabilities = useHostCapabilities();
   const canUpdate = capabilities.has('updater');
   const isCheckingForUpdates = stage === 'checking';
   const isUpdateActive = stage === 'checking'
     || stage === 'downloading'
-    || stage === 'installing'
-    || stage === 'restarting';
+    || stage === 'installing';
 
   useEffect(() => {
     // 应用版本走壳桥 currentVersion(工单 09 终态);桥缺失(纯 Web)时保持占位符。
@@ -57,8 +58,8 @@ export function AboutSettings() {
       .catch(() => {});
   }, []);
   // 更新进度区:此前本页只在 stage 上把「检查更新」按钮置灰,downloading /
-  // installing / restarting / error 一个都不渲染 —— 从关于页点「下载并安装」
-  // 后确认框一关,界面零变化(而标题栏 UpdateEntry 只在非设置页渲染)。
+  // installing / error 一个都不渲染 —— 从关于页点「开始下载」后确认框一关,
+  // 界面零变化(而标题栏 UpdateEntry 只在非设置页渲染)。
   // 口径与 UpdateEntry 共用 updateDisplay,两处必须一致。
   const updateView = getUpdateEntryView(stage, progress, updateError);
   const showUpdateStatus = canUpdate && updateView !== null && stage !== 'available';
@@ -101,7 +102,7 @@ export function AboutSettings() {
         </SettingsCard>
       </SettingsSection>
 
-      {/* 更新状态:下载/安装/重启进度 + 失败原因(此前本页完全没有反馈) */}
+      {/* 更新状态:下载进度 / 待安装指引 / 失败原因(此前本页完全没有反馈) */}
       {showUpdateStatus && updateView && (
         <SettingsSection
           label={
@@ -145,6 +146,20 @@ export function AboutSettings() {
                       : `已下载 ${formatBytes(downloadedBytes)}`}
                   </span>
                 </>
+              )}
+              {stage === 'ready' && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-ui-meta text-muted-foreground">
+                    更新包已下载，退出应用后按安装向导完成安装
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => setInstallGuideOpen(true)}
+                  >
+                    安装
+                  </Button>
+                </div>
               )}
               {updateView.tone === 'error' && updateView.detail && (
                 <span className="text-ui-meta text-destructive [overflow-wrap:anywhere]">
@@ -209,12 +224,22 @@ export function AboutSettings() {
       <ConfirmDialog
         open={updateConfirmOpen}
         onOpenChange={setUpdateConfirmOpen}
-        title={`安装更新 ${version ?? ''}？`}
-        description="下载完成后会重启应用，请先保存正在编辑的内容"
-        confirmLabel="下载并安装"
+        title={`下载更新 ${version ?? ''}？`}
+        description="将先在后台下载更新包，下载完成后会提示你退出应用并打开安装向导"
+        confirmLabel="开始下载"
         cancelLabel="稍后"
         onConfirm={() => {
           void startUpdate();
+        }}
+      />
+
+      <UpdateInstallGuideDialog
+        open={installGuideOpen}
+        onOpenChange={setInstallGuideOpen}
+        version={version}
+        installing={stage === 'installing'}
+        onConfirm={() => {
+          void installUpdate();
         }}
       />
 

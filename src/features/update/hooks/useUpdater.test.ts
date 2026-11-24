@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type MockUpdate = {
   version: string;
-  downloadAndInstall: (onEvent: (event: unknown) => void) => Promise<void>;
+  download: (onEvent: (event: unknown) => void) => Promise<void>;
 };
 
 const setTauri = (enabled: boolean) => {
@@ -38,13 +38,13 @@ describe('useUpdater', () => {
   it('静默自动检查在发现更新时进入 available', async () => {
     const checkMock = vi.fn<() => Promise<MockUpdate | null>>().mockResolvedValue({
       version: '0.0.5',
-      downloadAndInstall: vi.fn(async () => {}),
+      download: vi.fn(async () => {}),
     });
-    const relaunchMock = vi.fn(async () => {});
+    const installMock = vi.fn(async () => {});
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater());
@@ -64,7 +64,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -90,7 +90,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -117,7 +117,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -129,8 +129,8 @@ describe('useUpdater', () => {
     expect(result.current.stage).toBe('idle');
   });
 
-  it('下载、安装并重启时推进状态并记录进度', async () => {
-    const downloadAndInstall = vi.fn(async (onEvent: (event: unknown) => void) => {
+  it('下载完成后停在 ready(不自动安装)并记录进度', async () => {
+    const download = vi.fn(async (onEvent: (event: unknown) => void) => {
       onEvent({ event: 'Started', data: { contentLength: 100 } });
       onEvent({ event: 'Progress', data: { chunkLength: 40 } });
       onEvent({ event: 'Progress', data: { chunkLength: 60 } });
@@ -138,13 +138,13 @@ describe('useUpdater', () => {
     });
     const checkMock = vi.fn<() => Promise<MockUpdate | null>>().mockResolvedValue({
       version: '0.0.5',
-      downloadAndInstall,
+      download,
     });
-    const relaunchMock = vi.fn(async () => {});
+    const installMock = vi.fn(async () => {});
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -154,9 +154,10 @@ describe('useUpdater', () => {
       await result.current.startUpdate();
     });
 
-    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
-    expect(relaunchMock).toHaveBeenCalledTimes(1);
-    expect(result.current.stage).toBe('restarting');
+    expect(download).toHaveBeenCalledTimes(1);
+    // 关键回归:下载完**不**自动安装(旧版这里会直接 relaunch)。
+    expect(installMock).not.toHaveBeenCalled();
+    expect(result.current.stage).toBe('ready');
     expect(result.current.progress).toEqual({
       totalBytes: 100,
       downloadedBytes: 100,
@@ -165,7 +166,7 @@ describe('useUpdater', () => {
 
   it('下载进行中时停留在 downloading', async () => {
     let releaseDownload: (() => void) | undefined;
-    const downloadAndInstall = vi.fn(async (onEvent: (event: unknown) => void) => new Promise<void>((resolve) => {
+    const download = vi.fn(async (onEvent: (event: unknown) => void) => new Promise<void>((resolve) => {
       onEvent({ event: 'Started', data: { contentLength: 100 } });
       onEvent({ event: 'Progress', data: { chunkLength: 40 } });
       releaseDownload = () => {
@@ -177,9 +178,9 @@ describe('useUpdater', () => {
     __setUpdaterTestAdapters({
       check: vi.fn(async () => ({
         version: '0.0.5',
-        downloadAndInstall,
+        download,
       })),
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -206,15 +207,12 @@ describe('useUpdater', () => {
       await updatePromise;
     });
 
-    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledTimes(1);
   });
 
-  it('下载 Finished 后、relaunch 完成前进入 installing', async () => {
-    let resolveRelaunch: (() => void) | undefined;
-    const relaunchMock = vi.fn(async () => new Promise<void>((resolve) => {
-      resolveRelaunch = resolve;
-    }));
-    const downloadAndInstall = vi.fn(async (onEvent: (event: unknown) => void) => {
+  it('下载完成后进入 ready,installUpdate 才进入 installing', async () => {
+    const installMock = vi.fn(async () => {});
+    const download = vi.fn(async (onEvent: (event: unknown) => void) => {
       onEvent({ event: 'Started', data: { contentLength: 100 } });
       onEvent({ event: 'Progress', data: { chunkLength: 100 } });
       onEvent({ event: 'Finished' });
@@ -223,73 +221,71 @@ describe('useUpdater', () => {
     __setUpdaterTestAdapters({
       check: vi.fn(async () => ({
         version: '0.0.5',
-        downloadAndInstall,
+        download,
       })),
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
 
     await act(async () => {
       await result.current.checkForUpdates({ interactive: true });
+      await result.current.startUpdate();
     });
 
-    let updatePromise: Promise<void>;
+    expect(result.current.stage).toBe('ready');
+    expect(installMock).not.toHaveBeenCalled();
 
     await act(async () => {
-      updatePromise = result.current.startUpdate();
-      await Promise.resolve();
+      await result.current.installUpdate();
     });
 
+    expect(installMock).toHaveBeenCalledTimes(1);
+    // 应用即将退出,停留在 installing(没有可回写的后续状态)。
     expect(result.current.stage).toBe('installing');
-    expect(relaunchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      resolveRelaunch?.();
-      await updatePromise;
-    });
-
-    expect(result.current.stage).toBe('restarting');
   });
 
-  it('暴露 relaunch 方法供外部直接调用', async () => {
-    const relaunchMock = vi.fn(async () => {});
+  it('installUpdate 失败时进入 error', async () => {
+    const installMock = vi.fn(async () => {
+      throw new Error('installer missing');
+    });
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: vi.fn(async () => null),
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
 
     await act(async () => {
-      await result.current.relaunch();
+      await result.current.installUpdate();
     });
 
-    expect(relaunchMock).toHaveBeenCalledTimes(1);
-    expect(result.current.stage).toBe('restarting');
+    expect(installMock).toHaveBeenCalledTimes(1);
+    expect(result.current.stage).toBe('error');
+    expect(result.current.error).toBe('installer missing');
   });
 
-  it('resetToIdle 发生在 relaunch pending 期间时，旧 relaunch 的完成或失败不会污染状态', async () => {
-    let resolveRelaunch: (() => void) | undefined;
-    let rejectRelaunch: ((reason?: unknown) => void) | undefined;
-    const relaunchMock = vi
+  it('resetToIdle 发生在 install pending 期间时，旧 install 的完成或失败不会污染状态', async () => {
+    let resolveInstall: (() => void) | undefined;
+    let rejectInstall: ((reason?: unknown) => void) | undefined;
+    const installMock = vi
       .fn<() => Promise<void>>()
       .mockImplementationOnce(() => new Promise<void>((resolve) => {
-        resolveRelaunch = resolve;
+        resolveInstall = resolve;
       }))
       .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
-        rejectRelaunch = reject;
+        rejectInstall = reject;
       }));
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: vi.fn(async () => null),
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
 
-    const firstRelaunch = result.current.relaunch();
+    const firstInstall = result.current.installUpdate();
 
     await act(async () => {
       await Promise.resolve();
@@ -302,14 +298,14 @@ describe('useUpdater', () => {
     expect(result.current.stage).toBe('idle');
 
     await act(async () => {
-      resolveRelaunch?.();
-      await firstRelaunch;
+      resolveInstall?.();
+      await firstInstall;
     });
 
     expect(result.current.stage).toBe('idle');
     expect(result.current.error).toBeUndefined();
 
-    const secondRelaunch = result.current.relaunch();
+    const secondInstall = result.current.installUpdate();
 
     await act(async () => {
       await Promise.resolve();
@@ -322,11 +318,11 @@ describe('useUpdater', () => {
     expect(result.current.stage).toBe('idle');
 
     await act(async () => {
-      rejectRelaunch?.(new Error('stale relaunch failed'));
-      await secondRelaunch;
+      rejectInstall?.(new Error('stale install failed'));
+      await secondInstall;
     });
 
-    expect(relaunchMock).toHaveBeenCalledTimes(2);
+    expect(installMock).toHaveBeenCalledTimes(2);
     expect(result.current.stage).toBe('idle');
     expect(result.current.error).toBeUndefined();
   });
@@ -336,7 +332,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -357,7 +353,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -376,7 +372,7 @@ describe('useUpdater', () => {
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -424,12 +420,12 @@ describe('useUpdater', () => {
       }))
       .mockResolvedValueOnce({
         version: '0.0.6',
-        downloadAndInstall: vi.fn(async () => {}),
+        download: vi.fn(async () => {}),
       });
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -443,7 +439,7 @@ describe('useUpdater', () => {
       await secondPromise;
       resolveFirst?.({
         version: '0.0.5',
-        downloadAndInstall: vi.fn(async () => {}),
+        download: vi.fn(async () => {}),
       });
       await firstPromise;
     });
@@ -460,19 +456,19 @@ describe('useUpdater', () => {
       .fn<() => Promise<MockUpdate | null>>()
       .mockResolvedValueOnce({
         version: '0.0.5',
-        downloadAndInstall: staleDownload,
+        download: staleDownload,
       })
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolvePendingCheck = resolve;
       }))
       .mockResolvedValueOnce({
         version: '0.0.7',
-        downloadAndInstall: freshDownload,
+        download: freshDownload,
       });
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -501,7 +497,7 @@ describe('useUpdater', () => {
     await act(async () => {
       resolvePendingCheck?.({
         version: '0.0.6',
-        downloadAndInstall: vi.fn(async () => {}),
+        download: vi.fn(async () => {}),
       });
       await pendingRequest;
     });
@@ -532,10 +528,10 @@ describe('useUpdater', () => {
     expect(result.current.version).toBeUndefined();
   });
 
-  it('resetToIdle 后旧的下载或重启失败不会把状态改成 error', async () => {
+  it('resetToIdle 后旧的下载或安装失败不会把状态改成 error', async () => {
     let rejectDownload: ((reason?: unknown) => void) | undefined;
-    const relaunchMock = vi.fn(async () => {
-      throw new Error('stale relaunch failed');
+    const installMock = vi.fn(async () => {
+      throw new Error('stale install failed');
     });
     const staleDownload = vi.fn(async (_onEvent: (event: unknown) => void) => new Promise<void>((_resolve, reject) => {
       rejectDownload = reject;
@@ -549,16 +545,16 @@ describe('useUpdater', () => {
       .fn<() => Promise<MockUpdate | null>>()
       .mockResolvedValueOnce({
         version: '0.0.5',
-        downloadAndInstall: staleDownload,
+        download: staleDownload,
       })
       .mockResolvedValueOnce({
         version: '0.0.6',
-        downloadAndInstall: freshDownload,
+        download: freshDownload,
       });
     const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
     __setUpdaterTestAdapters({
       check: checkMock,
-      relaunch: relaunchMock,
+      install: installMock,
     });
 
     const { result } = renderHook(() => useUpdater({ autoCheck: false }));
@@ -596,7 +592,15 @@ describe('useUpdater', () => {
     expect(checkMock).toHaveBeenCalledTimes(2);
     expect(staleDownload).toHaveBeenCalledTimes(1);
     expect(freshDownload).toHaveBeenCalledTimes(1);
+    expect(result.current.stage).toBe('ready');
+
+    // 安装是独立一步:下载完成后再装,失败才落 error。
+    await act(async () => {
+      await result.current.installUpdate();
+    });
+
+    expect(installMock).toHaveBeenCalledTimes(1);
     expect(result.current.stage).toBe('error');
-    expect(result.current.error).toBe('stale relaunch failed');
+    expect(result.current.error).toBe('stale install failed');
   });
 });

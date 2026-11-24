@@ -3,12 +3,12 @@
  *
  * 单独抽出来的原因:两处入口展示的是同一份 state,文案/百分比口径必须一致 ——
  * 之前 AboutSettings 完全不渲染 downloading/installing/error,导致「在关于页点
- * 下载并安装后界面零变化」,而 UpdateEntry 又会在 error 时整块消失(把
+ * 开始下载后界面零变化」,而 UpdateEntry 又会在 error 时整块消失(把
  * 0b5ce063 的「检查失败隐藏入口」误用到了下载失败场景)。
  */
 import type { UpdateProgress, UpdateStage } from './hooks/useUpdater';
 
-export type UpdateEntryTone = 'available' | 'busy' | 'error';
+export type UpdateEntryTone = 'available' | 'ready' | 'busy' | 'error';
 
 export interface UpdateEntryView {
   label: string;
@@ -73,12 +73,18 @@ export function getUpdateEntryView(
     };
   }
 
-  if (stage === 'installing') {
-    return { label: '安装中', hint: '正在安装更新', disabled: true, tone: 'busy' };
+  if (stage === 'ready') {
+    // 下载完成、等用户确认安装:入口保持可点(点开安装指引),不再显示转圈。
+    return {
+      label: '待安装',
+      hint: '更新已下载，点击安装',
+      disabled: false,
+      tone: 'ready',
+    };
   }
 
-  if (stage === 'restarting') {
-    return { label: '重启中', hint: '正在重启应用', disabled: true, tone: 'busy' };
+  if (stage === 'installing') {
+    return { label: '安装中', hint: '正在退出应用并打开安装向导', disabled: true, tone: 'busy' };
   }
 
   if (stage === 'error') {

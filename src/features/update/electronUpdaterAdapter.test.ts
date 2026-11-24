@@ -16,7 +16,7 @@ function createBridgeStub() {
   const listeners: UpdaterEventListener[] = [];
   const bridge = {
     checkForUpdates: vi.fn<(result: DesktopUpdaterCheckResult) => Promise<DesktopUpdaterCheckResult>>(),
-    downloadAndInstall: vi.fn<() => Promise<{ version: string | null }>>(),
+    downloadUpdate: vi.fn<() => Promise<{ version: string | null }>>(),
     quitAndInstall: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     onUpdaterEvent: vi.fn((callback: UpdaterEventListener) => {
       listeners.push(callback);
@@ -59,14 +59,14 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
     await expect(adapters.check()).resolves.toBeNull();
   });
 
-  it('available 时返回 UpdateHandle;downloadAndInstall 把壳事件映射为 Started/Progress/Finished', async () => {
+  it('available 时返回 UpdateHandle;download 把壳事件映射为 Started/Progress/Finished', async () => {
     const { bridge, emit, listeners } = createBridgeStub();
     (bridge.checkForUpdates as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: 'available',
       version: '1.2.3',
     });
     let resolveInstall: (() => void) | undefined;
-    (bridge.downloadAndInstall as ReturnType<typeof vi.fn>).mockImplementation(
+    (bridge.downloadUpdate as ReturnType<typeof vi.fn>).mockImplementation(
       () => new Promise<void>((resolve) => {
         resolveInstall = resolve;
       }),
@@ -78,7 +78,7 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
     expect(handle).not.toBeNull();
 
     const onEvent = vi.fn();
-    const installPromise = handle!.downloadAndInstall(onEvent);
+    const downloadPromise = handle!.download(onEvent);
     await Promise.resolve(); // 让事件订阅先建立
 
     emit({ type: 'progress', percent: 25, transferred: 25, total: 100 });
@@ -86,9 +86,9 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
     emit({ type: 'error', message: 'download failed' });
     emit({ type: 'downloaded', version: '1.2.3' });
     resolveInstall?.();
-    await installPromise;
+    await downloadPromise;
 
-    expect(bridge.downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect(bridge.downloadUpdate).toHaveBeenCalledTimes(1);
     expect(onEvent.mock.calls).toEqual([
       [{ event: 'Started', data: { contentLength: 100 } }],
       [{ event: 'Progress', data: { chunkLength: 25 } }],
@@ -102,24 +102,24 @@ describe('createElectronUpdaterAdapters(工单 06)', () => {
     expect(listeners).toHaveLength(0);
   });
 
-  it('downloadAndInstall 失败时同样取消订阅并把错误抛给调用方', async () => {
+  it('download 失败时同样取消订阅并把错误抛给调用方', async () => {
     const { bridge, listeners } = createBridgeStub();
     (bridge.checkForUpdates as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: 'available',
       version: '1.2.3',
     });
-    (bridge.downloadAndInstall as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    (bridge.downloadUpdate as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
 
     const adapters = createElectronUpdaterAdapters(bridge);
     const handle = (await adapters.check())!;
-    await expect(handle.downloadAndInstall(vi.fn())).rejects.toThrow('boom');
+    await expect(handle.download(vi.fn())).rejects.toThrow('boom');
     expect(listeners).toHaveLength(0);
   });
 
-  it('relaunch 映射为壳的 quitAndInstall(静默安装 + 自动重启)', async () => {
+  it('install 映射为壳的 quitAndInstall(退出应用 + 打开安装向导)', async () => {
     const { bridge } = createBridgeStub();
     const adapters = createElectronUpdaterAdapters(bridge);
-    await adapters.relaunch();
+    await adapters.install();
     expect(bridge.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,6 @@
 // updater 服务契约测试(工单 06):electron / electron-updater 以 mock 替身注入,
 // 覆盖:未打包环境禁用(unavailable / 拒绝下载 / 不触发安装)、check 结果映射、
-// 事件转发(updater-event)、downloadAndInstall 返回下载到的版本,
+// 事件转发(updater-event)、downloadUpdate 返回下载到的版本,
 // 以及 updater.log 落盘。
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -77,19 +77,20 @@ describe('createUpdaterService(工单 06)', () => {
     autoUpdaterMock.forceDevUpdateConfig = false;
   });
 
-  it('注册 autoDownload=false / autoInstallOnAppQuit=true / disableWebInstaller=true', () => {
+  it('注册 autoDownload=false / autoInstallOnAppQuit=false / disableWebInstaller=true', () => {
     createService();
     expect(autoUpdaterMock.autoDownload).toBe(false);
-    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true);
+    // 下载完不在退出时偷偷安装:安装必须由用户在界面上确认。
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
     // NSIS 离线安装包,不走 web installer(否则下载时刷弃用警告)。
     expect(autoUpdaterMock.disableWebInstaller).toBe(true);
   });
 
-  it('未打包环境:check 返回 unavailable,downloadAndInstall 拒绝,quitAndInstall 不触发', async () => {
+  it('未打包环境:check 返回 unavailable,downloadUpdate 拒绝,quitAndInstall 不触发', async () => {
     const { service } = createService(false);
 
     await expect(service.check()).resolves.toEqual({ status: 'unavailable', version: null });
-    await expect(service.downloadAndInstall()).rejects.toThrow('更新器在开发/未打包环境不可用');
+    await expect(service.downloadUpdate()).rejects.toThrow('更新器在开发/未打包环境不可用');
     service.quitAndInstall();
     expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
     expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
@@ -122,14 +123,15 @@ describe('createUpdaterService(工单 06)', () => {
     await service.check();
     autoUpdaterMock.downloadUpdate.mockResolvedValueOnce(['D:/pkg/Setup.exe']);
 
-    await expect(service.downloadAndInstall()).resolves.toEqual({ version: '2.0.0' });
+    await expect(service.downloadUpdate()).resolves.toEqual({ version: '2.0.0' });
     expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('quitAndInstall:静默安装 + 自动重启', () => {
+  it('quitAndInstall:非静默,交给 NSIS 安装向导(用户按向导完成安装)', () => {
     const { service } = createService(true);
     service.quitAndInstall();
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
+    // 非静默 + 不强制重启:应用退出后打开安装向导,而不是静默替换 + 自动重启。
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, false);
   });
 
   it('事件经 sendToRenderer 以 updater-event 通道转发', () => {
@@ -158,12 +160,12 @@ describe('createUpdaterService(工单 06)', () => {
     expect(readLog()).toContain('check: 发现新版本 3.0.0');
 
     autoUpdaterMock.downloadUpdate.mockResolvedValueOnce(['D:/pkg/Setup.exe']);
-    await service.downloadAndInstall();
-    expect(readLog()).toContain('downloadAndInstall: 下载完成 files=D:/pkg/Setup.exe');
+    await service.downloadUpdate();
+    expect(readLog()).toContain('downloadUpdate: 下载完成 files=D:/pkg/Setup.exe');
 
     autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND'));
-    await expect(service.downloadAndInstall()).rejects.toThrow('getaddrinfo ENOTFOUND');
-    expect(readLog()).toContain('downloadAndInstall: 下载失败');
+    await expect(service.downloadUpdate()).rejects.toThrow('getaddrinfo ENOTFOUND');
+    expect(readLog()).toContain('downloadUpdate: 下载失败');
     expect(readLog()).toContain('getaddrinfo ENOTFOUND');
   });
 

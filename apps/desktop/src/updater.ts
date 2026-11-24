@@ -3,16 +3,20 @@
 //! - feed 源来自 electron-builder.yml 的 `publish`(provider: github,
 //!   owner/repo)——打包时 electron-builder 生成 resources/app-update.yml,
 //!   electron-updater 运行时自动读取,代码里无需 setFeedURL。
-//! - autoDownload=false:下载由用户在渲染层显式确认后触发;
-//!   autoInstallOnAppQuit=true:下载完成后即使不立即重启,退出时也会安装
-//!   (「退出时安装」语义)。
+//! - autoDownload=false:下载由用户在渲染层显式确认后触发。
+//! - autoInstallOnAppQuit=false:下载完**不**在退出时偷偷安装 —— 安装必须由用户
+//!   在界面上确认(渲染层弹出安装指引,确认后才调 quitAndInstall)。已下载的包
+//!   留在 electron-updater 缓存里,下次启动重新检查时 validateDownloadedPath
+//!   会直接复用,不必重下。
+//! - quitAndInstall 走**非静默**模式:应用退出后打开 NSIS 安装向导,由用户按
+//!   向导完成安装(传统桌面软件的升级步骤),而不是静默替换 + 自动重启。
 //! - 进度/状态事件经 webContents 转发到渲染层(channel: `updater-event`),
 //!   契约见 src/lib/desktop-bridge.ts 的 DesktopUpdaterEvent。
 //! - 全过程落盘 `<appDataDir>/logs/updater.log`(见 updater-log.ts):壳侧
 //!   生命周期 + electron-updater 本体日志(原先 `logger = null` 把失败原因
 //!   全部吞掉,更新失败在线上无从排查)。
 //! - 开发/未打包环境(app.isPackaged === false)更新器禁用:check 显式返回
-//!   unavailable、downloadAndInstall 显式拒绝、quitAndInstall 空转。
+//!   unavailable、downloadUpdate 显式拒绝、quitAndInstall 空转。
 
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
@@ -41,7 +45,9 @@ export type UpdaterMainEvent =
 
 export interface UpdaterService {
   check(): Promise<UpdaterCheckResult>;
-  downloadAndInstall(): Promise<{ version: string | null }>;
+  /** 只下载安装包,不安装(resolve 即下载完成,包留在 electron-updater 缓存里)。 */
+  downloadUpdate(): Promise<{ version: string | null }>;
+  /** 退出应用并把已下载的包交给 NSIS 安装向导(非静默,用户按向导完成安装)。 */
   quitAndInstall(): void;
   currentVersion(): string;
 }
@@ -65,11 +71,13 @@ export function createUpdaterService(deps: {
   };
 
 
-  /** 最近一次 check/update-downloaded 得到的远端版本(downloadAndInstall 返回用)。 */
+  /** 最近一次 check/update-downloaded 得到的远端版本(downloadUpdate 返回用)。 */
   let latestVersion: string | null = null;
 
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // 下载完**不**在退出时偷偷安装:安装必须由用户确认(渲染层弹安装指引)。
+  // 已下载的包留在缓存里,下次启动重新 check 时会被复用。
+  autoUpdater.autoInstallOnAppQuit = false;
   // electron-updater 6.x 起默认走 web installer,并会在下载时刷弃用警告;本项目
   // 走 NSIS 离线安装包,明确关掉(log 里可见该警告)。
   autoUpdater.disableWebInstaller = true;
@@ -79,7 +87,7 @@ export function createUpdaterService(deps: {
     `更新器初始化:packaged=${deps.isPackaged()} current=${app.getVersion()} `
       + `autoDownload=${autoUpdater.autoDownload} log=${recorder.filePath}`,
   );
-  // 持久事件转发:渲染层在 downloadAndInstall 期间消费 progress/downloaded。
+  // 持久事件转发:渲染层在 downloadUpdate 期间消费 progress/downloaded。
   autoUpdater.on('checking-for-update', () => {
     log('info', '事件: checking-for-update');
     forward({ type: 'checking' });
@@ -140,20 +148,20 @@ export function createUpdaterService(deps: {
       }
     },
 
-    downloadAndInstall: async (): Promise<{ version: string | null }> => {
+    downloadUpdate: async (): Promise<{ version: string | null }> => {
       if (!deps.isPackaged()) {
-        log('warn', 'downloadAndInstall: 未打包环境拒绝下载');
+        log('warn', 'downloadUpdate: 未打包环境拒绝下载');
         throw new Error('更新器在开发/未打包环境不可用');
       }
       // 前置 check 已缓存 updateInfo;resolve 即安装包下载完成
-      // ('update-downloaded' 事件同步转发给渲染层)。此后:
-      // 立即 quitAndInstall,或等 autoInstallOnAppQuit 在退出时安装。
-      log('info', `downloadAndInstall: 开始下载 version=${latestVersion ?? 'null'}`);
+      // ('update-downloaded' 事件同步转发给渲染层)。安装是**另一步**:用户看到
+      // 安装指引并确认后,渲染层才会调 quitAndInstall。
+      log('info', `downloadUpdate: 开始下载 version=${latestVersion ?? 'null'}`);
       try {
         const files = await autoUpdater.downloadUpdate();
-        log('info', `downloadAndInstall: 下载完成 files=${files.join(', ')}`);
+        log('info', `downloadUpdate: 下载完成 files=${files.join(', ')}`);
       } catch (error) {
-        log('error', `downloadAndInstall: 下载失败 ${formatUpdaterMessage(error)}`);
+        log('error', `downloadUpdate: 下载失败 ${formatUpdaterMessage(error)}`);
         throw error;
       }
       return { version: latestVersion };
@@ -164,10 +172,18 @@ export function createUpdaterService(deps: {
         log('warn', 'quitAndInstall: 未打包环境跳过安装(开发态请手动运行已下载的安装包)');
         return;
       }
-      // NSIS 静默安装 + 完成后自动重启;应用退出仍会先走壳的 before-quit
-      // (停自有 daemon)再交给安装器。
-      log('info', 'quitAndInstall: 交给安装器(静默安装 + 自动重启)');
-      autoUpdater.quitAndInstall(true, true);
+      // 非静默模式(参数全 false):应用退出后打开 NSIS 安装向导,用户按向导
+      // 「下一步 → 安装 → 完成」走完,与手动安装新版本的步骤一致;向导结束时
+      // 默认勾选「运行 CodeMUX」,安装完即回到新版本。
+      //
+      // 为什么不用静默(true, true):静默安装会在用户看不见的窗口里替换文件并
+      // 自动重启,用户点完「下载」就再没机会确认「现在安装」这一步 —— 正是这一版
+      // 之前的行为。autoInstallOnAppQuit 也一并关掉(见上),否则「稍后」之后
+      // 退出应用仍会偷偷装。
+      //
+      // 应用退出仍会先走壳的 before-quit(停自有 daemon)再交给安装器。
+      log('info', 'quitAndInstall: 交给 NSIS 安装向导(非静默,用户按向导完成安装)');
+      autoUpdater.quitAndInstall(false, false);
     },
 
     currentVersion: (): string => app.getVersion(),

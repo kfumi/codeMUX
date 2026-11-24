@@ -9,7 +9,7 @@ import { useDaemonConnectionStore } from '@/stores/daemonConnectionStore';
 import { UpdateEntry } from './UpdateEntry';
 
 type MockUpdaterState = {
-  stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
+  stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'ready' | 'installing' | 'error';
   version?: string;
   progress?: {
     totalBytes: number | null;
@@ -18,7 +18,7 @@ type MockUpdaterState = {
   error?: string;
   checkForUpdates: ReturnType<typeof vi.fn>;
   startUpdate: ReturnType<typeof vi.fn>;
-  relaunch: ReturnType<typeof vi.fn>;
+  installUpdate: ReturnType<typeof vi.fn>;
   resetToIdle: ReturnType<typeof vi.fn>;
 };
 
@@ -49,7 +49,7 @@ describe('UpdateEntry', () => {
       error: undefined,
       checkForUpdates: vi.fn(),
       startUpdate: vi.fn(),
-      relaunch: vi.fn(),
+      installUpdate: vi.fn(),
       resetToIdle: vi.fn(),
     };
   });
@@ -61,7 +61,7 @@ describe('UpdateEntry', () => {
     expect(screen.queryByRole('button', { name: /更新/ })).toBeNull();
   });
 
-  it('发现新版本时展示置底更新图标，确认后才开始下载安装', async () => {
+  it('发现新版本时展示置底更新图标，确认后才开始下载', async () => {
     mockUpdaterState.stage = 'available';
     mockUpdaterState.version = '1.2.3';
 
@@ -69,10 +69,10 @@ describe('UpdateEntry', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '更新' }));
 
-    expect(screen.getByText('安装更新 1.2.3？')).toBeTruthy();
+    expect(screen.getByText('下载更新 1.2.3？')).toBeTruthy();
     expect(mockUpdaterState.startUpdate).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '下载并安装' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始下载' }));
 
     expect(mockUpdaterState.startUpdate).toHaveBeenCalledTimes(1);
   });
@@ -95,24 +95,86 @@ describe('UpdateEntry', () => {
     expect(circle?.className).toContain('text-primary-foreground');
   });
 
-  it('下载、安装和重启阶段展示不可重复点击的进度入口', async () => {
+  it('下载阶段桌面格显示进度环与环心百分比(回归:此前只有转圈,没有进度)', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
     mockUpdaterState.stage = 'downloading';
-    mockUpdaterState.progress = {
-      totalBytes: 100,
-      downloadedBytes: 42,
-    };
+    mockUpdaterState.progress = { totalBytes: 100, downloadedBytes: 42 };
 
-    const { rerender } = render(<UpdateEntry />);
+    render(<UpdateEntry />);
 
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '下载中 42%' }).disabled).toBe(true);
+    const button = screen.getByRole('button', { name: '下载中 42%' });
+    expect(button.disabled).toBe(true);
+    const ring = screen.getByRole('progressbar', { name: '更新下载进度' });
+    expect(ring.getAttribute('aria-valuenow')).toBe('42');
+    // 环心百分比是图标格里唯一的文字。
+    expect(button.textContent).toBe('42%');
+  });
 
+  it('下载阶段窄屏行保留文字百分比,环只画弧不带中心文字', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    mockUpdaterState.stage = 'downloading';
+    mockUpdaterState.progress = { totalBytes: 100, downloadedBytes: 42 };
+
+    render(<UpdateEntry />);
+
+    const button = screen.getByRole('button', { name: '下载中 42%' });
+    expect(button.textContent).toBe('下载中 42%');
+    expect(screen.getByRole('progressbar', { name: '更新下载进度' }).getAttribute('aria-valuenow')).toBe('42');
+  });
+
+  it('总量未知时环进入不确定态,不显示假百分比', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    mockUpdaterState.stage = 'downloading';
+    mockUpdaterState.progress = { totalBytes: null, downloadedBytes: 2048 };
+
+    render(<UpdateEntry />);
+
+    const button = screen.getByRole('button', { name: '下载中' });
+    expect(button.textContent).toBe('');
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBeNull();
+  });
+
+  it('安装阶段展示不可重复点击的进度入口', async () => {
     mockUpdaterState.stage = 'installing';
-    rerender(<UpdateEntry />);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '安装中' }).disabled).toBe(true);
 
-    mockUpdaterState.stage = 'restarting';
-    rerender(<UpdateEntry />);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '重启中' }).disabled).toBe(true);
+    render(<UpdateEntry />);
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '安装中' }).disabled).toBe(true);
+  });
+
+  it('下载完成后入口变成「待安装」,点开安装指引并确认后才退出安装', async () => {
+    mockUpdaterState.stage = 'ready';
+    mockUpdaterState.version = '1.2.3';
+
+    render(<UpdateEntry />);
+
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: '待安装' });
+    expect(button.disabled).toBe(false);
+    expect(mockUpdaterState.installUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+
+    expect(screen.getByText('安装更新 1.2.3')).toBeTruthy();
+    // 指引把步骤讲清楚:保存内容 → 退出并打开向导 → 按向导完成。
+    expect(screen.getByText('保存正在编辑的内容')).toBeTruthy();
+    expect(screen.getByText('应用退出并打开安装向导')).toBeTruthy();
+    expect(screen.getByText('按向导完成安装')).toBeTruthy();
+    expect(mockUpdaterState.installUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /退出并安装/ }));
+
+    expect(mockUpdaterState.installUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('安装指引可以「稍后」关掉,不触发安装', async () => {
+    mockUpdaterState.stage = 'ready';
+
+    render(<UpdateEntry />);
+    fireEvent.click(screen.getByRole('button', { name: '待安装' }));
+    fireEvent.click(screen.getByRole('button', { name: '稍后' }));
+
+    expect(screen.queryByText('保存正在编辑的内容')).toBeNull();
+    expect(mockUpdaterState.installUpdate).not.toHaveBeenCalled();
   });
 
   it('更新失败时**保留**入口并展示原因与重试(回归:此前 error 返回 null,按钮凭空消失)', async () => {
@@ -136,14 +198,14 @@ describe('UpdateEntry', () => {
     mockUpdaterState.version = '1.2.4';
     mockUpdaterState.checkForUpdates.mockResolvedValue({
       version: '1.2.4',
-      downloadAndInstall: vi.fn(async () => {}),
+      download: vi.fn(async () => {}),
     });
 
     render(<UpdateEntry />);
     fireEvent.click(screen.getByRole('button', { name: '更新失败' }));
 
     await vi.waitFor(() => {
-      expect(screen.getByText('安装更新 1.2.4？')).toBeTruthy();
+      expect(screen.getByText('下载更新 1.2.4？')).toBeTruthy();
     });
     expect(mockUpdaterState.checkForUpdates).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true, throwOnError: true }),
@@ -162,7 +224,7 @@ describe('UpdateEntry', () => {
     await vi.waitFor(() => {
       expect(mockUpdaterState.checkForUpdates).toHaveBeenCalled();
     });
-    expect(screen.queryByText(/安装更新/)).toBeNull();
+    expect(screen.queryByText(/下载更新/)).toBeNull();
   });
 
   it('浏览器形态隐藏壳独占的更新入口', async () => {

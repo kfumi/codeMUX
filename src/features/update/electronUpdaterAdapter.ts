@@ -2,9 +2,13 @@
  * Electron 更新器适配器(工单 06):把 desktopBridge 的 updater 通道映射到
  * useUpdater 的 UpdaterAdapters 契约 ——
  * - check → 壳 checkForUpdates;unavailable 视为环境不支持;
- * - downloadAndInstall → 订阅 onUpdaterEvent,把壳侧 progress/downloaded/error
- *   事件映射为 DownloadEvent(Started/Progress/Finished/Error);
- * - relaunch → quitAndInstall(静默安装 + 自动重启;退出仍先停自有 daemon)。
+ * - download → 订阅 onUpdaterEvent,把壳侧 progress/downloaded/error 事件映射为
+ *   DownloadEvent(Started/Progress/Finished/Error);**只下载不安装**;
+ * - install → quitAndInstall(退出应用 + 拉起 NSIS 安装向导,用户按向导完成安装)。
+ *
+ * 为什么下载和安装分开:下载完成不等于可以装 —— 用户要先看到「安装指引」
+ * (保存内容 → 应用退出 → 向导安装 → 完成),确认后才退出。旧版把两步合在
+ * downloadAndInstall 里,下载一完就静默替换并自动重启,用户完全没有确认机会。
  *
  * 为什么要 Error:壳侧 `autoUpdater.on('error')` 是**独立于 IPC 返回值**的
  * 事件通道。下载中途失败(404、校验和不匹配、断网)时它先于 promise reject 到达,
@@ -28,7 +32,7 @@ export function createElectronUpdaterAdapters(bridge: CodemuxDesktopBridge): Upd
       const version = result.version;
       return {
         version,
-        downloadAndInstall: async (
+        download: async (
           onEvent: (event: DownloadEvent) => void,
         ): Promise<void> => {
           let started = false;
@@ -62,14 +66,14 @@ export function createElectronUpdaterAdapters(bridge: CodemuxDesktopBridge): Upd
             }
           });
           try {
-            await bridge.downloadAndInstall();
+            await bridge.downloadUpdate();
           } finally {
             unsubscribe();
           }
         },
       };
     },
-    relaunch: async (): Promise<void> => {
+    install: async (): Promise<void> => {
       await bridge.quitAndInstall();
     },
   };

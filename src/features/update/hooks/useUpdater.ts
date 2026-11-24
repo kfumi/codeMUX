@@ -35,8 +35,9 @@ export type UpdateStage =
   | 'available'
   | 'latest'
   | 'downloading'
+  /** 安装包已下载完成,等用户确认后退出应用并进入安装向导。 */
+  | 'ready'
   | 'installing'
-  | 'restarting'
   | 'error';
 
 export interface UpdateProgress {
@@ -46,12 +47,14 @@ export interface UpdateProgress {
 
 export interface UpdateHandle {
   version: string;
-  downloadAndInstall: (onEvent: (event: DownloadEvent) => void) => Promise<void>;
+  /** 只下载安装包;resolve 即下载完成(不安装)。 */
+  download: (onEvent: (event: DownloadEvent) => void) => Promise<void>;
 }
 
 export type UpdaterAdapters = {
   check: () => Promise<UpdateHandle | null>;
-  relaunch: () => Promise<void>;
+  /** 退出应用并把已下载的包交给安装向导(用户按向导完成安装)。 */
+  install: () => Promise<void>;
 };
 
 export interface CheckForUpdatesOptions {
@@ -89,7 +92,7 @@ const loadUpdaterAdapters = async (): Promise<UpdaterAdapters> => {
     check: async () => {
       throw new Error(UPDATER_UNAVAILABLE_MESSAGE);
     },
-    relaunch: async () => {
+    install: async () => {
       throw new Error(UPDATER_UNAVAILABLE_MESSAGE);
     },
   };
@@ -130,7 +133,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
   const latestTimerRef = useRef<number | null>(null);
   const checkRequestIdRef = useRef(0);
   const startRequestIdRef = useRef(0);
-  const relaunchRequestIdRef = useRef(0);
+  const installRequestIdRef = useRef(0);
 
   const clearLatestTimer = useCallback(() => {
     if (latestTimerRef.current !== null) {
@@ -142,7 +145,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
   const invalidateRequests = useCallback(() => {
     checkRequestIdRef.current += 1;
     startRequestIdRef.current += 1;
-    relaunchRequestIdRef.current += 1;
+    installRequestIdRef.current += 1;
   }, []);
 
   const resetToIdle = useCallback(() => {
@@ -246,6 +249,10 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
     }
   }, [clearLatestTimer, enabled, scheduleLatestReset]);
 
+  /**
+   * 下载安装包。下载完成后进入 `ready`(不安装)—— 安装要等用户看到指引并确认,
+   * 走 {@link installUpdate}。
+   */
   const startUpdate = useCallback(async () => {
     const requestId = startRequestIdRef.current + 1;
     startRequestIdRef.current = requestId;
@@ -272,7 +279,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
         },
       });
 
-      await update.downloadAndInstall((event) => {
+      await update.download((event) => {
         if (startRequestIdRef.current !== requestId) {
           return;
         }
@@ -314,62 +321,66 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
           return;
         }
 
+        // Finished:安装包落盘完成,进入「待安装」等用户确认。
         setState((current) => ({
           ...current,
-          stage: 'installing',
+          stage: 'ready',
         }));
       });
-
-      await Promise.resolve();
 
       if (startRequestIdRef.current !== requestId) {
         return;
       }
 
-
-      await relaunch();
+      // download() resolve 也代表下载完成(壳在缓存命中时不会再发 Finished 事件)。
+      // 只从 downloading 推进:期间若已落 error(壳侧 error 事件),不能被覆盖。
+      setState((current) => current.stage === 'downloading' ? {
+        ...current,
+        stage: 'ready',
+      } : current);
     } catch (error) {
       if (startRequestIdRef.current !== requestId) {
         return;
       }
 
-      logger.error('安装更新失败', undefined, serializeError(error));
+      logger.error('下载更新失败', undefined, serializeError(error));
       setState((current) => ({
         stage: 'error',
         version: current.version,
         progress: current.progress,
-        error: getErrorMessage(error, '更新安装失败'),
+        error: getErrorMessage(error, '更新下载失败'),
       }));
     }
   }, [checkForUpdates]);
 
-  const relaunch = useCallback(async () => {
-    const requestId = relaunchRequestIdRef.current + 1;
-    relaunchRequestIdRef.current = requestId;
+  /**
+   * 安装:退出应用并把已下载的包交给 NSIS 安装向导(用户按向导完成)。
+   * 应用退出后渲染层不复存在,所以这里不需要(也无法)回到某个后续状态 ——
+   * 失败(极少:包丢了/壳拒绝)才落 error。
+   */
+  const installUpdate = useCallback(async () => {
+    const requestId = installRequestIdRef.current + 1;
+    installRequestIdRef.current = requestId;
+
+    setState((current) => ({
+      ...current,
+      stage: 'installing',
+    }));
 
     try {
-      const { relaunch: runRelaunch } = await loadUpdaterAdapters();
-      await runRelaunch();
-
-      if (relaunchRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      setState((current) => ({
-        ...current,
-        stage: 'restarting',
-      }));
+      const { install } = await loadUpdaterAdapters();
+      await install();
     } catch (error) {
-      if (relaunchRequestIdRef.current !== requestId) {
+      if (installRequestIdRef.current !== requestId) {
         return;
       }
 
-      logger.error('重启应用失败', undefined, serializeError(error));
+      logger.error('启动安装失败', undefined, serializeError(error));
       setState((current) => ({
         stage: 'error',
         version: current.version,
         progress: current.progress,
-        error: getErrorMessage(error, '应用重启失败'),
+        error: getErrorMessage(error, '启动安装失败'),
       }));
     }
   }, []);
@@ -391,7 +402,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
     ...state,
     checkForUpdates,
     startUpdate,
-    relaunch,
+    installUpdate,
     resetToIdle,
   };
 }

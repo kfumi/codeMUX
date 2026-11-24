@@ -14,7 +14,7 @@ const { useUpdaterMock } = vi.hoisted(() => ({
     error: undefined,
     checkForUpdates: vi.fn(),
     startUpdate: vi.fn(),
-    relaunch: vi.fn(),
+    installUpdate: vi.fn(),
     resetToIdle: vi.fn(),
   })),
 }));

@@ -118,10 +118,16 @@ CI 侧对应两个仓库 Secrets（Settings → Secrets and variables → Action
 - [`apps/desktop/electron-builder.yml`](/D:/project/my-project/codeMUX/apps/desktop/electron-builder.yml:1)
   的 `publish`(provider: github,owner/repo = `kfumi/codeMUX`)在打包时生成
   `resources/app-update.yml`;electron-updater 运行时自动读取,代码不硬编码 feed。
-- 应用内更新流:渲染层「检查更新」(AboutSettings / 标题栏 UpdateEntry)→
-  preload 桥 → main `autoUpdater`(见 `apps/desktop/src/updater.ts`);
-  `autoDownload=false`(用户确认后下载)、`autoInstallOnAppQuit=true`(下载后
-  即使不立即重启,退出时也会安装)。
+- 应用内更新流:渲染层「检查更新」(AboutSettings / 图标轨 UpdateEntry)→
+  preload 桥 → main `autoUpdater`(见 `apps/desktop/src/updater.ts`)。下载与
+  安装是**两步**:
+  - `autoDownload=false` + `downloadUpdate()`:用户确认后只下载,进度经
+    `updater-event` 推到界面(图标轨进度环 / 关于页进度条);
+  - 下载完成进入「待安装」,界面弹出**安装指引**(保存内容 → 应用退出 → 按
+    NSIS 安装向导完成)。用户确认后才 `quitAndInstall(false, false)` —— 非静默,
+    应用退出后由用户走安装向导,与手动装新版的步骤一致。
+  - `autoInstallOnAppQuit=false`:下载完**不会**在退出应用时偷偷安装。已下载的
+    包留在 electron-updater 缓存里,下次启动重新检查时直接复用,不必重下。
 - 开发/未打包环境(`app.isPackaged === false`)更新器默认禁用,check 返回
   unavailable;设 `CODEMUX_UPDATER_DEV=1` 可在开发态放行(见下节)。
 - 发布新版本时,把 GitHub Release 附件(latest.yml + NSIS exe)上传到
@@ -169,8 +175,14 @@ $names | ForEach-Object {
 daemon 的每条请求日志带 `[trace=<id>]`(客户端可用 `x-codemux-trace-id` 头指定,缺省由
 daemon 生成并回写响应头);renderer 请求失败时本地日志也带同一个 `traceId`,两边按 id 对时间线。
 
-更新失败时 UI 不会静默:标题栏入口变成红色的「更新失败」并可点击重试,关于页
+更新失败时 UI 不会静默:图标轨入口变成红色的「更新失败」并可点击重试,关于页
 展示失败原因与进度条(两处口径共用 `src/features/update/updateDisplay.ts`)。
+
+> **macOS / Linux 的安装这一步**由 electron-updater 自己完成:macOS 走
+> Squirrel.Mac 替换应用(mac 上 `autoInstallOnAppQuit=false` 会把 Squirrel 的抓取
+> 推迟到用户确认后的 `quitAndInstall`,不会提前安装),Linux 直接替换 AppImage
+> 镜像文件。只有 Windows 才有「退出应用 → 打开 NSIS 安装向导 → 用户按向导完成」
+> 这一段。三端都不会静默替换用户没确认过的更新。
 
 ## 数据目录与旧壳用户迁移
 

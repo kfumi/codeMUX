@@ -38,7 +38,7 @@ function getHandler(channel: string): (event: unknown, payload: unknown) => unkn
 function createDeps(overrides: Partial<ShellBridgeDeps> = {}): ShellBridgeDeps {
   const updater: UpdaterService = {
     check: vi.fn().mockResolvedValue({ status: 'unavailable', version: null }),
-    downloadAndInstall: vi.fn().mockResolvedValue({ version: '1.2.3' }),
+    downloadUpdate: vi.fn().mockResolvedValue({ version: '1.2.3' }),
     quitAndInstall: vi.fn(),
     currentVersion: vi.fn().mockReturnValue('0.3.1'),
   };
@@ -131,7 +131,7 @@ describe('shell-bridge 对话框/更新器通道(工单 06)', () => {
     await expect(handler(null, {})).resolves.toBeNull();
   });
 
-  it('updater 通道接线:check/downloadAndInstall/quitAndInstall/currentVersion', async () => {
+  it('updater 通道接线:check/downloadUpdate/quitAndInstall/currentVersion', async () => {
     const deps = createDeps();
     registerShellBridge(deps);
 
@@ -139,7 +139,7 @@ describe('shell-bridge 对话框/更新器通道(工单 06)', () => {
       status: 'unavailable',
       version: null,
     });
-    await expect(getHandler('downloadAndInstall')(null, undefined)).resolves.toEqual({ version: '1.2.3' });
+    await expect(getHandler('downloadUpdate')(null, undefined)).resolves.toEqual({ version: '1.2.3' });
     // handler 经 Promise.resolve().then 异步执行,quitAndInstall 需 await 后断言。
     await getHandler('quitAndInstall')(null, undefined);
     expect(deps.updater.quitAndInstall).toHaveBeenCalledTimes(1);

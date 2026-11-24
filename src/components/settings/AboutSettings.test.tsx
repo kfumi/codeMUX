@@ -12,12 +12,13 @@ import { AboutSettings } from './AboutSettings';
 const currentVersionMock = vi.hoisted(() => vi.fn(async () => '1.0.0'));
 
 type MockUpdaterContext = {
-  stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'installing' | 'restarting' | 'error';
+  stage: 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'ready' | 'installing' | 'error';
   version?: string;
   progress?: { totalBytes: number | null; downloadedBytes: number };
   error?: string;
   checkForUpdates: ReturnType<typeof vi.fn>;
   startUpdate: ReturnType<typeof vi.fn>;
+  installUpdate: ReturnType<typeof vi.fn>;
 };
 
 let mockUpdaterContext: MockUpdaterContext;
@@ -45,6 +46,7 @@ describe('AboutSettings', () => {
       error: undefined,
       checkForUpdates: vi.fn(async () => null),
       startUpdate: vi.fn(),
+      installUpdate: vi.fn(),
     };
   });
 
@@ -66,10 +68,10 @@ describe('AboutSettings', () => {
     });
   });
 
-  it('手动检查发现更新后弹出确认窗，确认后开始下载安装', async () => {
+  it('手动检查发现更新后弹出确认窗，确认后只下载(安装留给安装指引)', async () => {
     mockUpdaterContext.checkForUpdates.mockResolvedValueOnce({
       version: '1.2.3',
-      downloadAndInstall: vi.fn(async () => {}),
+      download: vi.fn(async () => {}),
     });
     mockUpdaterContext.version = '1.2.3';
 
@@ -79,12 +81,13 @@ describe('AboutSettings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
-    expect(await screen.findByText('安装更新 1.2.3？')).toBeTruthy();
+    expect(await screen.findByText('下载更新 1.2.3？')).toBeTruthy();
     expect(mockUpdaterContext.startUpdate).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '下载并安装' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始下载' }));
 
     expect(mockUpdaterContext.startUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdaterContext.installUpdate).not.toHaveBeenCalled();
   });
 
   it('手动检查没有更新时弹出最新版本提示', async () => {
@@ -132,7 +135,6 @@ describe('AboutSettings', () => {
   it.each([
     ['downloading'],
     ['installing'],
-    ['restarting'],
   ] as const)('更新处于 %s 阶段时禁用检查更新按钮且不允许再次触发', async (stage) => {
     mockUpdaterContext.stage = stage;
 
@@ -189,15 +191,29 @@ describe('AboutSettings', () => {
     expect(screen.getByText('已下载 2 KB')).toBeTruthy();
   });
 
-  it('安装中/重启中展示阶段文案', async () => {
+  it('安装中展示阶段文案', async () => {
     mockUpdaterContext.stage = 'installing';
-    const { rerender } = render(<AboutSettings />);
+    render(<AboutSettings />);
     await screen.findByText('CodeMUX');
     expect(screen.getByText('安装中')).toBeTruthy();
+  });
 
-    mockUpdaterContext.stage = 'restarting';
-    rerender(<AboutSettings />);
-    expect(screen.getByText('重启中')).toBeTruthy();
+  it('下载完成后展示待安装状态,点「安装」打开安装指引', async () => {
+    mockUpdaterContext.stage = 'ready';
+    mockUpdaterContext.version = '1.2.3';
+
+    render(<AboutSettings />);
+    await screen.findByText('CodeMUX');
+
+    expect(screen.getByText('待安装')).toBeTruthy();
+    expect(screen.getByText('更新包已下载，退出应用后按安装向导完成安装')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '安装' }));
+
+    expect(screen.getByText('保存正在编辑的内容')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /退出并安装/ }));
+
+    expect(mockUpdaterContext.installUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('更新失败时展示原因与日志指引,而不是静默', async () => {

@@ -109,8 +109,9 @@ const bridge = {
   syncUnreadBadgeCount: (count: number) => invoke<void>('syncUnreadBadgeCount', count),
 
   // 应用内更新器(工单 06;electron-updater;进度事件经 onUpdaterEvent 转发)
+  // 下载(downloadUpdate)与安装(quitAndInstall)分开:下载完弹安装指引,用户确认才装。
   checkForUpdates: () => invoke('checkForUpdates'),
-  downloadAndInstall: () => invoke('downloadAndInstall'),
+  downloadUpdate: () => invoke('downloadUpdate'),
   quitAndInstall: () => invoke<void>('quitAndInstall'),
   currentVersion: () => invoke<string>('currentVersion'),
 

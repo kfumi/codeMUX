@@ -516,9 +516,10 @@ export function registerShellBridge(deps: ShellBridgeDeps): () => void {
   });
 
   // --- 更新器(工单 06;electron-updater,事件经 'updater-event' 转发) -------
-  // 开发/未打包环境由 updater.check() 显式返回 unavailable / downloadAndInstall 拒绝。
+  // 开发/未打包环境由 updater.check() 显式返回 unavailable / downloadUpdate 拒绝。
+  // 下载与安装是两步:downloadUpdate 只落盘,quitAndInstall 才退出并拉起安装向导。
   handle('checkForUpdates', () => deps.updater.check());
-  handle('downloadAndInstall', () => deps.updater.downloadAndInstall());
+  handle('downloadUpdate', () => deps.updater.downloadUpdate());
   handle('quitAndInstall', () => {
     deps.updater.quitAndInstall();
   });
