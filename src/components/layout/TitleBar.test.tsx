@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import type { CSSProperties } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -58,6 +59,64 @@ describe('TitleBar 的侧面板开关', () => {
     renderTitleBar();
 
     expect(panelToggle()?.hasAttribute('aria-keyshortcuts')).toBe(false);
+  });
+});
+
+describe('TitleBar 的顶栏分段', () => {
+  beforeEach(() => {
+    useSidePanelStore.setState({ isOpen: false });
+    setKeybindings({});
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderSplit(options: { splitAtSidebar?: boolean; sidebarResizing?: boolean } = {}) {
+    return render(
+      <div style={{ '--titlebar-split': '356px' } as CSSProperties}>
+        <TooltipProvider>
+          <TitleBar
+            leftContent={<span>nav</span>}
+            rightContent={<span>header</span>}
+            {...options}
+          />
+        </TooltipProvider>
+      </div>,
+    );
+  }
+
+  it('在侧栏边界画一条上下留白的短分割线，并让标题内容从线右侧开始', () => {
+    const { container } = renderSplit({ splitAtSidebar: true });
+
+    const divider = container.querySelector<HTMLElement>('[data-titlebar-split-divider]');
+    expect(divider).toBeTruthy();
+    expect(divider?.style.left).toBe('var(--titlebar-split)');
+    // 不顶满高度：48px 标题栏里上下各留 10px；2px 宽、半透明 ink，比侧栏
+    // 那条发丝线更醒目。
+    expect(divider?.className).toContain('top-2.5');
+    expect(divider?.className).toContain('bottom-2.5');
+    expect(divider?.className).toContain('w-0.5');
+    expect(divider?.className).toContain('bg-[hsl(var(--foreground)/0.2)]');
+    expect(divider?.className).toContain('pointer-events-none');
+
+    const leftRegion = container.querySelector<HTMLElement>('[data-titlebar-left-region]');
+    expect(leftRegion?.style.width).toBe('var(--titlebar-split)');
+  });
+
+  it('拖拽侧栏时关掉分段宽度过渡，避免分割线落后', () => {
+    const { container } = renderSplit({ splitAtSidebar: true, sidebarResizing: true });
+
+    const leftRegion = container.querySelector<HTMLElement>('[data-titlebar-left-region]');
+    expect(leftRegion?.className).toContain('transition-none');
+  });
+
+  it('不分段时不画短分割线', () => {
+    const { container } = renderSplit();
+
+    expect(container.querySelector('[data-titlebar-split-divider]')).toBeNull();
+    const leftRegion = container.querySelector<HTMLElement>('[data-titlebar-left-region]');
+    expect(leftRegion?.style.width).toBe('');
   });
 });
 

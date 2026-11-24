@@ -64,6 +64,14 @@ interface TitleBarProps {
   projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
   todos?: TodoItem[];
+  /**
+   * 侧栏与内容区并排时，顶栏按两者边界分成两段：左段只放导航控件，
+   * 会话标题/项目等从分割线右侧开始。分割线位置由 `.app-shell` 上的
+   * `--titlebar-split` 提供，与侧栏宽度同源。
+   */
+  splitAtSidebar?: boolean;
+  /** 侧栏拖拽中禁用分段宽度过渡，保证分割线与侧栏同帧移动。 */
+  sidebarResizing?: boolean;
 }
 
 export function TitleBar({
@@ -72,6 +80,8 @@ export function TitleBar({
   projectOpenPath,
   sidePanelAvailable = true,
   todos = EMPTY_TODOS,
+  splitAtSidebar = false,
+  sidebarResizing = false,
 }: TitleBarProps) {
   const [maximized, setMaximized] = useState(false);
   const currentTheme = useSettingsStore((state) => state.config?.theme || 'System');
@@ -119,6 +129,9 @@ export function TitleBar({
     { value: 'System', label: '跟随系统', Icon: Monitor },
   ];
 
+  // 没有左侧控件（无侧栏）时没有可对齐的边界，不拆段。
+  const split = splitAtSidebar && leftContent != null;
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -130,13 +143,36 @@ export function TitleBar({
           className="relative z-20 flex h-12 shrink-0 select-none items-stretch"
         >
           {leftContent && (
-            <div className="flex h-full items-center pl-2">
+            <div
+              data-titlebar-left-region
+              className={cn(
+                'flex h-full items-center pl-2',
+                split && 'shrink-0',
+                // 过渡与侧栏的 width 过渡同参：展开/收起时一起走完；拖拽时两边
+                // 同时关掉过渡，分割线跟手不落后。
+                split && (sidebarResizing
+                  ? 'transition-none'
+                  : 'transition-[width] duration-slow ease-motion-in-out'),
+              )}
+              style={split ? { width: 'var(--titlebar-split)' } : undefined}
+            >
               {leftContent}
             </div>
           )}
 
+          {/* 顶部的短分割线：与侧栏-内容区那条边界同 x，上下留白不顶满。
+              纯装饰且不拦截拖拽 —— 真正的拖拽手柄仍在下方的侧栏边缘。 */}
+          {split && (
+            <span
+              aria-hidden="true"
+              data-titlebar-split-divider
+              className="pointer-events-none absolute top-2.5 bottom-2.5 w-0.5 -translate-x-1/2 rounded-full bg-[hsl(var(--foreground)/0.2)]"
+              style={{ left: 'var(--titlebar-split)' }}
+            />
+          )}
+
           {rightContent && (
-            <div className={cn('flex min-w-0 shrink items-center gap-2 overflow-hidden', leftContent ? 'pl-1' : 'pl-3')}>
+            <div className={cn('flex min-w-0 shrink items-center gap-2 overflow-hidden', split ? 'pl-3' : leftContent ? 'pl-1' : 'pl-3')}>
               {rightContent}
             </div>
           )}

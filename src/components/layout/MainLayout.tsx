@@ -17,7 +17,7 @@ import { SidePanel } from '../workspace/SidePanel';
 import { SummaryPanelSurface } from '../workspace/review/SummaryPanelSurface';
 import { TooltipHint } from '../ui/tooltip';
 import { ConversationFullViewHost } from './ConversationFullViewHost';
-import { NavRail, type NavRailTarget } from './NavRail';
+import { NavRail, NAV_RAIL_WIDTH, type NavRailTarget } from './NavRail';
 import { NarrowNavFooter } from './NarrowNavFooter';
 import { NarrowNavSwitcher } from './NarrowNavSwitcher';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
@@ -175,6 +175,13 @@ export function MainLayout({
   const sidebarDocked = sidebar != null && sidebarVisible && !isNarrow;
   const contentFloats = sidebar != null && !sidebarVisible && !isNarrow
     && hostForm === 'desktop' && !windowMaximized;
+  // 顶栏分段线的 x：图标轨宽度 + 侧栏宽度。与侧栏自身的宽度同源（同一个
+  // `sidebarWidth` state），拖拽时两边在同一次 React 提交里更新，不存在
+  // 「先拖下面、再补上面」的二次同步。图标轨不渲染时（如测试/无导航形态）
+  // 边界只剩侧栏宽度。
+  const navRailVisible = sidebar != null && navRailTarget != null
+    && onNavRailSelect != null && !isNarrow;
+  const titleBarSplitOffset = (navRailVisible ? NAV_RAIL_WIDTH : 0) + sidebarWidth;
 
   /*
    * 摘要面板（环境信息/任务/子智能体）的档位与正文列让位。
@@ -275,6 +282,7 @@ export function MainLayout({
         'app-shell flex flex-col bg-[hsl(var(--chrome-bg))] text-foreground',
         isNarrow ? 'h-[100dvh]' : 'h-screen',
       )}
+      style={{ '--titlebar-split': `${titleBarSplitOffset}px` } as CSSProperties}
     >
       {/*
        * 标题栏跨全宽，位于导航栏与侧栏之上 —— 与 Codex 的原生 caption 同构。
@@ -287,6 +295,8 @@ export function MainLayout({
         projectOpenPath={projectOpenPath}
         sidePanelAvailable={sidePanelAvailable}
         todos={todos}
+        splitAtSidebar={sidebarDocked}
+        sidebarResizing={sidebarResizing}
       />
 
       <div className="relative flex min-h-0 flex-1">
@@ -367,7 +377,16 @@ export function MainLayout({
                 className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
                 onMouseDown={handleSidebarMouseDown}
               >
-                <div className="absolute left-1/2 top-[var(--radius-content)] bottom-[var(--radius-content)] w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-normal group-hover:bg-primary/22" />
+                {/* 高亮线必须与侧栏 `border-r` 同高：此前上下各让出
+                    `--radius-content`，激活时两端会露出未高亮的 1px 底边，
+                    看起来像「亮线断了一截」。拖拽中用更实的强调色，指针滑出
+                    8px 手柄范围也不会丢掉激活态。 */}
+                <div
+                  className={cn(
+                    'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full transition-all duration-normal',
+                    sidebarResizing ? 'bg-primary/45' : 'bg-transparent group-hover:bg-primary/22',
+                  )}
+                />
               </div>
             )}
           </aside>

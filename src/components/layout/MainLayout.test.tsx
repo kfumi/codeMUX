@@ -135,6 +135,40 @@ describe('MainLayout', () => {
     expect(shell?.firstElementChild).toBe(document.querySelector('[data-testid="title-bar"]'));
   });
 
+  it('writes the sidebar boundary into --titlebar-split for the split title bar', () => {
+    render(
+      <MainLayout
+        sidebar={<div>sidebar</div>}
+        navRailTarget="app"
+        onNavRailSelect={() => {}}
+        headerContent={<span>header</span>}
+      >
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    // 默认侧栏 300px + 图标轨 56px。变量与侧栏宽度同源，拖拽时同帧更新。
+    const shell = document.querySelector('.app-shell') as HTMLElement;
+    expect(shell.style.getPropertyValue('--titlebar-split')).toBe('356px');
+    expect(titleBarProps[0].splitAtSidebar).toBe(true);
+  });
+
+  it('does not split the title bar while the sidebar is collapsed', () => {
+    useShellLayoutStore.setState({ sidebarCollapsed: true });
+    render(
+      <MainLayout
+        sidebar={<div>sidebar</div>}
+        navRailTarget="app"
+        onNavRailSelect={() => {}}
+        headerContent={<span>header</span>}
+      >
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    expect(titleBarProps[0].splitAtSidebar).toBe(false);
+  });
+
   it('宽档钉住摘要时把「正文列左移」写成 CSS 变量，并把内联面挂进对话列', () => {
     useSummaryPanelStore.getState().setMetrics({ availableWidth: 1400, contentWidth: 768 });
     useSummaryPanelStore.getState().setPinned(true);
@@ -548,6 +582,29 @@ describe('MainLayout', () => {
     fireEvent.mouseUp(document);
     fireEvent.mouseMove(document, { clientX: 500 });
     expect(sidebar.style.width).toBe('340px');
+  });
+
+  it('highlights the whole sidebar divider while interacting, including its ends', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>} navRailTarget="app" onNavRailSelect={vi.fn()}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const sidebar = document.querySelector('aside') as HTMLElement;
+    const handle = sidebar.querySelector('.cursor-col-resize') as HTMLElement;
+    const highlight = handle.firstElementChild as HTMLElement;
+    // 与侧栏 border-r 同高：上下若让出 radius-content，激活时两端会露出
+    // 未高亮的底边，看起来像「亮线断了一截」。
+    expect(highlight.className).toContain('inset-y-0');
+    expect(highlight.className).not.toContain('top-[var(--radius-content)]');
+    expect(highlight.className).toContain('group-hover:bg-primary/22');
+
+    fireEvent.mouseDown(handle, { clientX: 356 });
+    expect(highlight.className).toContain('bg-primary/45');
+
+    fireEvent.mouseUp(document);
+    expect(highlight.className).not.toContain('bg-primary/45');
   });
 
   it('keeps the side panel mounted while settings only hide it', () => {
