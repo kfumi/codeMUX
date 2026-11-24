@@ -331,6 +331,33 @@ function sidebarMutedSurface(sidebar: Rgb, ink: Rgb): Rgb {
 }
 
 /**
+ * 侧栏文字的次级 / 第三级 —— 与全站 `--muted-foreground` / `--foreground-tertiary`
+ * 同一套语义，但合成在**侧栏自己的底色**上。
+ *
+ * 为什么侧栏要单独一套：`--sidebar-bg` 已经离开表面种子（浅色 241、深色 32），
+ * 直接拿合成在表面上的那两档会差 1–5 级，而且没法跟着侧栏底色一起变。更要紧的是
+ * 侧栏内部本来就没有层级 —— 分区标题（置顶 / 项目 / 对话）此前用的是**满墨色**，
+ * 比会话标题还重，读起来像「标题才是主体」。参考 ZCode 的侧栏（`text-foreground-subtle`
+ * / `text-foreground-subtlest`）：标题最浅、项目名次之、会话标题最亮。
+ *
+ * 于是这里给出两档，压在同一条亮度阶梯上（浅色越深越强、深色越亮越强）：
+ *   浅色 会话标题 13 < 项目名 67 < 分区标题 107 < 图标 135
+ *   深色 会话标题 237 > 项目名 192 > 分区标题 157 > 图标 134
+ * 对比度（压在侧栏底上）：次级 ≈ 8.8:1、第三级 ≈ 4.7:1（浅）/ 6.0:1（深）——
+ * 第三级是分区标题能用的最浅一档，再往下就掉出 AA 正文门槛。
+ */
+function sidebarForegroundTiers(
+  sidebar: Rgb,
+  ink: Rgb,
+  c: number,
+): { secondary: Rgb; tertiary: Rgb } {
+  return {
+    secondary: mixRgb(sidebar, ink, 0.72 + c * 0.1),
+    tertiary: mixRgb(sidebar, ink, 0.52 + c * 0.15),
+  };
+}
+
+/**
  * 凹面（画布）—— 右侧面板的主体底。
  *
  * 浅色沿用 Codex 的 `surfaceCanvas`（表面往黑 2%，实测 250），比内容面略深，
@@ -606,6 +633,11 @@ export function deriveThemeTokens(seeds: ThemeSeeds, isDark: boolean): Record<st
   // 沿用表面的 `hoverSurface` 会翻向：侧栏已经比表面暗（浅色 238 < 252），
   // 按表面算出来的 240 反而比侧栏底色更亮，悬停看着像浮起来。
   set('--sidebar-muted', sidebarMutedSurface(sidebar, ink));
+  // 侧栏文字的两档弱化色（见 `sidebarForegroundTiers`）。它们让分区标题 / 项目名
+  // 退到会话标题之后，而不是像此前那样全部取满墨色、由标题抢主体。
+  const sidebarTiers = sidebarForegroundTiers(sidebar, ink, normalizeContrast(seeds.contrast));
+  set('--sidebar-fg-secondary', sidebarTiers.secondary);
+  set('--sidebar-fg-tertiary', sidebarTiers.tertiary);
   set('--sidebar-glow', accent);
   set('--surface-glow', accent);
   set('--settings-sidebar-bg', sidebar);

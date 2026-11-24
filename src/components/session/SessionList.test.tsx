@@ -93,6 +93,7 @@ function makeProject(overrides: Partial<Project>): Project {
 
 describe('SessionList', () => {
   const defaultProps = {
+    onNewSession: vi.fn(),
     onNewSessionInProject: vi.fn(),
     onAddProject: vi.fn(),
     onSelectSession: vi.fn(),
@@ -438,7 +439,10 @@ describe('SessionList', () => {
     const actions = addButton.parentElement;
     expect(actions?.className).toContain('opacity-0');
     expect(actions?.className).toContain('group-hover:opacity-100');
-    expect(actions?.className).toContain('group-focus-within:opacity-100');
+    // 键盘可达但鼠标点完不赖着：这里必须钉 `focus-visible`，不能退回
+    // `focus-within` —— 鼠标点过之后按钮仍持有焦点，会在指针离开后继续常显。
+    expect(actions?.className).toContain('group-has-focus-visible:opacity-100');
+    expect(actions?.className).not.toContain('group-focus-within:opacity-100');
   });
 
   it('lazily expands project session history in fixed increments', () => {
@@ -511,6 +515,26 @@ describe('SessionList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'toggle-conversations-section' }));
 
     expect(screen.getByText('Active Session')).toBeTruthy();
+  });
+
+  it('starts a project-less conversation from the conversations header shortcut', () => {
+    // 分区标题右侧的快捷入口与顶部「新对话」是同一条路径：不关联任何项目。
+    useSessionStore.setState({
+      sessions: [makeSession({ id: 'session-active', title: 'Active Session' })],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
+
+    expect(defaultProps.onNewSession).toHaveBeenCalledTimes(1);
+    expect(defaultProps.onNewSessionInProject).not.toHaveBeenCalled();
   });
 
   it('retries daemon connection from the sidebar alert', async () => {

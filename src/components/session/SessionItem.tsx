@@ -86,7 +86,7 @@ function SessionStatusIcon({
       ) : (
         <span className={cn(
           'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-ui-micro font-semibold tracking-normal',
-          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
+          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg-tertiary))]',
         )}>
           {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
         </span>
@@ -229,7 +229,7 @@ export function SessionItem({
                         ) : flowActive ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning-vivid))]" />
                         ) : (
-                          <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/70">
+                          <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg-tertiary))]">
                             {timeLabel}
                           </span>
                         )}

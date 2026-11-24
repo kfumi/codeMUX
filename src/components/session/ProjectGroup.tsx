@@ -95,9 +95,13 @@ export function ProjectGroup({
     : null;
   const canCollapseSessions = section.canCollapseSessions;
   // 多根项目用叠放的文件夹图标区分；展开时换成打开版，单根同样切到 FolderOpen。
+  // 图标与项目名同档（`sidebar-fg-secondary`）—— ZCode 的文件夹图标与项目名
+  // 都是 `text-foreground-subtle`，一个分组只有一种「分组色」。
   const projectIconClass = cn(
     'h-3.5 w-3.5 shrink-0 transition-colors duration-normal',
-    isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
+    isActiveProject
+      ? 'text-[hsl(var(--sidebar-glow))]'
+      : 'text-[hsl(var(--sidebar-fg-secondary))]',
   );
 
   return (
@@ -122,7 +126,7 @@ export function ProjectGroup({
         aria-keyshortcuts={dragEnabled ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
         className={cn(
           'group relative flex select-none items-center gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-sm transition-colors duration-fast',
-          'text-[hsl(var(--sidebar-fg))]/86 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'text-[hsl(var(--sidebar-fg-secondary))] hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
           'cursor-pointer',
@@ -150,7 +154,7 @@ export function ProjectGroup({
         ) : null}
         <ChevronRight
           className={cn(
-            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-normal',
+            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg-tertiary))] transition-transform duration-normal',
             expanded && 'rotate-90',
           )}
         />
@@ -181,7 +185,7 @@ export function ProjectGroup({
                 variant="ghost"
                 size="icon"
                 aria-label={`项目 ${project.name} 的更多操作`}
-                className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg-tertiary))] hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
               >
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
@@ -226,7 +230,7 @@ export function ProjectGroup({
               <button
                 type="button"
                 aria-label={`打开项目 ${project.name} 的文件`}
-                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg-tertiary))] transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onOpenProjectFiles(project)}
               >
                 <FolderTree className="h-3.5 w-3.5" />
@@ -237,7 +241,7 @@ export function ProjectGroup({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg-tertiary))] transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onNewSessionInProject(project.id)}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -256,7 +260,7 @@ export function ProjectGroup({
           )}
         >
           {section.sessions.length === 0 ? (
-            <p className="px-2.5 py-1 text-ui-compact text-[hsl(var(--sidebar-fg))]/64">
+            <p className="px-2.5 py-1 text-ui-compact text-[hsl(var(--sidebar-fg-tertiary))]">
               暂无对话
             </p>
           ) : null}
@@ -279,7 +283,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`展开显示项目 ${project.name} 的更多对话`}
                   onClick={onShowMoreSessions}
-                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg-secondary))] transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]"
                 >
                   <ChevronDown className="h-3 w-3" />
                   展开显示
@@ -290,7 +294,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`折叠显示项目 ${project.name} 的对话`}
                   onClick={onCollapseSessions}
-                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/70 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-start gap-1 rounded-md px-1.5 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg-secondary))] transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]"
                 >
                   <ChevronUp className="h-3 w-3" />
                   折叠显示

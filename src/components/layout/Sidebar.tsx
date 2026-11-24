@@ -101,6 +101,7 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onSelectSession }
       <div className="flex-1 overflow-auto px-3 pb-3 scroll-smooth">
         <SessionList
           onNewSessionInProject={onNewSessionInProject}
+          onNewSession={onNewSession}
           onOpenProjectFiles={setExplorerProject}
           onAddProject={handleAddProject}
           onSelectSession={onSelectSession}

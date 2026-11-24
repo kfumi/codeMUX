@@ -26,6 +26,8 @@ import { cn } from '../../lib/utils';
 
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
+  /** 新建一条不关联项目的对话 —— 与侧栏顶部「新对话」按钮同一条路径。 */
+  onNewSession: () => void;
   onOpenProjectFiles?: (project: import('../../types/project').Project) => void;
   onAddProject: () => void;
   onSelectSession: (sessionId: string, projectId: string | null) => void;
@@ -79,13 +81,16 @@ function SectionHeader({
         onClick={onToggle}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-[hsl(var(--sidebar-muted))]/70"
       >
-        <span className="min-w-0 truncate text-sm font-medium text-[hsl(var(--sidebar-fg))]">
+        {/* 分区标题是「目录」而不是「内容」：比会话标题浅一档，让眼睛先落在
+            条目上。此前用满墨色，比会话标题还重，读起来像标题才是主体
+            （参考 ZCode 的 text-foreground-subtlest 分法）。 */}
+        <span className="min-w-0 truncate text-sm font-medium text-[hsl(var(--sidebar-fg-tertiary))]">
           {title}
         </span>
         {/* 展开/收起箭头跟在标题右侧,悬停该行才出现;窄屏(触摸)没有 hover,常显。 */}
         <ChevronRight
           className={cn(
-            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg))]/70 transition-all duration-normal',
+            'h-3.5 w-3.5 shrink-0 text-[hsl(var(--sidebar-fg-tertiary))] transition-all duration-normal',
             isNarrow ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
             expanded && 'rotate-90',
           )}
@@ -96,9 +101,14 @@ function SectionHeader({
           className={cn(
             'flex shrink-0 items-center gap-0.5 transition-opacity duration-fast',
             // 分区操作按钮跟展开箭头一致：宽屏悬停（或键盘聚焦）才出现，窄屏触摸常显。
+            //
+            // 焦点这一档必须用 `focus-visible` 而不是 `focus-within`：鼠标点完按钮后
+            // 按钮仍持有焦点，`focus-within` 会让整簇操作赖着不走 —— 用户看到的就是
+            // 「点了新建对话，按钮不消失」。`focus-visible` 只在键盘导航时成立，
+            // 鼠标点完随指针离开一起淡出，键盘用户依然能 Tab 出来。
             isNarrow
               ? 'opacity-100'
-              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
+              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-has-focus-visible:pointer-events-auto group-has-focus-visible:opacity-100',
           )}
         >
           {actions}
@@ -110,6 +120,7 @@ function SectionHeader({
 
 export function SessionList({
   onNewSessionInProject,
+  onNewSession,
   onOpenProjectFiles = () => {},
   onAddProject,
   onSelectSession,
@@ -335,7 +346,7 @@ export function SessionList({
                     <button
                       type="button"
                       aria-label={allProjectsToggleLabel}
-                      className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                      className="rounded-md p-1 text-[hsl(var(--sidebar-fg-tertiary))] transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
                       onClick={toggleAllProjectsExpanded}
                     >
                       {allProjectsExpanded
@@ -351,7 +362,7 @@ export function SessionList({
                       <button
                         type="button"
                         aria-label="添加项目"
-                        className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/86 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
+                        className="rounded-md p-1 text-[hsl(var(--sidebar-fg-tertiary))] transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
                         onClick={onAddProject}
                       >
                         <Plus className="h-3.5 w-3.5" />
@@ -410,6 +421,23 @@ export function SessionList({
             expanded={sidebarSections.conversationsExpanded}
             toggleLabel="toggle-conversations-section"
             onToggle={toggleConversationsExpanded}
+            actions={(
+              // 与项目行那个「在此项目中创建对话」同一套交互，只是这条不关联项目，
+              // 等价于顶部的「新对话」。悬停或键盘聚焦时才出现（见 SectionHeader）。
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="新建对话"
+                    className="rounded-md p-1 text-[hsl(var(--sidebar-fg-tertiary))] transition-all duration-normal hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                    onClick={onNewSession}
+                  >
+                    <MessageSquarePlus className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right"><p>新建对话</p></TooltipContent>
+              </Tooltip>
+            )}
           />
           {sidebarSections.conversationsExpanded && ungroupedSessions.map((session) => (
             <SessionItem

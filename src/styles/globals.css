@@ -305,6 +305,8 @@
     --surface-canvas: 0 0% 96.47%;
     --sidebar-bg: 0 0% 94.51%;
     --sidebar-fg: 0 0% 5.1%;
+    --sidebar-fg-secondary: 0 0% 26.27%;
+    --sidebar-fg-tertiary: 0 0% 41.96%;
     --sidebar-border: 0 0% 91.37%;
     --sidebar-muted: 0 0% 90.59%;
     --sidebar-accent: 216.83 92.2% 59.8%;
@@ -365,6 +367,8 @@
     --glow: 216.83 92.2% 59.8%;
     --sidebar-bg: 0 0% 12.55%;
     --sidebar-fg: 0 0% 92.94%;
+    --sidebar-fg-secondary: 0 0% 75.29%;
+    --sidebar-fg-tertiary: 0 0% 61.57%;
     --sidebar-border: 0 0% 13.73%;
     --sidebar-muted: 0 0% 16.08%;
     --sidebar-accent: 217.04 92% 75.49%;

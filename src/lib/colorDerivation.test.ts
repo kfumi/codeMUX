@@ -7,6 +7,7 @@ import {
   type ThemeSeeds,
   derivePalette,
   deriveThemeTokens,
+  contrastRatio,
   hexToRgb,
   normalizeContrast,
   overlayRgb,
@@ -169,6 +170,12 @@ function lightnessOf(triplet: string): number {
  */
 function gray8(triplet: string): number {
   return Math.round((lightnessOf(triplet) / 100) * 255);
+}
+
+/** 纯灰三元组 → 8bit RGB。侧栏那几档都是 0% 饱和度，通道值就是灰度值。 */
+function grayRgb(triplet: string) {
+  const value = gray8(triplet);
+  return { red: value, green: value, blue: value };
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,6 +344,23 @@ describe('colorDerivation', () => {
     // 侧栏的悬停/选中面必须与侧栏底色同向：浅色更深、深色更亮。
     expect(gray8(light['--sidebar-muted'])).toBeLessThan(lightSidebar);
     expect(gray8(dark['--sidebar-muted'])).toBeGreaterThan(darkSidebar);
+    // 侧栏文字的三档：会话标题（满墨）> 项目名（次级）> 分区标题（第三级）。
+    // 浅色越深越强、深色越亮越强，所以两套的判据方向相反 —— 这里只钉「三档两两分得开」。
+    const lightFg = gray8(light['--sidebar-fg']);
+    const lightSecondary = gray8(light['--sidebar-fg-secondary']);
+    const lightTertiary = gray8(light['--sidebar-fg-tertiary']);
+    expect(lightFg).toBeLessThan(lightSecondary);
+    expect(lightSecondary).toBeLessThan(lightTertiary);
+    const darkFg = gray8(dark['--sidebar-fg']);
+    const darkSecondary = gray8(dark['--sidebar-fg-secondary']);
+    const darkTertiary = gray8(dark['--sidebar-fg-tertiary']);
+    expect(darkFg).toBeGreaterThan(darkSecondary);
+    expect(darkSecondary).toBeGreaterThan(darkTertiary);
+    // 最浅的那档（分区标题）仍要守住正文 AA：压在侧栏底上 ≥ 4.5:1。
+    expect(contrastRatio(grayRgb(light['--sidebar-fg-tertiary']), grayRgb(light['--sidebar-bg'])))
+      .toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(grayRgb(dark['--sidebar-fg-tertiary']), grayRgb(dark['--sidebar-bg'])))
+      .toBeGreaterThanOrEqual(4.5);
   });
 
   it('keeps the composer context bar off both the page and the input surface', () => {
@@ -458,6 +482,8 @@ describe('colorDerivation', () => {
       '--sidebar-bg': '0 0% 94.51%',
       '--sidebar-border': '0 0% 91.37%',
       '--sidebar-fg': '0 0% 5.1%',
+      '--sidebar-fg-secondary': '0 0% 26.27%',
+      '--sidebar-fg-tertiary': '0 0% 41.96%',
       '--sidebar-glow': '216.83 92.2% 59.8%',
       '--sidebar-muted': '0 0% 90.59%',
       '--success': '145.79 78.1% 26.86%',
@@ -524,6 +550,8 @@ describe('colorDerivation', () => {
       '--sidebar-bg': '0 0% 12.55%',
       '--sidebar-border': '0 0% 13.73%',
       '--sidebar-fg': '0 0% 92.94%',
+      '--sidebar-fg-secondary': '0 0% 75.29%',
+      '--sidebar-fg-tertiary': '0 0% 61.57%',
       '--sidebar-glow': '216.83 92.2% 59.8%',
       '--sidebar-muted': '0 0% 16.08%',
       '--success': '144.09 55.92% 51.96%',
