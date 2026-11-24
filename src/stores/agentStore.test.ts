@@ -2765,6 +2765,86 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  // 2026-11-24 的真实故障：Claude 长回合里，最终答复（text-only assistant 事件）
+  // 在工具跑完之后到达。旧规则只要看到"尾部是工具"就把它插到工具之前，于是最终答复
+  // 被顶到回合中部，看起来像对话卡住/错位，只有切换会话重拉时间线才恢复。
+  it.each(['claude_code', 'codex'] as const)(
+    'appends the final %s answer after completed tool steps instead of hoisting it',
+    async (agentKind) => {
+      vi.useFakeTimers();
+      let emitEvent: ((event: string) => void) | undefined;
+
+      startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+        emitEvent = onEvent;
+      });
+
+      try {
+        const session = await primeSession(agentKind);
+        await useAgentStore
+          .getState()
+          .startQuery(session.id, 'final answer after tools', 'D:\project\ai-code\codeMUX');
+
+        const emit = (payload: Record<string, unknown>) => {
+          emitEvent?.(JSON.stringify({ session_id: session.id, ...payload }));
+        };
+
+        emit({
+          type: 'assistant_message',
+          event_id: 'evt-narration',
+          provider_message_id: 'msg-narration',
+          content: [{ type: 'text', text: '现在改会话行标题。' }],
+        });
+        for (const [index, toolId] of ['call-1', 'call-2', 'call-3'].entries()) {
+          emit({ type: 'tool_started', event_id: `evt-tool-${index}`, tool_use_id: toolId, name: 'Edit', input: {} });
+          emit({ type: 'tool_finished', event_id: `evt-tool-done-${index}`, tool_use_id: toolId, content: 'ok', is_error: false });
+        }
+        // 真实时序：最终答复先经过实时流（streamingText 非空），随后才以完整
+        // assistant_message 落地。没有这一段，事件会走"模拟流式"分支（追加到末尾），
+        // 反而掩盖了放置规则的缺陷。
+        emit({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text' } } });
+        emit({
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '改完了。' } },
+        });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(useAgentStore.getState().streamingText[session.id]).toBe('改完了。');
+
+        emit({
+          type: 'assistant_message',
+          event_id: 'evt-final',
+          provider_message_id: 'msg-final',
+          content: [{ type: 'text', text: '改完了。侧栏现在按 ZCode 的层级走。' }],
+        });
+
+        await vi.advanceTimersByTimeAsync(100);
+
+        const events = useAgentStore.getState().events[session.id] ?? [];
+        const indexOfText = (needle: string) => events.findIndex((event) => (
+          event.kind === 'assistant'
+          && (event.data.message.content as Array<{ type?: string; text?: string }>).some(
+            (block) => block.type === 'text' && block.text === needle,
+          )
+        ));
+        const lastToolIndex = events.reduce((last, event, index) => (
+          event.kind === 'assistant'
+          && (event.data.message.content as Array<{ type?: string }>).some((block) => block.type === 'tool_use')
+            ? index
+            : last
+        ), -1);
+
+        const finalIndex = indexOfText('改完了。侧栏现在按 ZCode 的层级走。');
+        expect(finalIndex).toBeGreaterThanOrEqual(0);
+        expect(lastToolIndex).toBeGreaterThanOrEqual(0);
+        // 最终答复必须排在最后一个工具步骤之后——它是这段工作的结论。
+        expect(finalIndex).toBeGreaterThan(lastToolIndex);
+        // 更早的叙述仍留在它自己的位置（工具之前）。
+        expect(indexOfText('现在改会话行标题。')).toBeLessThan(lastToolIndex);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('commits live streaming narration before tool_started interrupts answer streaming', async () => {
     vi.useFakeTimers();
     let emitEvent: ((event: string) => void) | undefined;

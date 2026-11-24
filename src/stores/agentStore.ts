@@ -12,6 +12,7 @@ import {
   THREAD_WINDOW_INITIAL_COMMIT_TURNS,
 } from '../lib/threadWindow';
 import { normalizeTurnProcessEventOrder, normalizeTurnProcessTimeline } from '../lib/agentTurnOrdering';
+import * as narrationPlacement from '../lib/timeline/narrationPlacement';
 import { daemonFacade } from '../lib/facades/daemon-facade';
 import {
   catchUpTimelineAfterSequence,
@@ -659,79 +660,22 @@ function replaceLastOrAppend(
   return [...events, incoming];
 }
 
-function isNarrationOnlyAssistantEvent(
-  event: AgentMessage,
-): event is Extract<AgentMessage, { kind: 'assistant' }> {
-  if (event.kind !== 'assistant') {
-    return false;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return false;
-  }
-  return content.every((block: { type?: string; text?: string }) => (
-    block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0
-  ));
-}
+/** 事件谓词与放置规则的实现在 `lib/timeline/narrationPlacement.ts`（纯函数，可单测）。 */
+const {
+  isNarrationOnlyAssistantEvent,
+  isNarrationContinuationAssistantEvent,
+  hasToolOnlyAssistantAfterIndex,
+  textFromNarrationOnlyAssistantEvent,
+  narrationTextFromAssistantEvent,
+  findReplaceableLiveNarrationIndex,
+  placeNarrationEvent,
+} = narrationPlacement;
 
 /**
- * 是否为"延续流式 narration"的最终 assistant 消息：同时含 thinking 与 text、
- * 无工具块（pi 等运行时把思考与回答合成一条最终消息）。这类事件到达时应原地
- * 替换正在流式预览的 narration 事件，或追加到工具步骤之后，而不是插到 pending tools 前。
+ * pi 的纯文本叙述：先尝试替换实时叙述，否则丢弃所有实时叙述副本后追加。
+ * pi 的叙述属于**工具之前**（它把思考与回答合成一条最终消息），因此这里保留
+ * 「追加到末尾」的语义，而不是走 `placeNarrationEvent` 的通用规则。
  */
-function isNarrationContinuationAssistantEvent(
-  event: AgentMessage,
-): event is Extract<AgentMessage, { kind: 'assistant' }> {
-  if (event.kind !== 'assistant') {
-    return false;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return false;
-  }
-  let hasText = false;
-  let hasThinking = false;
-  const allAllowed = content.every((block: { type?: string; text?: string; thinking?: string }) => {
-    if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
-      hasText = true;
-      return true;
-    }
-    if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim().length > 0) {
-      hasThinking = true;
-      return true;
-    }
-    return false;
-  });
-  return allAllowed && hasText && hasThinking;
-}
-
-function hasToolOnlyAssistantAfterIndex(events: AgentMessage[], index: number): boolean {
-  for (let i = index + 1; i < events.length; i += 1) {
-    const event = events[i];
-    if (event?.kind === 'user') {
-      return false;
-    }
-    if (isToolOnlyAssistantEvent(event)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function textFromNarrationOnlyAssistantEvent(event: AgentMessage): string | undefined {
-  if (!isNarrationOnlyAssistantEvent(event)) {
-    return undefined;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return undefined;
-  }
-  const text = content
-    .map((block: { type?: string; text?: string }) => (block?.type === 'text' ? block.text : ''))
-    .join('');
-  return text.trim().length > 0 ? text : undefined;
-}
-
 function appendPiNarrationFinalAfterTools(
   baseEvents: AgentMessage[],
   event: Extract<AgentMessage, { kind: 'assistant' }>,
@@ -739,7 +683,9 @@ function appendPiNarrationFinalAfterTools(
 ): AgentMessage[] {
   const narrationText = textFromNarrationOnlyAssistantEvent(event);
   const replaceAt = narrationText != null
-    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, (candidate) => (
+      isLiveStreamNarrationEvent(candidate, sessionId)
+    ))
     : undefined;
 
   if (replaceAt != null) {
@@ -759,7 +705,9 @@ function appendPiContinuationAssistantMessage(
 ): AgentMessage[] {
   const narrationText = narrationTextFromAssistantEvent(event);
   const replaceAt = narrationText != null
-    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
+    ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, (candidate) => (
+      isLiveStreamNarrationEvent(candidate, sessionId)
+    ))
     : undefined;
   const canReplaceInPlace = replaceAt != null
     && !hasToolOnlyAssistantAfterIndex(baseEvents, replaceAt);
@@ -772,89 +720,6 @@ function appendPiContinuationAssistantMessage(
     index !== replaceAt && !isLiveStreamNarrationEvent(entry, sessionId)
   ));
   return [...cleaned, event];
-}
-
-function isToolOnlyAssistantEvent(
-  event: AgentMessage,
-): event is Extract<AgentMessage, { kind: 'assistant' }> {
-  if (event.kind !== 'assistant') {
-    return false;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return false;
-  }
-  return content.every((block: { type?: string }) => block?.type === 'tool_use');
-}
-
-function narrationTextFromAssistantEvent(event: AgentMessage): string | undefined {
-  if (!isNarrationContinuationAssistantEvent(event)) {
-    return undefined;
-  }
-  const content = event.data?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return undefined;
-  }
-  const text = content
-    .map((block: { type?: string; text?: string }) => (block?.type === 'text' ? block.text : ''))
-    .join('');
-  return text.trim().length > 0 ? text : undefined;
-}
-
-function findNarrationAssistantInsertionIndex(events: AgentMessage[]): number | undefined {
-  let insertAt: number | undefined;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === 'tool_result') {
-      continue;
-    }
-    if (event?.kind !== 'assistant') {
-      break;
-    }
-    if (!isToolOnlyAssistantEvent(event)) {
-      break;
-    }
-    insertAt = index;
-  }
-  return insertAt;
-}
-
-function findReplaceableLiveNarrationIndex(
-  events: AgentMessage[],
-  text: string,
-  sessionId: string,
-): number | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === 'tool_result') {
-      continue;
-    }
-    if (event?.kind !== 'assistant') {
-      break;
-    }
-    if (isLiveStreamNarrationEvent(event, sessionId)) {
-      return index;
-    }
-    if (isToolOnlyAssistantEvent(event)) {
-      continue;
-    }
-    if (isNarrationOnlyAssistantEvent(event)) {
-      const existingText = narrationTextFromAssistantEvent(event);
-      if (
-        existingText
-        && (
-          existingText === text
-          || existingText.startsWith(text)
-          || text.startsWith(existingText)
-        )
-      ) {
-        return index;
-      }
-      break;
-    }
-    break;
-  }
-  return undefined;
 }
 
 function commitLiveStreamingNarration(
@@ -1281,6 +1146,18 @@ function hasCurrentTurnCommittedThinking(events: AgentMessage[]): boolean {
 function isOpencodeLikeAgent(sessionId: string): boolean {
   const kind = getSessionAgentKind(sessionId);
   return kind === 'opencode';
+}
+
+/**
+ * 该运行时是否会把**流式叙述** finalize 到工具事件之后。
+ *
+ * OpenCode 会在 `tool_started` 之后才把之前流式输出的说明文字提交成
+ * `assistant_message`；pi 同样把思考与回答合成一条最终消息。只有这两种运行时的
+ * 「晚到纯文本」才可能属于工具**之前**。Claude / Codex 的事件顺序与源码一致，
+ * 给它们开放「插到工具之前」只会把最终答复顶到回合中部。
+ */
+function narrationFinalizesAfterToolEvents(agentKind: AgentKind | undefined): boolean {
+  return agentKind === 'opencode' || agentKind === 'pi';
 }
 
 export function isRewindableUserEvent(event: AgentMessage): event is Extract<AgentMessage, { kind: 'user' }> {
@@ -2406,14 +2283,15 @@ function createSessionEventHandler(
       // Superseding events must replace their target in place; routing them
       // through the simulated-stream buffer would append them at the end.
       const supersedesExisting = Array.isArray(event.data.supersedes) && event.data.supersedes.length > 0;
-      const narrationInsertAt = isNarrationOnlyAssistantEvent(event)
-        ? findNarrationAssistantInsertionIndex(get().events[sessionId] || [])
-        : undefined;
+      // 只有「叙述会被 finalize 到工具事件之后」的运行时（OpenCode / pi）才需要
+      // 把晚到的叙述插到工具之前；Claude/Codex 的顺序本就正确。
+      const narrationGoesBeforeTools = isNarrationOnlyAssistantEvent(event)
+        && narrationFinalizesAfterToolEvents(getSessionAgentKind(sessionId));
       const shouldSimulate = Boolean(
         !hasToolUse
         && !supersedesExisting
         && !isNarrationContinuationAssistantEvent(event)
-        && narrationInsertAt == null
+        && !narrationGoesBeforeTools
         && !currentStreamingText
         && !currentStreamingThinking
         && (textBlock || thinkingBlock),
@@ -2578,18 +2456,16 @@ function createSessionEventHandler(
         if (getSessionAgentKind(sessionId) === 'pi') {
           newEvents = appendPiNarrationFinalAfterTools(baseEvents, event, sessionId);
         } else {
-          const narrationText = narrationTextFromAssistantEvent(event);
-          const replaceAt = narrationText != null
-            ? findReplaceableLiveNarrationIndex(baseEvents, narrationText, sessionId)
-            : undefined;
-          if (replaceAt != null) {
-            newEvents = baseEvents.map((entry, index) => (index === replaceAt ? event : entry));
-          } else {
-            const insertAt = findNarrationAssistantInsertionIndex(baseEvents);
-            newEvents = insertAt != null
-              ? [...baseEvents.slice(0, insertAt), event, ...baseEvents.slice(insertAt)]
-              : [...baseEvents, event];
-          }
+          // 放置规则单一真源（见 `lib/timeline/narrationPlacement.ts`）：能替换
+          // 实时叙述就替换；只有「叙述会被 finalize 到工具事件之后」的运行时
+          // （OpenCode / pi）才插到工具之前；其余一律追加。
+          // 旧实现不分运行时，只要"尾部是工具"就插到工具之前——Claude 的最终答复
+          // 因此被顶到回合中部（2026-11-24 长回合故障）。
+          newEvents = placeNarrationEvent(baseEvents, event, {
+            narrationText: narrationTextFromAssistantEvent(event),
+            isLiveNarration: (candidate) => isLiveStreamNarrationEvent(candidate, sessionId),
+            allowInsertBeforeTools: narrationFinalizesAfterToolEvents(getSessionAgentKind(sessionId)),
+          }).events;
         }
       } else {
         newEvents = [...baseEvents, event];
